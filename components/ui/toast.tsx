@@ -53,7 +53,6 @@ const toastConfig: Record<ToastType, { icon: string; bg: string; iconColor: stri
 };
 
 function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
-  const insets = useSafeAreaInsets();
   const config = toastConfig[toast.type];
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -118,7 +117,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
       <Animated.View
         entering={SlideInUp.duration(200)}
         exiting={SlideOutUp.duration(200)}
-        style={[animatedStyle, { marginTop: insets.top + 8 }]}
+        style={animatedStyle}
         className={"mx-4"}
       >
         <View
@@ -151,6 +150,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const idCounter = useRef(0);
+  const insets = useSafeAreaInsets();
 
   const showToast = useCallback((toast: Omit<Toast, "id">) => {
     const id = `toast-${++idCounter.current}`;
@@ -173,7 +173,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ showToast, hideToast }}>
       {children}
-      <View className={"absolute top-0 left-0 right-0 z-50"} pointerEvents={"box-none"}>
+      <View
+        className={"absolute top-0 left-0 right-0 z-50 gap-2"}
+        style={{ paddingTop: insets.top + 8 }}
+        pointerEvents={"box-none"}
+      >
         {toasts.map((toast) => (
           <ToastItem key={toast.id} toast={toast} onDismiss={() => hideToast(toast.id)} />
         ))}

@@ -69,15 +69,42 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
         <ThemedText className={"font-medium mt-1 text-blue-400"} numberOfLines={2}>
           {event.matchedRestaurant.name}
         </ThemedText>
+
+        {/* Award badge */}
         {event.matchedRestaurant.award && (
-          <ThemedText variant={"caption1"} color={"secondary"} className={"mt-0.5"}>
-            {event.matchedRestaurant.award}
-          </ThemedText>
+          <View className={"flex-row items-center gap-1 mt-1"}>
+            <IconSymbol name={"star.fill"} size={12} color={"#f59e0b"} />
+            <ThemedText variant={"caption1"} color={"secondary"}>
+              {event.matchedRestaurant.award}
+            </ThemedText>
+          </View>
         )}
+
+        {/* Location details */}
+        <View className={"mt-1.5 gap-0.5"}>
+          {event.matchedRestaurant.location && (
+            <View className={"flex-row items-center gap-1"}>
+              <IconSymbol name={"mappin"} size={12} color={"#9ca3af"} />
+              <ThemedText variant={"caption1"} color={"tertiary"} numberOfLines={1}>
+                {event.matchedRestaurant.location}
+              </ThemedText>
+            </View>
+          )}
+          {event.matchedRestaurant.address && (
+            <ThemedText variant={"caption2"} color={"tertiary"} numberOfLines={1} className={"ml-4"}>
+              {event.matchedRestaurant.address}
+            </ThemedText>
+          )}
+        </View>
+
+        {/* Cuisine */}
         {event.matchedRestaurant.cuisine && (
-          <ThemedText variant={"caption1"} color={"secondary"}>
-            {event.matchedRestaurant.cuisine}
-          </ThemedText>
+          <View className={"flex-row items-center gap-1 mt-1"}>
+            <IconSymbol name={"fork.knife"} size={12} color={"#9ca3af"} />
+            <ThemedText variant={"caption1"} color={"tertiary"}>
+              {event.matchedRestaurant.cuisine}
+            </ThemedText>
+          </View>
         )}
       </Pressable>
 
