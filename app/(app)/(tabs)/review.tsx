@@ -11,13 +11,12 @@ import {
 } from "@/hooks/queries";
 import { FlashList } from "@shopify/flash-list";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, RefreshControl, Alert, Modal, Pressable, ScrollView, TextInput, Platform } from "react-native";
+import { View, RefreshControl, Alert, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useToast } from "@/components/ui/toast";
 import Animated, { LinearTransition } from "react-native-reanimated";
-import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { router } from "expo-router";
 
 function LoadingState() {
@@ -89,14 +88,6 @@ export default function ReviewScreen() {
   const [foodFilter, setFoodFilter] = useState<FoodFilter>("on");
   const [matchesFilter, setMatchesFilter] = useState<MatchesFilter>("on");
   const [starFilter, setStarFilter] = useState<StarFilter>("any");
-  const [selectedRestaurantId, setSelectedRestaurantId] = useState<string | null>(null);
-  const [startDateMs, setStartDateMs] = useState<number | null>(null);
-  const [endDateMs, setEndDateMs] = useState<number | null>(null);
-
-  const [restaurantModalVisible, setRestaurantModalVisible] = useState(false);
-  const [restaurantSearchQuery, setRestaurantSearchQuery] = useState("");
-  const [dateModalVisible, setDateModalVisible] = useState(false);
-  const [androidActiveDateField, setAndroidActiveDateField] = useState<"start" | "end" | null>(null);
 
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -117,14 +108,6 @@ export default function ReviewScreen() {
     () => pendingVisits.filter((v) => !exactMatchVisitIds.has(v.id)),
     [pendingVisits, exactMatchVisitIds],
   );
-
-  const formatShortDate = useCallback((ms: number) => {
-    try {
-      return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-    } catch {
-      return "";
-    }
-  }, []);
 
   const ToggleChip = useCallback(
     ({ label, value, onToggle }: { label: string; value: boolean; onToggle: () => void }) => {
@@ -179,33 +162,6 @@ export default function ReviewScreen() {
     return max;
   }, []);
 
-  const uniqueSuggestedRestaurants = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; award: string | null }>();
-    for (const v of reviewableVisits) {
-      for (const r of v.suggestedRestaurants) {
-        if (!map.has(r.id)) {
-          map.set(r.id, { id: r.id, name: r.name, award: r.award ?? null });
-        }
-      }
-    }
-    const list = Array.from(map.values());
-    list.sort((a, b) => {
-      const starDiff = parseMichelinStars(b.award) - parseMichelinStars(a.award);
-      if (starDiff !== 0) {
-        return starDiff;
-      }
-      return a.name.localeCompare(b.name);
-    });
-    return list;
-  }, [reviewableVisits]);
-
-  const selectedRestaurant = useMemo(() => {
-    if (!selectedRestaurantId) {
-      return null;
-    }
-    return uniqueSuggestedRestaurants.find((r) => r.id === selectedRestaurantId) ?? null;
-  }, [selectedRestaurantId, uniqueSuggestedRestaurants]);
-
   const filtersSummary = useMemo(() => {
     const parts: string[] = [];
 
@@ -218,25 +174,8 @@ export default function ReviewScreen() {
       parts.push("3★");
     }
 
-    if (startDateMs || endDateMs) {
-      parts.push(`${startDateMs ? formatShortDate(startDateMs) : "…"}–${endDateMs ? formatShortDate(endDateMs) : "…"}`);
-    }
-
-    if (selectedRestaurant) {
-      parts.push(selectedRestaurant.name);
-    }
-
     return parts.join(" · ");
-  }, [foodFilter, matchesFilter, starFilter, startDateMs, endDateMs, selectedRestaurant, formatShortDate]);
-
-  const toStartOfDayMs = useCallback(
-    (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime(),
-    [],
-  );
-  const toEndOfDayMs = useCallback(
-    (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime(),
-    [],
-  );
+  }, [foodFilter, matchesFilter, starFilter]);
 
   const filteredReviewableVisits = useMemo(() => {
     return reviewableVisits.filter((v) => {
@@ -267,29 +206,9 @@ export default function ReviewScreen() {
         return false;
       }
 
-      if (selectedRestaurantId && !v.suggestedRestaurants.some((r) => r.id === selectedRestaurantId)) {
-        return false;
-      }
-
-      if (startDateMs !== null && v.startTime < startDateMs) {
-        return false;
-      }
-      if (endDateMs !== null && v.startTime > endDateMs) {
-        return false;
-      }
-
       return true;
     });
-  }, [
-    reviewableVisits,
-    foodFilter,
-    matchesFilter,
-    starFilter,
-    selectedRestaurantId,
-    startDateMs,
-    endDateMs,
-    visitMaxStars,
-  ]);
+  }, [reviewableVisits, foodFilter, matchesFilter, starFilter, visitMaxStars]);
 
   // UI state
   const hasExactMatches = exactMatches.length > 0;
@@ -429,46 +348,6 @@ export default function ReviewScreen() {
                   value={starFilter}
                   onChange={setStarFilter}
                 />
-
-                <View className={"flex-row gap-2"}>
-                  <Button variant={"muted"} size={"sm"} className={"flex-1"} onPress={() => setDateModalVisible(true)}>
-                    <ButtonText variant={"muted"} size={"sm"}>
-                      {startDateMs || endDateMs
-                        ? `Date: ${startDateMs ? formatShortDate(startDateMs) : "…"}–${endDateMs ? formatShortDate(endDateMs) : "…"}`
-                        : "Date: Any"}
-                    </ButtonText>
-                  </Button>
-                  <Button
-                    variant={"muted"}
-                    size={"sm"}
-                    className={"flex-1"}
-                    onPress={() => setRestaurantModalVisible(true)}
-                  >
-                    <ButtonText variant={"muted"} size={"sm"}>
-                      {selectedRestaurant ? `Restaurant: ${selectedRestaurant.name}` : "Restaurant: Any"}
-                    </ButtonText>
-                  </Button>
-      </View>
-
-                {(selectedRestaurantId || startDateMs !== null || endDateMs !== null) && (
-                  <View className={"flex-row gap-2"}>
-                    <Button
-                      variant={"outline"}
-                      size={"sm"}
-                      className={"flex-1"}
-                      onPress={() => {
-                        setSelectedRestaurantId(null);
-                        setRestaurantSearchQuery("");
-                        setStartDateMs(null);
-                        setEndDateMs(null);
-                      }}
-                    >
-                      <ButtonText variant={"outline"} size={"sm"}>
-                        Clear Filters
-                      </ButtonText>
-                    </Button>
-                  </View>
-                )}
               </Animated.View>
             )}
           </View>
@@ -482,11 +361,6 @@ export default function ReviewScreen() {
       foodFilter,
       matchesFilter,
       starFilter,
-      selectedRestaurant,
-      selectedRestaurantId,
-      startDateMs,
-      endDateMs,
-      formatShortDate,
       filtersSummary,
       ToggleChip,
     ],
@@ -592,10 +466,6 @@ export default function ReviewScreen() {
                       setFoodFilter("on");
                       setMatchesFilter("on");
                       setStarFilter("any");
-                      setSelectedRestaurantId(null);
-                      setRestaurantSearchQuery("");
-                      setStartDateMs(null);
-                      setEndDateMs(null);
                     }}
                   >
                     <ButtonText variant={"outline"}>Reset to Has Food</ButtonText>
@@ -619,270 +489,6 @@ export default function ReviewScreen() {
             ListEmptyComponent={isLoading ? <LoadingState /> : <AllCaughtUpEmpty />}
           />
         )}
-
-        {/* Restaurant Filter Modal */}
-        <Modal visible={restaurantModalVisible} animationType={"slide"} presentationStyle={"pageSheet"}>
-          <View className={"flex-1 bg-background"}>
-            <View className={"px-4 pt-4 pb-3 border-b border-border gap-3"}>
-              <View className={"flex-row items-center justify-between"}>
-                <ThemedText variant={"heading"} className={"font-semibold"}>
-                  Filter by Restaurant
-                </ThemedText>
-                <Pressable
-                  onPress={() => {
-                    setRestaurantModalVisible(false);
-                    setRestaurantSearchQuery("");
-                  }}
-                >
-                  <ThemedText className={"text-primary font-semibold"}>Done</ThemedText>
-                </Pressable>
-              </View>
-
-              <TextInput
-                value={restaurantSearchQuery}
-                onChangeText={setRestaurantSearchQuery}
-                placeholder={"Search restaurants…"}
-                placeholderTextColor={"#999"}
-                className={"bg-card rounded-2xl px-4 py-3 text-foreground"}
-                autoCapitalize={"none"}
-                autoCorrect={false}
-              />
-
-              <View className={"flex-row gap-2"}>
-                <Button
-                  variant={"outline"}
-                  size={"sm"}
-                  className={"flex-1"}
-                  onPress={() => {
-                    setSelectedRestaurantId(null);
-                    setRestaurantModalVisible(false);
-                    setRestaurantSearchQuery("");
-                  }}
-                >
-                  <ButtonText variant={"outline"} size={"sm"}>
-                    Clear Restaurant
-                  </ButtonText>
-                </Button>
-              </View>
-            </View>
-
-            <ScrollView className={"flex-1"}>
-              <View className={"p-4 gap-2"}>
-                {uniqueSuggestedRestaurants
-                  .filter((r) => {
-                    const q = restaurantSearchQuery.trim().toLowerCase();
-                    if (!q) {
-                      return true;
-                    }
-                    return r.name.toLowerCase().includes(q) || (r.award ?? "").toLowerCase().includes(q);
-                  })
-                  .slice(0, 250)
-                  .map((r) => {
-                    const isSelected = selectedRestaurantId === r.id;
-                    return (
-                      <Pressable
-                        key={r.id}
-                        onPress={() => {
-                          setSelectedRestaurantId(r.id);
-                          setRestaurantModalVisible(false);
-                          setRestaurantSearchQuery("");
-                        }}
-                        className={"bg-card rounded-2xl px-4 py-3"}
-                      >
-                        <View className={"flex-row items-center justify-between gap-3"}>
-                          <View className={"flex-1"}>
-                            <ThemedText className={"font-semibold"} numberOfLines={1}>
-                              {r.name}
-                            </ThemedText>
-                            {!!r.award && (
-                              <ThemedText variant={"footnote"} color={"secondary"} numberOfLines={1}>
-                                {r.award}
-                              </ThemedText>
-                            )}
-                          </View>
-                          {isSelected && <IconSymbol name={"checkmark"} size={18} color={"#22c55e"} />}
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-              </View>
-            </ScrollView>
-          </View>
-        </Modal>
-
-        {/* Date Range Modal */}
-        <Modal visible={dateModalVisible} animationType={"slide"} presentationStyle={"pageSheet"}>
-          <View className={"flex-1 bg-background"}>
-            <View className={"px-4 pt-4 pb-3 border-b border-border gap-3"}>
-              <View className={"flex-row items-center justify-between"}>
-                <ThemedText variant={"heading"} className={"font-semibold"}>
-                  Filter by Date
-                </ThemedText>
-                <Pressable
-                  onPress={() => {
-                    setDateModalVisible(false);
-                    setAndroidActiveDateField(null);
-                  }}
-                >
-                  <ThemedText className={"text-primary font-semibold"}>Done</ThemedText>
-                </Pressable>
-              </View>
-
-              {Platform.OS === "ios" ? (
-                <View className={"gap-4"}>
-                  <View className={"gap-2"}>
-                    <View className={"flex-row items-center justify-between"}>
-                      <ThemedText className={"font-semibold"}>Start date</ThemedText>
-                      <Pressable
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          setStartDateMs(null);
-                        }}
-                      >
-                        <ThemedText className={"text-primary font-semibold"}>Clear</ThemedText>
-                      </Pressable>
-                    </View>
-                    <DateTimePicker
-                      value={startDateMs ? new Date(startDateMs) : new Date()}
-                      mode={"date"}
-                      display={"inline"}
-                      onChange={(_event: DateTimePickerEvent, date?: Date) => {
-                        if (!date) {
-                          return;
-                        }
-                        const nextStart = toStartOfDayMs(date);
-                        setStartDateMs(nextStart);
-                        if (endDateMs !== null && endDateMs < nextStart) {
-                          setEndDateMs(toEndOfDayMs(date));
-                        }
-                      }}
-                    />
-                  </View>
-
-                  <View className={"gap-2"}>
-                    <View className={"flex-row items-center justify-between"}>
-                      <ThemedText className={"font-semibold"}>End date</ThemedText>
-                      <Pressable
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                          setEndDateMs(null);
-                        }}
-                      >
-                        <ThemedText className={"text-primary font-semibold"}>Clear</ThemedText>
-                      </Pressable>
-                    </View>
-                    <DateTimePicker
-                      value={endDateMs ? new Date(endDateMs) : new Date()}
-                      mode={"date"}
-                      display={"inline"}
-                      onChange={(_event: DateTimePickerEvent, date?: Date) => {
-                        if (!date) {
-                          return;
-                        }
-                        const nextEnd = toEndOfDayMs(date);
-                        setEndDateMs(nextEnd);
-                        if (startDateMs !== null && nextEnd < startDateMs) {
-                          setStartDateMs(toStartOfDayMs(date));
-                        }
-                      }}
-                    />
-                  </View>
-                </View>
-              ) : (
-                <View className={"gap-3"}>
-                  <Pressable
-                    className={"bg-card rounded-2xl px-4 py-3"}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      setAndroidActiveDateField("start");
-                    }}
-                  >
-                    <View className={"flex-row items-center justify-between gap-3"}>
-                      <ThemedText className={"font-semibold"}>Start</ThemedText>
-                      <ThemedText variant={"footnote"} color={"tertiary"}>
-                        {startDateMs ? formatShortDate(startDateMs) : "Any"}
-                      </ThemedText>
-                    </View>
-                  </Pressable>
-
-                  <Pressable
-                    className={"bg-card rounded-2xl px-4 py-3"}
-                    onPress={() => {
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      setAndroidActiveDateField("end");
-                    }}
-                  >
-                    <View className={"flex-row items-center justify-between gap-3"}>
-                      <ThemedText className={"font-semibold"}>End</ThemedText>
-                      <ThemedText variant={"footnote"} color={"tertiary"}>
-                        {endDateMs ? formatShortDate(endDateMs) : "Any"}
-                      </ThemedText>
-                    </View>
-                  </Pressable>
-
-                  <View className={"flex-row gap-2"}>
-                    <Button
-                      variant={"outline"}
-                      size={"sm"}
-                      className={"flex-1"}
-                      onPress={() => {
-                        setStartDateMs(null);
-                        setEndDateMs(null);
-                        setAndroidActiveDateField(null);
-                        setDateModalVisible(false);
-                      }}
-                    >
-                      <ButtonText variant={"outline"} size={"sm"}>
-                        Clear Dates
-                      </ButtonText>
-                    </Button>
-                  </View>
-
-                  {androidActiveDateField && (
-                    <DateTimePicker
-                      value={
-                        androidActiveDateField === "start"
-                          ? startDateMs
-                            ? new Date(startDateMs)
-                            : new Date()
-                          : endDateMs
-                            ? new Date(endDateMs)
-                            : new Date()
-                      }
-                      mode={"date"}
-                      onChange={(event: DateTimePickerEvent, date?: Date) => {
-                        if (event.type === "dismissed") {
-                          setAndroidActiveDateField(null);
-                          return;
-                        }
-                        if (!date) {
-                          setAndroidActiveDateField(null);
-                          return;
-                        }
-
-                        if (androidActiveDateField === "start") {
-                          const nextStart = toStartOfDayMs(date);
-                          setStartDateMs(nextStart);
-                          if (endDateMs !== null && endDateMs < nextStart) {
-                            setEndDateMs(toEndOfDayMs(date));
-                          }
-                        } else {
-                          const nextEnd = toEndOfDayMs(date);
-                          setEndDateMs(nextEnd);
-                          if (startDateMs !== null && nextEnd < startDateMs) {
-                            setStartDateMs(toStartOfDayMs(date));
-                          }
-                        }
-
-                        setAndroidActiveDateField(null);
-                      }}
-                    />
-                  )}
-                </View>
-              )}
-            </View>
-          </View>
-        </Modal>
       </View>
     </ScreenLayout>
   );

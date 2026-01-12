@@ -23,7 +23,6 @@
     "@buoy-gg/react-query": "^2.1.1",
     "@expo/metro-runtime": "6.1.2",
     "@expo/vector-icons": "15.0.3",
-    "@react-native-community/datetimepicker": "^8.6.0",
     "@react-navigation/elements": "2.9.4",
     "@react-navigation/native": "^7.1.27",
     "@shopify/flash-list": "^2.2.0",

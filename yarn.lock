@@ -2791,25 +2791,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@react-native-community/datetimepicker@npm:^8.6.0":
-  version: 8.6.0
-  resolution: "@react-native-community/datetimepicker@npm:8.6.0"
-  dependencies:
-    invariant: "npm:^2.2.4"
-  peerDependencies:
-    expo: ">=52.0.0"
-    react: "*"
-    react-native: "*"
-    react-native-windows: "*"
-  peerDependenciesMeta:
-    expo:
-      optional: true
-    react-native-windows:
-      optional: true
-  checksum: 10c0/4f7e84480e3a324a1f4e235d13552468a758a0bf3d6de6a67ef39bfc56c18c41566c4411cc5fc075d000cc5f744a63ced77dd38c6bb13ae15cc980f9af891b56
-  languageName: node
-  linkType: hard
-
 "@react-native/assets-registry@npm:0.81.5":
   version: 0.81.5
   resolution: "@react-native/assets-registry@npm:0.81.5"
@@ -8515,7 +8496,6 @@ __metadata:
     "@eslint/js": "npm:^9.39.2"
     "@expo/metro-runtime": "npm:6.1.2"
     "@expo/vector-icons": "npm:15.0.3"
-    "@react-native-community/datetimepicker": "npm:^8.6.0"
     "@react-navigation/elements": "npm:2.9.4"
     "@react-navigation/native": "npm:^7.1.27"
     "@shopify/flash-list": "npm:^2.2.0"
