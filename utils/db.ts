@@ -560,6 +560,7 @@ export async function getLinkedCalendarEventIds(): Promise<Set<string>> {
 /**
  * Insert calendar-only visits (visits created from calendar events without photos).
  * These visits have photoCount = 0 and get their location from the matched restaurant.
+ * If a matched restaurant is provided, the visit is auto-confirmed with that restaurant.
  */
 export async function insertCalendarOnlyVisits(
   visits: Array<{
@@ -571,7 +572,15 @@ export async function insertCalendarOnlyVisits(
     endTime: number;
     centerLat: number;
     centerLon: number;
-    suggestedRestaurantId: string | null;
+    // Full restaurant data for auto-confirmation (from Michelin match)
+    matchedRestaurant: {
+      id: string;
+      name: string;
+      latitude: number;
+      longitude: number;
+      address: string;
+      cuisine: string;
+    } | null;
   }>,
 ): Promise<void> {
   if (visits.length === 0) {
@@ -582,14 +591,37 @@ export async function insertCalendarOnlyVisits(
   const batchSize = 1000;
   const now = Date.now();
 
+  // First, insert/update restaurants for visits that have a matched restaurant
+  const visitsWithRestaurant = visits.filter((v) => v.matchedRestaurant !== null);
+  if (visitsWithRestaurant.length > 0) {
+    for (let i = 0; i < visitsWithRestaurant.length; i += batchSize) {
+      const batch = visitsWithRestaurant.slice(i, i + batchSize);
+      const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
+      const values = batch.flatMap((v) => [
+        v.matchedRestaurant!.id,
+        v.matchedRestaurant!.name,
+        v.matchedRestaurant!.latitude,
+        v.matchedRestaurant!.longitude,
+        v.matchedRestaurant!.address || null,
+        v.matchedRestaurant!.cuisine || null,
+      ]);
+
+      await database.runAsync(
+        `INSERT OR IGNORE INTO restaurants (id, name, latitude, longitude, address, cuisine) VALUES ${placeholders}`,
+        values,
+      );
+    }
+  }
+
+  // Then insert visits - auto-confirm if we have a matched restaurant
   for (let i = 0; i < visits.length; i += batchSize) {
     const batch = visits.slice(i, i + batchSize);
     const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0, ?)").join(", ");
     const values = batch.flatMap((v) => [
       v.id,
-      null, // restaurantId
-      v.suggestedRestaurantId,
-      "pending",
+      v.matchedRestaurant?.id ?? null, // restaurantId - links to restaurants table for confirmed
+      v.matchedRestaurant?.id ?? null, // suggestedRestaurantId - links to michelin_restaurants
+      v.matchedRestaurant ? "confirmed" : "pending", // auto-confirm if we have a restaurant match
       v.startTime,
       v.endTime,
       v.centerLat,

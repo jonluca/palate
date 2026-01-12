@@ -68,9 +68,10 @@ export default function CalendarImportScreen() {
           next.delete(calendarEventId);
           return next;
         });
+        await queryClient.refetchQueries();
       }
     },
-    [importCalendarMutation, showToast],
+    [importCalendarMutation, showToast, queryClient],
   );
 
   const handleImportAllCalendarEvents = useCallback(() => {

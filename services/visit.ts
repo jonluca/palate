@@ -37,8 +37,8 @@ import {
   isFuzzyRestaurantMatch,
   getReservationEvents,
   normalizeForComparison,
-  INSIGNIFICANT_WORDS,
   type CalendarEventInfo,
+  stripComparisonAffixes,
 } from "./calendar";
 import { loadMichelinRestaurants, toMichelinRecords } from "./michelin";
 import { searchNearbyRestaurants, isGoogleMapsConfigured, type PlaceResult } from "./places";
@@ -883,232 +883,64 @@ function dedupeCalendarEvents(
 }
 
 // ============================================================================
-// RESTAURANT INDEX FOR FAST MATCHING
-// Pre-computes normalized names and builds word-based index for O(1) lookups
+// RESTAURANT LOOKUP FOR EXACT MATCHING (CALENDAR IMPORT)
 // ============================================================================
 
-/** Pre-computed restaurant data for fast lookups */
-interface RestaurantIndexEntry {
-  restaurant: MichelinRestaurantRecord;
-  normalizedName: string;
-  significantWords: string[];
-  normalizedLocation: string;
-  normalizedAddress: string;
-  locationWords: string[];
-}
+type RestaurantsByNormalizedName = Map<string, MichelinRestaurantRecord[]>;
 
-interface RestaurantIndex {
-  entries: RestaurantIndexEntry[];
-  /** Maps significant words to restaurants containing that word */
-  wordIndex: Map<string, RestaurantIndexEntry[]>;
-  /** Maps normalized names to entries for exact/substring matching */
-  nameIndex: Map<string, RestaurantIndexEntry[]>;
-}
-
-/** Extract significant words from a normalized string */
-function getSignificantWords(normalized: string): string[] {
-  return normalized.split(" ").filter((w) => w.length > 1 && !INSIGNIFICANT_WORDS.has(w));
-}
-
-/**
- * Build a pre-computed index of restaurants for fast matching.
- * This is expensive but only done once per query.
- */
-function buildRestaurantIndex(restaurants: MichelinRestaurantRecord[]): RestaurantIndex {
-  const entries: RestaurantIndexEntry[] = [];
-  const wordIndex = new Map<string, RestaurantIndexEntry[]>();
-  const nameIndex = new Map<string, RestaurantIndexEntry[]>();
-
-  for (const restaurant of restaurants) {
-    const normalizedName = normalizeForComparison(restaurant.name);
-    const significantWords = getSignificantWords(normalizedName);
-    const normalizedLocation = normalizeForComparison(restaurant.location);
-    const normalizedAddress = normalizeForComparison(restaurant.address);
-    const locationWords = normalizedLocation.split(" ").filter((w) => w.length > 3);
-
-    const entry: RestaurantIndexEntry = {
-      restaurant,
-      normalizedName,
-      significantWords,
-      normalizedLocation,
-      normalizedAddress,
-      locationWords,
-    };
-
-    entries.push(entry);
-
-    // Index by each significant word for fast candidate lookup
-    for (const word of significantWords) {
-      const existing = wordIndex.get(word) ?? [];
-      existing.push(entry);
-      wordIndex.set(word, existing);
-    }
-
-    // Also index by normalized name for exact matching
-    const nameKey = normalizedName.slice(0, 10); // Use prefix for grouping
-    const nameEntries = nameIndex.get(nameKey) ?? [];
-    nameEntries.push(entry);
-    nameIndex.set(nameKey, nameEntries);
-  }
-
-  return { entries, wordIndex, nameIndex };
-}
-
-/**
- * Check if a query matches a restaurant entry using the pre-computed data.
- * Returns true if it's a fuzzy match.
- */
-function isIndexedFuzzyMatch(queryNorm: string, queryWords: string[], entry: RestaurantIndexEntry): boolean {
-  const { normalizedName, significantWords } = entry;
-
-  if (queryNorm.length < 3 || normalizedName.length < 3) {
-    return false;
-  }
-
-  // Exact match or substring match
-  if (queryNorm === normalizedName || queryNorm.includes(normalizedName) || normalizedName.includes(queryNorm)) {
-    return true;
-  }
-
-  // If query has few significant words, check if all are in the restaurant name
-  if (queryWords.length > 0 && queryWords.length <= 2 && queryWords.every((w) => normalizedName.includes(w))) {
-    return true;
-  }
-
-  // If restaurant has few significant words, check if all are in the query
-  if (
-    significantWords.length > 0 &&
-    significantWords.length <= 2 &&
-    significantWords.every((w) => queryNorm.includes(w))
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-/**
- * Score a restaurant match using pre-computed index data (fuzzy matching).
- * Returns -1 if no match, otherwise a positive score.
- * @deprecated Use scoreIndexedRestaurantMatchExact for calendar import
- */
-function _scoreIndexedRestaurantMatch(
-  queryNorm: string,
-  queryWords: string[],
-  eventLocationNorm: string | null,
-  eventLocationWords: Set<string> | null,
-  entry: RestaurantIndexEntry,
-): number {
-  // Name matching (base requirement)
-  if (!isIndexedFuzzyMatch(queryNorm, queryWords, entry)) {
-    return -1;
-  }
-
-  let score = 10; // Base score for name match
-
-  // Exact name match bonus
-  if (queryNorm === entry.normalizedName) {
-    score += 20;
-  }
-
-  // Location matching bonus
-  if (eventLocationNorm) {
-    // Check substring matches for location
-    if (
-      eventLocationNorm.includes(entry.normalizedAddress) ||
-      entry.normalizedAddress.includes(eventLocationNorm) ||
-      eventLocationNorm.includes(entry.normalizedLocation) ||
-      entry.normalizedLocation.includes(eventLocationNorm)
-    ) {
-      score += 15;
-    }
-
-    // Bonus for city/country words appearing in both
-    if (eventLocationWords) {
-      for (const word of entry.locationWords) {
-        if (eventLocationWords.has(word)) {
-          score += 5;
-        }
-      }
-    }
-  }
-
-  return score;
-}
-
-/**
- * Score a restaurant match requiring EXACT name match only (no fuzzy matching).
- * Used for calendar import to prevent false positives.
- * Returns -1 if no exact match, otherwise a positive score.
- */
-function scoreIndexedRestaurantMatchExact(
-  queryNorm: string,
-  eventLocationNorm: string | null,
-  eventLocationWords: Set<string> | null,
-  entry: RestaurantIndexEntry,
-): number {
-  // Require exact normalized name match only
-  if (queryNorm !== entry.normalizedName) {
-    return -1;
-  }
-
-  let score = 30; // Higher base score for exact match
-
-  // Location matching bonus
-  if (eventLocationNorm) {
-    // Check substring matches for location
-    if (
-      eventLocationNorm.includes(entry.normalizedAddress) ||
-      entry.normalizedAddress.includes(eventLocationNorm) ||
-      eventLocationNorm.includes(entry.normalizedLocation) ||
-      entry.normalizedLocation.includes(eventLocationNorm)
-    ) {
-      score += 15;
-    }
-
-    // Bonus for city/country words appearing in both
-    if (eventLocationWords) {
-      for (const word of entry.locationWords) {
-        if (eventLocationWords.has(word)) {
-          score += 5;
-        }
-      }
-    }
-  }
-
-  return score;
-}
-
-/**
- * Find candidate restaurants that might match a query using the word index.
- * This reduces the search space from ~15,500 to typically <100 restaurants.
- */
-function findCandidateRestaurants(queryWords: string[], index: RestaurantIndex): Set<RestaurantIndexEntry> {
-  const candidates = new Set<RestaurantIndexEntry>();
-
-  // PERFORMANCE NOTE:
-  // We intentionally avoid "partial word match" scans like:
-  //   for (const [indexWord] of index.wordIndex) { ...includes... }
-  // That pattern is O(|queryWords| * |uniqueWordsInIndex|) per event and gets very slow.
-  //
-  // For calendar import we later require an EXACT normalized restaurant name match
-  // (see scoreIndexedRestaurantMatchExact), so exact word matches are sufficient to surface
-  // the correct candidate(s) without expensive substring/compound-word scanning.
-
-  // Find restaurants that share at least one significant word with the query (exact token match)
-  // De-dupe query words to avoid repeated lookups.
-  const uniqueQueryWords = new Set(queryWords);
-  for (const word of uniqueQueryWords) {
-    const matches = index.wordIndex.get(word);
-    if (!matches) {
+function buildRestaurantsByNormalizedName(restaurants: MichelinRestaurantRecord[]): RestaurantsByNormalizedName {
+  const map: RestaurantsByNormalizedName = new Map();
+  for (const r of restaurants) {
+    const key = normalizeForComparison(stripComparisonAffixes(r.name));
+    if (!key) {
       continue;
     }
-    for (const entry of matches) {
-      candidates.add(entry);
+    const existing = map.get(key);
+    if (existing) {
+      existing.push(r);
+    } else {
+      map.set(key, [r]);
+    }
+  }
+  return map;
+}
+
+/**
+ * When multiple Michelin restaurants share the exact same normalized name, prefer the one whose
+ * location/address best matches the event location. This is NOT fuzzy name matching; it's only
+ * a disambiguation step after an exact-name match.
+ */
+function pickBestRestaurantForEventLocation(
+  matches: MichelinRestaurantRecord[],
+  eventLocation: string | null,
+): MichelinRestaurantRecord {
+  if (matches.length === 1 || !eventLocation) {
+    return matches[0];
+  }
+
+  const eventLocNorm = normalizeForComparison(eventLocation);
+  let best = matches[0];
+  let bestScore = -1;
+
+  for (const r of matches) {
+    const locNorm = normalizeForComparison(r.location);
+    const addrNorm = normalizeForComparison(r.address);
+
+    let score = 0;
+    if (eventLocNorm.includes(addrNorm) || addrNorm.includes(eventLocNorm)) {
+      score += 2;
+    }
+    if (eventLocNorm.includes(locNorm) || locNorm.includes(eventLocNorm)) {
+      score += 1;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = r;
     }
   }
 
-  return candidates;
+  return best;
 }
 
 /**
@@ -1119,15 +951,15 @@ function findCandidateRestaurants(queryWords: string[], index: RestaurantIndex):
  * Features:
  * - Pre-computes restaurant index for fast matching (O(1) word lookups instead of O(n) scanning)
  * - Deduplicates overlapping events with the same restaurant name
- * - Uses location matching to improve accuracy when multiple restaurants have similar names
+ * - Uses location/address disambiguation when multiple restaurants share the exact same name
  * - Yields to event loop to prevent UI blocking
  * - Filters out events where there's already a confirmed visit to that restaurant within ±1 day
- * - Requires exact restaurant name match (not fuzzy)
+ * - Requires exact restaurant name match only (no fuzzy matching)
  */
 export async function getImportableCalendarEvents(
   options: { lookbackDays?: number; lookforwardDays?: number } = {},
 ): Promise<ImportableCalendarEvent[]> {
-  const { lookbackDays = 730, lookforwardDays = 30 } = options;
+  const { lookbackDays = 1000, lookforwardDays = 30 } = options;
 
   // Check calendar permission
   const hasPermission = await hasCalendarPermission();
@@ -1181,11 +1013,11 @@ export async function getImportableCalendarEvents(
   // Deduplicate events by name and overlapping time
   const dedupedEvents = dedupeCalendarEvents(unlinkedEvents);
 
-  // Get all Michelin restaurants and build the search index
+  // Get all Michelin restaurants and build an exact-name lookup map
   const michelinRestaurants = await getAllMichelinRestaurants();
-  const restaurantIndex = buildRestaurantIndex(michelinRestaurants);
+  const restaurantsByName = buildRestaurantsByNormalizedName(michelinRestaurants);
 
-  // Yield after expensive index building
+  // Yield after map building (can still be expensive on slower devices)
   await yieldToEventLoop();
 
   const importableEvents: ImportableCalendarEvent[] = [];
@@ -1193,68 +1025,34 @@ export async function getImportableCalendarEvents(
 
   for (let i = 0; i < dedupedEvents.length; i++) {
     const event = dedupedEvents[i];
-    const cleanedTitle = cleanCalendarEventTitle(event.title);
+    const cleanedTitle = stripComparisonAffixes(cleanCalendarEventTitle(event.title));
 
     if (cleanedTitle.length < 3) {
       continue;
     }
 
-    // Pre-compute query data once per event
+    // Exact normalized-name match only
     const queryNorm = normalizeForComparison(cleanedTitle);
-    const queryWords = getSignificantWords(queryNorm);
-
-    // Pre-compute event location data
-    let eventLocationNorm: string | null = null;
-    let eventLocationWords: Set<string> | null = null;
-    if (event.location) {
-      eventLocationNorm = normalizeForComparison(event.location);
-      eventLocationWords = new Set(eventLocationNorm.split(" ").filter((w) => w.length > 3));
+    const matches = restaurantsByName.get(queryNorm);
+    if (!matches || matches.length === 0) {
+      continue;
     }
 
-    // Find candidate restaurants using word index (fast O(1) lookups)
-    const candidates = findCandidateRestaurants(queryWords, restaurantIndex);
+    const bestMatch = pickBestRestaurantForEventLocation(matches, event.location);
 
-    // If no candidates from word index, fall back to checking entries
-    // whose normalized name might be a substring match
-    if (candidates.size === 0 && queryNorm.length >= 3) {
-      // Check prefix matches in name index
-      const prefix = queryNorm.slice(0, 10);
-      const prefixMatches = restaurantIndex.nameIndex.get(prefix);
-      if (prefixMatches) {
-        for (const entry of prefixMatches) {
-          candidates.add(entry);
-        }
-      }
+    // Skip if there's already a confirmed visit to this restaurant within ±1 day
+    if (hasNearbyConfirmedVisit(bestMatch.id, event.startDate)) {
+      continue;
     }
 
-    // Score only the candidate restaurants - require EXACT match only
-    let bestMatch: MichelinRestaurantRecord | null = null;
-    let bestScore = -1;
-
-    for (const entry of candidates) {
-      const score = scoreIndexedRestaurantMatchExact(queryNorm, eventLocationNorm, eventLocationWords, entry);
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = entry.restaurant;
-      }
-    }
-
-    // Only add if we have an exact match and no nearby confirmed visit
-    if (bestMatch && bestScore >= 10) {
-      // Skip if there's already a confirmed visit to this restaurant within ±1 day
-      if (hasNearbyConfirmedVisit(bestMatch.id, event.startDate)) {
-        continue;
-      }
-
-      importableEvents.push({
-        calendarEventId: event.id,
-        calendarEventTitle: event.title,
-        calendarEventLocation: event.location,
-        startDate: event.startDate,
-        endDate: event.endDate,
-        matchedRestaurant: bestMatch,
-      });
-    }
+    importableEvents.push({
+      calendarEventId: event.id,
+      calendarEventTitle: event.title,
+      calendarEventLocation: event.location,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      matchedRestaurant: bestMatch,
+    });
 
     // Yield to event loop periodically
     if ((i + 1) % BATCH_SIZE === 0 && i + 1 < dedupedEvents.length) {
@@ -1329,6 +1127,7 @@ function dedupeImportableEvents(
 /**
  * Import specific calendar events as visits.
  * Takes an array of calendar event IDs to import.
+ * The matched restaurant is auto-confirmed on the created visit.
  */
 export async function importCalendarEvents(calendarEventIds: string[]): Promise<number> {
   if (calendarEventIds.length === 0) {
@@ -1354,16 +1153,26 @@ export async function importCalendarEvents(calendarEventIds: string[]): Promise<
     endTime: event.endDate,
     centerLat: event.matchedRestaurant.latitude,
     centerLon: event.matchedRestaurant.longitude,
-    suggestedRestaurantId: event.matchedRestaurant.id,
+    // Pass full restaurant data for auto-confirmation
+    matchedRestaurant: {
+      id: event.matchedRestaurant.id,
+      name: event.matchedRestaurant.name,
+      latitude: event.matchedRestaurant.latitude,
+      longitude: event.matchedRestaurant.longitude,
+      address: event.matchedRestaurant.address,
+      cuisine: event.matchedRestaurant.cuisine,
+    },
   }));
 
+  // Insert visits with auto-confirmation
+  await insertCalendarOnlyVisits(visitsToCreate);
+
+  // Also insert into suggested restaurants for tracking/UI purposes
   const suggestedRestaurantsToInsert: VisitSuggestedRestaurant[] = visitsToCreate.map((v) => ({
     visitId: v.id,
-    restaurantId: v.suggestedRestaurantId!,
+    restaurantId: v.matchedRestaurant.id,
     distance: 0,
   }));
-
-  await insertCalendarOnlyVisits(visitsToCreate);
   await insertVisitSuggestedRestaurants(suggestedRestaurantsToInsert);
 
   return visitsToCreate.length;

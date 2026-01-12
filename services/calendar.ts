@@ -104,6 +104,8 @@ async function getEventsInRange(startDate: number, endDate: number): Promise<Cal
     return events
       .filter(
         (event) =>
+          !event.allDay &&
+          !event.recurrenceRule &&
           event.title &&
           event.title.trim() !== "" &&
           event.title.trim() !== "Untitled Event" &&
@@ -439,7 +441,7 @@ const CALENDAR_TITLE_SUFFIXES_TO_STRIP = [
 ];
 
 /** Clean and normalize a calendar event title to extract the likely restaurant name */
-export function cleanCalendarEventTitle(title: string): string {
+export function _cleanCalendarEventTitle(title: string): string {
   if (!title) {
     return "";
   }
@@ -452,6 +454,7 @@ export function cleanCalendarEventTitle(title: string): string {
   }
   return cleaned.trim();
 }
+export const cleanCalendarEventTitle = memoize(_cleanCalendarEventTitle);
 
 const COMPARISON_SUFFIXES_TO_STRIP = [
   /\s+bar\s+(and|&)\s+restaurant\s*$/i,
@@ -547,7 +550,7 @@ const COMPARISON_PREFIXES_TO_STRIP = [
 ];
 
 /** Strip comparison-specific prefixes and suffixes from a name */
-function stripComparisonAffixes(str: string): string {
+function _stripComparisonAffixes(str: string): string {
   let result = str.trim();
   for (const p of COMPARISON_PREFIXES_TO_STRIP) {
     result = result.replace(p, "");
@@ -557,7 +560,7 @@ function stripComparisonAffixes(str: string): string {
   }
   return result.trim();
 }
-
+export const stripComparisonAffixes = memoize(_stripComparisonAffixes);
 /** Compare a restaurant name with a calendar event title to determine if they match */
 function _compareRestaurantAndCalendarTitle(calendarTitle: string, restaurantName: string): boolean {
   if (!calendarTitle || !restaurantName) {
@@ -571,17 +574,11 @@ function _compareRestaurantAndCalendarTitle(calendarTitle: string, restaurantNam
     return false;
   }
 
-  // Exact match, or one contains the other
-  if (normCalendar === normRestaurant) {
-    return true;
-  }
-
-  // Also try raw calendar title normalized
-  return normalizeForComparison(calendarTitle) === normRestaurant;
+  return normCalendar === normRestaurant;
 }
 export const compareRestaurantAndCalendarTitle = memoize(_compareRestaurantAndCalendarTitle);
 /** Normalize a string for fuzzy comparison */
-export function normalizeForComparison(str: string): string {
+function _normalizeForComparison(str: string): string {
   return (
     deburr(str)
       .toLowerCase()
@@ -604,6 +601,7 @@ export function normalizeForComparison(str: string): string {
       .trim()
   );
 }
+export const normalizeForComparison = memoize(_normalizeForComparison);
 
 export const INSIGNIFICANT_WORDS = new Set([
   "the",
@@ -676,7 +674,7 @@ export async function getReservationEvents(startDate: number, endDate: number): 
   const events = await getEventsInRange(startDate, endDate);
 
   // Filter to timed events that look like reservations
-  return events.filter((event) => !event.isAllDay && looksLikeReservation(event));
+  return events;
 }
 
 // ============================================================================

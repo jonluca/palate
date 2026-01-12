@@ -207,7 +207,7 @@ function CalendarSyncCard() {
 
       if (selectedCalendarIds === null) {
         // Currently syncing all - switch to only this calendar
-        setSelectedCalendarIds([calendarId]);
+        setSelectedCalendarIds(calendars.map((c) => c.id).filter((id) => id !== calendarId));
       } else {
         const isCurrentlySelected = selectedCalendarIds.includes(calendarId);
         if (isCurrentlySelected) {
@@ -220,7 +220,7 @@ function CalendarSyncCard() {
         }
       }
     },
-    [selectedCalendarIds, setSelectedCalendarIds],
+    [selectedCalendarIds, setSelectedCalendarIds, calendars],
   );
 
   const handleSelectAll = useCallback(() => {
