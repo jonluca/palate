@@ -1,7 +1,7 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { AnimatedListItem, ReviewVisitCard, TabButton, type ReviewTab } from "@/components/review";
-import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText, FilterPills } from "@/components/ui";
+import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText, Card, FilterPills } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import {
   usePendingReview,
@@ -18,6 +18,7 @@ import * as Haptics from "expo-haptics";
 import { useToast } from "@/components/ui/toast";
 import Animated, { LinearTransition } from "react-native-reanimated";
 import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { router } from "expo-router";
 
 function LoadingState() {
   return (
@@ -26,6 +27,52 @@ function LoadingState() {
         <SkeletonVisitCard key={i} />
       ))}
     </View>
+  );
+}
+
+function ReviewCaughtUpCard() {
+  return (
+    <Card className={"border border-green-500/20 bg-green-500/10"}>
+      <View className={"p-5 gap-3"}>
+        <View className={"flex-row items-center gap-3"}>
+          <View className={"w-10 h-10 rounded-2xl bg-green-500/20 items-center justify-center"}>
+            <IconSymbol name={"checkmark.circle.fill"} size={20} color={"#22c55e"} />
+          </View>
+          <View className={"flex-1"}>
+            <ThemedText className={"font-semibold"}>All caught up</ThemedText>
+            <ThemedText variant={"footnote"} color={"secondary"}>
+              You’ve reviewed everything pending.
+            </ThemedText>
+          </View>
+        </View>
+        <Button variant={"outline"} onPress={() => router.push("/rescan")}>
+          <ButtonText variant={"outline"}>Scan for new photos</ButtonText>
+        </Button>
+      </View>
+    </Card>
+  );
+}
+
+function NoManualReviewLeftCard({ onGoToExact }: { onGoToExact: () => void }) {
+  return (
+    <Card className={"border border-border bg-card"}>
+      <View className={"p-5 gap-3"}>
+        <View className={"flex-row items-center gap-3"}>
+          <View className={"w-10 h-10 rounded-2xl bg-primary/10 items-center justify-center"}>
+            <IconSymbol name={"sparkles"} size={18} color={"#999"} />
+          </View>
+          <View className={"flex-1"}>
+            <ThemedText className={"font-semibold"}>Nothing to manually review</ThemedText>
+            <ThemedText variant={"footnote"} color={"secondary"}>
+              You only have Exact Matches left.
+            </ThemedText>
+          </View>
+        </View>
+        <Button onPress={onGoToExact}>
+          <ButtonText>Go to Exact Matches</ButtonText>
+        </Button>
+      </View>
+    </Card>
   );
 }
 
@@ -247,7 +294,7 @@ export default function ReviewScreen() {
   // UI state
   const hasExactMatches = exactMatches.length > 0;
   const hasTabs = hasExactMatches;
-  const isEmpty = pendingVisits.length === 0;
+  const isAllCaughtUp = !isLoading && pendingVisits.length === 0;
 
   // Switch back to "all" tab if current tab becomes empty
   useEffect(() => {
@@ -401,7 +448,7 @@ export default function ReviewScreen() {
                       {selectedRestaurant ? `Restaurant: ${selectedRestaurant.name}` : "Restaurant: Any"}
                     </ButtonText>
                   </Button>
-                </View>
+      </View>
 
                 {(selectedRestaurantId || startDateMs !== null || endDateMs !== null) && (
                   <View className={"flex-row gap-2"}>
@@ -527,8 +574,10 @@ export default function ReviewScreen() {
             ListEmptyComponent={
               isLoading ? (
                 <LoadingState />
-              ) : isEmpty || reviewableVisits.length === 0 ? (
-                <AllCaughtUpEmpty />
+              ) : isAllCaughtUp ? (
+                <ReviewCaughtUpCard />
+              ) : reviewableVisits.length === 0 && hasExactMatches ? (
+                <NoManualReviewLeftCard onGoToExact={() => setActiveTab("exact")} />
               ) : (
                 <View className={"gap-3"}>
                   <ThemedText variant={"title3"} className={"font-semibold"}>
