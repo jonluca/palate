@@ -1,1 +1,1 @@
-export type ReviewTab = "all" | "exact" | "other";
+export type ReviewTab = "all" | "exact";

@@ -173,16 +173,16 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
               {stats.totalAccumulatedStars.toLocaleString()}
             </ThemedText>
             <ThemedText variant={"footnote"} className={"text-white/60"}>
-              Total Stars Earned
+              Total Stars
             </ThemedText>
           </View>
           <View className={"w-px h-12 bg-white/20"} />
           <View className={"items-center"}>
             <ThemedText variant={"largeTitle"} className={"text-amber-400 font-bold"}>
-              {stats.distinctStarredRestaurants.toLocaleString()}
+              {stats.distinctStars.toLocaleString()}
             </ThemedText>
             <ThemedText variant={"footnote"} className={"text-white/60"}>
-              Starred Restaurants
+              Distinct Stars
             </ThemedText>
           </View>
         </Animated.View>

@@ -17,12 +17,16 @@ import { FlashList } from "@shopify/flash-list";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useLocalSearchParams, router, Stack } from "expo-router";
 import React, { useCallback, useState } from "react";
-import { View, Pressable, Platform } from "react-native";
+import { View, Pressable, Platform, type LayoutChangeEvent } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp);
@@ -44,6 +48,19 @@ function formatTime(timestamp: number): string {
 
 function VisitHistoryCard({ visit, index }: { visit: VisitRecord; index: number }) {
   const { data: photos = [] } = useVisitPhotos(visit.id);
+  const [previewCount, setPreviewCount] = useState(3);
+
+  const handlePreviewLayout = useCallback((e: LayoutChangeEvent) => {
+    const width = e.nativeEvent.layout.width;
+    if (!Number.isFinite(width) || width <= 0) {
+      return;
+    }
+
+    // Choose a count that fills the row nicely on narrow and wide screens.
+    const minThumbWidth = 110;
+    const nextCount = clamp(Math.floor(width / minThumbWidth), 2, 4);
+    setPreviewCount((prev) => (prev === nextCount ? prev : nextCount));
+  }, []);
 
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -56,8 +73,8 @@ function VisitHistoryCard({ visit, index }: { visit: VisitRecord; index: number 
         <Card animated={false}>
           {/* Preview Photos */}
           {photos.length > 0 && (
-            <View className={"flex-row h-24"}>
-              {photos.slice(0, 3).map((photo, i) => (
+            <View className={"flex-row h-24"} onLayout={handlePreviewLayout}>
+              {photos.slice(0, previewCount).map((photo, i) => (
                 <View key={i} className={"flex-1"}>
                   <Image
                     source={{ uri: photo.uri }}

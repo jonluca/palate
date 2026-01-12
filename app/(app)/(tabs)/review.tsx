@@ -1,7 +1,7 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { AnimatedListItem, ReviewVisitCard, TabButton, type ReviewTab } from "@/components/review";
-import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText } from "@/components/ui";
+import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText, FilterPills } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import {
   usePendingReview,
@@ -11,11 +11,12 @@ import {
 } from "@/hooks/queries";
 import { FlashList } from "@shopify/flash-list";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, RefreshControl, Alert } from "react-native";
+import { View, RefreshControl, Alert, Modal, Pressable, ScrollView, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useToast } from "@/components/ui/toast";
+import Animated, { LinearTransition } from "react-native-reanimated";
 
 function LoadingState() {
   return (
@@ -32,6 +33,24 @@ export default function ReviewScreen() {
   const [isApproving, setIsApproving] = useState(false);
   const [activeTab, setActiveTab] = useState<ReviewTab>("all");
 
+  type FoodFilter = "on" | "off";
+  type MatchesFilter = "on" | "off";
+  type StarFilter = "any" | "2plus" | "3";
+
+  const [filtersCollapsed, setFiltersCollapsed] = useState(true);
+  const [foodFilter, setFoodFilter] = useState<FoodFilter>("on");
+  const [matchesFilter, setMatchesFilter] = useState<MatchesFilter>("on");
+  const [starFilter, setStarFilter] = useState<StarFilter>("any");
+  const [selectedRestaurantId, setSelectedRestaurantId] = useState<string | null>(null);
+  const [startDateMs, setStartDateMs] = useState<number | null>(null);
+  const [endDateMs, setEndDateMs] = useState<number | null>(null);
+
+  const [restaurantModalVisible, setRestaurantModalVisible] = useState(false);
+  const [restaurantSearchQuery, setRestaurantSearchQuery] = useState("");
+  const [dateModalVisible, setDateModalVisible] = useState(false);
+  const [startDateInput, setStartDateInput] = useState("");
+  const [endDateInput, setEndDateInput] = useState("");
+
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -47,33 +66,205 @@ export default function ReviewScreen() {
   // Computed data
   const exactMatchVisitIds = useMemo(() => new Set(exactMatches.map((m) => m.visitId)), [exactMatches]);
 
-  // Helper to check if a visit has high-confidence signals
-  const isHighConfidenceVisit = useCallback((visit: PendingVisitForReview) => {
-    const hasFood = !!visit.foodProbable;
-    return hasFood;
+  const reviewableVisits = useMemo(
+    () => pendingVisits.filter((v) => !exactMatchVisitIds.has(v.id)),
+    [pendingVisits, exactMatchVisitIds],
+  );
+
+  const formatShortDate = useCallback((ms: number) => {
+    try {
+      return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    } catch {
+      return "";
+    }
   }, []);
 
-  // Filter visits into categories
-  const { highConfidenceVisits, lowConfidenceVisits } = useMemo(() => {
-    const visitsWithoutExactMatches = pendingVisits.filter((v) => !exactMatchVisitIds.has(v.id));
-    const high: PendingVisitForReview[] = [];
-    const low: PendingVisitForReview[] = [];
+  const formatLocalISODate = useCallback((ms: number) => {
+    const d = new Date(ms);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }, []);
 
-    for (const visit of visitsWithoutExactMatches) {
-      if (isHighConfidenceVisit(visit)) {
-        high.push(visit);
-      } else {
-        low.push(visit);
+  const ToggleChip = useCallback(
+    ({ label, value, onToggle }: { label: string; value: boolean; onToggle: () => void }) => {
+      return (
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onToggle();
+          }}
+          className={`px-4 py-2 rounded-full ${value ? "bg-primary" : "bg-card"}`}
+        >
+          <ThemedText className={`text-sm font-medium ${value ? "text-primary-foreground" : "text-foreground"}`}>
+            {label}: {value ? "On" : "Off"}
+          </ThemedText>
+        </Pressable>
+      );
+    },
+    [],
+  );
+
+  function parseMichelinStars(award: string | null | undefined): number {
+    if (!award) {
+      return 0;
+    }
+    const s = award.toLowerCase();
+    const digitMatch = s.match(/(\d)\s*star/);
+    if (digitMatch) {
+      return Number(digitMatch[1]) || 0;
+    }
+    if (s.includes("three star")) {
+      return 3;
+    }
+    if (s.includes("two star")) {
+      return 2;
+    }
+    if (s.includes("one star")) {
+      return 1;
+    }
+    return 0;
+  }
+
+  const visitMaxStars = useCallback((visit: PendingVisitForReview) => {
+    let max = 0;
+    for (const r of visit.suggestedRestaurants) {
+      max = Math.max(max, parseMichelinStars(r.award));
+      if (max >= 3) {
+        return 3;
       }
     }
+    return max;
+  }, []);
 
-    return { highConfidenceVisits: high, lowConfidenceVisits: low };
-  }, [pendingVisits, exactMatchVisitIds, isHighConfidenceVisit]);
+  const uniqueSuggestedRestaurants = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; award: string | null }>();
+    for (const v of reviewableVisits) {
+      for (const r of v.suggestedRestaurants) {
+        if (!map.has(r.id)) {
+          map.set(r.id, { id: r.id, name: r.name, award: r.award ?? null });
+        }
+      }
+    }
+    const list = Array.from(map.values());
+    list.sort((a, b) => {
+      const starDiff = parseMichelinStars(b.award) - parseMichelinStars(a.award);
+      if (starDiff !== 0) {
+        return starDiff;
+      }
+      return a.name.localeCompare(b.name);
+    });
+    return list;
+  }, [reviewableVisits]);
+
+  const selectedRestaurant = useMemo(() => {
+    if (!selectedRestaurantId) {
+      return null;
+    }
+    return uniqueSuggestedRestaurants.find((r) => r.id === selectedRestaurantId) ?? null;
+  }, [selectedRestaurantId, uniqueSuggestedRestaurants]);
+
+  const filtersSummary = useMemo(() => {
+    const parts: string[] = [];
+
+    parts.push(foodFilter === "on" ? "Food On" : "Food Off");
+
+    parts.push(matchesFilter === "on" ? "Matches On" : "Matches Off");
+
+    if (starFilter === "2plus") {
+      parts.push("2★+");
+    } else if (starFilter === "3") {
+      parts.push("3★");
+    }
+
+    if (startDateMs || endDateMs) {
+      parts.push(`${startDateMs ? formatShortDate(startDateMs) : "…"}–${endDateMs ? formatShortDate(endDateMs) : "…"}`);
+    }
+
+    if (selectedRestaurant) {
+      parts.push(selectedRestaurant.name);
+    }
+
+    return parts.join(" · ");
+  }, [foodFilter, matchesFilter, starFilter, startDateMs, endDateMs, selectedRestaurant, formatShortDate]);
+
+  function parseLocalDateInput(input: string): { startMs: number; endMs: number } | null {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      return null;
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    if (!year || month < 1 || month > 12 || day < 1 || day > 31) {
+      return null;
+    }
+    const start = new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
+    const end = new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
+    return { startMs: start, endMs: end };
+  }
+
+  const filteredReviewableVisits = useMemo(() => {
+    return reviewableVisits.filter((v) => {
+      // Food toggle: ON => must have food, OFF => must not have food (covers 0/false/null/undefined)
+      if (foodFilter === "on" && !v.foodProbable) {
+        return false;
+      }
+      if (foodFilter === "off" && !!v.foodProbable) {
+        return false;
+      }
+
+      // Matches toggle: ON => must have matches, OFF => must have no matches.
+      // Treat "no matches" as both [] and missing/null (defensive).
+      const matchCount = v.suggestedRestaurants?.length ?? 0;
+      const hasMatches = matchCount > 0;
+      if (matchesFilter === "on" && !hasMatches) {
+        return false;
+      }
+      if (matchesFilter === "off" && hasMatches) {
+        return false;
+      }
+
+      const maxStars = visitMaxStars(v);
+      if (starFilter === "2plus" && maxStars < 2) {
+        return false;
+      }
+      if (starFilter === "3" && maxStars < 3) {
+        return false;
+      }
+
+      if (selectedRestaurantId && !v.suggestedRestaurants.some((r) => r.id === selectedRestaurantId)) {
+        return false;
+      }
+
+      if (startDateMs !== null && v.startTime < startDateMs) {
+        return false;
+      }
+      if (endDateMs !== null && v.startTime > endDateMs) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    reviewableVisits,
+    foodFilter,
+    matchesFilter,
+    starFilter,
+    selectedRestaurantId,
+    startDateMs,
+    endDateMs,
+    visitMaxStars,
+  ]);
 
   // UI state
   const hasExactMatches = exactMatches.length > 0;
-  const hasLowConfidence = lowConfidenceVisits.length > 0;
-  const hasTabs = hasExactMatches || hasLowConfidence;
+  const hasTabs = hasExactMatches;
   const isEmpty = pendingVisits.length === 0;
 
   // Switch back to "all" tab if current tab becomes empty
@@ -81,10 +272,7 @@ export default function ReviewScreen() {
     if (activeTab === "exact" && !hasExactMatches) {
       setActiveTab("all");
     }
-    if (activeTab === "other" && !hasLowConfidence) {
-      setActiveTab("all");
-    }
-  }, [activeTab, hasExactMatches, hasLowConfidence]);
+  }, [activeTab, hasExactMatches]);
 
   // Handlers
   const onRefresh = useCallback(async () => {
@@ -163,27 +351,128 @@ export default function ReviewScreen() {
           Review Visits
         </ThemedText>
         <ThemedText variant={"body"} color={"secondary"}>
-          {highConfidenceVisits.length.toLocaleString()}{" "}
-          {highConfidenceVisits.length === 1 ? "visit needs" : "visits need"} manual review
+          {filteredReviewableVisits.length.toLocaleString()}{" "}
+          {filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"} manual review
         </ThemedText>
-      </View>
-    ),
-    [highConfidenceVisits.length],
-  );
 
-  const LowConfidenceListHeader = useCallback(
-    () => (
-      <View className={"gap-2"}>
-        <ThemedText variant={"largeTitle"} className={"font-bold"}>
-          Other Visits
-        </ThemedText>
-        <ThemedText variant={"body"} color={"secondary"}>
-          {lowConfidenceVisits.length.toLocaleString()} {lowConfidenceVisits.length === 1 ? "visit" : "visits"} without
-          restaurant matches, calendar events, or food detected
-        </ThemedText>
+        {/* Filters */}
+        {reviewableVisits.length > 0 && (
+          <View className={"pt-2"}>
+            <Pressable
+              className={"bg-card rounded-2xl px-4 py-3"}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setFiltersCollapsed((v) => !v);
+              }}
+            >
+              <View className={"flex-row items-center justify-between gap-3"}>
+                <View className={"flex-1 gap-1"}>
+                  <ThemedText className={"font-semibold"}>Filters</ThemedText>
+                  <ThemedText variant={"footnote"} color={"tertiary"} numberOfLines={2}>
+                    {filtersSummary}
+                  </ThemedText>
+                </View>
+                <IconSymbol name={filtersCollapsed ? "chevron.down" : "chevron.up"} size={18} color={"#999"} />
+              </View>
+            </Pressable>
+
+            {!filtersCollapsed && (
+              <Animated.View layout={LinearTransition.duration(200)} className={"gap-3 pt-3"}>
+                <View className={"flex-row gap-2 flex-wrap"}>
+                  <ToggleChip
+                    label={"Food"}
+                    value={foodFilter === "on"}
+                    onToggle={() => setFoodFilter((v) => (v === "on" ? "off" : "on"))}
+                  />
+                  <ToggleChip
+                    label={"Matches"}
+                    value={matchesFilter === "on"}
+                    onToggle={() => setMatchesFilter((v) => (v === "on" ? "off" : "on"))}
+                  />
+                </View>
+
+                <FilterPills
+                  options={[
+                    { value: "any" as const, label: "Stars: Any" },
+                    { value: "2plus" as const, label: "2★+" },
+                    { value: "3" as const, label: "3★" },
+                  ]}
+                  value={starFilter}
+                  onChange={setStarFilter}
+                />
+
+                <View className={"flex-row gap-2"}>
+                  <Button
+                    variant={"muted"}
+                    size={"sm"}
+                    className={"flex-1"}
+                    onPress={() => {
+                      setStartDateInput(startDateMs ? formatLocalISODate(startDateMs) : "");
+                      setEndDateInput(endDateMs ? formatLocalISODate(endDateMs) : "");
+                      setDateModalVisible(true);
+                    }}
+                  >
+                    <ButtonText variant={"muted"} size={"sm"}>
+                      {startDateMs || endDateMs
+                        ? `Date: ${startDateMs ? formatShortDate(startDateMs) : "…"}–${endDateMs ? formatShortDate(endDateMs) : "…"}`
+                        : "Date: Any"}
+                    </ButtonText>
+                  </Button>
+                  <Button
+                    variant={"muted"}
+                    size={"sm"}
+                    className={"flex-1"}
+                    onPress={() => setRestaurantModalVisible(true)}
+                  >
+                    <ButtonText variant={"muted"} size={"sm"}>
+                      {selectedRestaurant ? `Restaurant: ${selectedRestaurant.name}` : "Restaurant: Any"}
+                    </ButtonText>
+                  </Button>
+                </View>
+
+                {(selectedRestaurantId || startDateMs !== null || endDateMs !== null) && (
+                  <View className={"flex-row gap-2"}>
+                    <Button
+                      variant={"outline"}
+                      size={"sm"}
+                      className={"flex-1"}
+                      onPress={() => {
+                        setSelectedRestaurantId(null);
+                        setRestaurantSearchQuery("");
+                        setStartDateMs(null);
+                        setEndDateMs(null);
+                        setStartDateInput("");
+                        setEndDateInput("");
+                      }}
+                    >
+                      <ButtonText variant={"outline"} size={"sm"}>
+                        Clear Filters
+                      </ButtonText>
+                    </Button>
+                  </View>
+                )}
+              </Animated.View>
+            )}
+          </View>
+        )}
       </View>
     ),
-    [lowConfidenceVisits.length],
+    [
+      filteredReviewableVisits.length,
+      reviewableVisits.length,
+      filtersCollapsed,
+      foodFilter,
+      matchesFilter,
+      starFilter,
+      selectedRestaurant,
+      selectedRestaurantId,
+      startDateMs,
+      endDateMs,
+      formatShortDate,
+      formatLocalISODate,
+      filtersSummary,
+      ToggleChip,
+    ],
   );
 
   const ExactMatchListHeader = useCallback(
@@ -238,7 +527,7 @@ export default function ReviewScreen() {
             <View className={"flex-row gap-2 bg-background/50 p-1 rounded-2xl"}>
               <TabButton
                 label={"All"}
-                count={highConfidenceVisits.length}
+                count={filteredReviewableVisits.length}
                 isSelected={activeTab === "all"}
                 onPress={() => setActiveTab("all")}
               />
@@ -250,14 +539,6 @@ export default function ReviewScreen() {
                   onPress={() => setActiveTab("exact")}
                 />
               )}
-              {hasLowConfidence && (
-                <TabButton
-                  label={"Other"}
-                  count={lowConfidenceVisits.length}
-                  isSelected={activeTab === "other"}
-                  onPress={() => setActiveTab("other")}
-                />
-              )}
             </View>
           </View>
         )}
@@ -265,7 +546,7 @@ export default function ReviewScreen() {
         {/* Tab Content */}
         {activeTab === "all" && (
           <FlashList
-            data={highConfidenceVisits}
+            data={filteredReviewableVisits}
             renderItem={renderRegularItem}
             keyExtractor={(item) => item.id}
             refreshControl={refreshControl}
@@ -273,7 +554,38 @@ export default function ReviewScreen() {
             contentContainerStyle={listContentStyle}
             ListHeaderComponent={RegularListHeader}
             ListHeaderComponentStyle={{ marginBottom: 24 }}
-            ListEmptyComponent={isLoading ? <LoadingState /> : isEmpty ? <AllCaughtUpEmpty /> : null}
+            ListEmptyComponent={
+              isLoading ? (
+                <LoadingState />
+              ) : isEmpty || reviewableVisits.length === 0 ? (
+                <AllCaughtUpEmpty />
+              ) : (
+                <View className={"gap-3"}>
+                  <ThemedText variant={"title3"} className={"font-semibold"}>
+                    No visits match these filters
+                  </ThemedText>
+                  <ThemedText variant={"body"} color={"secondary"}>
+                    Try changing the filters above.
+                  </ThemedText>
+                  <Button
+                    variant={"outline"}
+                    onPress={() => {
+                      setFoodFilter("on");
+                      setMatchesFilter("on");
+                      setStarFilter("any");
+                      setSelectedRestaurantId(null);
+                      setRestaurantSearchQuery("");
+                      setStartDateMs(null);
+                      setEndDateMs(null);
+                      setStartDateInput("");
+                      setEndDateInput("");
+                    }}
+                  >
+                    <ButtonText variant={"outline"}>Reset to Has Food</ButtonText>
+                  </Button>
+                </View>
+              )
+            }
           />
         )}
 
@@ -291,19 +603,185 @@ export default function ReviewScreen() {
           />
         )}
 
-        {activeTab === "other" && hasLowConfidence && (
-          <FlashList
-            data={lowConfidenceVisits}
-            renderItem={renderRegularItem}
-            keyExtractor={(item) => item.id}
-            refreshing={refreshing}
-            refreshControl={refreshControl}
-            contentContainerStyle={listContentStyle}
-            ListHeaderComponent={LowConfidenceListHeader}
-            ListHeaderComponentStyle={{ marginBottom: 24 }}
-            ListEmptyComponent={isLoading ? <LoadingState /> : <AllCaughtUpEmpty />}
-          />
-        )}
+        {/* Restaurant Filter Modal */}
+        <Modal visible={restaurantModalVisible} animationType={"slide"} presentationStyle={"pageSheet"}>
+          <View className={"flex-1 bg-background"}>
+            <View className={"px-4 pt-4 pb-3 border-b border-border gap-3"}>
+              <View className={"flex-row items-center justify-between"}>
+                <ThemedText variant={"heading"} className={"font-semibold"}>
+                  Filter by Restaurant
+                </ThemedText>
+                <Pressable
+                  onPress={() => {
+                    setRestaurantModalVisible(false);
+                    setRestaurantSearchQuery("");
+                  }}
+                >
+                  <ThemedText className={"text-primary font-semibold"}>Done</ThemedText>
+                </Pressable>
+              </View>
+
+              <TextInput
+                value={restaurantSearchQuery}
+                onChangeText={setRestaurantSearchQuery}
+                placeholder={"Search restaurants…"}
+                placeholderTextColor={"#999"}
+                className={"bg-card rounded-2xl px-4 py-3 text-foreground"}
+                autoCapitalize={"none"}
+                autoCorrect={false}
+              />
+
+              <View className={"flex-row gap-2"}>
+                <Button
+                  variant={"outline"}
+                  size={"sm"}
+                  className={"flex-1"}
+                  onPress={() => {
+                    setSelectedRestaurantId(null);
+                    setRestaurantModalVisible(false);
+                    setRestaurantSearchQuery("");
+                  }}
+                >
+                  <ButtonText variant={"outline"} size={"sm"}>
+                    Clear Restaurant
+                  </ButtonText>
+                </Button>
+              </View>
+            </View>
+
+            <ScrollView className={"flex-1"}>
+              <View className={"p-4 gap-2"}>
+                {uniqueSuggestedRestaurants
+                  .filter((r) => {
+                    const q = restaurantSearchQuery.trim().toLowerCase();
+                    if (!q) {
+                      return true;
+                    }
+                    return r.name.toLowerCase().includes(q) || (r.award ?? "").toLowerCase().includes(q);
+                  })
+                  .slice(0, 250)
+                  .map((r) => {
+                    const isSelected = selectedRestaurantId === r.id;
+                    return (
+                      <Pressable
+                        key={r.id}
+                        onPress={() => {
+                          setSelectedRestaurantId(r.id);
+                          setRestaurantModalVisible(false);
+                          setRestaurantSearchQuery("");
+                        }}
+                        className={"bg-card rounded-2xl px-4 py-3"}
+                      >
+                        <View className={"flex-row items-center justify-between gap-3"}>
+                          <View className={"flex-1"}>
+                            <ThemedText className={"font-semibold"} numberOfLines={1}>
+                              {r.name}
+                            </ThemedText>
+                            {!!r.award && (
+                              <ThemedText variant={"footnote"} color={"secondary"} numberOfLines={1}>
+                                {r.award}
+                              </ThemedText>
+                            )}
+                          </View>
+                          {isSelected && <IconSymbol name={"checkmark"} size={18} color={"#22c55e"} />}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+              </View>
+            </ScrollView>
+          </View>
+        </Modal>
+
+        {/* Date Range Modal */}
+        <Modal visible={dateModalVisible} animationType={"slide"} presentationStyle={"pageSheet"}>
+          <View className={"flex-1 bg-background"}>
+            <View className={"px-4 pt-4 pb-3 border-b border-border gap-3"}>
+              <View className={"flex-row items-center justify-between"}>
+                <ThemedText variant={"heading"} className={"font-semibold"}>
+                  Filter by Date
+                </ThemedText>
+                <Pressable
+                  onPress={() => {
+                    setDateModalVisible(false);
+                  }}
+                >
+                  <ThemedText className={"text-primary font-semibold"}>Done</ThemedText>
+                </Pressable>
+              </View>
+
+              <ThemedText variant={"footnote"} color={"secondary"}>
+                Enter dates as YYYY-MM-DD (local time)
+              </ThemedText>
+
+              <View className={"gap-2"}>
+                <TextInput
+                  value={startDateInput}
+                  onChangeText={setStartDateInput}
+                  placeholder={"Start date (YYYY-MM-DD) — optional"}
+                  placeholderTextColor={"#999"}
+                  className={"bg-card rounded-2xl px-4 py-3 text-foreground"}
+                  autoCapitalize={"none"}
+                  autoCorrect={false}
+                />
+                <TextInput
+                  value={endDateInput}
+                  onChangeText={setEndDateInput}
+                  placeholder={"End date (YYYY-MM-DD) — optional"}
+                  placeholderTextColor={"#999"}
+                  className={"bg-card rounded-2xl px-4 py-3 text-foreground"}
+                  autoCapitalize={"none"}
+                  autoCorrect={false}
+                />
+              </View>
+
+              <View className={"flex-row gap-2"}>
+                <Button
+                  variant={"outline"}
+                  size={"sm"}
+                  className={"flex-1"}
+                  onPress={() => {
+                    setStartDateMs(null);
+                    setEndDateMs(null);
+                    setStartDateInput("");
+                    setEndDateInput("");
+                    setDateModalVisible(false);
+                  }}
+                >
+                  <ButtonText variant={"outline"} size={"sm"}>
+                    Clear Dates
+                  </ButtonText>
+                </Button>
+                <Button
+                  variant={"default"}
+                  size={"sm"}
+                  className={"flex-1"}
+                  onPress={() => {
+                    const startParsed = parseLocalDateInput(startDateInput);
+                    const endParsed = parseLocalDateInput(endDateInput);
+
+                    if (startDateInput.trim() && !startParsed) {
+                      Alert.alert("Invalid Start Date", "Use YYYY-MM-DD (e.g. 2026-01-12).");
+                      return;
+                    }
+                    if (endDateInput.trim() && !endParsed) {
+                      Alert.alert("Invalid End Date", "Use YYYY-MM-DD (e.g. 2026-01-12).");
+                      return;
+                    }
+
+                    setStartDateMs(startParsed ? startParsed.startMs : null);
+                    setEndDateMs(endParsed ? endParsed.endMs : null);
+                    setDateModalVisible(false);
+                  }}
+                >
+                  <ButtonText variant={"default"} size={"sm"}>
+                    Apply
+                  </ButtonText>
+                </Button>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </View>
     </ScreenLayout>
   );

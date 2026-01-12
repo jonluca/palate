@@ -1,7 +1,7 @@
 import { cn } from "@/utils/cn";
 import { Image } from "expo-image";
 import React, { useCallback, useMemo, useState, useEffect } from "react";
-import { Dimensions, Pressable, View } from "react-native";
+import { Pressable, View, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -12,13 +12,26 @@ import Animated, {
   FadeIn,
 } from "react-native-reanimated";
 
-const { width: screenWidth } = Dimensions.get("window");
-
 interface PhotoGridProps {
   photos: Array<{ id: string; uri: string }>;
+  /**
+   * Fixed number of columns. If omitted, the grid can auto-compute columns when
+   * `minPhotoSize` (or min/max columns) is provided.
+   */
   columns?: number;
   gap?: number;
+  /**
+   * Used only as a fallback before the grid measures its actual width (or if layout
+   * measurement fails). This represents total horizontal padding *outside* the grid.
+   */
   containerPadding?: number;
+  /**
+   * If provided (and `columns` is not), the grid will pick a column count based on
+   * available width so each photo is at least this size.
+   */
+  minPhotoSize?: number;
+  minColumns?: number;
+  maxColumns?: number;
   onPhotoPress?: (photo: { id: string; uri: string }, index: number) => void;
   maxPhotos?: number;
   loading?: boolean;
@@ -83,17 +96,67 @@ function PhotoItem({
 
 export function PhotoGrid({
   photos,
-  columns = 3,
+  columns,
   gap = 8,
   containerPadding = 32,
+  minPhotoSize,
+  minColumns,
+  maxColumns,
   onPhotoPress,
   maxPhotos,
   loading = false,
 }: PhotoGridProps) {
+  const window = useWindowDimensions();
+  const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
+
+  const handleLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const nextWidth = Math.round(e.nativeEvent.layout.width);
+      if (nextWidth > 0) {
+        setMeasuredWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+      }
+    },
+    [setMeasuredWidth],
+  );
+
+  const availableWidth = useMemo(() => {
+    if (measuredWidth && measuredWidth > 0) {
+      return measuredWidth;
+    }
+    // Fallback: approximate using window width minus expected outer padding.
+    return Math.max(1, Math.round(window.width - containerPadding));
+  }, [measuredWidth, window.width, containerPadding]);
+
+  const columnCount = useMemo(() => {
+    if (columns !== undefined && Number.isFinite(columns) && columns > 0) {
+      return Math.floor(columns);
+    }
+
+    const shouldAuto =
+      minPhotoSize !== undefined || minColumns !== undefined || maxColumns !== undefined;
+
+    // Preserve previous behavior unless auto-sizing is explicitly enabled.
+    if (!shouldAuto) {
+      return 3;
+    }
+
+    const minC = minColumns ?? 2;
+    const maxC = maxColumns ?? 6;
+    const minSize = minPhotoSize ?? 96;
+
+    // Roughly: columns*(minSize) + (columns-1)*gap <= availableWidth
+    // => columns <= (availableWidth + gap) / (minSize + gap)
+    const raw = Math.floor((availableWidth + gap) / (minSize + gap));
+    const clamped = Math.max(minC, Math.min(maxC, raw));
+    return Math.max(1, clamped);
+  }, [columns, minPhotoSize, minColumns, maxColumns, availableWidth, gap]);
+
   const photoSize = useMemo(() => {
-    const totalGaps = (columns - 1) * gap;
-    return (screenWidth - containerPadding - totalGaps) / columns;
-  }, [columns, gap, containerPadding]);
+    const totalGaps = (columnCount - 1) * gap;
+    const raw = (availableWidth - totalGaps) / columnCount;
+    // Flooring avoids accidental wrapping due to subpixel rounding.
+    return Math.max(1, Math.floor(raw));
+  }, [availableWidth, columnCount, gap]);
 
   const displayPhotos = useMemo(() => {
     if (maxPhotos && photos.length > maxPhotos) {
@@ -119,7 +182,7 @@ export function PhotoGrid({
   if (loading) {
     const skeletonCount = maxPhotos ?? 9;
     return (
-      <View className={cn("flex-row flex-wrap")} style={{ gap }}>
+      <View onLayout={handleLayout} className={cn("flex-row flex-wrap")} style={{ gap }}>
         {Array.from({ length: skeletonCount }).map((_, index) => (
           <PhotoSkeleton key={index} size={photoSize} index={index} />
         ))}
@@ -128,7 +191,7 @@ export function PhotoGrid({
   }
 
   return (
-    <View className={cn("flex-row flex-wrap")} style={{ gap }}>
+    <View onLayout={handleLayout} className={cn("flex-row flex-wrap")} style={{ gap }}>
       {displayPhotos.map(renderPhoto)}
     </View>
   );

@@ -2038,6 +2038,7 @@ export interface WrappedStats {
     totalStarredVisits: number;
     distinctStarredRestaurants: number; // unique starred restaurants visited
     totalAccumulatedStars: number; // sum of stars across all visits (2 visits to 3-star = 6)
+    distinctStars: number; // sum of star rating across distinct starred restaurants (5 visits to 3-star = 3)
   };
   // Cuisine breakdown (top 5)
   topCuisines: Array<{ cuisine: string; count: number }>;
@@ -2064,6 +2065,7 @@ export async function getWrappedStats(): Promise<WrappedStats> {
     yearlyData,
     michelinData,
     distinctStarredResult,
+    distinctStarsResult,
     topCuisines,
     busiestMonth,
     busiestDayOfWeek,
@@ -2105,6 +2107,25 @@ export async function getWrappedStats(): Promise<WrappedStats> {
       JOIN michelin_restaurants m ON vsr.restaurantId = m.id
       WHERE v.status = 'confirmed'
         AND (m.award LIKE '%star%' OR m.award LIKE '%Star%')`,
+    ),
+    // Distinct stars (sum of star rating across unique starred restaurants)
+    database.getFirstAsync<{ distinctStars: number | null }>(
+      `SELECT SUM(
+        CASE
+          WHEN lower(t.award) LIKE '%3 star%' THEN 3
+          WHEN lower(t.award) LIKE '%2 star%' THEN 2
+          WHEN lower(t.award) LIKE '%1 star%' THEN 1
+          ELSE 0
+        END
+      ) as distinctStars
+      FROM (
+        SELECT DISTINCT m.id, m.award
+        FROM visits v
+        JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
+        JOIN michelin_restaurants m ON vsr.restaurantId = m.id
+        WHERE v.status = 'confirmed'
+          AND (m.award LIKE '%star%' OR m.award LIKE '%Star%')
+      ) t`,
     ),
     // Top cuisines
     database.getAllAsync<{ cuisine: string; count: number }>(
@@ -2203,6 +2224,7 @@ export async function getWrappedStats(): Promise<WrappedStats> {
     totalStarredVisits: 0,
     distinctStarredRestaurants: distinctStarredResult?.count ?? 0,
     totalAccumulatedStars: 0,
+    distinctStars: distinctStarsResult?.distinctStars ?? 0,
   };
 
   for (const row of michelinData) {

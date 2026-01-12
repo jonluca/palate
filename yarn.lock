@@ -2791,6 +2791,25 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@react-native-community/datetimepicker@npm:^8.6.0":
+  version: 8.6.0
+  resolution: "@react-native-community/datetimepicker@npm:8.6.0"
+  dependencies:
+    invariant: "npm:^2.2.4"
+  peerDependencies:
+    expo: ">=52.0.0"
+    react: "*"
+    react-native: "*"
+    react-native-windows: "*"
+  peerDependenciesMeta:
+    expo:
+      optional: true
+    react-native-windows:
+      optional: true
+  checksum: 10c0/4f7e84480e3a324a1f4e235d13552468a758a0bf3d6de6a67ef39bfc56c18c41566c4411cc5fc075d000cc5f744a63ced77dd38c6bb13ae15cc980f9af891b56
+  languageName: node
+  linkType: hard
+
 "@react-native/assets-registry@npm:0.81.5":
   version: 0.81.5
   resolution: "@react-native/assets-registry@npm:0.81.5"
@@ -8483,72 +8502,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"parent-module@npm:^1.0.0":
-  version: 1.0.1
-  resolution: "parent-module@npm:1.0.1"
-  dependencies:
-    callsites: "npm:^3.0.0"
-  checksum: 10c0/c63d6e80000d4babd11978e0d3fee386ca7752a02b035fd2435960ffaa7219dc42146f07069fb65e6e8bf1caef89daf9af7535a39bddf354d78bf50d8294f556
-  languageName: node
-  linkType: hard
-
-"parse-png@npm:^2.1.0":
-  version: 2.1.0
-  resolution: "parse-png@npm:2.1.0"
-  dependencies:
-    pngjs: "npm:^3.3.0"
-  checksum: 10c0/5157a8bbb976ae1ca990fc53c7014d42aac0967cb30e2daf36c3fef1876c8db0d551e695400c904f33c5c5add76a572c65b5044721d62417d8cc7abe4c4ffa41
-  languageName: node
-  linkType: hard
-
-"parseurl@npm:~1.3.3":
-  version: 1.3.3
-  resolution: "parseurl@npm:1.3.3"
-  checksum: 10c0/90dd4760d6f6174adb9f20cf0965ae12e23879b5f5464f38e92fce8073354341e4b3b76fa3d878351efe7d01e617121955284cfd002ab087fba1a0726ec0b4f5
-  languageName: node
-  linkType: hard
-
-"path-exists@npm:^4.0.0":
-  version: 4.0.0
-  resolution: "path-exists@npm:4.0.0"
-  checksum: 10c0/8c0bd3f5238188197dc78dced15207a4716c51cc4e3624c44fc97acf69558f5ebb9a2afff486fe1b4ee148e0c133e96c5e11a9aa5c48a3006e3467da070e5e1b
-  languageName: node
-  linkType: hard
-
-"path-is-absolute@npm:^1.0.0":
-  version: 1.0.1
-  resolution: "path-is-absolute@npm:1.0.1"
-  checksum: 10c0/127da03c82172a2a50099cddbf02510c1791fc2cc5f7713ddb613a56838db1e8168b121a920079d052e0936c23005562059756d653b7c544c53185efe53be078
-  languageName: node
-  linkType: hard
-
-"path-key@npm:^3.1.0":
-  version: 3.1.1
-  resolution: "path-key@npm:3.1.1"
-  checksum: 10c0/748c43efd5a569c039d7a00a03b58eecd1d75f3999f5a28303d75f521288df4823bc057d8784eb72358b2895a05f29a070bc9f1f17d28226cc4e62494cc58c4c
-  languageName: node
-  linkType: hard
-
-"path-parse@npm:^1.0.5, path-parse@npm:^1.0.7":
-  version: 1.0.7
-  resolution: "path-parse@npm:1.0.7"
-  checksum: 10c0/11ce261f9d294cc7a58d6a574b7f1b935842355ec66fba3c3fd79e0f036462eaf07d0aa95bb74ff432f9afef97ce1926c720988c6a7451d8a584930ae7de86e1
-  languageName: node
-  linkType: hard
-
-"path-scurry@npm:^2.0.0":
-  version: 2.0.1
-  resolution: "path-scurry@npm:2.0.1"
-  dependencies:
-    lru-cache: "npm:^11.0.0"
-    minipass: "npm:^7.1.2"
-  checksum: 10c0/2a16ed0e81fbc43513e245aa5763354e25e787dab0d539581a6c3f0f967461a159ed6236b2559de23aa5b88e7dc32b469b6c47568833dd142a4b24b4f5cd2620
-  languageName: node
-  linkType: hard
-
-"photos-organizer@workspace:.":
+"palate@workspace:.":
   version: 0.0.0-use.local
-  resolution: "photos-organizer@workspace:."
+  resolution: "palate@workspace:."
   dependencies:
     "@babel/core": "npm:^7.28.6"
     "@babel/runtime": "npm:^7.28.6"
@@ -8559,6 +8515,7 @@ __metadata:
     "@eslint/js": "npm:^9.39.2"
     "@expo/metro-runtime": "npm:6.1.2"
     "@expo/vector-icons": "npm:15.0.3"
+    "@react-native-community/datetimepicker": "npm:^8.6.0"
     "@react-navigation/elements": "npm:2.9.4"
     "@react-navigation/native": "npm:^7.1.27"
     "@shopify/flash-list": "npm:^2.2.0"
@@ -8628,6 +8585,69 @@ __metadata:
     zustand: "npm:^5.0.10"
   languageName: unknown
   linkType: soft
+
+"parent-module@npm:^1.0.0":
+  version: 1.0.1
+  resolution: "parent-module@npm:1.0.1"
+  dependencies:
+    callsites: "npm:^3.0.0"
+  checksum: 10c0/c63d6e80000d4babd11978e0d3fee386ca7752a02b035fd2435960ffaa7219dc42146f07069fb65e6e8bf1caef89daf9af7535a39bddf354d78bf50d8294f556
+  languageName: node
+  linkType: hard
+
+"parse-png@npm:^2.1.0":
+  version: 2.1.0
+  resolution: "parse-png@npm:2.1.0"
+  dependencies:
+    pngjs: "npm:^3.3.0"
+  checksum: 10c0/5157a8bbb976ae1ca990fc53c7014d42aac0967cb30e2daf36c3fef1876c8db0d551e695400c904f33c5c5add76a572c65b5044721d62417d8cc7abe4c4ffa41
+  languageName: node
+  linkType: hard
+
+"parseurl@npm:~1.3.3":
+  version: 1.3.3
+  resolution: "parseurl@npm:1.3.3"
+  checksum: 10c0/90dd4760d6f6174adb9f20cf0965ae12e23879b5f5464f38e92fce8073354341e4b3b76fa3d878351efe7d01e617121955284cfd002ab087fba1a0726ec0b4f5
+  languageName: node
+  linkType: hard
+
+"path-exists@npm:^4.0.0":
+  version: 4.0.0
+  resolution: "path-exists@npm:4.0.0"
+  checksum: 10c0/8c0bd3f5238188197dc78dced15207a4716c51cc4e3624c44fc97acf69558f5ebb9a2afff486fe1b4ee148e0c133e96c5e11a9aa5c48a3006e3467da070e5e1b
+  languageName: node
+  linkType: hard
+
+"path-is-absolute@npm:^1.0.0":
+  version: 1.0.1
+  resolution: "path-is-absolute@npm:1.0.1"
+  checksum: 10c0/127da03c82172a2a50099cddbf02510c1791fc2cc5f7713ddb613a56838db1e8168b121a920079d052e0936c23005562059756d653b7c544c53185efe53be078
+  languageName: node
+  linkType: hard
+
+"path-key@npm:^3.1.0":
+  version: 3.1.1
+  resolution: "path-key@npm:3.1.1"
+  checksum: 10c0/748c43efd5a569c039d7a00a03b58eecd1d75f3999f5a28303d75f521288df4823bc057d8784eb72358b2895a05f29a070bc9f1f17d28226cc4e62494cc58c4c
+  languageName: node
+  linkType: hard
+
+"path-parse@npm:^1.0.5, path-parse@npm:^1.0.7":
+  version: 1.0.7
+  resolution: "path-parse@npm:1.0.7"
+  checksum: 10c0/11ce261f9d294cc7a58d6a574b7f1b935842355ec66fba3c3fd79e0f036462eaf07d0aa95bb74ff432f9afef97ce1926c720988c6a7451d8a584930ae7de86e1
+  languageName: node
+  linkType: hard
+
+"path-scurry@npm:^2.0.0":
+  version: 2.0.1
+  resolution: "path-scurry@npm:2.0.1"
+  dependencies:
+    lru-cache: "npm:^11.0.0"
+    minipass: "npm:^7.1.2"
+  checksum: 10c0/2a16ed0e81fbc43513e245aa5763354e25e787dab0d539581a6c3f0f967461a159ed6236b2559de23aa5b88e7dc32b469b6c47568833dd142a4b24b4f5cd2620
+  languageName: node
+  linkType: hard
 
 "picocolors@npm:^1.0.0, picocolors@npm:^1.1.1":
   version: 1.1.1

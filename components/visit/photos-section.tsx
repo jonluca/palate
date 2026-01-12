@@ -23,9 +23,11 @@ export function PhotosSection({ photos, onPhotoPress }: PhotosSectionProps) {
       <Card animated={false} className={"p-2"}>
         <PhotoGrid
           photos={photos}
-          columns={3}
           gap={6}
-          containerPadding={48}
+          // Responsive columns based on available width.
+          minPhotoSize={96}
+          minColumns={2}
+          maxColumns={4}
           onPhotoPress={(_, index) => onPhotoPress(index)}
         />
       </Card>
