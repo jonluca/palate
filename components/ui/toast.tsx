@@ -147,14 +147,25 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
   );
 }
 
+const MAX_TOASTS = 4;
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const idCounter = useRef(0);
   const insets = useSafeAreaInsets();
+  const { height: screenHeight } = Dimensions.get("window");
+  const maxContainerHeight = screenHeight / 3;
 
   const showToast = useCallback((toast: Omit<Toast, "id">) => {
     const id = `toast-${++idCounter.current}`;
-    setToasts((prev) => [...prev, { ...toast, id }]);
+    setToasts((prev) => {
+      const newToasts = [...prev, { ...toast, id }];
+      // Remove oldest toasts if we exceed the max
+      if (newToasts.length > MAX_TOASTS) {
+        return newToasts.slice(-MAX_TOASTS);
+      }
+      return newToasts;
+    });
 
     // Haptic feedback based on type
     if (toast.type === "success") {
@@ -174,8 +185,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={{ showToast, hideToast }}>
       {children}
       <View
-        className={"absolute top-0 left-0 right-0 z-50 gap-2"}
-        style={{ paddingTop: insets.top + 8 }}
+        className={"absolute top-0 left-0 right-0 z-50 gap-2 overflow-hidden"}
+        style={{ paddingTop: insets.top + 8, maxHeight: maxContainerHeight }}
         pointerEvents={"box-none"}
       >
         {toasts.map((toast) => (
