@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { View, Alert, ScrollView, RefreshControl } from "react-native";
+import { View, Alert, RefreshControl } from "react-native";
 import { useToast } from "@/components/ui/toast";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedText } from "@/components/themed-text";
@@ -10,6 +10,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { useQueryClient } from "@tanstack/react-query";
 import { useImportableCalendarEvents, useImportCalendarEvents, type ImportableCalendarEvent } from "@/hooks/queries";
+import { FlashList } from "@shopify/flash-list";
 
 function LoadingState() {
   return (
@@ -20,6 +21,10 @@ function LoadingState() {
     </View>
   );
 }
+
+type CalendarImportListItem =
+  | { type: "month"; id: string; label: string }
+  | { type: "event"; id: string; event: ImportableCalendarEvent };
 
 export default function CalendarImportScreen() {
   const insets = useSafeAreaInsets();
@@ -122,123 +127,163 @@ export default function CalendarImportScreen() {
     });
   }, [importableCalendarEvents]);
 
-  return (
-    <ScrollView
-      className={"flex-1 bg-background"}
-      contentContainerStyle={{
-        paddingTop: insets.top + 60,
-        paddingBottom: insets.bottom + 32,
-        paddingHorizontal: 16,
-      }}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={"#999"} colors={["#999"]} />
+  const refreshControl = useMemo(
+    () => <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={"#999"} colors={["#999"]} />,
+    [refreshing, onRefresh],
+  );
+
+  const listData = useMemo<CalendarImportListItem[]>(() => {
+    if (isLoading || isEmpty) {
+      return [];
+    }
+
+    const items: CalendarImportListItem[] = [];
+    for (const [monthYear, events] of groupedEvents) {
+      items.push({ type: "month", id: `month:${monthYear}`, label: monthYear });
+      for (const event of events) {
+        items.push({ type: "event", id: `event:${event.calendarEventId}`, event });
       }
-    >
-      {/* Header */}
-      <View className={"gap-2 mb-6"}>
-        <ThemedText variant={"largeTitle"} className={"font-bold"}>
-          Calendar Imports
-        </ThemedText>
-        <ThemedText variant={"body"} color={"secondary"}>
-          Import restaurant reservations from your calendar
-        </ThemedText>
-      </View>
+    }
+    return items;
+  }, [groupedEvents, isLoading, isEmpty]);
 
-      {/* Stats Card */}
-      {!isEmpty && (
-        <Animated.View entering={FadeInDown.delay(100).duration(300)} className={"mb-6"}>
-          <Card animated={false}>
-            <View className={"p-4 gap-4"}>
-              <View className={"flex-row items-center gap-4"}>
-                <View className={"w-12 h-12 rounded-full bg-blue-500/15 items-center justify-center"}>
-                  <IconSymbol name={"calendar.badge.checkmark"} size={24} color={"#3b82f6"} />
-                </View>
-                <View className={"flex-1"}>
-                  <ThemedText variant={"title3"} className={"font-bold"}>
-                    {importableCalendarEvents.length.toLocaleString()}
-                  </ThemedText>
-                  <ThemedText variant={"footnote"} color={"secondary"}>
-                    Calendar event{importableCalendarEvents.length === 1 ? "" : "s"} matching Michelin restaurants
-                  </ThemedText>
-                </View>
-              </View>
-              <Button
-                variant={"default"}
-                onPress={handleImportAllCalendarEvents}
-                loading={isImportingAll}
-                disabled={isImportingAll}
-                className={"w-full"}
-              >
-                <IconSymbol name={"plus.circle.fill"} size={18} color={"#fff"} />
-                <ButtonText className={"ml-2"}>
-                  Import All ({importableCalendarEvents.length.toLocaleString()})
-                </ButtonText>
-              </Button>
-            </View>
-          </Card>
-        </Animated.View>
-      )}
-
-      {/* Loading State */}
-      {isLoading && <LoadingState />}
-
-      {/* Empty State */}
-      {!isLoading && isEmpty && (
-        <Animated.View entering={FadeInDown.delay(100).duration(300)}>
-          <AllCaughtUpEmpty />
-          <View className={"mt-6 bg-blue-500/10 rounded-xl p-4 flex-row gap-3"}>
-            <IconSymbol name={"lightbulb.fill"} size={18} color={"#3b82f6"} />
-            <View className={"flex-1"}>
-              <ThemedText variant={"footnote"} className={"text-blue-400"}>
-                Tip: Calendar events with restaurant reservation names that match Michelin restaurants will appear here
-                for easy importing.
-              </ThemedText>
-            </View>
-          </View>
-        </Animated.View>
-      )}
-
-      {/* Grouped Events List */}
-      {!isLoading && !isEmpty && (
-        <View className={"gap-6"}>
-          {groupedEvents.map(([monthYear, events], groupIndex) => (
-            <Animated.View key={monthYear} entering={FadeInDown.delay(150 + groupIndex * 50).duration(300)}>
-              <ThemedText
-                variant={"footnote"}
-                color={"tertiary"}
-                className={"uppercase font-semibold tracking-wide px-1 mb-3"}
-              >
-                {monthYear}
-              </ThemedText>
-              <View className={"gap-0"}>
-                {events.map((event) => (
-                  <CalendarImportCard
-                    key={event.calendarEventId}
-                    event={event}
-                    onImport={() => handleImportCalendarEvent(event.calendarEventId)}
-                    isImporting={importingEventIds.has(event.calendarEventId)}
-                  />
-                ))}
-              </View>
-            </Animated.View>
-          ))}
+  const ListHeader = useCallback(() => {
+    return (
+      <View className={"gap-6"}>
+        {/* Header */}
+        <View className={"gap-2"}>
+          <ThemedText variant={"largeTitle"} className={"font-bold"}>
+            Calendar Imports
+          </ThemedText>
+          <ThemedText variant={"body"} color={"secondary"}>
+            Import restaurant reservations from your calendar
+          </ThemedText>
         </View>
-      )}
 
-      {/* Info Tip */}
-      {!isLoading && !isEmpty && (
-        <Animated.View entering={FadeInDown.delay(300).duration(300)} className={"mt-6"}>
-          <View className={"bg-blue-500/10 rounded-xl p-4 flex-row gap-3"}>
-            <IconSymbol name={"lightbulb.fill"} size={18} color={"#3b82f6"} />
-            <View className={"flex-1"}>
-              <ThemedText variant={"footnote"} className={"text-blue-400"}>
-                Tip: These calendar events match Michelin restaurant names. Importing creates visits without photos that
-                you can add to later.
-              </ThemedText>
-            </View>
+        {/* Stats Card */}
+        {!isEmpty && (
+          <Animated.View entering={FadeInDown.delay(100).duration(300)}>
+            <Card animated={false}>
+              <View className={"p-4 gap-4"}>
+                <View className={"flex-row items-center gap-4"}>
+                  <View className={"w-12 h-12 rounded-full bg-blue-500/15 items-center justify-center"}>
+                    <IconSymbol name={"calendar.badge.checkmark"} size={24} color={"#3b82f6"} />
+                  </View>
+                  <View className={"flex-1"}>
+                    <ThemedText variant={"title3"} className={"font-bold"}>
+                      {importableCalendarEvents.length.toLocaleString()}
+                    </ThemedText>
+                    <ThemedText variant={"footnote"} color={"secondary"}>
+                      Calendar event{importableCalendarEvents.length === 1 ? "" : "s"} matching Michelin restaurants
+                    </ThemedText>
+                  </View>
+                </View>
+                <Button
+                  variant={"default"}
+                  onPress={handleImportAllCalendarEvents}
+                  loading={isImportingAll}
+                  disabled={isImportingAll}
+                  className={"w-full"}
+                >
+                  <IconSymbol name={"plus.circle.fill"} size={18} color={"#fff"} />
+                  <ButtonText className={"ml-2"}>
+                    Import All ({importableCalendarEvents.length.toLocaleString()})
+                  </ButtonText>
+                </Button>
+              </View>
+            </Card>
+          </Animated.View>
+        )}
+      </View>
+    );
+  }, [handleImportAllCalendarEvents, importableCalendarEvents.length, isEmpty, isImportingAll]);
+
+  const ListFooter = useCallback(() => {
+    if (isLoading || isEmpty) {
+      return null;
+    }
+
+    return (
+      <Animated.View entering={FadeInDown.delay(300).duration(300)} className={"mt-2"}>
+        <View className={"bg-blue-500/10 rounded-xl p-4 flex-row gap-3"}>
+          <IconSymbol name={"lightbulb.fill"} size={18} color={"#3b82f6"} />
+          <View className={"flex-1"}>
+            <ThemedText variant={"footnote"} className={"text-blue-400"}>
+              Tip: These calendar events match Michelin restaurant names. Importing creates visits without photos that
+              you can add to later.
+            </ThemedText>
           </View>
-        </Animated.View>
-      )}
-    </ScrollView>
+        </View>
+      </Animated.View>
+    );
+  }, [isEmpty, isLoading]);
+
+  const ListEmpty = useCallback(() => {
+    if (isLoading) {
+      return <LoadingState />;
+    }
+
+    return (
+      <Animated.View entering={FadeInDown.delay(100).duration(300)}>
+        <AllCaughtUpEmpty />
+        <View className={"mt-6 bg-blue-500/10 rounded-xl p-4 flex-row gap-3"}>
+          <IconSymbol name={"lightbulb.fill"} size={18} color={"#3b82f6"} />
+          <View className={"flex-1"}>
+            <ThemedText variant={"footnote"} className={"text-blue-400"}>
+              Tip: Calendar events with restaurant reservation names that match Michelin restaurants will appear here
+              for easy importing.
+            </ThemedText>
+          </View>
+        </View>
+      </Animated.View>
+    );
+  }, [isLoading]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: CalendarImportListItem }) => {
+      if (item.type === "month") {
+        return (
+          <View className={"mt-6"}>
+            <ThemedText
+              variant={"footnote"}
+              color={"tertiary"}
+              className={"uppercase font-semibold tracking-wide px-1 mb-3"}
+            >
+              {item.label}
+            </ThemedText>
+          </View>
+        );
+      }
+
+      return (
+        <CalendarImportCard
+          event={item.event}
+          onImport={() => handleImportCalendarEvent(item.event.calendarEventId)}
+          isImporting={importingEventIds.has(item.event.calendarEventId)}
+        />
+      );
+    },
+    [handleImportCalendarEvent, importingEventIds],
+  );
+
+  return (
+    <View className={"flex-1 bg-background"}>
+      <FlashList
+        data={listData}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id}
+        refreshControl={refreshControl}
+        refreshing={refreshing}
+        contentContainerStyle={{
+          paddingTop: insets.top + 60,
+          paddingBottom: insets.bottom + 32,
+          paddingHorizontal: 16,
+        }}
+        ListHeaderComponent={ListHeader}
+        ListHeaderComponentStyle={{ marginBottom: isEmpty ? 24 : 16 }}
+        ListEmptyComponent={ListEmpty}
+        ListFooterComponent={ListFooter}
+      />
+    </View>
   );
 }

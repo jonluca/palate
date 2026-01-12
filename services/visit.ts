@@ -1086,24 +1086,25 @@ function scoreIndexedRestaurantMatchExact(
 function findCandidateRestaurants(queryWords: string[], index: RestaurantIndex): Set<RestaurantIndexEntry> {
   const candidates = new Set<RestaurantIndexEntry>();
 
-  // Find restaurants that share at least one significant word with the query
-  for (const word of queryWords) {
-    const matches = index.wordIndex.get(word);
-    if (matches) {
-      for (const entry of matches) {
-        candidates.add(entry);
-      }
-    }
+  // PERFORMANCE NOTE:
+  // We intentionally avoid "partial word match" scans like:
+  //   for (const [indexWord] of index.wordIndex) { ...includes... }
+  // That pattern is O(|queryWords| * |uniqueWordsInIndex|) per event and gets very slow.
+  //
+  // For calendar import we later require an EXACT normalized restaurant name match
+  // (see scoreIndexedRestaurantMatchExact), so exact word matches are sufficient to surface
+  // the correct candidate(s) without expensive substring/compound-word scanning.
 
-    // Also check for partial word matches (for compound words)
-    if (word.length >= 4) {
-      for (const [indexWord, entries] of index.wordIndex) {
-        if (indexWord.includes(word) || word.includes(indexWord)) {
-          for (const entry of entries) {
-            candidates.add(entry);
-          }
-        }
-      }
+  // Find restaurants that share at least one significant word with the query (exact token match)
+  // De-dupe query words to avoid repeated lookups.
+  const uniqueQueryWords = new Set(queryWords);
+  for (const word of uniqueQueryWords) {
+    const matches = index.wordIndex.get(word);
+    if (!matches) {
+      continue;
+    }
+    for (const entry of matches) {
+      candidates.add(entry);
     }
   }
 
