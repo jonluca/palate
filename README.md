@@ -6,6 +6,14 @@ A mobile app that automatically discovers your restaurant visits by analyzing yo
 ![Expo](https://img.shields.io/badge/Expo-54-4630EB?style=flat&logo=expo)
 ![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?style=flat&logo=react)
 
+## Screenshots
+
+<p align="center">
+  <img src="assets/images/img1.jpeg" width="250" alt="Restaurant Visits" />
+  <img src="assets/images/img2.jpeg" width="250" alt="Visit Details" />
+  <img src="assets/images/img3.jpeg" width="250" alt="Photo Gallery" />
+</p>
+
 ## Features
 
 - **Camera Roll Scanning** — Batch processes your entire photo library with native performance

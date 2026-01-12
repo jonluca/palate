@@ -979,11 +979,16 @@ export async function getImportableCalendarEvents(
     return [];
   }
 
-  // Get calendar events already linked to visits
-  const linkedEventIds = await getLinkedCalendarEventIds();
+  // Get calendar events already linked to visits and dismissed events
+  const [linkedEventIds, dismissedEventIds] = await Promise.all([
+    getLinkedCalendarEventIds(),
+    getDismissedCalendarEventIds(),
+  ]);
 
-  // Filter to unlinked events only
-  const unlinkedEvents = reservationEvents.filter((event) => !linkedEventIds.has(event.id));
+  // Filter to unlinked and non-dismissed events only
+  const unlinkedEvents = reservationEvents.filter(
+    (event) => !linkedEventIds.has(event.id) && !dismissedEventIds.has(event.id),
+  );
 
   if (unlinkedEvents.length === 0) {
     return [];
@@ -1177,6 +1182,11 @@ export async function importCalendarEvents(calendarEventIds: string[]): Promise<
 
   return visitsToCreate.length;
 }
+
+/**
+ * Dismiss calendar events so they won't appear in the importable list.
+ */
+export { dismissCalendarEvents } from "@/utils/db";
 
 export interface DeepScanProgress {
   totalPhotos: number;

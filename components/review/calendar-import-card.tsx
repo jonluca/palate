@@ -8,11 +8,13 @@ import { Pressable, View } from "react-native";
 interface CalendarImportCardProps {
   event: ImportableCalendarEvent;
   onImport: () => void;
+  onDismiss: () => void;
   isImporting: boolean;
+  isDismissing: boolean;
 }
 
 /** Card for displaying an importable calendar event that matches a Michelin restaurant */
-export function CalendarImportCard({ event, onImport, isImporting }: CalendarImportCardProps) {
+export function CalendarImportCard({ event, onImport, onDismiss, isImporting, isDismissing }: CalendarImportCardProps) {
   const eventDate = new Date(event.startDate);
   const formattedDate = eventDate.toLocaleDateString("en-US", {
     weekday: "short",
@@ -79,18 +81,31 @@ export function CalendarImportCard({ event, onImport, isImporting }: CalendarImp
         )}
       </Pressable>
 
-      {/* Import Button */}
-      <Button
-        size={"sm"}
-        variant={"default"}
-        onPress={onImport}
-        loading={isImporting}
-        disabled={isImporting}
-        className={"w-full"}
-      >
-        <IconSymbol name={"plus.circle.fill"} size={18} color={"#fff"} />
-        <ButtonText className={"ml-2"}>Import as Visit</ButtonText>
-      </Button>
+      {/* Action Buttons */}
+      <View className={"flex-row gap-2"}>
+        <Button
+          size={"sm"}
+          variant={"secondary"}
+          onPress={onDismiss}
+          loading={isDismissing}
+          disabled={isImporting || isDismissing}
+          className={"flex-1"}
+        >
+          <IconSymbol name={"xmark.circle.fill"} size={18} color={"#9ca3af"} />
+          <ButtonText className={"ml-2 text-gray-400"}>Dismiss</ButtonText>
+        </Button>
+        <Button
+          size={"sm"}
+          variant={"default"}
+          onPress={onImport}
+          loading={isImporting}
+          disabled={isImporting || isDismissing}
+          className={"flex-1"}
+        >
+          <IconSymbol name={"plus.circle.fill"} size={18} color={"#fff"} />
+          <ButtonText className={"ml-2"}>Import</ButtonText>
+        </Button>
+      </View>
     </View>
   );
 }

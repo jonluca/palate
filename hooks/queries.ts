@@ -819,6 +819,39 @@ export function useImportCalendarEvents() {
   });
 }
 
+/**
+ * Dismiss calendar events (hide them from import list)
+ */
+export function useDismissCalendarEvents() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (calendarEventIds: string[]) => dismissCalendarEvents(calendarEventIds),
+    onMutate: async (calendarEventIds) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: queryKeys.importableCalendarEvents });
+
+      // Snapshot the previous value for rollback
+      const previousEvents = queryClient.getQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents);
+
+      // Optimistically remove the dismissed events from the list
+      optimisticallyRemoveImportableCalendarEvents(queryClient, calendarEventIds);
+
+      return { previousEvents };
+    },
+    onError: (_error, _calendarEventIds, context) => {
+      // Rollback to previous state on error
+      if (context?.previousEvents) {
+        queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, context.previousEvents);
+      }
+    },
+    onSettled: () => {
+      // Refetch to ensure data consistency
+      queryClient.invalidateQueries({ queryKey: queryKeys.importableCalendarEvents });
+    },
+  });
+}
+
 export type ExportFormat = "json" | "csv";
 
 /**

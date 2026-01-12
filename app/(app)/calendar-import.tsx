@@ -33,12 +33,14 @@ export default function CalendarImportScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [importingEventIds, setImportingEventIds] = useState<Set<string>>(new Set());
+  const [dismissingEventIds, setDismissingEventIds] = useState<Set<string>>(new Set());
 
   // Data queries
   const { data: importableCalendarEvents = [], isLoading } = useImportableCalendarEvents();
 
   // Mutations
   const importCalendarMutation = useImportCalendarEvents();
+  const dismissCalendarMutation = useDismissCalendarEvents();
 
   // UI state
   const isImportingAll = importingEventIds.size === importableCalendarEvents.length && importingEventIds.size > 0;
@@ -72,6 +74,27 @@ export default function CalendarImportScreen() {
       }
     },
     [importCalendarMutation, showToast, queryClient],
+  );
+
+  const handleDismissCalendarEvent = useCallback(
+    async (calendarEventId: string) => {
+      setDismissingEventIds((prev) => new Set(prev).add(calendarEventId));
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      try {
+        await dismissCalendarMutation.mutateAsync([calendarEventId]);
+        showToast({ type: "success", message: "Calendar event dismissed." });
+      } catch (error) {
+        console.error("Error dismissing calendar event:", error);
+        showToast({ type: "error", message: "Failed to dismiss. Please try again." });
+      } finally {
+        setDismissingEventIds((prev) => {
+          const next = new Set(prev);
+          next.delete(calendarEventId);
+          return next;
+        });
+      }
+    },
+    [dismissCalendarMutation, showToast],
   );
 
   const handleImportAllCalendarEvents = useCallback(() => {
@@ -260,11 +283,13 @@ export default function CalendarImportScreen() {
         <CalendarImportCard
           event={item.event}
           onImport={() => handleImportCalendarEvent(item.event.calendarEventId)}
+          onDismiss={() => handleDismissCalendarEvent(item.event.calendarEventId)}
           isImporting={importingEventIds.has(item.event.calendarEventId)}
+          isDismissing={dismissingEventIds.has(item.event.calendarEventId)}
         />
       );
     },
-    [handleImportCalendarEvent, importingEventIds],
+    [handleImportCalendarEvent, handleDismissCalendarEvent, importingEventIds, dismissingEventIds],
   );
 
   return (

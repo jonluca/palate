@@ -423,9 +423,16 @@ function MichelinDetailsCard({ details }: { details: MichelinRestaurantDetails }
               <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase tracking-wide"}>
                 Inspector's Notes
               </ThemedText>
-              <ThemedText variant={"body"} color={"secondary"} className={"leading-relaxed"}>
-                {details.description}
-              </ThemedText>
+              <ScrollView
+                style={{ maxHeight: 120 }}
+                showsVerticalScrollIndicator
+                nestedScrollEnabled
+                className={"bg-secondary/30 rounded-lg p-2 -mx-1"}
+              >
+                <ThemedText variant={"body"} color={"secondary"} className={"leading-relaxed"}>
+                  {details.description}
+                </ThemedText>
+              </ScrollView>
             </View>
           )}
 
