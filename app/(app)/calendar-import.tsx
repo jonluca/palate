@@ -9,7 +9,12 @@ import { CalendarImportCard } from "@/components/review";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { useQueryClient } from "@tanstack/react-query";
-import { useImportableCalendarEvents, useImportCalendarEvents, type ImportableCalendarEvent } from "@/hooks/queries";
+import {
+  useImportableCalendarEvents,
+  useImportCalendarEvents,
+  useDismissCalendarEvents,
+  type ImportableCalendarEvent,
+} from "@/hooks/queries";
 import { FlashList } from "@shopify/flash-list";
 
 function LoadingState() {
