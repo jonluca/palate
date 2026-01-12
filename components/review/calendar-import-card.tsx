@@ -2,7 +2,8 @@ import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText } from "@/components/ui";
 import type { ImportableCalendarEvent } from "@/hooks/queries";
-import { View } from "react-native";
+import { router } from "expo-router";
+import { Pressable, View } from "react-native";
 
 interface CalendarImportCardProps {
   event: ImportableCalendarEvent;
@@ -47,14 +48,25 @@ export function CalendarImportCard({ event, onImport, isImporting }: CalendarImp
       </View>
 
       {/* Matched Restaurant */}
-      <View className={"bg-background/50 rounded-xl p-3"}>
-        <View className={"flex-row items-center gap-2"}>
-          <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#34C759"} />
-          <ThemedText variant={"caption1"} color={"secondary"}>
-            Matches Michelin Restaurant
-          </ThemedText>
+      <Pressable
+        onPress={() => router.push(`/restaurant/${event.matchedRestaurant.id}`)}
+        accessibilityRole={"button"}
+        className={"bg-background/50 rounded-xl p-3"}
+        hitSlop={6}
+      >
+        <View className={"flex-row items-center justify-between"}>
+          <View className={"flex-row items-center gap-2"}>
+            <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#34C759"} />
+            <ThemedText variant={"caption1"} color={"secondary"}>
+              Matches Michelin Restaurant
+            </ThemedText>
+          </View>
+          <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
         </View>
-        <ThemedText className={"font-medium mt-1"}>{event.matchedRestaurant.name}</ThemedText>
+
+        <ThemedText className={"font-medium mt-1 text-blue-400"} numberOfLines={2}>
+          {event.matchedRestaurant.name}
+        </ThemedText>
         {event.matchedRestaurant.award && (
           <ThemedText variant={"caption1"} color={"secondary"} className={"mt-0.5"}>
             {event.matchedRestaurant.award}
@@ -65,7 +77,7 @@ export function CalendarImportCard({ event, onImport, isImporting }: CalendarImp
             {event.matchedRestaurant.cuisine}
           </ThemedText>
         )}
-      </View>
+      </Pressable>
 
       {/* Import Button */}
       <Button

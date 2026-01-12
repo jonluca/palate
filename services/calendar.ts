@@ -733,7 +733,7 @@ interface CreateCalendarEventParams {
 }
 
 // App identifier for calendar events we create - allows us to identify and delete them later
-const PHOTO_FOODIE_EVENT_IDENTIFIER = "[PhotoFoodie Export]";
+const PHOTO_FOODIE_EVENT_IDENTIFIER = "[Palate Export]";
 
 /** Build notes field with app identifier for tracking */
 function buildExportNotes(visitId: string, userNotes: string | null): string {

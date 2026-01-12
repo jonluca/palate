@@ -3,7 +3,7 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
 const getConfig = ({ config }: ConfigContext): ExpoConfig => {
   return {
     ...config,
-    name: "PhotoFoodie",
+    name: "Palate",
     slug: "photos-organizer",
     version: "1.0.0",
     orientation: "portrait",
