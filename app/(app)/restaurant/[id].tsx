@@ -18,7 +18,7 @@ import { FlashList } from "@shopify/flash-list";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useLocalSearchParams, router, Stack } from "expo-router";
 import React, { useCallback, useState } from "react";
-import { View, Pressable, Platform, type LayoutChangeEvent } from "react-native";
+import { View, Pressable, Platform, type LayoutChangeEvent, ScrollView } from "react-native";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";

@@ -19,6 +19,7 @@ import {
   batchUpdateVisitSuggestedRestaurants,
   recomputeSuggestedRestaurants,
   getLinkedCalendarEventIds,
+  getDismissedCalendarEventIds,
   insertCalendarOnlyVisits,
   performDatabaseMaintenance,
   getConfirmedVisitsWithMichelinIds,

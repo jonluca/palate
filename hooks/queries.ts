@@ -111,6 +111,7 @@ import {
   scanVisitPhotosForFood,
   getImportableCalendarEvents,
   importCalendarEvents,
+  dismissCalendarEvents,
   type DeepScanProgress,
   type VisitFoodScanProgress,
   type ImportableCalendarEvent,
