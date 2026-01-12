@@ -130,6 +130,36 @@ function isTimeOverlapping(
   return visitStart < eventEnd + bufferMs && visitEnd > eventStart - bufferMs;
 }
 
+/** Binary search: first index where event.startDate >= target */
+function lowerBoundByStartDate(events: CalendarEventInfo[], target: number): number {
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (events[mid]!.startDate < target) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
+/** Binary search: first index where event.startDate > target */
+function upperBoundByStartDate(events: CalendarEventInfo[], target: number): number {
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (events[mid]!.startDate <= target) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return lo;
+}
+
 /** Get start of day (midnight) for a timestamp */
 function getStartOfDay(timestamp: number): number {
   const date = new Date(timestamp);
@@ -159,32 +189,53 @@ export async function batchFindEventsForVisits(
     return new Map(visits.map((v) => [v.id, null]));
   }
 
-  // Find overall date range
+  // Find overall date range (single calendar query for the batch)
   const times = visits.flatMap((v) => [v.startTime, v.endTime]);
   const bufferMs = bufferMinutes * 60 * 1000;
   const searchStart = getStartOfDay(Math.min(...times)) - bufferMs;
   const searchEnd = getEndOfDay(Math.max(...times)) + bufferMs;
 
   const allEvents = await getEventsInRange(searchStart, searchEnd);
+  const timedEvents = allEvents
+    .filter((e) => !e.isAllDay)
+    .sort((a, b) => (a.startDate - b.startDate !== 0 ? a.startDate - b.startDate : a.endDate - b.endDate));
+
+  // Compute max duration so we can bound "overlap" searches safely.
+  // Any event starting before (windowStart - maxDurationMs) cannot overlap the visit window.
+  let maxDurationMs = 0;
+  for (const e of timedEvents) {
+    const d = Math.max(0, e.endDate - e.startDate);
+    if (d > maxDurationMs) {
+      maxDurationMs = d;
+    }
+  }
+
   const results = new Map<string, CalendarEventInfo | null>();
 
   for (const visit of visits) {
-    // Filter to timed events that overlap with this visit
-    const matchingEvents = allEvents.filter(
-      (e) => !e.isAllDay && isTimeOverlapping(visit.startTime, visit.endTime, e.startDate, e.endDate, bufferMs),
-    );
+    const windowStart = visit.startTime - bufferMs;
+    const windowEnd = visit.endTime + bufferMs;
 
-    if (matchingEvents.length === 0) {
-      results.set(visit.id, null);
-      continue;
+    // Binary-search the only slice of events that could possibly overlap.
+    const startIdx = lowerBoundByStartDate(timedEvents, windowStart - maxDurationMs);
+    const endExclusiveIdx = upperBoundByStartDate(timedEvents, windowEnd);
+
+    let bestEvent: CalendarEventInfo | null = null;
+    let bestScore = -Infinity;
+
+    for (let i = startIdx; i < endExclusiveIdx; i++) {
+      const event = timedEvents[i]!;
+      if (!isTimeOverlapping(visit.startTime, visit.endTime, event.startDate, event.endDate, bufferMs)) {
+        continue;
+      }
+
+      const s = scoreEvent(event, visit.startTime, visit.endTime);
+      if (s > bestScore) {
+        bestScore = s;
+        bestEvent = event;
+      }
     }
 
-    // Find best scoring event
-    const bestEvent = matchingEvents.reduce((best, event) =>
-      scoreEvent(event, visit.startTime, visit.endTime) > scoreEvent(best, visit.startTime, visit.endTime)
-        ? event
-        : best,
-    );
     results.set(visit.id, bestEvent);
   }
 
@@ -449,7 +500,7 @@ const COMPARISON_SUFFIXES_TO_STRIP = [
   /\s+shack\s*$/i,
   /\s+club\s*$/i,
   // City abbreviations at the end
-  /\s+(nyc|la|sf|dc|atl|chi|bos|sea|pdx|phx|den|mia|dal|hou|austin)\s*$/i,
+  /\s+(nyc|la|sf|london|dc|atl|chi|bos|sea|pdx|phx|den|mia|dal|hou|austin)\s*$/i,
   /^the\s+/i,
 ];
 
@@ -580,7 +631,7 @@ export const INSIGNIFICANT_WORDS = new Set([
 ]);
 
 /** Check if two strings are a fuzzy match for restaurant name comparison */
-export function _isFuzzyRestaurantMatch(a: string, b: string, threshold: number = 3): boolean {
+function _isFuzzyRestaurantMatch(a: string, b: string, threshold: number = 3): boolean {
   const normA = normalizeForComparison(a);
   const normB = normalizeForComparison(b);
 
@@ -665,7 +716,7 @@ export async function getWritableCalendars(): Promise<WritableCalendar[]> {
   }
 }
 
-export interface CreateCalendarEventParams {
+interface CreateCalendarEventParams {
   calendarId: string;
   title: string;
   startDate: Date;
@@ -675,7 +726,7 @@ export interface CreateCalendarEventParams {
 }
 
 // App identifier for calendar events we create - allows us to identify and delete them later
-export const PHOTO_FOODIE_EVENT_IDENTIFIER = "[PhotoFoodie Export]";
+const PHOTO_FOODIE_EVENT_IDENTIFIER = "[PhotoFoodie Export]";
 
 /** Build notes field with app identifier for tracking */
 function buildExportNotes(visitId: string, userNotes: string | null): string {
@@ -687,7 +738,7 @@ function buildExportNotes(visitId: string, userNotes: string | null): string {
 }
 
 /** Create a calendar event and return its ID */
-export async function createCalendarEvent(params: CreateCalendarEventParams): Promise<string | null> {
+async function createCalendarEvent(params: CreateCalendarEventParams): Promise<string | null> {
   if (!(await hasCalendarPermission())) {
     return null;
   }
@@ -747,7 +798,7 @@ export async function batchCreateCalendarEvents(
 }
 
 /** Delete a calendar event by ID */
-export async function deleteCalendarEvent(eventId: string): Promise<boolean> {
+async function deleteCalendarEvent(eventId: string): Promise<boolean> {
   if (!(await hasCalendarPermission())) {
     return false;
   }

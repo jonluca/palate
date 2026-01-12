@@ -12,7 +12,7 @@ export interface RenderItemInfo<T> {
   setImageDimensions: (imageDimensions: Dimensions) => void;
 }
 
-export interface EventsCallbacks {
+interface EventsCallbacks {
   onSwipeToClose?: () => void;
   onTap?: () => void;
   onDoubleTap?: (toScale: number) => void;
@@ -29,7 +29,7 @@ export interface ItemRef {
   reset: (animated: boolean) => void;
 }
 
-export interface GalleryRef {
+interface GalleryRef {
   setIndex: (newIndex: number, animated?: boolean) => void;
   reset: (animated?: boolean) => void;
 }

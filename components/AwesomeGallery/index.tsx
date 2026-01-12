@@ -166,9 +166,6 @@ export const Gallery = React.forwardRef(GalleryComponent) as <T = string>(
   p: GalleryProps<T> & { ref?: GalleryReactRef },
 ) => React.ReactElement;
 
-// Re-export types for consumers
-export type { GalleryProps, GalleryRef, GalleryReactRef, RenderItemInfo, EventsCallbacks, Dimensions } from "./types";
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "black" },
   rowContainer: { flex: 1 },

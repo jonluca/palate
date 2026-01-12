@@ -798,25 +798,6 @@ export async function clearExportedCalendarEvents(visitIds: string[]): Promise<v
 }
 
 /**
- * Update a visit with calendar event information after creating the event.
- */
-export async function updateVisitCalendarEvent(
-  visitId: string,
-  calendarEventId: string,
-  calendarEventTitle: string,
-): Promise<void> {
-  const database = await getDatabase();
-  const now = Date.now();
-
-  await database.runAsync(
-    `UPDATE visits 
-     SET calendarEventId = ?, calendarEventTitle = ?, updatedAt = ? 
-     WHERE id = ?`,
-    [calendarEventId, calendarEventTitle, now, visitId],
-  );
-}
-
-/**
  * Batch update visits with calendar event information.
  * When exportedToCalendarId is provided, it indicates we created this event (vs imported).
  */
@@ -1720,7 +1701,7 @@ async function buildRestaurantSpatialIndex(database: SQLite.SQLiteDatabase): Pro
 /**
  * Invalidate the restaurant spatial index (call when Michelin data changes).
  */
-export function invalidateRestaurantIndex(): void {
+function invalidateRestaurantIndex(): void {
   restaurantIndex = null;
   indexedRestaurants = [];
 }

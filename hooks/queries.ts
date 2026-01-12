@@ -49,7 +49,6 @@ import {
   batchCreateCalendarEvents,
   batchDeleteCalendarEvents,
   type WritableCalendar,
-  type SyncableCalendar,
 } from "@/services/calendar";
 
 // ============================================================================
@@ -96,6 +95,7 @@ export type PendingVisitForReview = PendingVisitForReviewDB;
 export type VisitWithRestaurant = VisitWithDetails;
 export type VisitRecord = VisitRecordDB;
 export type { IgnoredLocationRecord };
+export type { WritableCalendar };
 
 import {
   processPhotos,
@@ -1284,6 +1284,3 @@ export function useDeleteExportedCalendarEvents() {
     },
   });
 }
-
-// Re-export types for convenience
-export type { WritableCalendar, SyncableCalendar, VisitForCalendarExport, ExportedCalendarEvent };

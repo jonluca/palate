@@ -3,7 +3,7 @@ import type { MapKitSearchResult } from "@/modules/mapkit-search";
 
 export type VisitStatus = "pending" | "confirmed" | "rejected";
 
-export interface BaseVisitCardProps {
+interface BaseVisitCardProps {
   id: string;
   startTime: number;
   photoCount: number;

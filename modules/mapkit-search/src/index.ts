@@ -143,22 +143,3 @@ export async function searchByText(
 
   return promise;
 }
-
-/**
- * Clear all cached search results.
- * Useful for forcing fresh data or freeing memory.
- */
-export function clearSearchCache(): void {
-  nearbyCache.clear();
-  textSearchCache.clear();
-}
-
-/**
- * Get cache statistics for debugging.
- */
-export function getSearchCacheStats(): { nearbyCount: number; textSearchCount: number } {
-  return {
-    nearbyCount: nearbyCache.size,
-    textSearchCount: textSearchCache.size,
-  };
-}
