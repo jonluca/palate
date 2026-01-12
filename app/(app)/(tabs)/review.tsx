@@ -11,12 +11,13 @@ import {
 } from "@/hooks/queries";
 import { FlashList } from "@shopify/flash-list";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, RefreshControl, Alert, Modal, Pressable, ScrollView, TextInput } from "react-native";
+import { View, RefreshControl, Alert, Modal, Pressable, ScrollView, TextInput, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useToast } from "@/components/ui/toast";
 import Animated, { LinearTransition } from "react-native-reanimated";
+import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 
 function LoadingState() {
   return (
@@ -48,8 +49,7 @@ export default function ReviewScreen() {
   const [restaurantModalVisible, setRestaurantModalVisible] = useState(false);
   const [restaurantSearchQuery, setRestaurantSearchQuery] = useState("");
   const [dateModalVisible, setDateModalVisible] = useState(false);
-  const [startDateInput, setStartDateInput] = useState("");
-  const [endDateInput, setEndDateInput] = useState("");
+  const [androidActiveDateField, setAndroidActiveDateField] = useState<"start" | "end" | null>(null);
 
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -79,14 +79,6 @@ export default function ReviewScreen() {
     }
   }, []);
 
-  const formatLocalISODate = useCallback((ms: number) => {
-    const d = new Date(ms);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  }, []);
-
   const ToggleChip = useCallback(
     ({ label, value, onToggle }: { label: string; value: boolean; onToggle: () => void }) => {
       return (
@@ -97,9 +89,11 @@ export default function ReviewScreen() {
           }}
           className={`px-4 py-2 rounded-full ${value ? "bg-primary" : "bg-card"}`}
         >
-          <ThemedText className={`text-sm font-medium ${value ? "text-primary-foreground" : "text-foreground"}`}>
-            {label}: {value ? "On" : "Off"}
-          </ThemedText>
+          <View className={"flex-row items-center gap-2"}>
+            <ThemedText className={`text-sm font-medium ${value ? "text-primary-foreground" : "text-foreground"}`}>
+              {label}
+            </ThemedText>
+          </View>
         </Pressable>
       );
     },
@@ -168,9 +162,8 @@ export default function ReviewScreen() {
   const filtersSummary = useMemo(() => {
     const parts: string[] = [];
 
-    parts.push(foodFilter === "on" ? "Food On" : "Food Off");
-
-    parts.push(matchesFilter === "on" ? "Matches On" : "Matches Off");
+    parts.push(foodFilter === "on" ? "Food" : "No Food");
+    parts.push(matchesFilter === "on" ? "Matches" : "No Matches");
 
     if (starFilter === "2plus") {
       parts.push("2★+");
@@ -189,25 +182,14 @@ export default function ReviewScreen() {
     return parts.join(" · ");
   }, [foodFilter, matchesFilter, starFilter, startDateMs, endDateMs, selectedRestaurant, formatShortDate]);
 
-  function parseLocalDateInput(input: string): { startMs: number; endMs: number } | null {
-    const trimmed = input.trim();
-    if (!trimmed) {
-      return null;
-    }
-    const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!match) {
-      return null;
-    }
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    if (!year || month < 1 || month > 12 || day < 1 || day > 31) {
-      return null;
-    }
-    const start = new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
-    const end = new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
-    return { startMs: start, endMs: end };
-  }
+  const toStartOfDayMs = useCallback(
+    (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime(),
+    [],
+  );
+  const toEndOfDayMs = useCallback(
+    (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999).getTime(),
+    [],
+  );
 
   const filteredReviewableVisits = useMemo(() => {
     return reviewableVisits.filter((v) => {
@@ -402,16 +384,7 @@ export default function ReviewScreen() {
                 />
 
                 <View className={"flex-row gap-2"}>
-                  <Button
-                    variant={"muted"}
-                    size={"sm"}
-                    className={"flex-1"}
-                    onPress={() => {
-                      setStartDateInput(startDateMs ? formatLocalISODate(startDateMs) : "");
-                      setEndDateInput(endDateMs ? formatLocalISODate(endDateMs) : "");
-                      setDateModalVisible(true);
-                    }}
-                  >
+                  <Button variant={"muted"} size={"sm"} className={"flex-1"} onPress={() => setDateModalVisible(true)}>
                     <ButtonText variant={"muted"} size={"sm"}>
                       {startDateMs || endDateMs
                         ? `Date: ${startDateMs ? formatShortDate(startDateMs) : "…"}–${endDateMs ? formatShortDate(endDateMs) : "…"}`
@@ -441,8 +414,6 @@ export default function ReviewScreen() {
                         setRestaurantSearchQuery("");
                         setStartDateMs(null);
                         setEndDateMs(null);
-                        setStartDateInput("");
-                        setEndDateInput("");
                       }}
                     >
                       <ButtonText variant={"outline"} size={"sm"}>
@@ -469,7 +440,6 @@ export default function ReviewScreen() {
       startDateMs,
       endDateMs,
       formatShortDate,
-      formatLocalISODate,
       filtersSummary,
       ToggleChip,
     ],
@@ -577,8 +547,6 @@ export default function ReviewScreen() {
                       setRestaurantSearchQuery("");
                       setStartDateMs(null);
                       setEndDateMs(null);
-                      setStartDateInput("");
-                      setEndDateInput("");
                     }}
                   >
                     <ButtonText variant={"outline"}>Reset to Has Food</ButtonText>
@@ -704,81 +672,165 @@ export default function ReviewScreen() {
                 <Pressable
                   onPress={() => {
                     setDateModalVisible(false);
+                    setAndroidActiveDateField(null);
                   }}
                 >
                   <ThemedText className={"text-primary font-semibold"}>Done</ThemedText>
                 </Pressable>
               </View>
 
-              <ThemedText variant={"footnote"} color={"secondary"}>
-                Enter dates as YYYY-MM-DD (local time)
-              </ThemedText>
+              {Platform.OS === "ios" ? (
+                <View className={"gap-4"}>
+                  <View className={"gap-2"}>
+                    <View className={"flex-row items-center justify-between"}>
+                      <ThemedText className={"font-semibold"}>Start date</ThemedText>
+                      <Pressable
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setStartDateMs(null);
+                        }}
+                      >
+                        <ThemedText className={"text-primary font-semibold"}>Clear</ThemedText>
+                      </Pressable>
+                    </View>
+                    <DateTimePicker
+                      value={startDateMs ? new Date(startDateMs) : new Date()}
+                      mode={"date"}
+                      display={"inline"}
+                      onChange={(_event: DateTimePickerEvent, date?: Date) => {
+                        if (!date) {
+                          return;
+                        }
+                        const nextStart = toStartOfDayMs(date);
+                        setStartDateMs(nextStart);
+                        if (endDateMs !== null && endDateMs < nextStart) {
+                          setEndDateMs(toEndOfDayMs(date));
+                        }
+                      }}
+                    />
+                  </View>
 
-              <View className={"gap-2"}>
-                <TextInput
-                  value={startDateInput}
-                  onChangeText={setStartDateInput}
-                  placeholder={"Start date (YYYY-MM-DD) — optional"}
-                  placeholderTextColor={"#999"}
-                  className={"bg-card rounded-2xl px-4 py-3 text-foreground"}
-                  autoCapitalize={"none"}
-                  autoCorrect={false}
-                />
-                <TextInput
-                  value={endDateInput}
-                  onChangeText={setEndDateInput}
-                  placeholder={"End date (YYYY-MM-DD) — optional"}
-                  placeholderTextColor={"#999"}
-                  className={"bg-card rounded-2xl px-4 py-3 text-foreground"}
-                  autoCapitalize={"none"}
-                  autoCorrect={false}
-                />
-              </View>
+                  <View className={"gap-2"}>
+                    <View className={"flex-row items-center justify-between"}>
+                      <ThemedText className={"font-semibold"}>End date</ThemedText>
+                      <Pressable
+                        onPress={() => {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                          setEndDateMs(null);
+                        }}
+                      >
+                        <ThemedText className={"text-primary font-semibold"}>Clear</ThemedText>
+                      </Pressable>
+                    </View>
+                    <DateTimePicker
+                      value={endDateMs ? new Date(endDateMs) : new Date()}
+                      mode={"date"}
+                      display={"inline"}
+                      onChange={(_event: DateTimePickerEvent, date?: Date) => {
+                        if (!date) {
+                          return;
+                        }
+                        const nextEnd = toEndOfDayMs(date);
+                        setEndDateMs(nextEnd);
+                        if (startDateMs !== null && nextEnd < startDateMs) {
+                          setStartDateMs(toStartOfDayMs(date));
+                        }
+                      }}
+                    />
+                  </View>
+                </View>
+              ) : (
+                <View className={"gap-3"}>
+                  <Pressable
+                    className={"bg-card rounded-2xl px-4 py-3"}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setAndroidActiveDateField("start");
+                    }}
+                  >
+                    <View className={"flex-row items-center justify-between gap-3"}>
+                      <ThemedText className={"font-semibold"}>Start</ThemedText>
+                      <ThemedText variant={"footnote"} color={"tertiary"}>
+                        {startDateMs ? formatShortDate(startDateMs) : "Any"}
+                      </ThemedText>
+                    </View>
+                  </Pressable>
 
-              <View className={"flex-row gap-2"}>
-                <Button
-                  variant={"outline"}
-                  size={"sm"}
-                  className={"flex-1"}
-                  onPress={() => {
-                    setStartDateMs(null);
-                    setEndDateMs(null);
-                    setStartDateInput("");
-                    setEndDateInput("");
-                    setDateModalVisible(false);
-                  }}
-                >
-                  <ButtonText variant={"outline"} size={"sm"}>
-                    Clear Dates
-                  </ButtonText>
-                </Button>
-                <Button
-                  variant={"default"}
-                  size={"sm"}
-                  className={"flex-1"}
-                  onPress={() => {
-                    const startParsed = parseLocalDateInput(startDateInput);
-                    const endParsed = parseLocalDateInput(endDateInput);
+                  <Pressable
+                    className={"bg-card rounded-2xl px-4 py-3"}
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setAndroidActiveDateField("end");
+                    }}
+                  >
+                    <View className={"flex-row items-center justify-between gap-3"}>
+                      <ThemedText className={"font-semibold"}>End</ThemedText>
+                      <ThemedText variant={"footnote"} color={"tertiary"}>
+                        {endDateMs ? formatShortDate(endDateMs) : "Any"}
+                      </ThemedText>
+                    </View>
+                  </Pressable>
 
-                    if (startDateInput.trim() && !startParsed) {
-                      Alert.alert("Invalid Start Date", "Use YYYY-MM-DD (e.g. 2026-01-12).");
-                      return;
-                    }
-                    if (endDateInput.trim() && !endParsed) {
-                      Alert.alert("Invalid End Date", "Use YYYY-MM-DD (e.g. 2026-01-12).");
-                      return;
-                    }
+                  <View className={"flex-row gap-2"}>
+                    <Button
+                      variant={"outline"}
+                      size={"sm"}
+                      className={"flex-1"}
+                      onPress={() => {
+                        setStartDateMs(null);
+                        setEndDateMs(null);
+                        setAndroidActiveDateField(null);
+                        setDateModalVisible(false);
+                      }}
+                    >
+                      <ButtonText variant={"outline"} size={"sm"}>
+                        Clear Dates
+                      </ButtonText>
+                    </Button>
+                  </View>
 
-                    setStartDateMs(startParsed ? startParsed.startMs : null);
-                    setEndDateMs(endParsed ? endParsed.endMs : null);
-                    setDateModalVisible(false);
-                  }}
-                >
-                  <ButtonText variant={"default"} size={"sm"}>
-                    Apply
-                  </ButtonText>
-                </Button>
-              </View>
+                  {androidActiveDateField && (
+                    <DateTimePicker
+                      value={
+                        androidActiveDateField === "start"
+                          ? startDateMs
+                            ? new Date(startDateMs)
+                            : new Date()
+                          : endDateMs
+                            ? new Date(endDateMs)
+                            : new Date()
+                      }
+                      mode={"date"}
+                      onChange={(event: DateTimePickerEvent, date?: Date) => {
+                        if (event.type === "dismissed") {
+                          setAndroidActiveDateField(null);
+                          return;
+                        }
+                        if (!date) {
+                          setAndroidActiveDateField(null);
+                          return;
+                        }
+
+                        if (androidActiveDateField === "start") {
+                          const nextStart = toStartOfDayMs(date);
+                          setStartDateMs(nextStart);
+                          if (endDateMs !== null && endDateMs < nextStart) {
+                            setEndDateMs(toEndOfDayMs(date));
+                          }
+                        } else {
+                          const nextEnd = toEndOfDayMs(date);
+                          setEndDateMs(nextEnd);
+                          if (startDateMs !== null && nextEnd < startDateMs) {
+                            setStartDateMs(toStartOfDayMs(date));
+                          }
+                        }
+
+                        setAndroidActiveDateField(null);
+                      }}
+                    />
+                  )}
+                </View>
+              )}
             </View>
           </View>
         </Modal>

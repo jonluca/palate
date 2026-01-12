@@ -9,7 +9,6 @@ import { Slot } from "expo-router";
 import { AppState, Platform } from "react-native";
 import type { AppStateStatus } from "react-native";
 import { focusManager } from "@tanstack/react-query";
-import { FloatingDevTools } from "@buoy-gg/core";
 import { useDrizzleStudioInspector } from "@/hooks";
 
 function onAppStateChange(status: AppStateStatus) {
@@ -47,7 +46,7 @@ export default function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <ToastProvider>
           <Slot />
-          {__DEV__ && <FloatingDevTools disableHints />}
+          {/* {__DEV__ && <FloatingDevTools disableHints />} */}
         </ToastProvider>
       </GestureHandlerRootView>
       <StatusBar style={"light"} />

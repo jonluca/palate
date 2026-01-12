@@ -132,8 +132,7 @@ export function PhotoGrid({
       return Math.floor(columns);
     }
 
-    const shouldAuto =
-      minPhotoSize !== undefined || minColumns !== undefined || maxColumns !== undefined;
+    const shouldAuto = minPhotoSize !== undefined || minColumns !== undefined || maxColumns !== undefined;
 
     // Preserve previous behavior unless auto-sizing is explicitly enabled.
     if (!shouldAuto) {
