@@ -1,0 +1,111 @@
+import type { ExactCalendarMatch } from "@/hooks/queries";
+import type { MapKitSearchResult } from "@/modules/mapkit-search";
+
+export type VisitStatus = "pending" | "confirmed" | "rejected";
+
+export interface BaseVisitCardProps {
+  id: string;
+  startTime: number;
+  photoCount: number;
+  previewPhotos?: string[];
+  foodProbable?: boolean;
+  calendarEventTitle?: string | null;
+  calendarEventIsAllDay?: boolean | null;
+  /** Called when card is pressed. Optional photoIndex if a specific photo was tapped. */
+  onPress?: (photoIndex?: number) => void;
+  index?: number;
+}
+
+// List mode: simple card for the visits list
+export type ListModeProps = BaseVisitCardProps & {
+  mode: "list";
+  restaurantName: string | null;
+  status: VisitStatus;
+  onStatusChange?: (status: VisitStatus) => void;
+};
+
+// Suggested restaurant detail
+export interface SuggestedRestaurant {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  address: string;
+  location: string;
+  cuisine: string;
+  award: string;
+  distance: number;
+}
+
+// Review mode: card for the review flow with Michelin suggestions
+export type ReviewModeProps = BaseVisitCardProps & {
+  mode: "review";
+  suggestedRestaurantName?: string | null;
+  suggestedRestaurantAward?: string | null;
+  suggestedRestaurantCuisine?: string | null;
+  suggestedRestaurants?: SuggestedRestaurant[];
+  hasSuggestion?: boolean;
+  isLoading?: boolean;
+  onConfirm?: (restaurant?: SuggestedRestaurant) => void;
+  onReject?: () => void;
+  onFindRestaurant?: () => void;
+  /** Center latitude for Apple Maps verification searches */
+  centerLat?: number;
+  /** Center longitude for Apple Maps verification searches */
+  centerLon?: number;
+  /** Whether to perform Apple Maps verification searches (expensive, use sparingly) */
+  enableAppleMapsVerification?: boolean;
+  match?: ExactCalendarMatch;
+};
+
+export type VisitCardProps = ListModeProps | ReviewModeProps;
+
+// Apple Maps verification result for a restaurant
+export interface AppleMapsVerification {
+  restaurantId: string;
+  isVerified: boolean;
+  mapKitResult?: MapKitSearchResult;
+  isLoading: boolean;
+}
+
+// Merged restaurant suggestion with source info
+export interface MergedRestaurantSuggestion extends SuggestedRestaurant {
+  source: "michelin" | "apple-maps";
+  isVerified: boolean;
+}
+
+// Result from Apple Maps search hook
+export interface AppleMapsSearchResult {
+  /** Merged list of restaurants (Michelin + Apple Maps, deduped) */
+  mergedRestaurants: MergedRestaurantSuggestion[];
+  /** Verification status for Michelin restaurants */
+  verifications: Map<string, AppleMapsVerification>;
+  /** Whether the search is still loading */
+  isLoading: boolean;
+  /** Count of Apple Maps restaurants added */
+  appleMapsCount: number;
+  /** Count of verified Michelin restaurants */
+  verifiedCount: number;
+}
+
+// Visit actions props
+export interface VisitActionsProps {
+  onSkip: () => void;
+  onConfirm: () => void;
+  onFindRestaurant?: () => void;
+  hasSuggestion: boolean;
+  isLoading?: boolean;
+  variant?: "pill" | "full";
+  promptText?: string;
+}
+
+export interface MichelinBadge {
+  emoji: string;
+  label: string;
+}
+
+export const statusColors = {
+  pending: { bg: "bg-orange-500/10", text: "text-orange-500", dot: "bg-orange-500" },
+  confirmed: { bg: "bg-green-500/10", text: "text-green-500", dot: "bg-green-500" },
+  rejected: { bg: "bg-red-500/10", text: "text-red-500", dot: "bg-red-500" },
+} as const;
