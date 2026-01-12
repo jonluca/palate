@@ -49,10 +49,8 @@ export default function ReviewScreen() {
 
   // Helper to check if a visit has high-confidence signals
   const isHighConfidenceVisit = useCallback((visit: PendingVisitForReview) => {
-    const hasRestaurantMatch = visit.suggestedRestaurants.length > 0;
-    const hasCalendarEvent = !!visit.calendarEventTitle;
     const hasFood = !!visit.foodProbable;
-    return hasRestaurantMatch || hasCalendarEvent || hasFood;
+    return hasFood;
   }, []);
 
   // Filter visits into categories

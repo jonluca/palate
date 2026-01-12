@@ -19,6 +19,7 @@ interface OnboardingFlowProps {
 export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
   const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = React.useState(0);
+  const [isPagerScrollEnabled, setIsPagerScrollEnabled] = React.useState(true);
   const flatListRef = useRef<FlatList>(null);
   const scrollX = useSharedValue(0);
 
@@ -117,15 +118,20 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         data={ONBOARDING_SLIDES}
         horizontal
         pagingEnabled
+        scrollEnabled={isPagerScrollEnabled}
         showsHorizontalScrollIndicator={false}
         bounces={false}
+        directionalLockEnabled
+        nestedScrollEnabled
         onScroll={(e) => {
           scrollX.value = e.nativeEvent.contentOffset.x;
         }}
         scrollEventThrottle={16}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
-        renderItem={({ item, index }) => <SlideItem slide={item} index={index} scrollX={scrollX} />}
+        renderItem={({ item, index }) => (
+          <SlideItem slide={item} index={index} scrollX={scrollX} setParentScrollEnabled={setIsPagerScrollEnabled} />
+        )}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{
           paddingTop: insets.top + 80,

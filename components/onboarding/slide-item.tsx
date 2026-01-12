@@ -11,9 +11,10 @@ interface SlideItemProps {
   slide: OnboardingSlide;
   index: number;
   scrollX: SharedValue<number>;
+  setParentScrollEnabled?: (enabled: boolean) => void;
 }
 
-export function SlideItem({ slide, index, scrollX }: SlideItemProps) {
+export function SlideItem({ slide, index, scrollX, setParentScrollEnabled }: SlideItemProps) {
   const inputRange = [(index - 1) * SCREEN_WIDTH, index * SCREEN_WIDTH, (index + 1) * SCREEN_WIDTH];
 
   const animatedIconStyle = useAnimatedStyle(() => {
@@ -78,7 +79,9 @@ export function SlideItem({ slide, index, scrollX }: SlideItemProps) {
       </Animated.View>
 
       {/* Custom Content */}
-      {slide.CustomContent && <slide.CustomContent scrollX={scrollX} index={index} />}
+      {slide.CustomContent && (
+        <slide.CustomContent scrollX={scrollX} index={index} setParentScrollEnabled={setParentScrollEnabled} />
+      )}
     </View>
   );
 }

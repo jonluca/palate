@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { View, Pressable, ActivityIndicator, Dimensions } from "react-native";
+import { View, Pressable, ActivityIndicator, Dimensions, ScrollView } from "react-native";
 import Animated, { useAnimatedStyle, interpolate, Extrapolation, type SharedValue } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { ThemedText } from "@/components/themed-text";
@@ -12,9 +12,10 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 interface CalendarSelectionContentProps {
   scrollX: SharedValue<number>;
   index: number;
+  setParentScrollEnabled?: (enabled: boolean) => void;
 }
 
-export function CalendarSelectionContent({ scrollX, index }: CalendarSelectionContentProps) {
+export function CalendarSelectionContent({ scrollX, index, setParentScrollEnabled }: CalendarSelectionContentProps) {
   const [calendars, setCalendars] = useState<SyncableCalendar[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasPermission, setHasPermission] = useState(false);
@@ -163,44 +164,56 @@ export function CalendarSelectionContent({ scrollX, index }: CalendarSelectionCo
 
       {/* Calendar List */}
       <View className={"bg-white/10 rounded-2xl overflow-hidden max-h-56"}>
-        {calendars.map((calendar, idx) => {
-          const isSelected = selectedIds.has(calendar.id);
-          const isLast = idx === calendars.length - 1;
+        <ScrollView
+          nestedScrollEnabled
+          showsVerticalScrollIndicator
+          keyboardShouldPersistTaps={"handled"}
+          onTouchStart={() => setParentScrollEnabled?.(false)}
+          onTouchEnd={() => setParentScrollEnabled?.(true)}
+          onScrollBeginDrag={() => setParentScrollEnabled?.(false)}
+          onScrollEndDrag={() => setParentScrollEnabled?.(true)}
+          onMomentumScrollBegin={() => setParentScrollEnabled?.(false)}
+          onMomentumScrollEnd={() => setParentScrollEnabled?.(true)}
+        >
+          {calendars.map((calendar, idx) => {
+            const isSelected = selectedIds.has(calendar.id);
+            const isLast = idx === calendars.length - 1;
 
-          return (
-            <Pressable
-              key={calendar.id}
-              onPress={() => toggleCalendar(calendar.id)}
-              className={`flex-row items-center px-4 py-3 ${!isLast ? "border-b border-white/10" : ""}`}
-            >
-              {/* Calendar Color Dot */}
-              <View className={"w-4 h-4 rounded-full mr-3"} style={{ backgroundColor: calendar.color }} />
-
-              {/* Calendar Info */}
-              <View className={"flex-1"}>
-                <ThemedText
-                  variant={"subhead"}
-                  className={`font-medium ${isSelected ? "text-white" : "text-white/50"}`}
-                  numberOfLines={1}
-                >
-                  {calendar.title}
-                </ThemedText>
-                <ThemedText variant={"caption2"} className={"text-white/40"} numberOfLines={1}>
-                  {calendar.source}
-                </ThemedText>
-              </View>
-
-              {/* Checkbox */}
-              <View
-                className={`w-6 h-6 rounded-md items-center justify-center ${
-                  isSelected ? "bg-blue-500" : "bg-white/10 border border-white/20"
-                }`}
+            return (
+              <Pressable
+                key={calendar.id}
+                onPress={() => toggleCalendar(calendar.id)}
+                className={`flex-row items-center px-4 py-3 ${!isLast ? "border-b border-white/10" : ""}`}
               >
-                {isSelected && <IconSymbol name={"checkmark"} size={14} color={"#fff"} />}
-              </View>
-            </Pressable>
-          );
-        })}
+                {/* Calendar Color Dot */}
+                <View className={"w-4 h-4 rounded-full mr-3"} style={{ backgroundColor: calendar.color }} />
+
+                {/* Calendar Info */}
+                <View className={"flex-1"}>
+                  <ThemedText
+                    variant={"subhead"}
+                    className={`font-medium ${isSelected ? "text-white" : "text-white/50"}`}
+                    numberOfLines={1}
+                  >
+                    {calendar.title}
+                  </ThemedText>
+                  <ThemedText variant={"caption2"} className={"text-white/40"} numberOfLines={1}>
+                    {calendar.source}
+                  </ThemedText>
+                </View>
+
+                {/* Checkbox */}
+                <View
+                  className={`w-6 h-6 rounded-md items-center justify-center ${
+                    isSelected ? "bg-blue-500" : "bg-white/10 border border-white/20"
+                  }`}
+                >
+                  {isSelected && <IconSymbol name={"checkmark"} size={14} color={"#fff"} />}
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {/* Selection Info */}

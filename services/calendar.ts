@@ -102,7 +102,13 @@ async function getEventsInRange(startDate: number, endDate: number): Promise<Cal
     );
 
     return events
-      .filter((event) => event.title && event.title.trim() !== "" && event.title.trim() !== "Untitled Event")
+      .filter(
+        (event) =>
+          event.title &&
+          event.title.trim() !== "" &&
+          event.title.trim() !== "Untitled Event" &&
+          event.title.trim() !== "Custom",
+      )
       .map((event) => ({
         id: event.id,
         title: event.title!,
@@ -505,10 +511,11 @@ const COMPARISON_SUFFIXES_TO_STRIP = [
 ];
 
 const COMPARISON_PREFIXES_TO_STRIP = [
+  /^the\s+/i,
   /^reservation\s+(at|for|@)\s+/i,
   /^upcoming reservation (at|for|@)\s+/i,
   /^reservation\s*:\s+/i,
-  /^the\s+(dining room|dining hall|experience|kitchen table|table)\s+(at)?\s*:?\s+/i,
+  /^the\s+(dining room|dining hall|experience|kitchen table|table)?\s*(at)?\s*:?\s*/i,
   /^restaurant\s*:?\s*/i,
   /^bar\s*:?\s*/i,
   /^confirmation\s*:?\s+/i,

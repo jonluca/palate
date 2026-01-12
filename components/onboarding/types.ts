@@ -16,7 +16,15 @@ export interface OnboardingSlide {
   /** If set, this slide requests a permission when the user continues */
   permission?: PermissionType;
   /** Custom component to render additional content below the description */
-  CustomContent?: React.ComponentType<{ scrollX: SharedValue<number>; index: number }>;
+  CustomContent?: React.ComponentType<{
+    scrollX: SharedValue<number>;
+    index: number;
+    /**
+     * Allows nested scrollable content (like a calendar list) to temporarily
+     * disable the parent onboarding FlatList paging while the user interacts.
+     */
+    setParentScrollEnabled?: (enabled: boolean) => void;
+  }>;
   /** Custom button text override */
   buttonText?: string;
 }

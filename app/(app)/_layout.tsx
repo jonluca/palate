@@ -46,6 +46,7 @@ export default function RootLayoutNav() {
         headerLargeTitleStyle: {
           fontWeight: "700",
         },
+        headerTitle: "",
         animation: "slide_from_right",
         animationDuration: 250,
         gestureEnabled: true,
