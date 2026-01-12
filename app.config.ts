@@ -13,7 +13,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
     newArchEnabled: true,
     ios: {
       ...config.ios,
-      supportsTablet: true,
+      supportsTablet: false,
       bundleIdentifier: "com.jonluca.photo-restaurant-matcher",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
