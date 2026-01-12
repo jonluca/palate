@@ -11,6 +11,7 @@ import {
   useMichelinRestaurantDetails,
   type VisitRecord,
   type MichelinAward,
+  type MichelinRestaurantDetails,
 } from "@/hooks/queries";
 import type { RestaurantRecord, UpdateRestaurantData } from "@/utils/db";
 import { FlashList } from "@shopify/flash-list";
@@ -381,6 +382,92 @@ function MichelinAwardHistoryCard({ awards }: { awards: MichelinAward[] }) {
   );
 }
 
+function MichelinDetailsCard({ details }: { details: MichelinRestaurantDetails }) {
+  const hasContent = details.description || details.facilitiesAndServices || details.url;
+
+  if (!hasContent) {
+    return null;
+  }
+
+  const handleOpenMichelinGuide = () => {
+    if (details.url) {
+      Linking.openURL(details.url);
+    }
+  };
+
+  // Parse facilities string into an array
+  const facilities = details.facilitiesAndServices
+    ? details.facilitiesAndServices
+        .split(",")
+        .map((f) => f.trim())
+        .filter(Boolean)
+    : [];
+
+  return (
+    <Animated.View entering={FadeInDown.delay(150).duration(300)}>
+      <Card animated={false}>
+        <View className={"p-4 gap-4"}>
+          {/* Header */}
+          <View className={"flex-row items-center gap-2"}>
+            <View className={"w-8 h-8 rounded-full bg-red-500/15 items-center justify-center"}>
+              <IconSymbol name={"book.fill"} size={16} color={"#ef4444"} />
+            </View>
+            <ThemedText variant={"heading"} className={"font-semibold"}>
+              Michelin Guide
+            </ThemedText>
+          </View>
+
+          {/* Description */}
+          {details.description && (
+            <View className={"gap-1"}>
+              <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase tracking-wide"}>
+                Inspector's Notes
+              </ThemedText>
+              <ThemedText variant={"body"} color={"secondary"} className={"leading-relaxed"}>
+                {details.description}
+              </ThemedText>
+            </View>
+          )}
+
+          {/* Facilities & Services */}
+          {facilities.length > 0 && (
+            <View className={"gap-2"}>
+              <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase tracking-wide"}>
+                Facilities & Services
+              </ThemedText>
+              <View className={"flex-row flex-wrap gap-2"}>
+                {facilities.map((facility, index) => (
+                  <View key={index} className={"bg-secondary px-2.5 py-1.5 rounded-full"}>
+                    <ThemedText variant={"caption1"} color={"secondary"}>
+                      {facility}
+                    </ThemedText>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* Michelin Guide Link */}
+          {details.url && (
+            <Pressable
+              onPress={handleOpenMichelinGuide}
+              className={"flex-row items-center justify-between bg-red-500/10 p-3 rounded-xl mt-1"}
+            >
+              <View className={"flex-row items-center gap-3"}>
+                <IconSymbol name={"link"} size={16} color={"#ef4444"} />
+                <ThemedText variant={"subhead"} className={"text-red-400 font-medium"}>
+                  View on Michelin Guide
+                </ThemedText>
+              </View>
+              <IconSymbol name={"arrow.up.right"} size={14} color={"#ef4444"} />
+            </Pressable>
+          )}
+        </View>
+      </Card>
+    </Animated.View>
+  );
+}
+
 export default function RestaurantDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const headerHeight = useHeaderHeight();
@@ -412,6 +499,9 @@ export default function RestaurantDetailScreen() {
     () => (
       <View className={"gap-6"}>
         {restaurant && <RestaurantInfoCard restaurant={restaurant} onEdit={() => setEditModalVisible(true)} />}
+
+        {/* Michelin Details */}
+        {michelinDetails && <MichelinDetailsCard details={michelinDetails} />}
 
         {/* Michelin Award History */}
         {michelinDetails?.awards && michelinDetails.awards.length > 0 && (

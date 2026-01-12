@@ -245,6 +245,12 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
 
     -- General time index for visits (getMergeableVisits, getWrappedStats)
     CREATE INDEX IF NOT EXISTS idx_visits_time ON visits(startTime);
+
+    -- Dismissed calendar events (calendar events the user doesn't want to import)
+    CREATE TABLE IF NOT EXISTS dismissed_calendar_events (
+      calendarEventId TEXT PRIMARY KEY,
+      dismissedAt INTEGER NOT NULL
+    );
   `);
 
   // Migration: Add exportedToCalendarId column to track which calendar we exported events to
@@ -555,6 +561,50 @@ export async function getLinkedCalendarEventIds(): Promise<Set<string>> {
     `SELECT calendarEventId FROM visits WHERE calendarEventId IS NOT NULL`,
   );
   return new Set(rows.map((r) => r.calendarEventId));
+}
+
+/**
+ * Get all dismissed calendar event IDs.
+ * These are events the user has chosen not to import.
+ */
+export async function getDismissedCalendarEventIds(): Promise<Set<string>> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<{ calendarEventId: string }>(
+    `SELECT calendarEventId FROM dismissed_calendar_events`,
+  );
+  return new Set(rows.map((r) => r.calendarEventId));
+}
+
+/**
+ * Dismiss calendar events (mark them as not to be imported).
+ */
+export async function dismissCalendarEvents(calendarEventIds: string[]): Promise<void> {
+  if (calendarEventIds.length === 0) {
+    return;
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+  const batchSize = 1000;
+
+  for (let i = 0; i < calendarEventIds.length; i += batchSize) {
+    const batch = calendarEventIds.slice(i, i + batchSize);
+    const placeholders = batch.map(() => "(?, ?)").join(", ");
+    const values = batch.flatMap((id) => [id, now]);
+
+    await database.runAsync(
+      `INSERT OR IGNORE INTO dismissed_calendar_events (calendarEventId, dismissedAt) VALUES ${placeholders}`,
+      values,
+    );
+  }
+}
+
+/**
+ * Undismiss a calendar event (remove from dismissed list).
+ */
+export async function undismissCalendarEvent(calendarEventId: string): Promise<void> {
+  const database = await getDatabase();
+  await database.runAsync(`DELETE FROM dismissed_calendar_events WHERE calendarEventId = ?`, [calendarEventId]);
 }
 
 /**

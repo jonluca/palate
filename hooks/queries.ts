@@ -89,6 +89,13 @@ function optimisticallyUpdateStats(queryClient: QueryClient, delta: { pending?: 
   );
 }
 
+function optimisticallyRemoveImportableCalendarEvents(queryClient: QueryClient, calendarEventIds: string[]) {
+  const eventIdSet = new Set(calendarEventIds);
+  queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, (old) =>
+    old ? old.filter((event) => !eventIdSet.has(event.calendarEventId)) : old,
+  );
+}
+
 // Re-export types for external use with visit naming
 export type RestaurantWithVisits = RestaurantWithVisitsDB;
 export type PendingVisitForReview = PendingVisitForReviewDB;
@@ -116,7 +123,7 @@ import {
   searchNearbyRestaurants as mapKitSearchNearbyRestaurants,
   type MapKitSearchResult,
 } from "@/modules/mapkit-search";
-import { getMichelinRestaurantDetails, type MichelinAward } from "@/services/michelin";
+import { getMichelinRestaurantDetails, type MichelinAward, type MichelinRestaurantDetails } from "@/services/michelin";
 
 // Types
 export interface Stats {
@@ -339,7 +346,7 @@ function useMichelinRestaurants() {
 }
 
 // Re-export Michelin types
-export type { MichelinAward };
+export type { MichelinAward, MichelinRestaurantDetails };
 
 /**
  * Fetch detailed Michelin restaurant info including full award history
@@ -783,8 +790,29 @@ export function useImportCalendarEvents() {
 
   return useMutation({
     mutationFn: (calendarEventIds: string[]) => importCalendarEvents(calendarEventIds),
-    onSuccess: () => {
-      // Invalidate relevant queries
+    onMutate: async (calendarEventIds) => {
+      // Cancel any outgoing refetches to avoid overwriting optimistic update
+      await queryClient.cancelQueries({ queryKey: queryKeys.importableCalendarEvents });
+
+      // Snapshot the previous value for rollback
+      const previousEvents = queryClient.getQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents);
+
+      // Optimistically remove the imported events from the list
+      optimisticallyRemoveImportableCalendarEvents(queryClient, calendarEventIds);
+
+      // Also optimistically update stats (since these are now confirmed visits)
+      optimisticallyUpdateStats(queryClient, { confirmed: calendarEventIds.length });
+
+      return { previousEvents };
+    },
+    onError: (_error, _calendarEventIds, context) => {
+      // Rollback to previous state on error
+      if (context?.previousEvents) {
+        queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, context.previousEvents);
+      }
+    },
+    onSettled: () => {
+      // Always refetch after mutation settles to ensure data consistency
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.importableCalendarEvents });
     },
