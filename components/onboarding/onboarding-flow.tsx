@@ -153,13 +153,7 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         {/* Action Button */}
         <Button onPress={handleNext} size={"lg"} className={"bg-white"} loading={isRequestingPermission}>
           <ButtonText className={"text-black font-semibold"}>
-            {isLastSlide
-              ? "Get Started"
-              : currentSlide.buttonText
-                ? currentSlide.buttonText
-                : currentSlide.permission
-                  ? "Allow Access"
-                  : "Continue"}
+            {isLastSlide ? "Get Started" : currentSlide.buttonText ? currentSlide.buttonText : "Continue"}
           </ButtonText>
         </Button>
       </Animated.View>
