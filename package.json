@@ -68,7 +68,7 @@
     "tailwind-merge": "3.4.0",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
-    "uniwind": "^1.2.3",
+    "uniwind": "^1.2.4",
     "zustand": "^5.0.10"
   },
   "private": true,
@@ -78,7 +78,7 @@
     "@eslint/js": "^9.39.2",
     "@types/babel__core": "^7",
     "@types/lodash-es": "^4",
-    "@types/node": "^25.0.6",
+    "@types/node": "^25.0.8",
     "@types/react-dom": "~19.2.3",
     "@typescript-eslint/utils": "^8.53.0",
     "eslint": "^9.39.2",
