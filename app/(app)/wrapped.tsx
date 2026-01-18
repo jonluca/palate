@@ -148,13 +148,12 @@ function MonthlyVisitsChart({
   monthlyVisits: WrappedStats["monthlyVisits"];
   selectedYear: number | null;
 }) {
-  if (monthlyVisits.length === 0) {
-    return null;
-  }
-
-  // For a specific year, show all 12 months
-  // For all-time, show the last 12 months of data
+  // For a specific year, show all 12 months for that year
+  // For all-time, aggregate visits by month across all years
   const chartData = useMemo(() => {
+    if (monthlyVisits.length === 0) {
+      return [];
+    }
     if (selectedYear) {
       // Fill in all 12 months for the selected year
       return MONTH_NAMES.map((name, index) => {
@@ -165,23 +164,24 @@ function MonthlyVisitsChart({
         };
       });
     } else {
-      // For all-time, show the last 12 months with data or recent months
-      const sortedData = [...monthlyVisits].sort((a, b) => {
-        if (a.year !== b.year) {
-          return b.year - a.year;
-        }
-        return b.month - a.month;
-      });
+      // For all-time, aggregate all visits by month (Jan-Dec totals across all years)
+      const monthTotals = new Map<number, number>();
+      for (const m of monthlyVisits) {
+        monthTotals.set(m.month, (monthTotals.get(m.month) ?? 0) + m.visits);
+      }
 
-      const last12 = sortedData.slice(0, 12).reverse();
-      return last12.map((m) => ({
-        month: `${MONTH_NAMES[m.month - 1]}'${String(m.year).slice(-2)}`,
-        visits: m.visits,
+      return MONTH_NAMES.map((name, index) => ({
+        month: name,
+        visits: monthTotals.get(index + 1) ?? 0,
       }));
     }
   }, [monthlyVisits, selectedYear]);
 
   const maxVisits = Math.max(...chartData.map((d) => d.visits), 1);
+
+  if (chartData.length === 0) {
+    return null;
+  }
 
   return (
     <Animated.View entering={FadeInDown.delay(300).duration(400)} className={"gap-4"}>
@@ -189,41 +189,52 @@ function MonthlyVisitsChart({
         📈 Monthly Visits
       </ThemedText>
       <View className={"bg-white/5 rounded-2xl p-4"}>
-        <View className={"flex-row items-end justify-between h-32 gap-1"}>
+        {/* Value labels row */}
+        <View className={"flex-row justify-between gap-1 mb-1"}>
+          {chartData.map((data, index) => (
+            <View key={`label-${data.month}-${index}`} className={"flex-1 items-center"}>
+              <ThemedText variant={"caption2"} className={"text-white/60 text-center"} style={{ fontSize: 9 }}>
+                {data.visits > 0 ? data.visits : ""}
+              </ThemedText>
+            </View>
+          ))}
+        </View>
+        {/* Bars container with fixed height */}
+        <View className={"flex-row items-end justify-between gap-1"} style={{ height: 100 }}>
           {chartData.map((data, index) => {
             const heightPercent = data.visits > 0 ? (data.visits / maxVisits) * 100 : 0;
             const barHeight = Math.max(heightPercent, data.visits > 0 ? 8 : 2);
 
             return (
               <Animated.View
-                key={`${data.month}-${index}`}
+                key={`bar-${data.month}-${index}`}
                 entering={FadeInUp.delay(400 + index * 30).duration(300)}
-                className={"flex-1 items-center gap-1"}
+                className={"flex-1 items-center justify-end h-full"}
               >
-                <ThemedText variant={"caption2"} className={"text-white/60 text-center"}>
-                  {data.visits > 0 ? data.visits : ""}
-                </ThemedText>
                 <View
                   className={"w-full rounded-t-sm"}
                   style={{
                     height: `${barHeight}%`,
-                    minHeight: data.visits > 0 ? 8 : 2,
+                    minHeight: data.visits > 0 ? 6 : 2,
                     backgroundColor:
                       data.visits > 0
                         ? `rgba(251, 191, 36, ${0.4 + (data.visits / maxVisits) * 0.6})`
                         : "rgba(255, 255, 255, 0.1)",
                   }}
                 />
-                <ThemedText
-                  variant={"caption2"}
-                  className={"text-white/40 text-center"}
-                  style={{ fontSize: selectedYear ? 10 : 8 }}
-                >
-                  {selectedYear ? data.month : data.month.slice(0, 3)}
-                </ThemedText>
               </Animated.View>
             );
           })}
+        </View>
+        {/* Month labels row */}
+        <View className={"flex-row justify-between gap-1 mt-1"}>
+          {chartData.map((data, index) => (
+            <View key={`month-${data.month}-${index}`} className={"flex-1 items-center"}>
+              <ThemedText variant={"caption2"} className={"text-white/40 text-center"} style={{ fontSize: 9 }}>
+                {data.month}
+              </ThemedText>
+            </View>
+          ))}
         </View>
       </View>
     </Animated.View>
@@ -558,7 +569,6 @@ export default function WrappedScreen() {
     }
   }, [showConfetti]);
 
-  const headerTitle = selectedYear ? `${selectedYear}` : "All Time";
   const headerSubtitle = selectedYear
     ? `Your ${selectedYear} culinary journey`
     : "A look back at your culinary adventures";
@@ -587,7 +597,7 @@ export default function WrappedScreen() {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
-          paddingTop: insets.top + 16,
+          paddingTop: 16,
           paddingBottom: insets.bottom + 32,
           paddingHorizontal: 20,
           flexGrow: 1,
@@ -597,7 +607,7 @@ export default function WrappedScreen() {
         {/* Header */}
         <Animated.View entering={FadeInDown.duration(500)} className={"gap-2 mb-4"}>
           <ThemedText variant={"caption1"} className={"text-amber-400 uppercase tracking-widest font-bold"}>
-            ✨ Your Dining Year
+            ✨ Your Dining Years
           </ThemedText>
           <ThemedText variant={"largeTitle"} className={"text-white font-bold"}>
             Wrapped
