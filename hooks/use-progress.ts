@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useSharedValue, withTiming, type SharedValue } from "react-native-reanimated";
+import { useSharedValue, withTiming, runOnUI, type SharedValue } from "react-native-reanimated";
 
 interface ProgressData {
   status: string;
@@ -74,7 +74,7 @@ function useProgressUpdater(sharedValues: ProgressSharedValues) {
     [updateProgressWorklet],
   );
 
-  const reset = useCallback(() => {
+  const resetWorklet = useCallback(() => {
     "worklet";
     statusRef.value = "";
     speedRef.value = 0;
@@ -82,6 +82,10 @@ function useProgressUpdater(sharedValues: ProgressSharedValues) {
     progressRef.value = 0;
     isActiveRef.value = false;
   }, [statusRef, speedRef, etaRef, progressRef, isActiveRef]);
+
+  const reset = useCallback(() => {
+    runOnUI(resetWorklet)();
+  }, [resetWorklet]);
 
   return { updateProgress, reset };
 }

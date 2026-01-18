@@ -91,7 +91,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
       [
         "expo-splash-screen",
         {
-          image: "./assets/images/splash-icon.jpeg",
+          image: "./assets/images/splash-icon.png",
           imageWidth: 100,
           resizeMode: "contain",
           backgroundColor: "#ffffff",
