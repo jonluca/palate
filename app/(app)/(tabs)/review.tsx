@@ -82,7 +82,7 @@ export default function ReviewScreen() {
 
   type FoodFilter = "on" | "off";
   type MatchesFilter = "on" | "off";
-  type StarFilter = "any" | "2plus" | "3";
+  type StarFilter = "any" | "1plus" | "2plus" | "3";
 
   const [filtersCollapsed, setFiltersCollapsed] = useState(true);
   const [foodFilter, setFoodFilter] = useState<FoodFilter>("on");
@@ -175,7 +175,9 @@ export default function ReviewScreen() {
     parts.push(foodFilter === "on" ? "Food" : "No Food");
     parts.push(matchesFilter === "on" ? "Restaurant Matches" : "No Restaurant Matches");
 
-    if (starFilter === "2plus") {
+    if (starFilter === "1plus") {
+      parts.push("1★+");
+    } else if (starFilter === "2plus") {
       parts.push("2★+");
     } else if (starFilter === "3") {
       parts.push("3★");
@@ -206,6 +208,9 @@ export default function ReviewScreen() {
       }
 
       const maxStars = visitMaxStars(v);
+      if (starFilter === "1plus" && maxStars < 1) {
+        return false;
+      }
       if (starFilter === "2plus" && maxStars < 2) {
         return false;
       }
@@ -372,6 +377,7 @@ export default function ReviewScreen() {
                 <FilterPills
                   options={[
                     { value: "any" as const, label: "Stars: Any" },
+                    { value: "1plus" as const, label: "1★+" },
                     { value: "2plus" as const, label: "2★+" },
                     { value: "3" as const, label: "3★" },
                   ]}
@@ -491,16 +497,6 @@ export default function ReviewScreen() {
                   <ThemedText variant={"body"} color={"secondary"}>
                     Try changing the filters above.
                   </ThemedText>
-                  <Button
-                    variant={"outline"}
-                    onPress={() => {
-                      setFoodFilter("on");
-                      setMatchesFilter("on");
-                      setStarFilter("any");
-                    }}
-                  >
-                    <ButtonText variant={"outline"}>Reset to Has Food</ButtonText>
-                  </Button>
                 </View>
               )
             }
