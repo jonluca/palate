@@ -395,7 +395,7 @@ function WrappedCardContent({ stats }: { stats: WrappedStats }) {
 
 export function WrappedCard() {
   const isFocused = useIsFocused();
-  const { data: stats, isLoading } = useWrappedStats({ enabled: isFocused });
+  const { data: stats, isLoading } = useWrappedStats(null, { enabled: isFocused });
 
   // Show loading skeleton while fetching
   if (isLoading) {

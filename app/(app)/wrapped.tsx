@@ -241,29 +241,44 @@ function MonthlyVisitsChart({
   );
 }
 
-function StatPill({
+function StatCard({
   icon,
   value,
   label,
+  accentColor = "amber",
   delay = 0,
 }: {
   icon: string;
   value: string | number;
   label: string;
+  accentColor?: "amber" | "emerald" | "violet" | "rose";
   delay?: number;
 }) {
+  const accentStyles = {
+    amber: { border: "border-amber-500/30", glow: "bg-amber-500/10", text: "text-amber-400" },
+    emerald: { border: "border-emerald-500/30", glow: "bg-emerald-500/10", text: "text-emerald-400" },
+    violet: { border: "border-violet-500/30", glow: "bg-violet-500/10", text: "text-violet-400" },
+    rose: { border: "border-rose-500/30", glow: "bg-rose-500/10", text: "text-rose-400" },
+  };
+  const accent = accentStyles[accentColor];
+
   return (
     <Animated.View
       entering={FadeInUp.delay(delay).duration(400)}
-      className={"bg-white/10 rounded-2xl px-5 py-4 items-center gap-2 flex-1"}
+      className={`flex-1 rounded-2xl border ${accent.border} overflow-hidden`}
+      style={{ minHeight: 120 }}
     >
-      <ThemedText variant={"largeTitle"}>{icon}</ThemedText>
-      <ThemedText variant={"largeTitle"} className={"text-white font-bold"}>
-        {typeof value === "number" ? value.toLocaleString() : value}
-      </ThemedText>
-      <ThemedText variant={"footnote"} className={"text-white/60 text-center"}>
-        {label}
-      </ThemedText>
+      {/* Glow effect at top */}
+      <View className={`absolute top-0 left-0 right-0 h-16 ${accent.glow}`} style={{ opacity: 0.6 }} />
+      <View className={"flex-1 items-center justify-center p-4 gap-1"}>
+        <ThemedText style={{ fontSize: 28 }}>{icon}</ThemedText>
+        <ThemedText variant={"title1"} className={`font-bold ${accent.text}`}>
+          {typeof value === "number" ? value.toLocaleString() : value}
+        </ThemedText>
+        <ThemedText variant={"caption1"} className={"text-white/50 text-center"}>
+          {label}
+        </ThemedText>
+      </View>
     </Animated.View>
   );
 }
@@ -423,20 +438,50 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
   const hasCuisineData = stats.topCuisines.length > 0;
   const hasMonthlyData = stats.monthlyVisits.length > 0;
 
+  // Determine the 4th stat to show
+  const fourthStat = useMemo(() => {
+    if (stats.michelinStats.totalAccumulatedStars > 0) {
+      return { icon: "⭐", value: stats.michelinStats.totalAccumulatedStars, label: "Michelin Stars" };
+    }
+    if (stats.topCuisines.length > 0) {
+      return { icon: "🍜", value: stats.topCuisines.length, label: "Cuisines" };
+    }
+    if (stats.longestStreak && stats.longestStreak.days >= 2) {
+      return { icon: "🔥", value: stats.longestStreak.days, label: "Day Streak" };
+    }
+    return { icon: "📸", value: "—", label: "Photos" };
+  }, [stats]);
+
   return (
     <View className={"gap-8"}>
-      {/* Hero Stats */}
-      <Animated.View entering={FadeIn.delay(100).duration(500)} className={"gap-4"}>
-        <View className={"flex-row gap-4"}>
-          <StatPill icon={"🍽️"} value={stats.totalConfirmedVisits} label={"Total Visits"} delay={100} />
-          <StatPill icon={"🏠"} value={stats.totalUniqueRestaurants} label={"Restaurants"} delay={200} />
+      {/* Hero Stats - 2x2 Grid */}
+      <Animated.View entering={FadeIn.delay(100).duration(500)} className={"gap-3"}>
+        <View className={"flex-row gap-3"}>
+          <StatCard icon={"🍽️"} value={stats.totalConfirmedVisits} label={"Visits"} accentColor={"amber"} delay={100} />
+          <StatCard
+            icon={"🏠"}
+            value={stats.totalUniqueRestaurants}
+            label={"Restaurants"}
+            accentColor={"emerald"}
+            delay={150}
+          />
         </View>
-        {stats.averageVisitsPerMonth > 0 && (
-          <View className={"flex-row gap-4"}>
-            <StatPill icon={"📅"} value={stats.averageVisitsPerMonth} label={"Per Month"} delay={300} />
-            <View className={"flex-1"} />
-          </View>
-        )}
+        <View className={"flex-row gap-3"}>
+          <StatCard
+            icon={"📅"}
+            value={stats.averageVisitsPerMonth > 0 ? stats.averageVisitsPerMonth : "—"}
+            label={"Per Month"}
+            accentColor={"violet"}
+            delay={200}
+          />
+          <StatCard
+            icon={fourthStat.icon}
+            value={fourthStat.value}
+            label={fourthStat.label}
+            accentColor={"rose"}
+            delay={250}
+          />
+        </View>
       </Animated.View>
 
       {/* Monthly Chart */}
