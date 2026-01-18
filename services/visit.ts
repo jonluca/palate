@@ -1371,6 +1371,8 @@ export async function processPhotos(
     detail: string;
     photosPerSecond?: number;
     eta?: string;
+    /** Progress value 0-1 for the current phase */
+    progress?: number;
   }) => void,
 ): Promise<{
   visitsCreated: number;
@@ -1390,6 +1392,7 @@ export async function processPhotos(
         detail: `Scanned ${p.processedAssets.toLocaleString()} of ${p.totalAssets.toLocaleString()} photos`,
         photosPerSecond: p.newPhotosPerSecond,
         eta: formatEta(p.etaMs),
+        progress: p.totalAssets > 0 ? p.processedAssets / p.totalAssets : 0,
       });
     },
   });
@@ -1404,6 +1407,7 @@ export async function processPhotos(
         detail: `Grouped ${p.visitedPhotos.toLocaleString()} of ${p.totalPhotos.toLocaleString()}`,
         photosPerSecond: p.visitsPerSecond,
         eta: formatEta(p.etaMs),
+        progress: p.totalPhotos > 0 ? p.visitedPhotos / p.totalPhotos : 0,
       });
     },
   });
@@ -1421,6 +1425,7 @@ export async function processPhotos(
         detail: `Matched ${p.visitsWithEvents.toLocaleString()} events for ${p.processedVisits.toLocaleString()} visits`,
         photosPerSecond: p.visitsPerSecond,
         eta: formatEta(p.etaMs),
+        progress: p.totalVisits > 0 ? p.processedVisits / p.totalVisits : 0,
       });
     },
   });
@@ -1438,6 +1443,7 @@ export async function processPhotos(
         detail: `Analyzed ${p.processedSamples.toLocaleString()} of ${p.totalSamples.toLocaleString()} pics for food`,
         photosPerSecond: p.samplesPerSecond,
         eta: formatEta(p.etaMs),
+        progress: p.totalSamples > 0 ? p.processedSamples / p.totalSamples : 0,
       });
     },
   });

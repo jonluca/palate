@@ -594,6 +594,8 @@ export interface ScanProgress {
   detail: string;
   photosPerSecond?: number;
   eta?: string;
+  /** Progress value 0-1 for the current phase */
+  progress?: number;
 }
 
 /**

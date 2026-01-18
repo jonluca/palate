@@ -87,11 +87,12 @@ export function useScanProgress() {
   const { updateProgress, reset } = useProgressUpdater(sharedValues);
 
   const onProgress = useCallback(
-    (progress: { phase: string; detail: string; photosPerSecond?: number; eta?: string }) => {
+    (progress: { phase: string; detail: string; photosPerSecond?: number; eta?: string; progress?: number }) => {
       updateProgress({
         status: progress.detail,
         speed: progress.photosPerSecond ?? 0,
         eta: progress.eta ?? "",
+        progress: progress.progress,
       });
     },
     [updateProgress],

@@ -47,7 +47,7 @@ export function useScan(): UseScanReturn {
   const { sharedValues, onProgress, start, complete, error } = useScanProgress();
 
   const handleProgress = useCallback(
-    (progress: { phase: string; detail: string; photosPerSecond?: number; eta?: string }) => {
+    (progress: { phase: string; detail: string; photosPerSecond?: number; eta?: string; progress?: number }) => {
       onProgress(progress);
       updateScanProgress({
         phase: progress.phase as "scanning" | "analyzing-visits" | "enriching",
@@ -61,8 +61,8 @@ export function useScan(): UseScanReturn {
 
   const handleDeepScanProgress = useCallback(
     (progress: DeepScanProgress) => {
-      const percent =
-        progress.totalPhotos > 0 ? Math.round((progress.processedPhotos / progress.totalPhotos) * 100) : 0;
+      const progressValue = progress.totalPhotos > 0 ? progress.processedPhotos / progress.totalPhotos : 0;
+      const percent = Math.round(progressValue * 100);
       const eta =
         progress.etaMs !== null && progress.etaMs > 0
           ? `${Math.ceil(progress.etaMs / 1000).toLocaleString()}s`
@@ -75,6 +75,7 @@ export function useScan(): UseScanReturn {
         detail: `Deep scanning ${progress.processedPhotos.toLocaleString()} of ${progress.totalPhotos.toLocaleString()} photos (${percent.toLocaleString()}%) - ${progress.foodPhotosFound.toLocaleString()} food photos found`,
         photosPerSecond: Math.round(progress.photosPerSecond),
         eta,
+        progress: progressValue,
       });
       updateScanProgress({
         phase: "scanning",
