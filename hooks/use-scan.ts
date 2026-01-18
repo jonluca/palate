@@ -9,6 +9,7 @@ import {
 } from "./queries";
 import { useScanProgress, type ProgressSharedValues } from "./use-progress";
 import { useAppStore, useHasCompletedInitialScan } from "@/store/app-store";
+import { formatEta } from "@/services/scanner";
 
 export interface UseScanReturn {
   // Permission state
@@ -63,12 +64,7 @@ export function useScan(): UseScanReturn {
     (progress: DeepScanProgress) => {
       const progressValue = progress.totalPhotos > 0 ? progress.processedPhotos / progress.totalPhotos : 0;
       const percent = Math.round(progressValue * 100);
-      const eta =
-        progress.etaMs !== null && progress.etaMs > 0
-          ? `${Math.ceil(progress.etaMs / 1000).toLocaleString()}s`
-          : progress.isComplete
-            ? "Done"
-            : "calculating...";
+      const eta = progress.isComplete ? "Done" : formatEta(progress.etaMs);
 
       onProgress({
         phase: "deep-scanning",
