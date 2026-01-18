@@ -80,7 +80,7 @@ function AnimatedStatusText({ value }: { value: SharedValue<string> }) {
   }
 
   return (
-    <ThemedText variant={"subhead"} color={"secondary"} className={"flex-1 font-medium"}>
+    <ThemedText variant={"subhead"} color={"secondary"} className={"flex-1 font-medium"} numberOfLines={1}>
       {text}
     </ThemedText>
   );
