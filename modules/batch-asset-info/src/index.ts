@@ -39,6 +39,11 @@ export interface FoodDetectionOptions extends ClassificationOptions {
    * Default is 0.3
    */
   foodConfidenceThreshold?: number;
+  /**
+   * Custom list of food-related keywords to use for detection.
+   * If not provided, uses the default FOOD_IDENTIFIERS set.
+   */
+  foodKeywords?: string[];
 }
 
 interface ClassificationLabel {
@@ -64,8 +69,8 @@ export interface FoodDetectionResult {
   error?: string;
 }
 
-// Food-related classification identifiers
-const FOOD_IDENTIFIERS = new Set([
+// Default food-related classification identifiers (used if no custom keywords provided)
+const DEFAULT_FOOD_IDENTIFIERS = new Set([
   "food",
   "dish",
   "meal",
@@ -117,23 +122,24 @@ const FOOD_IDENTIFIERS = new Set([
 ]);
 
 /**
- * Check if a label is food-related
+ * Check if a label is food-related against a set of keywords
  */
-function isFoodLabel(label: string): boolean {
+function isFoodLabel(label: string, foodKeywords: Set<string>): boolean {
   const lowerLabel = label.trim().toLowerCase();
-  for (const foodId of FOOD_IDENTIFIERS) {
-    if (lowerLabel === foodId) {
-      return true;
-    }
-  }
-  return false;
+  return foodKeywords.has(lowerLabel);
 }
 
 /**
  * Process classification results to detect food
  */
-function processForFoodDetection(result: ClassificationResult, foodConfidenceThreshold: number): FoodDetectionResult {
-  const foodLabels = result.labels.filter((l) => isFoodLabel(l.label) && l.confidence >= foodConfidenceThreshold);
+function processForFoodDetection(
+  result: ClassificationResult,
+  foodConfidenceThreshold: number,
+  foodKeywords: Set<string>,
+): FoodDetectionResult {
+  const foodLabels = result.labels.filter(
+    (l) => isFoodLabel(l.label, foodKeywords) && l.confidence >= foodConfidenceThreshold,
+  );
 
   const maxFoodConfidence = foodLabels.length > 0 ? Math.max(...foodLabels.map((l) => l.confidence)) : 0;
 
@@ -209,7 +215,7 @@ async function classifyImageBatch(
  * Uses image classification and filters for food-related labels.
  *
  * @param assetIds Array of asset local identifiers
- * @param options Optional detection options
+ * @param options Optional detection options (including custom food keywords)
  * @returns Array of food detection results
  */
 export async function detectFoodInImageBatch(
@@ -233,5 +239,10 @@ export async function detectFoodInImageBatch(
 
   const foodConfidenceThreshold = options.foodConfidenceThreshold ?? 0.3;
 
-  return classificationResults.map((result) => processForFoodDetection(result, foodConfidenceThreshold));
+  // Use custom keywords if provided, otherwise use defaults
+  const foodKeywords = options.foodKeywords
+    ? new Set(options.foodKeywords.map((k) => k.trim().toLowerCase()))
+    : DEFAULT_FOOD_IDENTIFIERS;
+
+  return classificationResults.map((result) => processForFoodDetection(result, foodConfidenceThreshold, foodKeywords));
 }

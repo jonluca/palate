@@ -108,11 +108,11 @@ const isNativeBatchAvailable = () => isBatchAssetInfoAvailable();
 async function processWithNativeBatch(
   assetIds: string[],
   onPhotosWithLocation: (count: number) => void,
-): Promise<Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence">[]> {
+): Promise<Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[]> {
   try {
     const batchInfo = await getAssetInfoBatch(assetIds);
 
-    const photos: Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence">[] = [];
+    const photos: Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[] = [];
     let locCount = 0;
 
     // Note: batchInfo may have fewer items than assetIds if some photos were deleted
@@ -149,7 +149,7 @@ async function processWithPMap(
   assets: MediaLibrary.Asset[],
   concurrency: number,
   onPhotosWithLocation: (count: number) => void,
-): Promise<Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence">[]> {
+): Promise<Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[]> {
   const assetsWithInfo = await pMap(
     assets,
     async (asset) => {
@@ -163,7 +163,7 @@ async function processWithPMap(
     { concurrency },
   );
 
-  const photos: Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence">[] = [];
+  const photos: Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[] = [];
   let locCount = 0;
 
   for (const asset of assetsWithInfo) {
@@ -244,7 +244,10 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     });
 
     if (response.assets.length > 0) {
-      let photosToInsert: Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence">[];
+      let photosToInsert: Omit<
+        PhotoRecord,
+        "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels"
+      >[];
 
       if (useNativeBatch) {
         // Use native batch API (iOS) - much faster!

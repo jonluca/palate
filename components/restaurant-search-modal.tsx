@@ -1,7 +1,13 @@
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { Card, Button, ButtonText } from "@/components/ui";
-import { useUnifiedNearbyRestaurants, useSearchNearbyRestaurants, type NearbyRestaurant } from "@/hooks";
+import {
+  useUnifiedNearbyRestaurants,
+  useSearchNearbyRestaurants,
+  useConfirmedRestaurants,
+  type NearbyRestaurant,
+  type RestaurantWithVisits,
+} from "@/hooks";
 import type { PlaceResult } from "@/services/places";
 import type { VisitRecord } from "@/utils/db";
 import { useGoogleMapsApiKey } from "@/store";
@@ -149,6 +155,9 @@ export function RestaurantSearchModal({
     visible,
   );
 
+  // Also fetch confirmed restaurants (restaurants the user has visited)
+  const { data: confirmedRestaurants = [] } = useConfirmedRestaurants();
+
   const searchGoogleMutation = useSearchNearbyRestaurants();
 
   const calendarEventTitle = visit.calendarEventTitle;
@@ -177,6 +186,29 @@ export function RestaurantSearchModal({
   // Sort term: use search query if provided, otherwise fall back to calendar event title
   const sortTerm = searchQuery.trim() || calendarEventTitle;
 
+  // Convert confirmed restaurants to RestaurantOption and filter by search query
+  const visitedOptions: (RestaurantOption & { visitCount: number })[] = useMemo(() => {
+    // Only include visited restaurants when there's a search query
+    if (!searchQuery.trim()) {
+      return [];
+    }
+
+    const query = searchQuery.toLowerCase();
+    const filtered = confirmedRestaurants.filter((r: RestaurantWithVisits) => r.name.toLowerCase().includes(query));
+
+    const options = filtered.map((r: RestaurantWithVisits) => ({
+      id: r.id,
+      name: r.name,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      address: null,
+      source: "michelin" as const, // Use michelin as source since these are confirmed
+      visitCount: r.visitCount,
+    }));
+
+    return sortBySimilarity(options, sortTerm);
+  }, [confirmedRestaurants, searchQuery, sortTerm]);
+
   // Convert unified results to RestaurantOption, filter by search, and sort by similarity
   const nearbyOptions: RestaurantOption[] = useMemo(() => {
     const options: RestaurantOption[] = unifiedRestaurants.map((r: NearbyRestaurant) => ({
@@ -203,8 +235,12 @@ export function RestaurantSearchModal({
         })
       : options;
 
-    return sortBySimilarity(filtered, sortTerm);
-  }, [unifiedRestaurants, sortTerm, searchQuery]);
+    // Exclude restaurants that are already in visitedOptions to avoid duplicates
+    const visitedIds = new Set(visitedOptions.map((v) => v.id));
+    const deduplicated = filtered.filter((r) => !visitedIds.has(r.id));
+
+    return sortBySimilarity(deduplicated, sortTerm);
+  }, [unifiedRestaurants, sortTerm, searchQuery, visitedOptions]);
 
   const googleOptions: (RestaurantOption & {
     rating?: number;
@@ -282,6 +318,60 @@ export function RestaurantSearchModal({
         </View>
 
         <ScrollView ref={scrollViewRef} className={"flex-1"} contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
+          {/* Visited Restaurants (shown when searching) */}
+          {!showGoogle && visitedOptions.length > 0 && (
+            <Animated.View entering={FadeIn} className={"gap-4 mb-6"}>
+              <ThemedText variant={"subhead"} color={"secondary"} className={"font-medium"}>
+                Your Restaurants
+              </ThemedText>
+              <View className={"gap-3"}>
+                {visitedOptions.map((restaurant, idx) => {
+                  const similarity = sortTerm ? calculateSimilarity(restaurant.name, sortTerm) : 0;
+                  const isLikelyMatch = similarity > 0.5;
+                  return (
+                    <Pressable
+                      key={`visited-${restaurant.id}-${idx}`}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        onSelect(restaurant);
+                        handleClose();
+                      }}
+                    >
+                      <Card animated={false}>
+                        <View className={"p-3 gap-1"}>
+                          <View className={"flex-row items-start justify-between"}>
+                            <View className={"flex-1"}>
+                              <View className={"flex-row items-center gap-2"}>
+                                <ThemedText variant={"subhead"} className={"font-medium"}>
+                                  {restaurant.name}
+                                </ThemedText>
+                                {isLikelyMatch && (
+                                  <View className={"bg-emerald-500/20 px-1.5 py-0.5 rounded"}>
+                                    <ThemedText variant={"caption2"} className={"text-emerald-400"}>
+                                      Match
+                                    </ThemedText>
+                                  </View>
+                                )}
+                              </View>
+                              <ThemedText variant={"footnote"} color={"tertiary"}>
+                                {restaurant.visitCount} {restaurant.visitCount === 1 ? "visit" : "visits"}
+                              </ThemedText>
+                            </View>
+                            <View className={"bg-violet-500/20 px-1.5 py-0.5 rounded"}>
+                              <ThemedText variant={"caption2"} className={"text-violet-400"}>
+                                Visited
+                              </ThemedText>
+                            </View>
+                          </View>
+                        </View>
+                      </Card>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </Animated.View>
+          )}
+
           {/* Nearby Results (Michelin + MapKit) */}
           {!showGoogle && (
             <Animated.View entering={FadeIn} className={"gap-4"}>

@@ -28,6 +28,13 @@ import {
   getVisitsWithExportedCalendarEvents,
   clearExportedCalendarEvents,
   batchUpdateVisitCalendarEvents,
+  getAllFoodKeywords,
+  addFoodKeyword,
+  removeFoodKeyword,
+  toggleFoodKeyword,
+  resetFoodKeywordsToDefaults,
+  reclassifyPhotosWithCurrentKeywords,
+  getPhotosWithLabelsCount,
   type VisitWithDetails,
   type PhotoRecord,
   type RestaurantRecord,
@@ -40,6 +47,8 @@ import {
   type UpdateRestaurantData,
   type VisitForCalendarExport,
   type ExportedCalendarEvent,
+  type FoodKeywordRecord,
+  type ReclassifyProgress,
   createManualVisit,
 } from "@/utils/db";
 import {
@@ -180,6 +189,8 @@ export const queryKeys = {
   syncableCalendars: ["syncableCalendars"] as const,
   visitsWithoutCalendarEvents: ["visitsWithoutCalendarEvents"] as const,
   exportedCalendarEvents: ["exportedCalendarEvents"] as const,
+  foodKeywords: ["foodKeywords"] as const,
+  photosWithLabelsCount: ["photosWithLabelsCount"] as const,
 };
 
 // Hooks
@@ -1426,6 +1437,135 @@ export function useDeleteExportedCalendarEvents() {
       queryClient.invalidateQueries({ queryKey: queryKeys.visitsWithoutCalendarEvents });
       queryClient.invalidateQueries({ queryKey: queryKeys.visits() });
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+    },
+  });
+}
+
+// ============================================================================
+// FOOD KEYWORDS HOOKS
+// ============================================================================
+
+// Re-export types
+export type { FoodKeywordRecord, ReclassifyProgress };
+
+/**
+ * Fetch all food keywords
+ */
+export function useFoodKeywords() {
+  return useQuery({
+    queryKey: queryKeys.foodKeywords,
+    queryFn: getAllFoodKeywords,
+  });
+}
+
+/**
+ * Get count of photos that have classification labels stored (for reclassification UI)
+ */
+export function usePhotosWithLabelsCount() {
+  return useQuery({
+    queryKey: queryKeys.photosWithLabelsCount,
+    queryFn: getPhotosWithLabelsCount,
+  });
+}
+
+/**
+ * Add a new food keyword
+ */
+export function useAddFoodKeyword() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (keyword: string) => {
+      return addFoodKeyword(keyword);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.foodKeywords });
+    },
+  });
+}
+
+/**
+ * Remove a food keyword (only user-added keywords can be removed)
+ */
+export function useRemoveFoodKeyword() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      await removeFoodKeyword(id);
+      return { id };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.foodKeywords });
+    },
+  });
+}
+
+/**
+ * Toggle a food keyword on/off
+ */
+export function useToggleFoodKeyword() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, enabled }: { id: number; enabled: boolean }) => {
+      await toggleFoodKeyword(id, enabled);
+      return { id, enabled };
+    },
+    onMutate: async ({ id, enabled }) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: queryKeys.foodKeywords });
+
+      // Snapshot the previous value
+      const previousKeywords = queryClient.getQueryData<FoodKeywordRecord[]>(queryKeys.foodKeywords);
+
+      // Optimistically update the cache
+      queryClient.setQueryData<FoodKeywordRecord[]>(queryKeys.foodKeywords, (old) =>
+        old?.map((k) => (k.id === id ? { ...k, enabled } : k)),
+      );
+
+      return { previousKeywords };
+    },
+    onError: (_err, _vars, context) => {
+      // Rollback on error
+      if (context?.previousKeywords) {
+        queryClient.setQueryData(queryKeys.foodKeywords, context.previousKeywords);
+      }
+    },
+  });
+}
+
+/**
+ * Reset food keywords to defaults (re-enable all built-in, remove user-added)
+ */
+export function useResetFoodKeywords() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      await resetFoodKeywordsToDefaults();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.foodKeywords });
+    },
+  });
+}
+
+/**
+ * Reclassify all photos based on current enabled food keywords
+ */
+export function useReclassifyPhotos(onProgress?: (progress: ReclassifyProgress) => void) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      return reclassifyPhotosWithCurrentKeywords(onProgress);
+    },
+    onSuccess: () => {
+      // Invalidate all relevant queries after reclassification
+      invalidateVisitQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.photosWithLabelsCount });
     },
   });
 }

@@ -23,6 +23,7 @@ import {
   insertCalendarOnlyVisits,
   performDatabaseMaintenance,
   getConfirmedVisitsWithMichelinIds,
+  getEnabledFoodKeywords,
   type PhotoRecord,
   type VisitRecord,
   type VisitSuggestedRestaurant,
@@ -645,6 +646,7 @@ interface FoodBatchResult {
   foodDetected: boolean;
   foodLabels?: FoodLabel[];
   foodConfidence?: number;
+  allLabels?: FoodLabel[];
 }
 
 /** Generic batch food detection processor - shared by all food detection functions */
@@ -652,9 +654,13 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
   items: T[],
   confidenceThreshold: number,
   onBatchComplete?: (processed: number, foodFound: number) => void,
+  foodKeywords?: string[],
 ): Promise<{ results: FoodBatchResult[]; foodFoundCount: number }> {
   const results: FoodBatchResult[] = [];
   let foodFoundCount = 0;
+
+  // Fetch enabled food keywords from database if not provided
+  const keywords = foodKeywords ?? (await getEnabledFoodKeywords());
 
   for (let i = 0; i < items.length; i += FOOD_DETECTION_BATCH_SIZE) {
     const batch = items.slice(i, i + FOOD_DETECTION_BATCH_SIZE);
@@ -663,7 +669,7 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
     try {
       const detectionResults = await detectFoodInImageBatch(
         batch.map((b) => b.id),
-        { confidenceThreshold },
+        { confidenceThreshold, foodKeywords: keywords },
       );
 
       for (const result of detectionResults) {
@@ -675,6 +681,7 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
           foodDetected: result.containsFood,
           foodLabels: result.foodLabels as FoodLabel[],
           foodConfidence: result.foodConfidence,
+          allLabels: result.labels as FoodLabel[], // Store all labels from classifier
         });
         if (result.containsFood) {
           foodFoundCount++;

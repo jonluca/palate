@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { View, Alert, RefreshControl, ScrollView, Pressable, Linking, TextInput, Modal, FlatList } from "react-native";
 import { useToast } from "@/components/ui/toast";
 import { router } from "expo-router";
@@ -17,6 +17,7 @@ import {
   useSelectedCalendarIds,
   useSetSelectedCalendarIds,
 } from "@/store";
+
 import {
   useStats,
   useIgnoredLocations,
@@ -27,8 +28,17 @@ import {
   useCreateCalendarEventsForVisits,
   useExportedCalendarEvents,
   useDeleteExportedCalendarEvents,
+  useFoodKeywords,
+  useAddFoodKeyword,
+  useRemoveFoodKeyword,
+  useToggleFoodKeyword,
+  useResetFoodKeywords,
+  useReclassifyPhotos,
+  usePhotosWithLabelsCount,
   type IgnoredLocationRecord,
   type WritableCalendar,
+  type FoodKeywordRecord,
+  type ReclassifyProgress,
 } from "@/hooks/queries";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
@@ -854,6 +864,297 @@ function DangerZoneCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Food Keywords Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function FoodKeywordsCard() {
+  const { showToast } = useToast();
+  const { data: keywords = [], isLoading } = useFoodKeywords();
+  const { data: photosWithLabelsCount = 0 } = usePhotosWithLabelsCount();
+  const addKeywordMutation = useAddFoodKeyword();
+  const removeKeywordMutation = useRemoveFoodKeyword();
+  const toggleKeywordMutation = useToggleFoodKeyword();
+  const resetKeywordsMutation = useResetFoodKeywords();
+
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [newKeyword, setNewKeyword] = useState("");
+  const [reclassifyProgress, setReclassifyProgress] = useState<ReclassifyProgress | null>(null);
+
+  const reclassifyMutation = useReclassifyPhotos((progress) => {
+    setReclassifyProgress(progress);
+  });
+
+  const enabledCount = keywords.filter((k) => k.enabled).length;
+  const userAddedCount = keywords.filter((k) => !k.isBuiltIn).length;
+
+  const handleAddKeyword = useCallback(async () => {
+    const trimmed = newKeyword.trim().toLowerCase();
+    if (!trimmed) {
+      return;
+    }
+
+    // Check if already exists
+    if (keywords.some((k) => k.keyword === trimmed)) {
+      showToast({ type: "error", message: "Keyword already exists" });
+      return;
+    }
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    try {
+      await addKeywordMutation.mutateAsync(trimmed);
+      setNewKeyword("");
+      showToast({ type: "success", message: `Added "${trimmed}"` });
+    } catch {
+      showToast({ type: "error", message: "Failed to add keyword" });
+    }
+  }, [newKeyword, keywords, addKeywordMutation, showToast]);
+
+  const handleToggleKeyword = useCallback(
+    (keyword: FoodKeywordRecord) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      toggleKeywordMutation.mutate({ id: keyword.id, enabled: !keyword.enabled });
+    },
+    [toggleKeywordMutation],
+  );
+
+  const handleRemoveKeyword = useCallback(
+    (keyword: FoodKeywordRecord) => {
+      if (keyword.isBuiltIn) {
+        showToast({ type: "error", message: "Cannot remove built-in keywords" });
+        return;
+      }
+
+      Alert.alert("Remove Keyword", `Remove "${keyword.keyword}" from food detection?`, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            removeKeywordMutation.mutate(keyword.id, {
+              onSuccess: () => showToast({ type: "success", message: `Removed "${keyword.keyword}"` }),
+              onError: () => showToast({ type: "error", message: "Failed to remove keyword" }),
+            });
+          },
+        },
+      ]);
+    },
+    [removeKeywordMutation, showToast],
+  );
+
+  const handleResetToDefaults = useCallback(() => {
+    Alert.alert(
+      "Reset to Defaults",
+      "This will re-enable all built-in keywords and remove any custom keywords you added.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            resetKeywordsMutation.mutate(undefined, {
+              onSuccess: () => showToast({ type: "success", message: "Keywords reset to defaults" }),
+              onError: () => showToast({ type: "error", message: "Failed to reset keywords" }),
+            });
+          },
+        },
+      ],
+    );
+  }, [resetKeywordsMutation, showToast]);
+
+  const handleReclassify = useCallback(() => {
+    if (photosWithLabelsCount === 0) {
+      showToast({ type: "info", message: "No photos to reclassify. Run a scan first." });
+      return;
+    }
+
+    Alert.alert(
+      "Reclassify Photos",
+      `This will re-evaluate ${photosWithLabelsCount.toLocaleString()} photos with the current keyword settings. This may take a while.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Reclassify",
+          onPress: () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            setReclassifyProgress({ total: photosWithLabelsCount, processed: 0, updated: 0, isComplete: false });
+            reclassifyMutation.mutate(undefined, {
+              onSuccess: (result) => {
+                setReclassifyProgress(null);
+                showToast({
+                  type: "success",
+                  message: `Reclassified ${result.total.toLocaleString()} photos`,
+                });
+              },
+              onError: () => {
+                setReclassifyProgress(null);
+                showToast({ type: "error", message: "Failed to reclassify photos" });
+              },
+            });
+          },
+        },
+      ],
+    );
+  }, [photosWithLabelsCount, reclassifyMutation, showToast]);
+
+  // Group keywords: enabled first, then disabled
+  const sortedKeywords = useMemo(() => {
+    return [...keywords].sort((a, b) => {
+      if (a.enabled !== b.enabled) {
+        return a.enabled ? -1 : 1;
+      }
+      return a.keyword.localeCompare(b.keyword);
+    });
+  }, [keywords]);
+
+  return (
+    <Card animated={false}>
+      <Pressable onPress={() => setIsExpanded(!isExpanded)}>
+        <View className={"p-4"}>
+          <View className={"flex-row items-center gap-3"}>
+            <CardIcon name={"fork.knife"} color={"#f97316"} bgColor={"bg-orange-500/15"} />
+            <View className={"flex-1"}>
+              <ThemedText variant={"subhead"} className={"font-medium"}>
+                Food Detection Keywords
+              </ThemedText>
+              <ThemedText variant={"footnote"} color={"secondary"}>
+                {isLoading
+                  ? "Loading..."
+                  : `${enabledCount} of ${keywords.length} keywords enabled${userAddedCount > 0 ? ` (${userAddedCount} custom)` : ""}`}
+              </ThemedText>
+            </View>
+            <IconSymbol name={isExpanded ? "chevron.up" : "chevron.down"} size={16} color={"#9ca3af"} />
+          </View>
+        </View>
+      </Pressable>
+
+      {isExpanded && (
+        <View className={"px-4 pb-4 gap-4"}>
+          {/* Reclassify Progress */}
+          {reclassifyProgress && !reclassifyProgress.isComplete && (
+            <View className={"bg-orange-500/10 rounded-xl p-3"}>
+              <View className={"flex-row items-center justify-between mb-2"}>
+                <ThemedText variant={"footnote"} className={"text-orange-400"}>
+                  Reclassifying photos...
+                </ThemedText>
+                <ThemedText variant={"caption2"} className={"text-orange-400"}>
+                  {reclassifyProgress.processed.toLocaleString()} / {reclassifyProgress.total.toLocaleString()}
+                </ThemedText>
+              </View>
+              <View className={"h-1.5 bg-orange-500/20 rounded-full overflow-hidden"}>
+                <View
+                  className={"h-full bg-orange-500 rounded-full"}
+                  style={{
+                    width: `${reclassifyProgress.total > 0 ? (reclassifyProgress.processed / reclassifyProgress.total) * 100 : 0}%`,
+                  }}
+                />
+              </View>
+            </View>
+          )}
+
+          {/* Add new keyword */}
+          <View className={"flex-row gap-2"}>
+            <View className={"flex-1 bg-background/50 rounded-xl overflow-hidden"}>
+              <TextInput
+                className={"px-4 py-3 text-foreground"}
+                placeholder={"Add custom keyword..."}
+                placeholderTextColor={"#9ca3af"}
+                value={newKeyword}
+                onChangeText={setNewKeyword}
+                autoCapitalize={"none"}
+                autoCorrect={false}
+                returnKeyType={"done"}
+                onSubmitEditing={handleAddKeyword}
+              />
+            </View>
+            <Pressable
+              onPress={handleAddKeyword}
+              disabled={!newKeyword.trim() || addKeywordMutation.isPending}
+              className={`px-4 py-3 rounded-xl ${newKeyword.trim() ? "bg-orange-500" : "bg-gray-600"}`}
+            >
+              <IconSymbol name={"plus"} size={20} color={"#fff"} />
+            </Pressable>
+          </View>
+
+          {/* Keywords list */}
+          <View className={"gap-2 max-h-64"}>
+            <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled>
+              <View className={"flex-row flex-wrap gap-2"}>
+                {sortedKeywords.map((keyword) => (
+                  <Pressable
+                    key={keyword.id}
+                    onPress={() => handleToggleKeyword(keyword)}
+                    onLongPress={() => handleRemoveKeyword(keyword)}
+                    className={`flex-row items-center gap-1.5 px-3 py-2 rounded-full ${
+                      keyword.enabled
+                        ? "bg-orange-500/20 border border-orange-500/40"
+                        : "bg-background/50 border border-white/10"
+                    }`}
+                  >
+                    <ThemedText variant={"footnote"} className={keyword.enabled ? "text-orange-400" : "text-gray-500"}>
+                      {keyword.keyword}
+                    </ThemedText>
+                    {!keyword.isBuiltIn && <View className={"w-1.5 h-1.5 rounded-full bg-blue-500"} />}
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+
+          {/* Actions */}
+          <View className={"flex-row gap-2"}>
+            <View className={"flex-1"}>
+              <Button
+                variant={"secondary"}
+                size={"sm"}
+                onPress={handleReclassify}
+                disabled={reclassifyMutation.isPending || photosWithLabelsCount === 0}
+                loading={reclassifyMutation.isPending}
+              >
+                <IconSymbol name={"arrow.triangle.2.circlepath"} size={14} color={"#f97316"} />
+                <ButtonText variant={"secondary"} className={"ml-1.5"}>
+                  Reclassify
+                </ButtonText>
+              </Button>
+            </View>
+            <View className={"flex-1"}>
+              <Button
+                variant={"secondary"}
+                size={"sm"}
+                onPress={handleResetToDefaults}
+                disabled={resetKeywordsMutation.isPending}
+              >
+                <IconSymbol name={"arrow.counterclockwise"} size={14} color={"#9ca3af"} />
+                <ButtonText variant={"secondary"} className={"ml-1.5"}>
+                  Reset
+                </ButtonText>
+              </Button>
+            </View>
+          </View>
+
+          {/* Info */}
+          <View className={"gap-1"}>
+            <View className={"flex-row items-center gap-2"}>
+              <IconSymbol name={"info.circle"} size={12} color={"#9ca3af"} />
+              <ThemedText variant={"caption2"} color={"tertiary"}>
+                Tap to toggle, long-press custom keywords to remove
+              </ThemedText>
+            </View>
+            <View className={"flex-row items-center gap-2"}>
+              <View className={"w-1.5 h-1.5 rounded-full bg-blue-500"} />
+              <ThemedText variant={"caption2"} color={"tertiary"}>
+                Blue dot = custom keyword
+              </ThemedText>
+            </View>
+          </View>
+        </View>
+      )}
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // About Card
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1003,8 +1304,14 @@ export default function SettingsScreen() {
         </Animated.View>
       )}
 
-      {/* Google Maps API Key Section */}
+      {/* Food Detection Section */}
       <Animated.View entering={FadeInDown.delay(150).duration(300)} className={"mb-6"}>
+        <SectionHeader>Food Detection</SectionHeader>
+        <FoodKeywordsCard />
+      </Animated.View>
+
+      {/* Google Maps API Key Section */}
+      <Animated.View entering={FadeInDown.delay(200).duration(300)} className={"mb-6"}>
         <SectionHeader>Integrations</SectionHeader>
         <GoogleMapsApiKeyCard />
       </Animated.View>

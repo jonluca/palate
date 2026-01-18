@@ -255,21 +255,50 @@ function StatCard({
   delay?: number;
 }) {
   const accentStyles = {
-    amber: { border: "border-amber-500/30", glow: "bg-amber-500/10", text: "text-amber-400" },
-    emerald: { border: "border-emerald-500/30", glow: "bg-emerald-500/10", text: "text-emerald-400" },
-    violet: { border: "border-violet-500/30", glow: "bg-violet-500/10", text: "text-violet-400" },
-    rose: { border: "border-rose-500/30", glow: "bg-rose-500/10", text: "text-rose-400" },
+    amber: {
+      border: "border-amber-500/30",
+      text: "text-amber-400",
+      gradientColors: ["rgba(251, 191, 36, 0.35)", "rgba(251, 191, 36, 0.08)", "transparent"] as const,
+    },
+    emerald: {
+      border: "border-emerald-500/30",
+      text: "text-emerald-400",
+      gradientColors: ["rgba(52, 211, 153, 0.35)", "rgba(52, 211, 153, 0.08)", "transparent"] as const,
+    },
+    violet: {
+      border: "border-violet-500/30",
+      text: "text-violet-400",
+      gradientColors: ["rgba(167, 139, 250, 0.35)", "rgba(167, 139, 250, 0.08)", "transparent"] as const,
+    },
+    rose: {
+      border: "border-rose-500/30",
+      text: "text-rose-400",
+      gradientColors: ["rgba(251, 113, 133, 0.35)", "rgba(251, 113, 133, 0.08)", "transparent"] as const,
+    },
   };
   const accent = accentStyles[accentColor];
 
   return (
     <Animated.View
       entering={FadeInUp.delay(delay).duration(400)}
-      className={`flex-1 rounded-2xl border ${accent.border} overflow-hidden`}
+      className={`flex-1 rounded-2xl border ${accent.border} overflow-hidden bg-white/5`}
       style={{ minHeight: 120 }}
     >
-      {/* Glow effect at top */}
-      <View className={`absolute top-0 left-0 right-0 h-16 ${accent.glow}`} style={{ opacity: 0.6 }} />
+      {/* Radial glow effect */}
+      <LinearGradient
+        colors={accent.gradientColors}
+        locations={[0, 0.5, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={{
+          position: "absolute",
+          top: -20,
+          left: -20,
+          right: -20,
+          height: 100,
+          borderRadius: 60,
+        }}
+      />
       <View className={"flex-1 items-center justify-center p-4 gap-1"}>
         <ThemedText style={{ fontSize: 28 }}>{icon}</ThemedText>
         <ThemedText variant={"title1"} className={`font-bold ${accent.text}`}>
