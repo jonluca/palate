@@ -42,7 +42,7 @@ function useProgressUpdater(sharedValues: ProgressSharedValues) {
   const progressRef = sharedValues.progress;
   const isActiveRef = sharedValues.isActive;
 
-  const updateProgress = useCallback(
+  const updateProgressWorklet = useCallback(
     (data: Partial<ProgressData>) => {
       "worklet";
       // Shared values are designed to be mutated - disable react-compiler for this block
@@ -65,6 +65,13 @@ function useProgressUpdater(sharedValues: ProgressSharedValues) {
       /* eslint-enable react-compiler/react-compiler */
     },
     [statusRef, speedRef, etaRef, progressRef, isActiveRef],
+  );
+
+  const updateProgress = useCallback(
+    (data: Partial<ProgressData>) => {
+      runOnUI(updateProgressWorklet)(data);
+    },
+    [updateProgressWorklet],
   );
 
   const reset = useCallback(() => {

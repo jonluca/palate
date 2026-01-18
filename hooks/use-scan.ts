@@ -72,7 +72,7 @@ export function useScan(): UseScanReturn {
 
       onProgress({
         phase: "deep-scanning",
-        detail: `Deep scanning ${progress.processedPhotos.toLocaleString()} of ${progress.totalPhotos.toLocaleString()} photos (${percent.toLocaleString()}%) - ${progress.foodPhotosFound.toLocaleString()} food photos found`,
+        detail: `Scanned ${progress.processedPhotos.toLocaleString()} of ${progress.totalPhotos.toLocaleString()} photos (${percent.toLocaleString()}%)`,
         photosPerSecond: Math.round(progress.photosPerSecond),
         eta,
         progress: progressValue,
