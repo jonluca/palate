@@ -736,7 +736,7 @@ export async function getVisitsWithDetails(
   }
 
   // Single query joining visits with both restaurants tables
-  // For confirmed visits, use awardAtVisit (historical), otherwise use current award
+  // For confirmed visits, use awardAtVisit (historical) if available, otherwise fall back to current award
   const visits = await database.getAllAsync<
     VisitRecord & {
       restaurantName: string | null;
@@ -747,7 +747,7 @@ export async function getVisitsWithDetails(
     `SELECT c.*, 
             r.name as restaurantName,
             m.name as suggestedRestaurantName,
-            CASE WHEN c.status = 'confirmed' THEN c.awardAtVisit ELSE m.award END as suggestedRestaurantAward
+            COALESCE(c.awardAtVisit, m.award) as suggestedRestaurantAward
      FROM visits c
      LEFT JOIN restaurants r ON c.restaurantId = r.id
      LEFT JOIN michelin_restaurants m ON c.suggestedRestaurantId = m.id
@@ -2028,7 +2028,7 @@ export async function getMergeableVisits(
   const database = await getDatabase();
 
   // Get visits excluding the current one, ordered by time proximity
-  // For confirmed visits, use awardAtVisit (historical), otherwise use current award
+  // Use awardAtVisit (historical) if available, otherwise fall back to current award
   const visits = await database.getAllAsync<
     VisitRecord & {
       restaurantName: string | null;
@@ -2039,7 +2039,7 @@ export async function getMergeableVisits(
     `SELECT c.*, 
             r.name as restaurantName,
             m.name as suggestedRestaurantName,
-            CASE WHEN c.status = 'confirmed' THEN c.awardAtVisit ELSE m.award END as suggestedRestaurantAward,
+            COALESCE(c.awardAtVisit, m.award) as suggestedRestaurantAward,
             ABS(c.startTime - ?) as timeDiff
      FROM visits c
      LEFT JOIN restaurants r ON c.restaurantId = r.id
@@ -2238,37 +2238,38 @@ export async function getWrappedStats(): Promise<WrappedStats> {
       GROUP BY year
       ORDER BY year DESC`,
     ),
-    // Michelin stats - uses awardAtVisit for historical accuracy
+    // Michelin stats - uses awardAtVisit for historical accuracy, falls back to current award
     database.getAllAsync<{ award: string; count: number }>(
-      `SELECT v.awardAtVisit as award, COUNT(DISTINCT v.id) as count
+      `SELECT COALESCE(v.awardAtVisit, m.award) as award, COUNT(DISTINCT v.id) as count
       FROM visits v
-      WHERE v.status = 'confirmed' AND v.awardAtVisit IS NOT NULL
-      GROUP BY v.awardAtVisit`,
+      LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
+      WHERE v.status = 'confirmed' AND COALESCE(v.awardAtVisit, m.award) IS NOT NULL
+      GROUP BY COALESCE(v.awardAtVisit, m.award)`,
     ),
-    // Distinct starred restaurants count - uses awardAtVisit for historical accuracy
+    // Distinct starred restaurants count - uses awardAtVisit or falls back to current award
     database.getFirstAsync<{ count: number }>(
       `SELECT COUNT(DISTINCT v.restaurantId) as count
       FROM visits v
+      LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
       WHERE v.status = 'confirmed'
-        AND v.awardAtVisit IS NOT NULL
-        AND (v.awardAtVisit LIKE '%star%' OR v.awardAtVisit LIKE '%Star%')`,
+        AND (COALESCE(v.awardAtVisit, m.award) LIKE '%star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%Star%')`,
     ),
-    // Distinct stars (sum of star rating across unique starred restaurants at time of visit)
+    // Distinct stars (sum of star rating across unique starred restaurants at time of visit or current)
     database.getFirstAsync<{ distinctStars: number | null }>(
       `SELECT SUM(
         CASE
-          WHEN lower(t.awardAtVisit) LIKE '%3 star%' THEN 3
-          WHEN lower(t.awardAtVisit) LIKE '%2 star%' THEN 2
-          WHEN lower(t.awardAtVisit) LIKE '%1 star%' THEN 1
+          WHEN lower(t.award) LIKE '%3 star%' THEN 3
+          WHEN lower(t.award) LIKE '%2 star%' THEN 2
+          WHEN lower(t.award) LIKE '%1 star%' THEN 1
           ELSE 0
         END
       ) as distinctStars
       FROM (
-        SELECT DISTINCT v.restaurantId, v.awardAtVisit
+        SELECT DISTINCT v.restaurantId, COALESCE(v.awardAtVisit, m.award) as award
         FROM visits v
+        LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
         WHERE v.status = 'confirmed'
-          AND v.awardAtVisit IS NOT NULL
-          AND (v.awardAtVisit LIKE '%star%' OR v.awardAtVisit LIKE '%Star%')
+          AND (COALESCE(v.awardAtVisit, m.award) LIKE '%star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%Star%')
       ) t`,
     ),
     // Top cuisines

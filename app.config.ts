@@ -1,11 +1,13 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
+const VERSION = "1.0.1";
+
 const getConfig = ({ config }: ConfigContext): ExpoConfig => {
   return {
     ...config,
     name: "Palate",
     slug: "photos-organizer",
-    version: "1.0.0",
+    version: VERSION,
     orientation: "portrait",
     icon: "./assets/images/icon.jpeg",
     scheme: "photorestaurantmatcher",
