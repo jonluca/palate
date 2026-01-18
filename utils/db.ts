@@ -2312,18 +2312,18 @@ export async function getWrappedStats(): Promise<WrappedStats> {
   for (const row of michelinData) {
     const award = row.award.toLowerCase();
     if (award.includes("3 star")) {
-      michelinStats.threeStars = row.count;
+      michelinStats.threeStars += row.count;
       michelinStats.totalAccumulatedStars += row.count * 3;
     } else if (award.includes("2 star")) {
-      michelinStats.twoStars = row.count;
+      michelinStats.twoStars += row.count;
       michelinStats.totalAccumulatedStars += row.count * 2;
     } else if (award.includes("1 star")) {
-      michelinStats.oneStars = row.count;
+      michelinStats.oneStars += row.count;
       michelinStats.totalAccumulatedStars += row.count * 1;
     } else if (award.includes("bib")) {
-      michelinStats.bibGourmand = row.count;
+      michelinStats.bibGourmand += row.count;
     } else if (award.includes("selected")) {
-      michelinStats.selected = row.count;
+      michelinStats.selected += row.count;
     }
     michelinStats.totalStarredVisits += row.count;
   }
