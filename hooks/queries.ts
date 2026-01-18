@@ -291,11 +291,12 @@ export function useVisitDetail(id: string | undefined) {
         suggestedRestaurant = await getMichelinRestaurantById(visit.suggestedRestaurantId);
       }
 
-      // For confirmed visits, use the historical award stored at time of confirmation
-      if (visit.status === "confirmed" && suggestedRestaurant && visit.awardAtVisit !== undefined) {
+      // For confirmed visits, prefer the historical award stored at time of confirmation
+      // Fall back to current award if no historical award was stored
+      if (visit.status === "confirmed" && suggestedRestaurant && visit.awardAtVisit) {
         suggestedRestaurant = {
           ...suggestedRestaurant,
-          award: visit.awardAtVisit ?? "",
+          award: visit.awardAtVisit,
         };
       }
 

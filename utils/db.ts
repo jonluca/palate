@@ -2242,15 +2242,17 @@ export async function getWrappedStats(): Promise<WrappedStats> {
     database.getAllAsync<{ award: string; count: number }>(
       `SELECT COALESCE(v.awardAtVisit, m.award) as award, COUNT(DISTINCT v.id) as count
       FROM visits v
-      LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
-      WHERE v.status = 'confirmed' AND COALESCE(v.awardAtVisit, m.award) IS NOT NULL
+      JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
+      JOIN michelin_restaurants m ON vsr.restaurantId = m.id
+      WHERE v.status = 'confirmed'
       GROUP BY COALESCE(v.awardAtVisit, m.award)`,
     ),
     // Distinct starred restaurants count - uses awardAtVisit or falls back to current award
     database.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(DISTINCT v.restaurantId) as count
+      `SELECT COUNT(DISTINCT m.id) as count
       FROM visits v
-      LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
+      JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
+      JOIN michelin_restaurants m ON vsr.restaurantId = m.id
       WHERE v.status = 'confirmed'
         AND (COALESCE(v.awardAtVisit, m.award) LIKE '%star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%Star%')`,
     ),
@@ -2265,9 +2267,10 @@ export async function getWrappedStats(): Promise<WrappedStats> {
         END
       ) as distinctStars
       FROM (
-        SELECT DISTINCT v.restaurantId, COALESCE(v.awardAtVisit, m.award) as award
+        SELECT DISTINCT m.id, COALESCE(v.awardAtVisit, m.award) as award
         FROM visits v
-        LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
+        JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
+        JOIN michelin_restaurants m ON vsr.restaurantId = m.id
         WHERE v.status = 'confirmed'
           AND (COALESCE(v.awardAtVisit, m.award) LIKE '%star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%Star%')
       ) t`,
