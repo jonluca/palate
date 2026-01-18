@@ -4,6 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { Uniwind } from "uniwind";
 import { ToastProvider } from "@/components/ui/toast";
+import { UndoProvider } from "@/components/ui/undo-banner";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Slot } from "expo-router";
 import { AppState, Platform } from "react-native";
@@ -45,8 +46,10 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <ToastProvider>
-          <Slot />
-          {/* {__DEV__ && <FloatingDevTools disableHints />} */}
+          <UndoProvider>
+            <Slot />
+            {/* {__DEV__ && <FloatingDevTools disableHints />} */}
+          </UndoProvider>
         </ToastProvider>
       </GestureHandlerRootView>
       <StatusBar style={"light"} />

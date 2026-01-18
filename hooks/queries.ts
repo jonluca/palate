@@ -1021,6 +1021,27 @@ export function useQuickUpdateVisitStatus() {
 }
 
 /**
+ * Undo a visit action (confirm or reject) by restoring it to pending status.
+ * This is used by the undo banner to revert actions.
+ */
+export function useUndoVisitAction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ visitId }: { visitId: string }) => {
+      await updateVisitStatus(visitId, "pending");
+      return { visitId };
+    },
+    onSuccess: () => {
+      // Refetch the pending review list to restore the visit
+      queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+    },
+  });
+}
+
+/**
  * Batch update visit statuses - for bulk operations
  * Uses optimistic updates for instant UI feedback - no query invalidation needed for pending reviews
  */

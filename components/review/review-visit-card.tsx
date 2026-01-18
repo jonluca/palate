@@ -1,9 +1,10 @@
 import { RestaurantSearchModal, type RestaurantOption } from "@/components/restaurant-search-modal";
-import { SwipeableCard } from "@/components/ui";
+import { SwipeableCard, useUndo } from "@/components/ui";
 import { VisitCard, type SuggestedRestaurant } from "@/components/visit-card";
 import {
   useConfirmVisit,
   useQuickUpdateVisitStatus,
+  useUndoVisitAction,
   type ExactCalendarMatch,
   type PendingVisitForReview,
 } from "@/hooks/queries";
@@ -23,6 +24,8 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
   const [showSearch, setShowSearch] = useState(false);
   const confirmMutation = useConfirmVisit();
   const updateStatusMutation = useQuickUpdateVisitStatus();
+  const undoMutation = useUndoVisitAction();
+  const { showUndo } = useUndo();
 
   // Reset modal state when card identity changes (handles FlashList recycling)
   useEffect(() => {
@@ -34,6 +37,10 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
   const hasMultipleSuggestions = !match && visit.suggestedRestaurants && visit.suggestedRestaurants.length > 1;
 
   const handleConfirmSuggestion = async (selectedRestaurant?: SuggestedRestaurant) => {
+    // Determine the restaurant name for the undo message
+    const restaurantName =
+      selectedRestaurant?.name ?? match?.restaurantName ?? visit.suggestedRestaurantName ?? "restaurant";
+
     // If a restaurant was selected from the multiple suggestions picker
     if (selectedRestaurant) {
       await confirmMutation.mutateAsync({
@@ -44,11 +51,8 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
         longitude: selectedRestaurant.longitude,
         startTime: visit.startTime,
       });
-      return;
-    }
-
-    // If we have an exact match, use its restaurant info
-    if (match) {
+    } else if (match) {
+      // If we have an exact match, use its restaurant info
       await confirmMutation.mutateAsync({
         visitId: match.visitId,
         restaurantId: match.restaurantId,
@@ -57,26 +61,43 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
         longitude: match.longitude,
         startTime: match.startTime,
       });
+    } else if (visit.suggestedRestaurantId && visit.suggestedRestaurantName) {
+      // Fall back to the primary suggestion
+      await confirmMutation.mutateAsync({
+        visitId: visit.id,
+        restaurantId: visit.suggestedRestaurantId,
+        restaurantName: visit.suggestedRestaurantName,
+        latitude: visit.centerLat,
+        longitude: visit.centerLon,
+        startTime: visit.startTime,
+      });
+    } else {
       return;
     }
 
-    // Fall back to the primary suggestion
-    if (!visit.suggestedRestaurantId || !visit.suggestedRestaurantName) {
-      return;
-    }
-
-    await confirmMutation.mutateAsync({
+    // Show undo banner
+    showUndo({
+      type: "confirm",
       visitId: visit.id,
-      restaurantId: visit.suggestedRestaurantId,
-      restaurantName: visit.suggestedRestaurantName,
-      latitude: visit.centerLat,
-      longitude: visit.centerLon,
-      startTime: visit.startTime,
+      message: `Confirmed ${restaurantName}`,
+      onUndo: async () => {
+        await undoMutation.mutateAsync({ visitId: visit.id });
+      },
     });
   };
 
   const handleReject = async () => {
     await updateStatusMutation.mutateAsync({ visitId: visit.id, newStatus: "rejected" });
+
+    // Show undo banner
+    showUndo({
+      type: "reject",
+      visitId: visit.id,
+      message: "Visit skipped",
+      onUndo: async () => {
+        await undoMutation.mutateAsync({ visitId: visit.id });
+      },
+    });
   };
 
   const handleSelectRestaurant = async (restaurant: RestaurantOption) => {
@@ -88,6 +109,16 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
       latitude: restaurant.latitude,
       longitude: restaurant.longitude,
       startTime: visit.startTime,
+    });
+
+    // Show undo banner
+    showUndo({
+      type: "confirm",
+      visitId: visit.id,
+      message: `Confirmed ${restaurant.name}`,
+      onUndo: async () => {
+        await undoMutation.mutateAsync({ visitId: visit.id });
+      },
     });
   };
 
