@@ -1,7 +1,7 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { AnimatedListItem, ReviewVisitCard, TabButton, type ReviewTab } from "@/components/review";
-import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText, Card, FilterPills } from "@/components/ui";
+import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText, Card, FilterPills, useUndo } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import {
   usePendingReview,
@@ -10,7 +10,7 @@ import {
   type ExactCalendarMatch,
 } from "@/hooks/queries";
 import { FlashList } from "@shopify/flash-list";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, RefreshControl, Alert, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
@@ -92,6 +92,13 @@ export default function ReviewScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { setOnUndoComplete } = useUndo();
+
+  // FlashList refs for scrolling back after undo
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const regularListRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const exactMatchListRef = useRef<any>(null);
 
   // Data queries
   const { data, isLoading } = usePendingReview();
@@ -166,7 +173,7 @@ export default function ReviewScreen() {
     const parts: string[] = [];
 
     parts.push(foodFilter === "on" ? "Food" : "No Food");
-    parts.push(matchesFilter === "on" ? "Matches" : "No Matches");
+    parts.push(matchesFilter === "on" ? "Restaurant Matches" : "No Restaurant Matches");
 
     if (starFilter === "2plus") {
       parts.push("2★+");
@@ -221,6 +228,29 @@ export default function ReviewScreen() {
       setActiveTab("all");
     }
   }, [activeTab, hasExactMatches]);
+
+  // Register undo complete callback to scroll back to restored item
+  useEffect(() => {
+    setOnUndoComplete((visitId: string) => {
+      // Wait a bit for the query to refetch and the item to appear in the list
+      setTimeout(() => {
+        // Try to find the item in the current list and scroll to it
+        if (activeTab === "all") {
+          const index = filteredReviewableVisits.findIndex((v) => v.id === visitId);
+          if (index !== -1) {
+            regularListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 });
+          }
+        } else if (activeTab === "exact") {
+          const index = exactMatches.findIndex((m) => m.visitId === visitId);
+          if (index !== -1) {
+            exactMatchListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 });
+          }
+        }
+      }, 300); // Small delay for data to refetch
+    });
+
+    return () => setOnUndoComplete(null);
+  }, [setOnUndoComplete, activeTab, filteredReviewableVisits, exactMatches]);
 
   // Handlers
   const onRefresh = useCallback(async () => {
@@ -333,7 +363,7 @@ export default function ReviewScreen() {
                     onToggle={() => setFoodFilter((v) => (v === "on" ? "off" : "on"))}
                   />
                   <ToggleChip
-                    label={"Matches"}
+                    label={"Restaurant Matches"}
                     value={matchesFilter === "on"}
                     onToggle={() => setMatchesFilter((v) => (v === "on" ? "off" : "on"))}
                   />
@@ -437,6 +467,7 @@ export default function ReviewScreen() {
         {/* Tab Content */}
         {activeTab === "all" && (
           <FlashList
+            ref={regularListRef}
             data={filteredReviewableVisits}
             renderItem={renderRegularItem}
             keyExtractor={(item) => item.id}
@@ -478,6 +509,7 @@ export default function ReviewScreen() {
 
         {activeTab === "exact" && hasExactMatches && (
           <FlashList
+            ref={exactMatchListRef}
             data={exactMatches}
             renderItem={renderExactMatchItem}
             keyExtractor={(item) => item.visitId}

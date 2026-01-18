@@ -33,6 +33,8 @@ interface UndoContextValue {
   clearUndo: () => void;
   /** Current undoable action, if any */
   currentAction: UndoableAction | null;
+  /** Register a callback to be called when undo completes successfully */
+  setOnUndoComplete: (callback: ((visitId: string) => void) | null) => void;
 }
 
 const UndoContext = createContext<UndoContextValue | null>(null);
@@ -150,6 +152,7 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
   const [currentAction, setCurrentAction] = useState<UndoableAction | null>(null);
   const [isUndoing, setIsUndoing] = useState(false);
   const idCounter = useRef(0);
+  const onUndoCompleteRef = useRef<((visitId: string) => void) | null>(null);
   const insets = useSafeAreaInsets();
 
   const showUndo = useCallback((action: Omit<UndoableAction, "id">) => {
@@ -161,14 +164,21 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
     setCurrentAction(null);
   }, []);
 
+  const setOnUndoComplete = useCallback((callback: ((visitId: string) => void) | null) => {
+    onUndoCompleteRef.current = callback;
+  }, []);
+
   const handleUndo = useCallback(async () => {
     if (!currentAction || isUndoing) {
       return;
     }
 
+    const visitId = currentAction.visitId;
     setIsUndoing(true);
     try {
       await currentAction.onUndo();
+      // Call the completion callback after successful undo
+      onUndoCompleteRef.current?.(visitId);
     } finally {
       setIsUndoing(false);
       setCurrentAction(null);
@@ -176,7 +186,7 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
   }, [currentAction, isUndoing]);
 
   return (
-    <UndoContext.Provider value={{ showUndo, clearUndo, currentAction }}>
+    <UndoContext.Provider value={{ showUndo, clearUndo, currentAction, setOnUndoComplete }}>
       {children}
       {currentAction && (
         <View
