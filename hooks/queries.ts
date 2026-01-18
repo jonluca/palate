@@ -40,6 +40,7 @@ import {
   type UpdateRestaurantData,
   type VisitForCalendarExport,
   type ExportedCalendarEvent,
+  createManualVisit,
 } from "@/utils/db";
 import {
   compareRestaurantAndCalendarTitle,
@@ -124,7 +125,12 @@ import {
   searchNearbyRestaurants as mapKitSearchNearbyRestaurants,
   type MapKitSearchResult,
 } from "@/modules/mapkit-search";
-import { getMichelinRestaurantDetails, type MichelinAward, type MichelinRestaurantDetails } from "@/services/michelin";
+import {
+  getMichelinRestaurantDetails,
+  getAwardForDate,
+  type MichelinAward,
+  type MichelinRestaurantDetails,
+} from "@/services/michelin";
 
 // Types
 export interface Stats {
@@ -283,6 +289,14 @@ export function useVisitDetail(id: string | undefined) {
       }
       if (visit.suggestedRestaurantId) {
         suggestedRestaurant = await getMichelinRestaurantById(visit.suggestedRestaurantId);
+      }
+
+      // For confirmed visits, use the historical award stored at time of confirmation
+      if (visit.status === "confirmed" && suggestedRestaurant && visit.awardAtVisit !== undefined) {
+        suggestedRestaurant = {
+          ...suggestedRestaurant,
+          award: visit.awardAtVisit ?? "",
+        };
       }
 
       // Get suggested restaurants from pre-computed data (same source as review page)
@@ -621,6 +635,7 @@ export function useSearchNearbyRestaurants() {
 /**
  * Confirm a visit by linking visit to restaurant
  * Uses optimistic updates for instant UI feedback - no query invalidation needed for pending reviews
+ * Looks up and stores the historical Michelin award at the time of visit
  */
 export function useConfirmVisit() {
   const queryClient = useQueryClient();
@@ -632,14 +647,22 @@ export function useConfirmVisit() {
       restaurantName,
       latitude,
       longitude,
+      startTime,
     }: {
       visitId: string;
       restaurantId: string;
       restaurantName: string;
       latitude: number;
       longitude: number;
+      startTime: number;
     }) => {
-      await confirmVisit(visitId, restaurantId, restaurantName, latitude, longitude);
+      // Look up the historical award for this restaurant at the time of visit
+      // Only Michelin restaurants (with "michelin-" prefix) have historical awards
+      let awardAtVisit: string | null = null;
+      if (restaurantId.startsWith("michelin-")) {
+        awardAtVisit = await getAwardForDate(restaurantId, startTime);
+      }
+      await confirmVisit(visitId, restaurantId, restaurantName, latitude, longitude, awardAtVisit);
       return { visitId };
     },
     onMutate: async ({ visitId }) => {
@@ -673,6 +696,7 @@ export function useConfirmVisit() {
 /**
  * Batch confirm multiple visits with their matched restaurants
  * Uses optimistic updates for instant UI feedback - no query invalidation needed for pending reviews
+ * Looks up and stores the historical Michelin award at the time of each visit
  */
 export function useBatchConfirmVisits() {
   const queryClient = useQueryClient();
@@ -685,10 +709,18 @@ export function useBatchConfirmVisits() {
         restaurantName: string;
         latitude: number;
         longitude: number;
+        startTime: number;
       }>,
     ) => {
       await Promise.all(
-        confirmations.map((c) => confirmVisit(c.visitId, c.restaurantId, c.restaurantName, c.latitude, c.longitude)),
+        confirmations.map(async (c) => {
+          // Look up the historical award for this restaurant at the time of visit
+          let awardAtVisit: string | null = null;
+          if (c.restaurantId.startsWith("michelin-")) {
+            awardAtVisit = await getAwardForDate(c.restaurantId, c.startTime);
+          }
+          return confirmVisit(c.visitId, c.restaurantId, c.restaurantName, c.latitude, c.longitude, awardAtVisit);
+        }),
       );
       return { count: confirmations.length };
     },
@@ -734,6 +766,7 @@ export interface ExactCalendarMatch {
   latitude: number;
   longitude: number;
   calendarTitle: string;
+  startTime: number;
 }
 
 /**
@@ -759,6 +792,7 @@ function getExactCalendarMatches(pendingVisits: PendingVisitForReview[]): ExactC
           latitude: restaurant.latitude,
           longitude: restaurant.longitude,
           calendarTitle: visit.calendarEventTitle,
+          startTime: visit.startTime,
         });
         break; // Only match once per visit
       }
@@ -1038,6 +1072,45 @@ export function useMergeVisits() {
     onSuccess: ({ targetVisitId }) => {
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(targetVisitId) });
+    },
+  });
+}
+
+/**
+ * Create a manual visit for a restaurant (without photos).
+ * This allows users to log past visits that weren't captured by photos.
+ */
+export function useCreateManualVisit() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      restaurantId,
+      restaurantName,
+      latitude,
+      longitude,
+      visitDate,
+      notes,
+    }: {
+      restaurantId: string;
+      restaurantName: string;
+      latitude: number;
+      longitude: number;
+      visitDate: number;
+      notes?: string | null;
+    }) => {
+      const visitId = await createManualVisit(restaurantId, restaurantName, latitude, longitude, visitDate, notes);
+      return { visitId, restaurantId };
+    },
+    onSuccess: ({ restaurantId }) => {
+      // Invalidate restaurant visits to show the new visit
+      queryClient.invalidateQueries({ queryKey: queryKeys.restaurantVisits(restaurantId) });
+      // Invalidate confirmed restaurants list (visit count changed)
+      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      // Invalidate stats
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      // Invalidate wrapped stats
+      queryClient.invalidateQueries({ queryKey: queryKeys.wrapped });
     },
   });
 }

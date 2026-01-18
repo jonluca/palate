@@ -46,6 +46,8 @@ export interface VisitRecord {
   notes: string | null;
   // Timestamps
   updatedAt: number | null;
+  // Historical Michelin award at the time of visit (for confirmed visits)
+  awardAtVisit: string | null;
 }
 
 export interface MichelinRestaurantRecord {
@@ -257,6 +259,15 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
   // This allows us to identify and delete exported events later
   try {
     await database.execAsync(`ALTER TABLE visits ADD COLUMN exportedToCalendarId TEXT`);
+  } catch {
+    // Column already exists, ignore
+  }
+
+  // Migration: Add awardAtVisit column to store the restaurant's Michelin award at the time of visit
+  // This allows historical accuracy - if a restaurant was 2 stars when visited but is now 3 stars,
+  // it should show as 2 stars for that visit
+  try {
+    await database.execAsync(`ALTER TABLE visits ADD COLUMN awardAtVisit TEXT`);
   } catch {
     // Column already exists, ignore
   }
@@ -725,6 +736,7 @@ export async function getVisitsWithDetails(
   }
 
   // Single query joining visits with both restaurants tables
+  // For confirmed visits, use awardAtVisit (historical), otherwise use current award
   const visits = await database.getAllAsync<
     VisitRecord & {
       restaurantName: string | null;
@@ -735,7 +747,7 @@ export async function getVisitsWithDetails(
     `SELECT c.*, 
             r.name as restaurantName,
             m.name as suggestedRestaurantName,
-            m.award as suggestedRestaurantAward
+            CASE WHEN c.status = 'confirmed' THEN c.awardAtVisit ELSE m.award END as suggestedRestaurantAward
      FROM visits c
      LEFT JOIN restaurants r ON c.restaurantId = r.id
      LEFT JOIN michelin_restaurants m ON c.suggestedRestaurantId = m.id
@@ -1337,6 +1349,7 @@ export async function confirmVisit(
   restaurantName: string,
   latitude: number,
   longitude: number,
+  awardAtVisit?: string | null,
 ): Promise<void> {
   const database = await getDatabase();
   const now = Date.now();
@@ -1349,12 +1362,63 @@ export async function confirmVisit(
     longitude,
   ]);
 
-  // Update visit with restaurant and confirmed status
-  await database.runAsync(`UPDATE visits SET restaurantId = ?, status = 'confirmed', updatedAt = ? WHERE id = ?`, [
+  // Update visit with restaurant, confirmed status, and the award at time of visit
+  await database.runAsync(
+    `UPDATE visits SET restaurantId = ?, status = 'confirmed', updatedAt = ?, awardAtVisit = ? WHERE id = ?`,
+    [restaurantId, now, awardAtVisit ?? null, visitId],
+  );
+}
+
+/**
+ * Create a manual visit for a restaurant (without photos).
+ * This allows users to log past visits that weren't captured by photos.
+ */
+export async function createManualVisit(
+  restaurantId: string,
+  restaurantName: string,
+  latitude: number,
+  longitude: number,
+  visitDate: number,
+  notes?: string | null,
+): Promise<string> {
+  const database = await getDatabase();
+  const now = Date.now();
+
+  // Generate a unique visit ID for manual visits
+  const latRounded = Math.round(latitude * 1000) / 1000;
+  const lonRounded = Math.round(longitude * 1000) / 1000;
+  const timeRounded = Math.floor(visitDate / (60 * 60 * 1000));
+  const visitId = `manual-${timeRounded}-${latRounded}-${lonRounded}-${now}`;
+
+  // Ensure restaurant exists
+  await database.runAsync(`INSERT OR IGNORE INTO restaurants (id, name, latitude, longitude) VALUES (?, ?, ?, ?)`, [
     restaurantId,
-    now,
-    visitId,
+    restaurantName,
+    latitude,
+    longitude,
   ]);
+
+  // Create the visit as confirmed with 0 photos
+  // Use visitDate as both start and end time (1 hour duration for display purposes)
+  const endTime = visitDate + 60 * 60 * 1000; // 1 hour after start
+
+  await database.runAsync(
+    `INSERT INTO visits (id, restaurantId, suggestedRestaurantId, status, startTime, endTime, centerLat, centerLon, photoCount, foodProbable, notes, updatedAt) 
+     VALUES (?, ?, ?, 'confirmed', ?, ?, ?, ?, 0, 0, ?, ?)`,
+    [
+      visitId,
+      restaurantId,
+      restaurantId.startsWith("michelin-") ? restaurantId : null,
+      visitDate,
+      endTime,
+      latitude,
+      longitude,
+      notes ?? null,
+      now,
+    ],
+  );
+
+  return visitId;
 }
 
 // Suggested restaurant with full details
@@ -1622,6 +1686,7 @@ export async function getPendingVisitsForReview(): Promise<PendingVisitForReview
       exportedToCalendarId: null, // Pending visits don't have exported events
       notes: row.notes,
       updatedAt: row.updatedAt,
+      awardAtVisit: null, // Pending visits don't have historical award yet
       restaurantName: row.restaurantName,
       suggestedRestaurantName: row.suggestedRestaurantName,
       suggestedRestaurantAward: row.suggestedRestaurantAward,
@@ -1963,6 +2028,7 @@ export async function getMergeableVisits(
   const database = await getDatabase();
 
   // Get visits excluding the current one, ordered by time proximity
+  // For confirmed visits, use awardAtVisit (historical), otherwise use current award
   const visits = await database.getAllAsync<
     VisitRecord & {
       restaurantName: string | null;
@@ -1973,7 +2039,7 @@ export async function getMergeableVisits(
     `SELECT c.*, 
             r.name as restaurantName,
             m.name as suggestedRestaurantName,
-            m.award as suggestedRestaurantAward,
+            CASE WHEN c.status = 'confirmed' THEN c.awardAtVisit ELSE m.award END as suggestedRestaurantAward,
             ABS(c.startTime - ?) as timeDiff
      FROM visits c
      LEFT JOIN restaurants r ON c.restaurantId = r.id
@@ -2172,41 +2238,37 @@ export async function getWrappedStats(): Promise<WrappedStats> {
       GROUP BY year
       ORDER BY year DESC`,
     ),
-    // Michelin stats
+    // Michelin stats - uses awardAtVisit for historical accuracy
     database.getAllAsync<{ award: string; count: number }>(
-      `SELECT m.award, COUNT(DISTINCT v.id) as count
+      `SELECT v.awardAtVisit as award, COUNT(DISTINCT v.id) as count
       FROM visits v
-      JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
-      JOIN michelin_restaurants m ON vsr.restaurantId = m.id
-      WHERE v.status = 'confirmed'
-      GROUP BY m.award`,
+      WHERE v.status = 'confirmed' AND v.awardAtVisit IS NOT NULL
+      GROUP BY v.awardAtVisit`,
     ),
-    // Distinct starred restaurants count
+    // Distinct starred restaurants count - uses awardAtVisit for historical accuracy
     database.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(DISTINCT m.id) as count
+      `SELECT COUNT(DISTINCT v.restaurantId) as count
       FROM visits v
-      JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
-      JOIN michelin_restaurants m ON vsr.restaurantId = m.id
       WHERE v.status = 'confirmed'
-        AND (m.award LIKE '%star%' OR m.award LIKE '%Star%')`,
+        AND v.awardAtVisit IS NOT NULL
+        AND (v.awardAtVisit LIKE '%star%' OR v.awardAtVisit LIKE '%Star%')`,
     ),
-    // Distinct stars (sum of star rating across unique starred restaurants)
+    // Distinct stars (sum of star rating across unique starred restaurants at time of visit)
     database.getFirstAsync<{ distinctStars: number | null }>(
       `SELECT SUM(
         CASE
-          WHEN lower(t.award) LIKE '%3 star%' THEN 3
-          WHEN lower(t.award) LIKE '%2 star%' THEN 2
-          WHEN lower(t.award) LIKE '%1 star%' THEN 1
+          WHEN lower(t.awardAtVisit) LIKE '%3 star%' THEN 3
+          WHEN lower(t.awardAtVisit) LIKE '%2 star%' THEN 2
+          WHEN lower(t.awardAtVisit) LIKE '%1 star%' THEN 1
           ELSE 0
         END
       ) as distinctStars
       FROM (
-        SELECT DISTINCT m.id, m.award
+        SELECT DISTINCT v.restaurantId, v.awardAtVisit
         FROM visits v
-        JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
-        JOIN michelin_restaurants m ON vsr.restaurantId = m.id
         WHERE v.status = 'confirmed'
-          AND (m.award LIKE '%star%' OR m.award LIKE '%Star%')
+          AND v.awardAtVisit IS NOT NULL
+          AND (v.awardAtVisit LIKE '%star%' OR v.awardAtVisit LIKE '%Star%')
       ) t`,
     ),
     // Top cuisines
@@ -2310,6 +2372,9 @@ export async function getWrappedStats(): Promise<WrappedStats> {
   };
 
   for (const row of michelinData) {
+    if (!row.award) {
+      continue;
+    }
     const award = row.award.toLowerCase();
     if (award.includes("3 star")) {
       michelinStats.threeStars += row.count;

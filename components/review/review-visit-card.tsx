@@ -42,6 +42,7 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
         restaurantName: selectedRestaurant.name,
         latitude: selectedRestaurant.latitude,
         longitude: selectedRestaurant.longitude,
+        startTime: visit.startTime,
       });
       return;
     }
@@ -54,6 +55,7 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
         restaurantName: match.restaurantName,
         latitude: match.latitude,
         longitude: match.longitude,
+        startTime: match.startTime,
       });
       return;
     }
@@ -69,6 +71,7 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
       restaurantName: visit.suggestedRestaurantName,
       latitude: visit.centerLat,
       longitude: visit.centerLon,
+      startTime: visit.startTime,
     });
   };
 
@@ -84,6 +87,7 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
       restaurantName: restaurant.name,
       latitude: restaurant.latitude,
       longitude: restaurant.longitude,
+      startTime: visit.startTime,
     });
   };
 

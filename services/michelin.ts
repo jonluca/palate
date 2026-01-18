@@ -220,6 +220,77 @@ export interface MichelinRestaurantDetails {
 }
 
 /**
+ * Get the award for a restaurant at a specific date.
+ * Uses the award from the year of the visit, or the closest previous year if not available.
+ * @param michelinId - The michelin ID in format "michelin-{dbId}"
+ * @param timestamp - Unix timestamp in milliseconds of the visit date
+ * @returns The award string at that time, or null if not found
+ */
+export async function getAwardForDate(michelinId: string, timestamp: number): Promise<string | null> {
+  try {
+    // Extract the numeric ID from "michelin-123" format
+    const match = michelinId.match(/^michelin-(\d+)$/);
+    if (!match) {
+      return null;
+    }
+    const dbId = parseInt(match[1], 10);
+
+    const db = await getMichelinDatabase();
+    const visitYear = new Date(timestamp).getFullYear();
+
+    // Get the award for the visit year, or the closest previous year
+    // This handles cases where a restaurant got new stars after the visit
+    const award = await db.getFirstAsync<{
+      year: number;
+      distinction: string;
+      green_star: number | null;
+    }>(
+      `SELECT year, distinction, green_star 
+       FROM restaurant_awards 
+       WHERE restaurant_id = ? AND year <= ?
+       ORDER BY year DESC
+       LIMIT 1`,
+      [dbId, visitYear],
+    );
+
+    if (!award) {
+      // No historical record found for this year or before
+      // Fall back to getting any award (for restaurants that might have been added later)
+      const anyAward = await db.getFirstAsync<{
+        distinction: string;
+        green_star: number | null;
+      }>(
+        `SELECT distinction, green_star 
+         FROM restaurant_awards 
+         WHERE restaurant_id = ?
+         ORDER BY year ASC
+         LIMIT 1`,
+        [dbId],
+      );
+
+      if (!anyAward) {
+        return null;
+      }
+
+      let awardStr = anyAward.distinction ?? "";
+      if (anyAward.green_star === 1) {
+        awardStr = awardStr ? `${awardStr}, Green Star` : "Green Star";
+      }
+      return awardStr || null;
+    }
+
+    let awardStr = award.distinction ?? "";
+    if (award.green_star === 1) {
+      awardStr = awardStr ? `${awardStr}, Green Star` : "Green Star";
+    }
+    return awardStr || null;
+  } catch (error) {
+    console.error("Error getting award for date:", error);
+    return null;
+  }
+}
+
+/**
  * Get detailed restaurant information including full award history.
  * @param michelinId - The michelin ID in format "michelin-{dbId}"
  */

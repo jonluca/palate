@@ -161,6 +161,7 @@ export default function VisitDetailScreen() {
         restaurantName: restaurantToConfirm.name,
         latitude: restaurantToConfirm.latitude,
         longitude: restaurantToConfirm.longitude,
+        startTime: data.visit.startTime,
       });
       router.back();
     } catch (error) {
@@ -183,6 +184,7 @@ export default function VisitDetailScreen() {
           restaurantName: restaurant.name,
           latitude: restaurant.latitude,
           longitude: restaurant.longitude,
+          startTime: data.visit.startTime,
         });
         router.back();
       } catch (error) {

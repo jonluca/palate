@@ -1,6 +1,6 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
-import { Card } from "@/components/ui";
+import { Button, Card } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import { RestaurantEditModal } from "@/components/restaurant-edit-modal";
 import {
@@ -12,14 +12,15 @@ import {
   type VisitRecord,
   type MichelinAward,
   type MichelinRestaurantDetails,
+  useCreateManualVisit,
 } from "@/hooks/queries";
 import type { RestaurantRecord, UpdateRestaurantData } from "@/utils/db";
 import { FlashList } from "@shopify/flash-list";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useLocalSearchParams, router, Stack } from "expo-router";
 import React, { useCallback, useState } from "react";
-import { View, Pressable, Platform, type LayoutChangeEvent, ScrollView } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
+import { View, Pressable, Platform, type LayoutChangeEvent, ScrollView, Modal, TextInput } from "react-native";
+import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
@@ -382,6 +383,240 @@ function MichelinAwardHistoryCard({ awards }: { awards: MichelinAward[] }) {
   );
 }
 
+// Quick date option for the add visit modal
+interface DateOption {
+  label: string;
+  getDate: () => Date;
+}
+
+const DATE_OPTIONS: DateOption[] = [
+  { label: "Today", getDate: () => new Date() },
+  {
+    label: "Yesterday",
+    getDate: () => {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return d;
+    },
+  },
+  {
+    label: "2 days ago",
+    getDate: () => {
+      const d = new Date();
+      d.setDate(d.getDate() - 2);
+      return d;
+    },
+  },
+  {
+    label: "Last week",
+    getDate: () => {
+      const d = new Date();
+      d.setDate(d.getDate() - 7);
+      return d;
+    },
+  },
+];
+
+function AddVisitModal({
+  visible,
+  onClose,
+  onSave,
+  restaurantName,
+  isLoading,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSave: (date: Date, notes?: string) => Promise<void>;
+  restaurantName: string;
+  isLoading: boolean;
+}) {
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [notes, setNotes] = useState("");
+  const [customDateStr, setCustomDateStr] = useState("");
+  const [showCustomDate, setShowCustomDate] = useState(false);
+
+  const handleSelectQuickDate = (option: DateOption) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const date = option.getDate();
+    setSelectedDate(date);
+    setShowCustomDate(false);
+    setCustomDateStr("");
+  };
+
+  const handleCustomDateChange = (text: string) => {
+    setCustomDateStr(text);
+    // Try to parse date in format YYYY-MM-DD or MM/DD/YYYY
+    const parsed = new Date(text);
+    if (!isNaN(parsed.getTime()) && parsed <= new Date()) {
+      setSelectedDate(parsed);
+    }
+  };
+
+  const handleSave = async () => {
+    await onSave(selectedDate, notes.trim() || undefined);
+    setNotes("");
+    setCustomDateStr("");
+    setShowCustomDate(false);
+    setSelectedDate(new Date());
+  };
+
+  const formatSelectedDate = (date: Date) => {
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return "Today";
+    }
+    if (date.toDateString() === yesterday.toDateString()) {
+      return "Yesterday";
+    }
+    return date.toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: date.getFullYear() !== today.getFullYear() ? "numeric" : undefined,
+    });
+  };
+
+  return (
+    <Modal visible={visible} animationType={"slide"} presentationStyle={"pageSheet"}>
+      <View className={"flex-1 bg-background"}>
+        {/* Header */}
+        <View className={"flex-row items-center justify-between p-4 border-b border-white/10"}>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <ThemedText variant={"body"} className={"text-primary"}>
+              Cancel
+            </ThemedText>
+          </Pressable>
+          <ThemedText variant={"subhead"} className={"font-semibold"}>
+            Add Visit
+          </ThemedText>
+          <View style={{ width: 50 }} />
+        </View>
+
+        <ScrollView className={"flex-1"} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
+          <Animated.View entering={FadeIn} className={"gap-6"}>
+            {/* Restaurant Name */}
+            <View className={"gap-2"}>
+              <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
+                Restaurant
+              </ThemedText>
+              <View className={"bg-secondary rounded-xl p-4 flex-row items-center gap-3"}>
+                <View className={"w-10 h-10 rounded-full bg-primary/20 items-center justify-center"}>
+                  <IconSymbol name={"fork.knife"} size={18} color={"#3b82f6"} />
+                </View>
+                <ThemedText variant={"body"} className={"font-medium flex-1"} numberOfLines={2}>
+                  {restaurantName}
+                </ThemedText>
+              </View>
+            </View>
+
+            {/* Date Selection */}
+            <View className={"gap-3"}>
+              <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
+                When did you visit?
+              </ThemedText>
+
+              {/* Quick date options */}
+              <View className={"flex-row flex-wrap gap-2"}>
+                {DATE_OPTIONS.map((option) => {
+                  const optionDate = option.getDate();
+                  const isSelected = selectedDate.toDateString() === optionDate.toDateString() && !showCustomDate;
+                  return (
+                    <Pressable
+                      key={option.label}
+                      onPress={() => handleSelectQuickDate(option)}
+                      className={`px-4 py-2.5 rounded-full ${isSelected ? "bg-primary" : "bg-secondary"}`}
+                    >
+                      <ThemedText
+                        variant={"subhead"}
+                        className={isSelected ? "text-primary-foreground font-semibold" : ""}
+                      >
+                        {option.label}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setShowCustomDate(true);
+                  }}
+                  className={`px-4 py-2.5 rounded-full ${showCustomDate ? "bg-primary" : "bg-secondary"}`}
+                >
+                  <ThemedText
+                    variant={"subhead"}
+                    className={showCustomDate ? "text-primary-foreground font-semibold" : ""}
+                  >
+                    Other...
+                  </ThemedText>
+                </Pressable>
+              </View>
+
+              {/* Custom date input */}
+              {showCustomDate && (
+                <Animated.View entering={FadeIn.duration(200)} className={"gap-2"}>
+                  <ThemedText variant={"footnote"} color={"secondary"}>
+                    Enter date (YYYY-MM-DD)
+                  </ThemedText>
+                  <TextInput
+                    value={customDateStr}
+                    onChangeText={handleCustomDateChange}
+                    placeholder={"2024-01-15"}
+                    placeholderTextColor={"#6b7280"}
+                    keyboardType={"numbers-and-punctuation"}
+                    className={"bg-secondary rounded-lg px-4 py-3 text-foreground"}
+                  />
+                </Animated.View>
+              )}
+
+              {/* Selected date display */}
+              <View className={"bg-green-500/10 rounded-xl p-4 flex-row items-center gap-3"}>
+                <View className={"w-10 h-10 rounded-full bg-green-500/20 items-center justify-center"}>
+                  <IconSymbol name={"calendar"} size={18} color={"#22c55e"} />
+                </View>
+                <View className={"flex-1"}>
+                  <ThemedText variant={"footnote"} color={"tertiary"}>
+                    Visit date
+                  </ThemedText>
+                  <ThemedText variant={"body"} className={"font-medium text-green-400"}>
+                    {formatSelectedDate(selectedDate)}
+                  </ThemedText>
+                </View>
+              </View>
+            </View>
+
+            {/* Notes */}
+            <View className={"gap-2"}>
+              <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
+                Notes (optional)
+              </ThemedText>
+              <TextInput
+                value={notes}
+                onChangeText={setNotes}
+                placeholder={"What did you have? How was it?"}
+                placeholderTextColor={"#6b7280"}
+                multiline
+                numberOfLines={3}
+                className={"bg-secondary rounded-lg px-4 py-3 text-foreground"}
+                style={{ minHeight: 80, textAlignVertical: "top" }}
+              />
+            </View>
+
+            {/* Save Button */}
+            <Button onPress={handleSave} loading={isLoading} className={"mt-4"}>
+              <ThemedText variant={"body"} className={"text-primary-foreground font-semibold"}>
+                Add Visit
+              </ThemedText>
+            </Button>
+          </Animated.View>
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
 function MichelinDetailsCard({ details }: { details: MichelinRestaurantDetails }) {
   const hasContent = details.description || details.facilitiesAndServices || details.url;
 
@@ -480,10 +715,12 @@ export default function RestaurantDetailScreen() {
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [addVisitModalVisible, setAddVisitModalVisible] = useState(false);
 
   const { data: restaurant } = useRestaurantDetail(id);
   const { data: visits = [] } = useRestaurantVisits(id);
   const updateRestaurantMutation = useUpdateRestaurant(id);
+  const createManualVisitMutation = useCreateManualVisit();
 
   // Check if this is a Michelin restaurant and fetch award history
   const isMichelinRestaurant = id?.startsWith("michelin-") ?? false;
@@ -493,6 +730,28 @@ export default function RestaurantDetailScreen() {
 
   const handleSaveRestaurant = async (data: UpdateRestaurantData) => {
     await updateRestaurantMutation.mutateAsync(data);
+  };
+
+  const handleAddVisit = async (date: Date, notes?: string) => {
+    if (!restaurant || !id) {
+      return;
+    }
+
+    try {
+      await createManualVisitMutation.mutateAsync({
+        restaurantId: id,
+        restaurantName: restaurant.name,
+        latitude: restaurant.latitude,
+        longitude: restaurant.longitude,
+        visitDate: date.getTime(),
+        notes: notes ?? null,
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setAddVisitModalVisible(false);
+    } catch (error) {
+      console.error("Error creating manual visit:", error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
   };
 
   const renderItem = useCallback(
@@ -515,13 +774,26 @@ export default function RestaurantDetailScreen() {
           <MichelinAwardHistoryCard awards={michelinDetails.awards} />
         )}
 
+        {/* Visit History Header with Add Button */}
         <View className={"flex-row items-center justify-between"}>
           <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase font-semibold tracking-wide px-1"}>
             Visit History
           </ThemedText>
-          <ThemedText variant={"footnote"} color={"tertiary"}>
-            {visits.length.toLocaleString()} {visits.length === 1 ? "visit" : "visits"}
-          </ThemedText>
+          <View className={"flex-row items-center gap-3"}>
+            <ThemedText variant={"footnote"} color={"tertiary"}>
+              {visits.length.toLocaleString()} {visits.length === 1 ? "visit" : "visits"}
+            </ThemedText>
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setAddVisitModalVisible(true);
+              }}
+              className={"bg-primary/20 rounded-full p-1.5"}
+              hitSlop={8}
+            >
+              <IconSymbol name={"plus"} size={14} color={"#3b82f6"} />
+            </Pressable>
+          </View>
         </View>
       </View>
     ),
@@ -573,6 +845,15 @@ export default function RestaurantDetailScreen() {
           restaurant={restaurant}
         />
       )}
+
+      {/* Add Visit Modal */}
+      <AddVisitModal
+        visible={addVisitModalVisible}
+        onClose={() => setAddVisitModalVisible(false)}
+        onSave={handleAddVisit}
+        restaurantName={restaurantName}
+        isLoading={createManualVisitMutation.isPending}
+      />
     </>
   );
 }

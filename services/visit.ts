@@ -481,6 +481,8 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
       // User notes - empty by default
       notes: null,
       updatedAt: null,
+      // Historical award - set when visit is confirmed
+      awardAtVisit: null,
     }));
 
     // Build suggested restaurants list (pre-allocate for better memory performance)
