@@ -2169,13 +2169,17 @@ export async function mergeVisits(targetVisitId: string, sourceVisitId: string):
 
 // Wrapped statistics types
 export interface WrappedStats {
-  // Per-year data
+  // Available years for filtering (only present when year is null/all-time)
+  availableYears: number[];
+  // Per-year data (only present when year is null/all-time)
   yearlyStats: Array<{
     year: number;
     totalVisits: number;
     uniqueRestaurants: number;
     topRestaurant: { name: string; visits: number } | null;
   }>;
+  // Monthly visits data for chart
+  monthlyVisits: Array<{ month: number; year: number; visits: number }>;
   // Michelin stars breakdown
   michelinStats: {
     threeStars: number;
@@ -2204,13 +2208,19 @@ export interface WrappedStats {
 }
 
 // Get wrapped statistics for confirmed visits
-export async function getWrappedStats(): Promise<WrappedStats> {
+// When year is provided, filters all stats to that year only
+export async function getWrappedStats(year?: number | null): Promise<WrappedStats> {
   const start = DEBUG_TIMING ? performance.now() : 0;
   const database = await getDatabase();
+
+  // Build year filter clause
+  const yearFilter = year ? `AND strftime('%Y', datetime(startTime/1000, 'unixepoch')) = '${year}'` : "";
+  const yearFilterForV = year ? `AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = '${year}'` : "";
 
   // Run all independent queries in parallel
   const [
     yearlyData,
+    monthlyVisitsData,
     michelinData,
     distinctStarredResult,
     distinctStarsResult,
@@ -2223,20 +2233,33 @@ export async function getWrappedStats(): Promise<WrappedStats> {
     mostRevisitedRestaurant,
     visitDates,
   ] = await Promise.all([
-    // Yearly stats
-    database.getAllAsync<{
-      year: number;
-      totalVisits: number;
-      uniqueRestaurants: number;
-    }>(
+    // Yearly stats (only for all-time view)
+    year
+      ? Promise.resolve([])
+      : database.getAllAsync<{
+          year: number;
+          totalVisits: number;
+          uniqueRestaurants: number;
+        }>(
+          `SELECT 
+          strftime('%Y', datetime(startTime/1000, 'unixepoch')) as year,
+          COUNT(*) as totalVisits,
+          COUNT(DISTINCT restaurantId) as uniqueRestaurants
+        FROM visits 
+        WHERE status = 'confirmed' AND restaurantId IS NOT NULL
+        GROUP BY year
+        ORDER BY year DESC`,
+        ),
+    // Monthly visits data for chart
+    database.getAllAsync<{ month: number; year: number; visits: number }>(
       `SELECT 
-        strftime('%Y', datetime(startTime/1000, 'unixepoch')) as year,
-        COUNT(*) as totalVisits,
-        COUNT(DISTINCT restaurantId) as uniqueRestaurants
+        CAST(strftime('%m', datetime(startTime/1000, 'unixepoch')) AS INTEGER) as month,
+        CAST(strftime('%Y', datetime(startTime/1000, 'unixepoch')) AS INTEGER) as year,
+        COUNT(*) as visits
       FROM visits 
-      WHERE status = 'confirmed' AND restaurantId IS NOT NULL
-      GROUP BY year
-      ORDER BY year DESC`,
+      WHERE status = 'confirmed' ${yearFilter}
+      GROUP BY year, month
+      ORDER BY year ASC, month ASC`,
     ),
     // Michelin stats - uses awardAtVisit for historical accuracy, falls back to current award
     database.getAllAsync<{ award: string; count: number }>(
@@ -2244,7 +2267,7 @@ export async function getWrappedStats(): Promise<WrappedStats> {
       FROM visits v
       JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
       JOIN michelin_restaurants m ON vsr.restaurantId = m.id
-      WHERE v.status = 'confirmed'
+      WHERE v.status = 'confirmed' ${yearFilterForV}
       GROUP BY COALESCE(v.awardAtVisit, m.award)`,
     ),
     // Distinct starred restaurants count - uses awardAtVisit or falls back to current award
@@ -2253,7 +2276,7 @@ export async function getWrappedStats(): Promise<WrappedStats> {
       FROM visits v
       JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
       JOIN michelin_restaurants m ON vsr.restaurantId = m.id
-      WHERE v.status = 'confirmed'
+      WHERE v.status = 'confirmed' ${yearFilterForV}
         AND (COALESCE(v.awardAtVisit, m.award) LIKE '%star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%Star%')`,
     ),
     // Distinct stars (sum of star rating across unique starred restaurants at time of visit or current)
@@ -2271,7 +2294,7 @@ export async function getWrappedStats(): Promise<WrappedStats> {
         FROM visits v
         JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
         JOIN michelin_restaurants m ON vsr.restaurantId = m.id
-        WHERE v.status = 'confirmed'
+        WHERE v.status = 'confirmed' ${yearFilterForV}
           AND (COALESCE(v.awardAtVisit, m.award) LIKE '%star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%Star%')
       ) t`,
     ),
@@ -2281,7 +2304,7 @@ export async function getWrappedStats(): Promise<WrappedStats> {
       FROM visits v
       JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
       JOIN michelin_restaurants m ON vsr.restaurantId = m.id
-      WHERE v.status = 'confirmed' AND m.cuisine != ''
+      WHERE v.status = 'confirmed' AND m.cuisine != '' ${yearFilterForV}
       GROUP BY m.cuisine
       ORDER BY count DESC
       LIMIT 5`,
@@ -2293,7 +2316,7 @@ export async function getWrappedStats(): Promise<WrappedStats> {
         CAST(strftime('%Y', datetime(startTime/1000, 'unixepoch')) AS INTEGER) as year,
         COUNT(*) as visits
       FROM visits 
-      WHERE status = 'confirmed'
+      WHERE status = 'confirmed' ${yearFilter}
       GROUP BY year, month
       ORDER BY visits DESC
       LIMIT 1`,
@@ -2304,27 +2327,29 @@ export async function getWrappedStats(): Promise<WrappedStats> {
         CAST(strftime('%w', datetime(startTime/1000, 'unixepoch')) AS INTEGER) as day,
         COUNT(*) as visits
       FROM visits 
-      WHERE status = 'confirmed'
+      WHERE status = 'confirmed' ${yearFilter}
       GROUP BY day
       ORDER BY visits DESC
       LIMIT 1`,
     ),
     // Total unique restaurants
     database.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(DISTINCT restaurantId) as count FROM visits WHERE status = 'confirmed' AND restaurantId IS NOT NULL`,
+      `SELECT COUNT(DISTINCT restaurantId) as count FROM visits WHERE status = 'confirmed' AND restaurantId IS NOT NULL ${yearFilter}`,
     ),
     // Total confirmed visits
-    database.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM visits WHERE status = 'confirmed'`),
+    database.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) as count FROM visits WHERE status = 'confirmed' ${yearFilter}`,
+    ),
     // First visit date
     database.getFirstAsync<{ startTime: number }>(
-      `SELECT startTime FROM visits WHERE status = 'confirmed' ORDER BY startTime ASC LIMIT 1`,
+      `SELECT startTime FROM visits WHERE status = 'confirmed' ${yearFilter} ORDER BY startTime ASC LIMIT 1`,
     ),
     // Most revisited restaurant
     database.getFirstAsync<{ name: string; visits: number }>(
       `SELECT r.name, COUNT(*) as visits
       FROM visits v
       JOIN restaurants r ON v.restaurantId = r.id
-      WHERE v.status = 'confirmed'
+      WHERE v.status = 'confirmed' ${yearFilterForV}
       GROUP BY v.restaurantId
       HAVING visits > 1
       ORDER BY visits DESC
@@ -2334,7 +2359,7 @@ export async function getWrappedStats(): Promise<WrappedStats> {
     database.getAllAsync<{ date: string }>(
       `SELECT DISTINCT date(datetime(startTime/1000, 'unixepoch')) as date
       FROM visits 
-      WHERE status = 'confirmed'
+      WHERE status = 'confirmed' ${yearFilter}
       ORDER BY date ASC`,
     ),
   ]);
@@ -2446,8 +2471,13 @@ export async function getWrappedStats(): Promise<WrappedStats> {
     console.log(`[DB] getWrappedStats: ${(performance.now() - start).toFixed(2)}ms`);
   }
 
+  // Extract available years from yearly data (only for all-time view)
+  const availableYears = yearlyStats.map((y) => y.year).sort((a, b) => b - a);
+
   return {
+    availableYears,
     yearlyStats,
+    monthlyVisits: monthlyVisitsData,
     michelinStats,
     topCuisines,
     busiestMonth: busiestMonth ?? null,

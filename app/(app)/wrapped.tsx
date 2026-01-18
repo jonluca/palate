@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { View, ScrollView, Pressable, Dimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, {
@@ -13,7 +13,6 @@ import Animated, {
   Easing,
 } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
-import { IconSymbol } from "@/components/icon-symbol";
 import { useWrappedStats, type WrappedStats } from "@/hooks/queries";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
@@ -112,6 +111,125 @@ function Confetti({ enabled }: { enabled: boolean }) {
   );
 }
 
+// Year Tab Component
+function YearTab({
+  label,
+  isActive,
+  onPress,
+  delay = 0,
+}: {
+  label: string;
+  isActive: boolean;
+  onPress: () => void;
+  delay?: number;
+}) {
+  return (
+    <Animated.View entering={FadeIn.delay(delay).duration(300)}>
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onPress();
+        }}
+        className={`px-4 py-2 rounded-full mr-2 ${isActive ? "bg-amber-500" : "bg-white/10"}`}
+      >
+        <ThemedText variant={"subhead"} className={`font-semibold ${isActive ? "text-gray-900" : "text-white/70"}`}>
+          {label}
+        </ThemedText>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+// Monthly Chart Component
+function MonthlyVisitsChart({
+  monthlyVisits,
+  selectedYear,
+}: {
+  monthlyVisits: WrappedStats["monthlyVisits"];
+  selectedYear: number | null;
+}) {
+  if (monthlyVisits.length === 0) {
+    return null;
+  }
+
+  // For a specific year, show all 12 months
+  // For all-time, show the last 12 months of data
+  const chartData = useMemo(() => {
+    if (selectedYear) {
+      // Fill in all 12 months for the selected year
+      return MONTH_NAMES.map((name, index) => {
+        const monthData = monthlyVisits.find((m) => m.month === index + 1 && m.year === selectedYear);
+        return {
+          month: name,
+          visits: monthData?.visits ?? 0,
+        };
+      });
+    } else {
+      // For all-time, show the last 12 months with data or recent months
+      const sortedData = [...monthlyVisits].sort((a, b) => {
+        if (a.year !== b.year) {
+          return b.year - a.year;
+        }
+        return b.month - a.month;
+      });
+
+      const last12 = sortedData.slice(0, 12).reverse();
+      return last12.map((m) => ({
+        month: `${MONTH_NAMES[m.month - 1]}'${String(m.year).slice(-2)}`,
+        visits: m.visits,
+      }));
+    }
+  }, [monthlyVisits, selectedYear]);
+
+  const maxVisits = Math.max(...chartData.map((d) => d.visits), 1);
+
+  return (
+    <Animated.View entering={FadeInDown.delay(300).duration(400)} className={"gap-4"}>
+      <ThemedText variant={"title2"} className={"text-white font-bold"}>
+        📈 Monthly Visits
+      </ThemedText>
+      <View className={"bg-white/5 rounded-2xl p-4"}>
+        <View className={"flex-row items-end justify-between h-32 gap-1"}>
+          {chartData.map((data, index) => {
+            const heightPercent = data.visits > 0 ? (data.visits / maxVisits) * 100 : 0;
+            const barHeight = Math.max(heightPercent, data.visits > 0 ? 8 : 2);
+
+            return (
+              <Animated.View
+                key={`${data.month}-${index}`}
+                entering={FadeInUp.delay(400 + index * 30).duration(300)}
+                className={"flex-1 items-center gap-1"}
+              >
+                <ThemedText variant={"caption2"} className={"text-white/60 text-center"}>
+                  {data.visits > 0 ? data.visits : ""}
+                </ThemedText>
+                <View
+                  className={"w-full rounded-t-sm"}
+                  style={{
+                    height: `${barHeight}%`,
+                    minHeight: data.visits > 0 ? 8 : 2,
+                    backgroundColor:
+                      data.visits > 0
+                        ? `rgba(251, 191, 36, ${0.4 + (data.visits / maxVisits) * 0.6})`
+                        : "rgba(255, 255, 255, 0.1)",
+                  }}
+                />
+                <ThemedText
+                  variant={"caption2"}
+                  className={"text-white/40 text-center"}
+                  style={{ fontSize: selectedYear ? 10 : 8 }}
+                >
+                  {selectedYear ? data.month : data.month.slice(0, 3)}
+                </ThemedText>
+              </Animated.View>
+            );
+          })}
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
 function StatPill({
   icon,
   value,
@@ -207,60 +325,6 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
   );
 }
 
-function YearlyHighlight({ yearData, index }: { yearData: WrappedStats["yearlyStats"][0]; index: number }) {
-  return (
-    <Animated.View
-      entering={FadeInDown.delay(400 + index * 100).duration(400)}
-      className={"bg-white/10 rounded-2xl p-5 min-w-[220px]"}
-    >
-      <ThemedText variant={"largeTitle"} className={"text-white font-bold"}>
-        {yearData.year}
-      </ThemedText>
-      <View className={"mt-4 gap-3"}>
-        <View className={"flex-row items-center gap-3"}>
-          <View className={"w-10 h-10 rounded-full bg-white/20 items-center justify-center"}>
-            <IconSymbol name={"fork.knife"} size={18} color={"white"} />
-          </View>
-          <View>
-            <ThemedText variant={"title1"} className={"text-white font-bold"}>
-              {yearData.totalVisits.toLocaleString()}
-            </ThemedText>
-            <ThemedText variant={"footnote"} className={"text-white/60"}>
-              visits
-            </ThemedText>
-          </View>
-        </View>
-        <View className={"flex-row items-center gap-3"}>
-          <View className={"w-10 h-10 rounded-full bg-white/20 items-center justify-center"}>
-            <IconSymbol name={"building.2"} size={18} color={"white"} />
-          </View>
-          <View>
-            <ThemedText variant={"title1"} className={"text-white font-bold"}>
-              {yearData.uniqueRestaurants.toLocaleString()}
-            </ThemedText>
-            <ThemedText variant={"footnote"} className={"text-white/60"}>
-              restaurants
-            </ThemedText>
-          </View>
-        </View>
-        {yearData.topRestaurant && (
-          <View className={"mt-2 pt-3 border-t border-white/10"}>
-            <ThemedText variant={"footnote"} className={"text-white/60"}>
-              Most Visited
-            </ThemedText>
-            <ThemedText variant={"body"} className={"text-white font-medium"} numberOfLines={1}>
-              {yearData.topRestaurant.name}
-            </ThemedText>
-            <ThemedText variant={"footnote"} className={"text-amber-300"}>
-              {yearData.topRestaurant.visits.toLocaleString()} visits
-            </ThemedText>
-          </View>
-        )}
-      </View>
-    </Animated.View>
-  );
-}
-
 function CuisineCloud({ cuisines }: { cuisines: WrappedStats["topCuisines"] }) {
   if (cuisines.length === 0) {
     return null;
@@ -269,7 +333,7 @@ function CuisineCloud({ cuisines }: { cuisines: WrappedStats["topCuisines"] }) {
   const maxCount = Math.max(...cuisines.map((c) => c.count));
 
   return (
-    <Animated.View entering={FadeInDown.delay(600).duration(400)} className={"gap-4"}>
+    <Animated.View entering={FadeInDown.delay(500).duration(400)} className={"gap-4"}>
       <ThemedText variant={"title2"} className={"text-white font-bold"}>
         🍜 Favorite Cuisines
       </ThemedText>
@@ -280,7 +344,7 @@ function CuisineCloud({ cuisines }: { cuisines: WrappedStats["topCuisines"] }) {
           return (
             <Animated.View
               key={cuisine.cuisine}
-              entering={FadeIn.delay(700 + index * 80).duration(300)}
+              entering={FadeIn.delay(600 + index * 80).duration(300)}
               className={"rounded-full px-4 py-2"}
               style={{ backgroundColor: `rgba(255, 255, 255, ${bgOpacity})` }}
             >
@@ -343,10 +407,10 @@ function FunFactCard({
   );
 }
 
-function WrappedContent({ stats }: { stats: WrappedStats }) {
-  const hasYearlyData = stats.yearlyStats.length > 0;
+function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selectedYear: number | null }) {
   const hasMichelinData = stats.michelinStats.totalStarredVisits > 0;
   const hasCuisineData = stats.topCuisines.length > 0;
+  const hasMonthlyData = stats.monthlyVisits.length > 0;
 
   return (
     <View className={"gap-8"}>
@@ -364,22 +428,11 @@ function WrappedContent({ stats }: { stats: WrappedStats }) {
         )}
       </Animated.View>
 
+      {/* Monthly Chart */}
+      {hasMonthlyData && <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />}
+
       {/* Michelin Stars */}
       {hasMichelinData && <StarBreakdown stats={stats.michelinStats} />}
-
-      {/* Yearly Breakdown */}
-      {hasYearlyData && (
-        <View className={"gap-4"}>
-          <ThemedText variant={"title2"} className={"text-white font-bold"}>
-            📊 Year by Year
-          </ThemedText>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 16 }}>
-            {stats.yearlyStats.map((yearData, index) => (
-              <YearlyHighlight key={yearData.year} yearData={yearData} index={index} />
-            ))}
-          </ScrollView>
-        </View>
-      )}
 
       {/* Cuisine Breakdown */}
       {hasCuisineData && <CuisineCloud cuisines={stats.topCuisines} />}
@@ -397,7 +450,7 @@ function WrappedContent({ stats }: { stats: WrappedStats }) {
               title={"Busiest Month"}
               value={`${MONTH_NAMES[stats.busiestMonth.month - 1]} ${stats.busiestMonth.year}`}
               subtitle={`${stats.busiestMonth.visits.toLocaleString()} visits`}
-              delay={800}
+              delay={700}
             />
           )}
 
@@ -408,7 +461,7 @@ function WrappedContent({ stats }: { stats: WrappedStats }) {
               title={"Favorite Day"}
               value={DAY_NAMES[stats.busiestDayOfWeek.day]}
               subtitle={`${stats.busiestDayOfWeek.visits.toLocaleString()} visits`}
-              delay={900}
+              delay={800}
             />
           )}
 
@@ -419,7 +472,7 @@ function WrappedContent({ stats }: { stats: WrappedStats }) {
               title={"Your Favorite Spot"}
               value={stats.mostRevisitedRestaurant.name}
               subtitle={`${stats.mostRevisitedRestaurant.visits.toLocaleString()} visits`}
-              delay={1000}
+              delay={900}
             />
           )}
 
@@ -430,7 +483,7 @@ function WrappedContent({ stats }: { stats: WrappedStats }) {
               title={"Longest Streak"}
               value={`${stats.longestStreak.days.toLocaleString()} consecutive days`}
               subtitle={`${formatDateShort(stats.longestStreak.startDate)} - ${formatDateShort(stats.longestStreak.endDate)}`}
-              delay={1100}
+              delay={1000}
             />
           )}
 
@@ -438,13 +491,13 @@ function WrappedContent({ stats }: { stats: WrappedStats }) {
             <FunFactCard
               icon={"🌟"}
               iconBg={"bg-amber-500/30"}
-              title={"Foodie Journey Started"}
+              title={selectedYear ? "First Visit This Year" : "Foodie Journey Started"}
               value={new Date(stats.firstVisitDate).toLocaleDateString(undefined, {
                 month: "long",
                 day: "numeric",
                 year: "numeric",
               })}
-              delay={1200}
+              delay={1100}
             />
           )}
         </View>
@@ -484,7 +537,16 @@ function EmptyState() {
 
 export default function WrappedScreen() {
   const insets = useSafeAreaInsets();
-  const { data: stats, isLoading } = useWrappedStats();
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+
+  // Fetch all-time stats to get available years
+  const { data: allTimeStats, isLoading: isLoadingAllTime } = useWrappedStats(null);
+
+  // Fetch stats for selected year (or all-time if null)
+  const { data: stats, isLoading: isLoadingYearStats } = useWrappedStats(selectedYear);
+
+  const isLoading = isLoadingAllTime || isLoadingYearStats;
+  const availableYears = allTimeStats?.availableYears ?? [];
 
   const hasData = stats && stats.totalConfirmedVisits > 0;
   const showConfetti = Boolean(hasData && !isLoading);
@@ -495,6 +557,11 @@ export default function WrappedScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   }, [showConfetti]);
+
+  const headerTitle = selectedYear ? `${selectedYear}` : "All Time";
+  const headerSubtitle = selectedYear
+    ? `Your ${selectedYear} culinary journey`
+    : "A look back at your culinary adventures";
 
   return (
     <View style={{ flex: 1 }}>
@@ -528,7 +595,7 @@ export default function WrappedScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <Animated.View entering={FadeInDown.duration(500)} className={"gap-2 mb-8"}>
+        <Animated.View entering={FadeInDown.duration(500)} className={"gap-2 mb-4"}>
           <ThemedText variant={"caption1"} className={"text-amber-400 uppercase tracking-widest font-bold"}>
             ✨ Your Dining Year
           </ThemedText>
@@ -536,9 +603,36 @@ export default function WrappedScreen() {
             Wrapped
           </ThemedText>
           <ThemedText variant={"body"} className={"text-white/60"}>
-            A look back at your culinary adventures
+            {headerSubtitle}
           </ThemedText>
         </Animated.View>
+
+        {/* Year Tabs */}
+        {availableYears.length > 0 && (
+          <Animated.View entering={FadeIn.delay(200).duration(400)} className={"mb-6"}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingVertical: 8 }}
+            >
+              <YearTab
+                label={"All Time"}
+                isActive={selectedYear === null}
+                onPress={() => setSelectedYear(null)}
+                delay={100}
+              />
+              {availableYears.map((year, index) => (
+                <YearTab
+                  key={year}
+                  label={String(year)}
+                  isActive={selectedYear === year}
+                  onPress={() => setSelectedYear(year)}
+                  delay={150 + index * 50}
+                />
+              ))}
+            </ScrollView>
+          </Animated.View>
+        )}
 
         {/* Content */}
         {isLoading ? (
@@ -548,7 +642,7 @@ export default function WrappedScreen() {
             </ThemedText>
           </View>
         ) : hasData ? (
-          <WrappedContent stats={stats} />
+          <WrappedContent stats={stats} selectedYear={selectedYear} />
         ) : (
           <EmptyState />
         )}

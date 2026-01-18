@@ -164,7 +164,12 @@ export const queryKeys = {
   michelinRestaurantDetail: (michelinId: string) => ["michelinRestaurants", "detail", michelinId] as const,
   nearbyMichelin: (lat: number, lon: number) => ["nearbyMichelin", lat, lon] as const,
   mapKitNearby: (lat: number, lon: number) => ["mapKitNearby", lat.toFixed(4), lon.toFixed(4)] as const,
-  wrapped: ["wrapped"] as const,
+  wrapped: (year?: number | null) => {
+    if (year) {
+      return ["wrapped", year] as const;
+    }
+    return ["wrapped"] as const;
+  },
   mergeableVisits: (visitId: string) => ["visits", "mergeableVisits", visitId] as const,
   ignoredLocations: ["ignoredLocations"] as const,
   importableCalendarEvents: ["importableCalendarEvents"] as const,
@@ -194,11 +199,15 @@ export type { WrappedStats };
 
 /**
  * Fetch wrapped statistics for restaurant visits
+ * @param year - Optional year to filter stats. When null/undefined, returns all-time stats.
  */
-export function useWrappedStats(options?: Omit<UseQueryOptions<WrappedStats, Error>, "queryKey" | "queryFn">) {
+export function useWrappedStats(
+  year?: number | null,
+  options?: Omit<UseQueryOptions<WrappedStats, Error>, "queryKey" | "queryFn">,
+) {
   return useQuery({
-    queryKey: queryKeys.wrapped,
-    queryFn: getWrappedStats,
+    queryKey: queryKeys.wrapped(year),
+    queryFn: () => getWrappedStats(year),
     ...options,
   });
 }
@@ -1110,8 +1119,8 @@ export function useCreateManualVisit() {
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
       // Invalidate stats
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      // Invalidate wrapped stats
-      queryClient.invalidateQueries({ queryKey: queryKeys.wrapped });
+      // Invalidate wrapped stats (invalidates all years)
+      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
     },
   });
 }
