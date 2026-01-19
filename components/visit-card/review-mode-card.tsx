@@ -27,7 +27,7 @@ export function ReviewModeCard({
   suggestedRestaurantCuisine,
   suggestedRestaurants = [],
   hasSuggestion = false,
-  isLoading = false,
+  loadingAction = null,
   onConfirm,
   onReject,
   onFindRestaurant,
@@ -48,13 +48,7 @@ export function ReviewModeCard({
 
   // Fetch nearby restaurants using unified hook (Michelin + MapKit)
   const shouldFetchNearby = enableAppleMapsVerification && !hasMatch && Boolean(centerLat) && Boolean(centerLon);
-  const { data: unifiedRestaurants = [] } = useUnifiedNearbyRestaurants(
-    centerLat,
-    centerLon,
-    500, // Michelin radius
-    200, // MapKit radius
-    shouldFetchNearby,
-  );
+  const { data: unifiedRestaurants = [] } = useUnifiedNearbyRestaurants(centerLat, centerLon, shouldFetchNearby);
 
   // Use unified results when fetching is enabled, otherwise fall back to passed suggestedRestaurants
   const unsortedDisplayRestaurants: NearbyRestaurant[] = shouldFetchNearby
@@ -295,7 +289,7 @@ export function ReviewModeCard({
               onConfirm={handleConfirm}
               onFindRestaurant={onFindRestaurant}
               hasSuggestion={canConfirm}
-              isLoading={isLoading}
+              loadingAction={loadingAction}
               variant={"pill"}
             />
 

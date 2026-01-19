@@ -150,8 +150,6 @@ export function RestaurantSearchModal({
   const { data: unifiedRestaurants, isLoading: isLoadingNearby } = useUnifiedNearbyRestaurants(
     centerLat,
     centerLon,
-    500, // Michelin radius
-    200, // MapKit radius
     visible,
   );
 

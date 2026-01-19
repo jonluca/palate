@@ -130,7 +130,13 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
     }
   };
 
-  const isLoading = confirmMutation.isPending || updateStatusMutation.isPending;
+  // Determine which action is currently loading
+  const loadingAction: LoadingAction = confirmMutation.isPending
+    ? "confirm"
+    : updateStatusMutation.isPending
+      ? "skip"
+      : null;
+  const isAnyLoading = loadingAction !== null;
 
   // Use swipeable card for quick actions
   const canSwipeConfirm = hasSuggestion && !hasMultipleSuggestions;
@@ -146,7 +152,7 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
         onSwipeRight={canSwipeConfirm ? () => handleConfirmSuggestion() : undefined}
         leftLabel={"Skip"}
         rightLabel={"Confirm"}
-        enabled={!isLoading}
+        enabled={!isAnyLoading}
       >
         <VisitCard
           mode={"review"}
@@ -165,7 +171,7 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
           suggestedRestaurantCuisine={visit.suggestedRestaurantCuisine}
           suggestedRestaurants={match ? undefined : visit.suggestedRestaurants}
           hasSuggestion={hasSuggestion || hasMultipleSuggestions}
-          isLoading={isLoading}
+          loadingAction={loadingAction}
           onConfirm={handleConfirmSuggestion}
           onReject={handleReject}
           onFindRestaurant={() => setShowSearch(true)}

@@ -45,7 +45,8 @@ export type ReviewModeProps = BaseVisitCardProps & {
   suggestedRestaurantCuisine?: string | null;
   suggestedRestaurants?: SuggestedRestaurant[];
   hasSuggestion?: boolean;
-  isLoading?: boolean;
+  /** Which action is currently loading (shows spinner only on that button) */
+  loadingAction?: LoadingAction;
   onConfirm?: (restaurant?: SuggestedRestaurant) => void;
   onReject?: () => void;
   onFindRestaurant?: () => void;

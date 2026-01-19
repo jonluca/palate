@@ -530,23 +530,18 @@ function mergeNearbyRestaurants(
   return [...michelin, ...dedupedMapKit].sort((a, b) => a.distance - b.distance);
 }
 
+const MICHELIN_RADIUS_METERS = 500;
+const MAPKIT_RADIUS_METERS = 200;
+
 /**
  * Unified hook for fetching nearby restaurants from both Michelin database and MapKit.
  * Handles merging and deduplication automatically.
  *
  * @param lat - Center latitude
  * @param lon - Center longitude
- * @param michelinRadiusMeters - Search radius for Michelin restaurants (default 500m)
- * @param mapKitRadiusMeters - Search radius for MapKit restaurants (default 200m)
  * @param enabled - Whether to enable the query
  */
-export function useUnifiedNearbyRestaurants(
-  lat: number | undefined,
-  lon: number | undefined,
-  michelinRadiusMeters: number = 500,
-  mapKitRadiusMeters: number = 200,
-  enabled: boolean = true,
-) {
+export function useUnifiedNearbyRestaurants(lat: number | undefined, lon: number | undefined, enabled: boolean = true) {
   // Fetch Michelin restaurants
   const { data: michelinResults = [], isLoading: michelinLoading } = useNearbyMichelinRestaurants(lat, lon, enabled);
 
@@ -554,16 +549,16 @@ export function useUnifiedNearbyRestaurants(
   const { data: mapKitResults = [], isLoading: mapKitLoading } = useMapKitNearbyRestaurants(
     lat,
     lon,
-    mapKitRadiusMeters,
+    MAPKIT_RADIUS_METERS,
     enabled,
   );
 
   // Merge results
   const mergedRestaurants = useMemo(() => {
     // Filter Michelin results by radius (the hook might return more)
-    const filteredMichelin = michelinResults.filter((r) => r.distance <= michelinRadiusMeters);
+    const filteredMichelin = michelinResults.filter((r) => r.distance <= MICHELIN_RADIUS_METERS);
     return mergeNearbyRestaurants(filteredMichelin, mapKitResults);
-  }, [michelinResults, mapKitResults, michelinRadiusMeters]);
+  }, [michelinResults, mapKitResults]);
 
   return {
     data: mergedRestaurants,

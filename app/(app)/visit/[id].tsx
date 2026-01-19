@@ -121,8 +121,6 @@ export default function VisitDetailScreen() {
   const { data: suggestedRestaurants = [] } = useUnifiedNearbyRestaurants(
     data?.visit?.centerLat,
     data?.visit?.centerLon,
-    500, // Michelin radius
-    200, // MapKit radius
     shouldFetchNearby,
   );
 
