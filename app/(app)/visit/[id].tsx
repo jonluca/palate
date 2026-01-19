@@ -42,7 +42,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { FoodLabel } from "@/utils/db";
 import { cleanCalendarEventTitle } from "@/services/calendar";
 import { logVisitViewed } from "@/services/analytics";
-import { ActivityIndicator, View, Alert } from "react-native";
+import { ActivityIndicator, View, Alert, Pressable } from "react-native";
 import { useToast } from "@/components/ui/toast";
 
 // Hook to aggregate food labels from photos
@@ -532,6 +532,25 @@ export default function VisitDetailScreen() {
         )}
 
         <NotesCard notes={visit.notes} onSave={handleSaveNotes} isSaving={updateNotes.isPending} />
+
+        {visit.status !== "pending" && (
+          <Pressable
+            onPress={() => handleStatusChange("pending")}
+            disabled={loadingAction !== null}
+            className={"flex-row items-center justify-center gap-2 py-4 mt-2"}
+          >
+            {loadingAction === "skip" ? (
+              <ActivityIndicator size={"small"} color={"#9ca3af"} />
+            ) : (
+              <>
+                <Ionicons name={"refresh"} size={14} color={"#9ca3af"} />
+                <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>
+                  Reset to Pending
+                </ThemedText>
+              </>
+            )}
+          </Pressable>
+        )}
       </ScreenLayout>
 
       <RestaurantSearchModal

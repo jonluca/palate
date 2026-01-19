@@ -3,7 +3,6 @@ import { Pressable, ActivityIndicator } from "react-native";
 import Animated, { FadeInUp, LinearTransition } from "react-native-reanimated";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
-import { Button, ButtonText } from "@/components/ui";
 import { VisitActions, type LoadingAction } from "@/components/visit-card";
 import type { VisitStatus } from "@/hooks/queries";
 
@@ -71,16 +70,7 @@ export function VisitActionButtons({
             )}
           </Pressable>
         </>
-      ) : (
-        <Button
-          onPress={() => onStatusChange("pending")}
-          loading={loadingAction === "skip"}
-          disabled={isAnyLoading}
-          variant={"muted"}
-        >
-          <ButtonText variant={"muted"}>Reset to Pending</ButtonText>
-        </Button>
-      )}
+      ) : null}
     </Animated.View>
   );
 }

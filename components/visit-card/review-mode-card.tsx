@@ -270,7 +270,7 @@ export function ReviewModeCard({
                       >
                         <View className={"flex-row items-start justify-between"}>
                           <View className={"flex-1 gap-1"}>
-                            <View className={"flex-row items-center gap-2"}>
+                            <View className={"flex-row items-center gap-1"}>
                               {isSelected && <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#22c55e"} />}
                               <ThemedText variant={"subhead"} className={"font-medium flex-1"} numberOfLines={1}>
                                 {restaurant.name}
@@ -289,6 +289,9 @@ export function ReviewModeCard({
                                   <IconSymbol name={"checkmark.seal.fill"} size={8} color={"#22c55e"} />
                                 </View>
                               )}
+                              <ThemedText variant={"caption2"} color={"tertiary"}>
+                                {formatDistance(restaurant.distance)}
+                              </ThemedText>
                             </View>
                             <View className={"flex-row items-center gap-2 flex-wrap"}>
                               {restaurantBadge && (
@@ -311,9 +314,6 @@ export function ReviewModeCard({
                               </ThemedText>
                             )}
                           </View>
-                          <ThemedText variant={"caption2"} color={"tertiary"}>
-                            {formatDistance(restaurant.distance)}
-                          </ThemedText>
                         </View>
                       </Pressable>
                     );
