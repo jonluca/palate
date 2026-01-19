@@ -4,18 +4,19 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
 import { Badge } from "@/components/ui";
 import { getMichelinBadge } from "@/components/restaurant-search-modal";
-import { formatDate, statusVariant } from "./utils";
+import { formatDate, formatTime, statusVariant } from "./utils";
 import type { VisitStatus } from "@/hooks/queries";
 
 interface VisitHeaderProps {
   displayName: string;
   status: VisitStatus;
   startTime: number;
+  endTime: number;
   foodProbable: boolean;
   award?: string | null;
 }
 
-export function VisitHeader({ displayName, status, startTime, foodProbable, award }: VisitHeaderProps) {
+export function VisitHeader({ displayName, status, startTime, endTime, foodProbable, award }: VisitHeaderProps) {
   const badge = award ? getMichelinBadge(award) : null;
 
   return (
@@ -46,7 +47,7 @@ export function VisitHeader({ displayName, status, startTime, foodProbable, awar
       )}
 
       <ThemedText variant={"body"} color={"secondary"}>
-        {formatDate(startTime)}
+        {formatDate(startTime)} · {formatTime(startTime)} – {formatTime(endTime)}
       </ThemedText>
     </Animated.View>
   );

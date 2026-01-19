@@ -7,7 +7,6 @@ import {
   VisitHeader,
   CalendarEventCard,
   FoodDetectionCard,
-  VisitDetailsCard,
   PhotosSection,
   NearbyRestaurantsCard,
   SuggestedRestaurantCard,
@@ -451,16 +450,9 @@ export default function VisitDetailScreen() {
           displayName={displayName}
           status={visit.status}
           startTime={visit.startTime}
+          endTime={visit.endTime}
           foodProbable={Boolean(visit.foodProbable)}
           award={suggestedRestaurant?.award}
-        />
-
-        <VisitDetailsCard
-          startTime={visit.startTime}
-          endTime={visit.endTime}
-          photoCount={visit.photoCount}
-          mergeableCount={mergeableVisits.length}
-          onMergePress={() => setShowMergeModal(true)}
         />
 
         {visit.calendarEventTitle && (

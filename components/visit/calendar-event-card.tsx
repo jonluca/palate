@@ -26,9 +26,9 @@ export function CalendarEventCard({ title, location }: CalendarEventCardProps) {
           {cleanCalendarEventTitle(title)}
         </ThemedText>
         {location && !location.includes("http") && (
-          <View className={"flex-row items-center gap-2"}>
+          <View className={"flex-row items-center gap-2 pr-2"}>
             <IconSymbol name={"mappin"} size={14} color={"#6b7280"} />
-            <ThemedText variant={"footnote"} color={"tertiary"}>
+            <ThemedText variant={"footnote"} color={"tertiary"} className={"pr-2"}>
               {location}
             </ThemedText>
           </View>

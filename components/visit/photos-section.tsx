@@ -127,17 +127,19 @@ export function PhotosSection({
         )}
       </View>
 
-      <Card animated={false} className={"p-2"}>
-        <View onLayout={handleLayout} style={{ height: containerHeight }}>
-          <FlashList
-            data={photos}
-            renderItem={renderPhoto}
-            keyExtractor={keyExtractor}
-            numColumns={NUM_COLUMNS}
-            showsVerticalScrollIndicator={actualRows > maxRows}
-          />
-        </View>
-      </Card>
+      {photos.length > 0 && (
+        <Card animated={false} className={"p-2"}>
+          <View onLayout={handleLayout} style={{ height: containerHeight }}>
+            <FlashList
+              data={photos}
+              renderItem={renderPhoto}
+              keyExtractor={keyExtractor}
+              numColumns={NUM_COLUMNS}
+              showsVerticalScrollIndicator={actualRows > maxRows}
+            />
+          </View>
+        </Card>
+      )}
     </View>
   );
 }

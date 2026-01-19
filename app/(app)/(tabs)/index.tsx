@@ -279,11 +279,11 @@ export default function RestaurantsScreen() {
   const renderItem = useCallback(({ item, index }: { item: ListItem; index: number }) => {
     if (item.type === "section-header") {
       return (
-        <Animated.View entering={FadeIn.duration(200)} className={"pt-4 pb-2"}>
+        <View className={""}>
           <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase font-semibold tracking-wide px-1"}>
             {item.title}
           </ThemedText>
-        </Animated.View>
+        </View>
       );
     }
     if (item.type === "michelin") {
@@ -379,7 +379,7 @@ export default function RestaurantsScreen() {
           drawDistance={250}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{
-            paddingTop: restaurants.length > 0 ? 16 : insets.top + 16,
+            paddingTop: restaurants.length > 0 ? 0 : insets.top + 16,
             paddingBottom: insets.bottom + 32,
             paddingHorizontal: 16,
           }}
