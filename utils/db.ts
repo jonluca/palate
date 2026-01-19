@@ -3137,3 +3137,88 @@ export async function reclassifyPhotosWithCurrentKeywords(
 
   return progress;
 }
+
+// ============================================================================
+// PHOTO-VISIT ASSOCIATION
+// ============================================================================
+
+/**
+ * Get photos by their asset IDs (for checking if photos exist in the database)
+ */
+export async function getPhotosByAssetIds(assetIds: string[]): Promise<PhotoRecord[]> {
+  if (assetIds.length === 0) {
+    return [];
+  }
+
+  const database = await getDatabase();
+  const placeholders = assetIds.map(() => "?").join(", ");
+  const rawPhotos = await database.getAllAsync<RawPhotoRecord>(
+    `SELECT * FROM photos WHERE id IN (${placeholders})`,
+    assetIds,
+  );
+  return rawPhotos.map(parsePhotoRecord);
+}
+
+export interface MovePhotosResult {
+  movedCount: number;
+  fromVisitIds: string[];
+}
+
+/**
+ * Move photos to a different visit.
+ * Updates the visitId for each photo and recalculates photo counts for affected visits.
+ * Returns the count of photos moved and the visit IDs they were moved from.
+ */
+export async function movePhotosToVisit(photoIds: string[], targetVisitId: string): Promise<MovePhotosResult> {
+  if (photoIds.length === 0) {
+    return { movedCount: 0, fromVisitIds: [] };
+  }
+
+  const database = await getDatabase();
+
+  // Get the current visit IDs for these photos (to update their counts later)
+  const placeholders = photoIds.map(() => "?").join(", ");
+  const existingPhotos = await database.getAllAsync<{ id: string; visitId: string | null }>(
+    `SELECT id, visitId FROM photos WHERE id IN (${placeholders})`,
+    photoIds,
+  );
+
+  // Collect unique source visit IDs (excluding null and the target)
+  const sourceVisitIds = new Set<string>();
+  for (const photo of existingPhotos) {
+    if (photo.visitId && photo.visitId !== targetVisitId) {
+      sourceVisitIds.add(photo.visitId);
+    }
+  }
+
+  // Update the photos to point to the target visit
+  await database.runAsync(`UPDATE photos SET visitId = ? WHERE id IN (${placeholders})`, [targetVisitId, ...photoIds]);
+
+  // Update photo counts for all affected visits (target + sources)
+  const allAffectedVisitIds = [...sourceVisitIds, targetVisitId];
+  const visitPlaceholders = allAffectedVisitIds.map(() => "?").join(", ");
+
+  await database.runAsync(
+    `UPDATE visits SET photoCount = (
+      SELECT COUNT(*) FROM photos WHERE photos.visitId = visits.id
+    ) WHERE id IN (${visitPlaceholders})`,
+    allAffectedVisitIds,
+  );
+
+  // Update the target visit's time range if needed (expand to include new photos)
+  await database.runAsync(
+    `UPDATE visits SET 
+      startTime = (SELECT MIN(creationTime) FROM photos WHERE visitId = ?),
+      endTime = (SELECT MAX(creationTime) FROM photos WHERE visitId = ?)
+    WHERE id = ?`,
+    [targetVisitId, targetVisitId, targetVisitId],
+  );
+
+  // Sync food probable status for affected visits
+  await syncAllVisitsFoodProbable();
+
+  return {
+    movedCount: existingPhotos.length,
+    fromVisitIds: Array.from(sourceVisitIds),
+  };
+}

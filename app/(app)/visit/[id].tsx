@@ -29,11 +29,13 @@ import {
   useScanVisitForFood,
   useReverseGeocode,
   useUnifiedNearbyRestaurants,
+  useAddPhotosToVisit,
   type VisitStatus,
   type VisitFoodScanProgress,
   type NearbyRestaurant,
 } from "@/hooks";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { FoodLabel } from "@/utils/db";
@@ -100,6 +102,7 @@ export default function VisitDetailScreen() {
   const mergeVisits = useMergeVisits();
   const ignoreLocation = useIgnoreLocation();
   const scanForFood = useScanVisitForFood(id, setFoodScanProgress);
+  const addPhotosToVisit = useAddPhotosToVisit(id);
 
   // Get mergeable visits when modal is open
   const { data: mergeableVisits = [], isLoading: isMergeableLoading } = useMergeableVisits(
@@ -299,6 +302,80 @@ export default function VisitDetailScreen() {
     [updateNotes, showToast],
   );
 
+  const handleAddPhotos = useCallback(async () => {
+    // Show warning first about photo association
+    Alert.alert(
+      "Add Photos to Visit",
+      "Each photo can only be associated with one visit. If a selected photo is already linked to another visit, it will be moved to this visit.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Select Photos",
+          onPress: async () => {
+            try {
+              // Request media library permission
+              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+              if (status !== "granted") {
+                showToast({ type: "error", message: "Photo library permission is required to add photos" });
+                return;
+              }
+
+              // Open image picker
+              const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ["images"],
+                allowsMultipleSelection: true,
+                quality: 1,
+                orderedSelection: true,
+              });
+
+              if (result.canceled || result.assets.length === 0) {
+                return;
+              }
+
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+              // Extract asset IDs from the selected images
+              const assetIds = result.assets
+                .map((asset) => asset.assetId)
+                .filter((id): id is string => id !== null && id !== undefined);
+
+              if (assetIds.length === 0) {
+                showToast({
+                  type: "info",
+                  message: "Selected photos don't have asset IDs. Only photos from your camera roll can be added.",
+                });
+                return;
+              }
+
+              // Add the photos to this visit
+              const moveResult = await addPhotosToVisit.mutateAsync(assetIds);
+
+              if (moveResult.movedCount > 0) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                const movedFromOther = moveResult.fromVisitIds.length > 0;
+                showToast({
+                  type: "success",
+                  message: movedFromOther
+                    ? `Added ${moveResult.movedCount.toLocaleString()} photo${moveResult.movedCount === 1 ? "" : "s"} (moved from ${moveResult.fromVisitIds.length} other visit${moveResult.fromVisitIds.length === 1 ? "" : "s"})`
+                    : `Added ${moveResult.movedCount.toLocaleString()} photo${moveResult.movedCount === 1 ? "" : "s"} to this visit`,
+                });
+              } else {
+                showToast({
+                  type: "info",
+                  message: "No matching photos found in your library. Photos must be scanned first.",
+                });
+              }
+            } catch (error) {
+              console.error("Error adding photos:", error);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              showToast({ type: "error", message: "Failed to add photos. Please try again." });
+            }
+          },
+        },
+      ],
+    );
+  }, [addPhotosToVisit, showToast]);
+
   if (isLoading) {
     return (
       <View className={"flex-1 bg-background items-center justify-center"}>
@@ -366,32 +443,18 @@ export default function VisitDetailScreen() {
           onMergePress={() => setShowMergeModal(true)}
         />
 
-        {showSuggestedRestaurant && (
-          <SuggestedRestaurantCard
-            name={suggestedRestaurant.name}
-            award={suggestedRestaurant.award}
-            cuisine={suggestedRestaurant.cuisine}
-            address={suggestedRestaurant.address}
-            onSearchPress={() => setShowSearch(true)}
-          />
-        )}
-
-        {showNearbyRestaurants && (
-          <NearbyRestaurantsCard
-            restaurants={nearbyRestaurantsForCard}
-            selectedIndex={selectedRestaurantIndex}
-            onSelectIndex={setSelectedRestaurantIndex}
-            onSearchPress={() => setShowSearch(true)}
-          />
-        )}
-
         {showNoMatch && <NoMatchCard onSearchPress={() => setShowSearch(true)} />}
 
         {visit.calendarEventTitle && (
           <CalendarEventCard title={visit.calendarEventTitle} location={visit.calendarEventLocation} />
         )}
 
-        <PhotosSection photos={photoData} onPhotoPress={(index) => setGalleryIndex(index)} />
+        <PhotosSection
+          photos={photoData}
+          onPhotoPress={(index) => setGalleryIndex(index)}
+          onAddPhotos={handleAddPhotos}
+          isAddingPhotos={addPhotosToVisit.isPending}
+        />
 
         {showFoodScanCard && (
           <Card delay={90}>
@@ -429,6 +492,25 @@ export default function VisitDetailScreen() {
         )}
 
         <NotesCard notes={visit.notes} onSave={handleSaveNotes} isSaving={updateNotes.isPending} />
+
+        {showSuggestedRestaurant && (
+          <SuggestedRestaurantCard
+            name={suggestedRestaurant.name}
+            award={suggestedRestaurant.award}
+            cuisine={suggestedRestaurant.cuisine}
+            address={suggestedRestaurant.address}
+            onSearchPress={() => setShowSearch(true)}
+          />
+        )}
+
+        {showNearbyRestaurants && (
+          <NearbyRestaurantsCard
+            restaurants={nearbyRestaurantsForCard}
+            selectedIndex={selectedRestaurantIndex}
+            onSelectIndex={setSelectedRestaurantIndex}
+            onSearchPress={() => setShowSearch(true)}
+          />
+        )}
 
         <VisitActionButtons
           status={visit.status}

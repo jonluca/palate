@@ -37,7 +37,10 @@ import {
   reclassifyPhotosWithCurrentKeywords,
   getPhotosWithLabelsCount,
   recomputeSuggestedRestaurants,
+  getPhotosByAssetIds,
+  movePhotosToVisit,
   type VisitWithDetails,
+  type MovePhotosResult,
   type PhotoRecord,
   type RestaurantRecord,
   type MichelinRestaurantRecord,
@@ -1624,3 +1627,45 @@ export function useRecomputeSuggestedRestaurants() {
     },
   });
 }
+
+// ============================================================================
+// PHOTO MANAGEMENT
+// ============================================================================
+
+/**
+ * Add photos to a visit by moving them from their current visit (if any).
+ * Photos can only belong to one visit at a time.
+ */
+export function useAddPhotosToVisit(visitId: string | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (assetIds: string[]): Promise<MovePhotosResult> => {
+      if (!visitId) {
+        throw new Error("Visit ID is required");
+      }
+      // First check which photos exist in the database
+      const existingPhotos = await getPhotosByAssetIds(assetIds);
+      const existingPhotoIds = existingPhotos.map((p) => p.id);
+
+      if (existingPhotoIds.length === 0) {
+        return { movedCount: 0, fromVisitIds: [] };
+      }
+
+      // Move the photos to this visit
+      return movePhotosToVisit(existingPhotoIds, visitId);
+    },
+    onSuccess: (_result, _vars) => {
+      // Invalidate visit detail query for this visit
+      if (visitId) {
+        queryClient.invalidateQueries({ queryKey: ["visitDetail", visitId] });
+      }
+      // Also invalidate any affected source visits and general queries
+      invalidateVisitQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+    },
+  });
+}
+
+/** Re-export for external use */
+export { getPhotosByAssetIds };

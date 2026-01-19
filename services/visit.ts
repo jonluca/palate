@@ -166,7 +166,7 @@ interface AnalyzingVisitsOptions {
 
 const DEFAULT_TIME_GAP_MS = 2 * 60 * 60 * 1000; // 2 hours
 const DEFAULT_DISTANCE_THRESHOLD = 100; // 200 meters
-const DEFAULT_RESTAURANT_MATCH_THRESHOLD = 250; // within 250 meters of the visit centroid
+const DEFAULT_RESTAURANT_MATCH_THRESHOLD = 250; // within 250 meters of the visit centroid1
 
 /**
  * Initialize Michelin restaurant reference data in the database
