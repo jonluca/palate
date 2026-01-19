@@ -1395,11 +1395,6 @@ export async function getAllMichelinRestaurants(): Promise<MichelinRestaurantRec
   return database.getAllAsync<MichelinRestaurantRecord>(`SELECT * FROM michelin_restaurants`);
 }
 
-export async function getMichelinRestaurantById(id: string): Promise<MichelinRestaurantRecord | null> {
-  const database = await getDatabase();
-  return database.getFirstAsync<MichelinRestaurantRecord>(`SELECT * FROM michelin_restaurants WHERE id = ?`, [id]);
-}
-
 // Get confirmed restaurants with visit counts
 export type RestaurantWithVisits = RestaurantRecord & {
   visitCount: number;

@@ -7,8 +7,6 @@ import {
   getVisitById,
   getStats,
   getPhotosByVisitId,
-  getRestaurantById,
-  getMichelinRestaurantById,
   updateVisitStatus,
   updateVisitNotes,
   getConfirmedRestaurantsWithVisits,
@@ -291,6 +289,9 @@ export interface VisitDetail {
  * Fetch visit detail with restaurant and photos
  */
 export function useVisitDetail(id: string | undefined) {
+  const { data: confirmedRestaurants } = useConfirmedRestaurants();
+  const { data: allMichelinRestaurants } = useMichelinRestaurants();
+
   return useQuery({
     queryKey: queryKeys.visitDetail(id ?? ""),
     queryFn: async (): Promise<VisitDetail | null> => {
@@ -308,14 +309,16 @@ export function useVisitDetail(id: string | undefined) {
         return null;
       }
 
+      // Find restaurant from confirmed restaurants list
       let restaurant: RestaurantRecord | null = null;
-      let suggestedRestaurant: MichelinRestaurantRecord | null = null;
-
-      if (visit.restaurantId) {
-        restaurant = await getRestaurantById(visit.restaurantId);
+      if (visit.restaurantId && confirmedRestaurants) {
+        restaurant = confirmedRestaurants.find((r) => r.id === visit.restaurantId) ?? null;
       }
-      if (visit.suggestedRestaurantId) {
-        suggestedRestaurant = await getMichelinRestaurantById(visit.suggestedRestaurantId);
+
+      // Find suggested restaurant from michelin restaurants list
+      let suggestedRestaurant: MichelinRestaurantRecord | null = null;
+      if (visit.suggestedRestaurantId && allMichelinRestaurants) {
+        suggestedRestaurant = allMichelinRestaurants.find((r) => r.id === visit.suggestedRestaurantId) ?? null;
       }
 
       // For confirmed visits, prefer the historical award stored at time of confirmation
@@ -1234,11 +1237,15 @@ export function useRemoveIgnoredLocation() {
 
 /** Restaurant detail query */
 export function useRestaurantDetail(restaurantId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.restaurantDetail(restaurantId ?? ""),
-    queryFn: () => (restaurantId ? getRestaurantById(restaurantId) : null),
-    enabled: !!restaurantId,
-  });
+  const { data: confirmedRestaurants } = useConfirmedRestaurants();
+
+  return useMemo(() => {
+    if (!restaurantId || !confirmedRestaurants) {
+      return { data: undefined };
+    }
+    const restaurant = confirmedRestaurants.find((r) => r.id === restaurantId);
+    return { data: restaurant ?? undefined };
+  }, [restaurantId, confirmedRestaurants]);
 }
 
 /** Update restaurant mutation */

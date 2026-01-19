@@ -21,7 +21,6 @@ import { useHeaderHeight } from "@react-navigation/elements";
 import { useLocalSearchParams, router, Stack } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { View, Pressable, Platform, type LayoutChangeEvent, ScrollView, Modal, TextInput } from "react-native";
-import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
@@ -49,7 +48,7 @@ function formatTime(timestamp: number): string {
   });
 }
 
-function VisitHistoryCard({ visit, index }: { visit: VisitRecord; index: number }) {
+function VisitHistoryCard({ visit }: { visit: VisitRecord }) {
   const { data: photos = [] } = useVisitPhotos(visit.id);
   const [previewCount, setPreviewCount] = useState(3);
 
@@ -71,7 +70,7 @@ function VisitHistoryCard({ visit, index }: { visit: VisitRecord; index: number 
   };
 
   return (
-    <Animated.View entering={FadeInDown.delay(index * 50).duration(300)}>
+    <View>
       <Pressable onPress={handlePress}>
         <Card animated={false}>
           {/* Preview Photos */}
@@ -114,7 +113,7 @@ function VisitHistoryCard({ visit, index }: { visit: VisitRecord; index: number 
           </View>
         </Card>
       </Pressable>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -159,7 +158,7 @@ function RestaurantInfoCard({ restaurant, onEdit }: { restaurant: RestaurantReco
     restaurant.notes;
 
   return (
-    <Animated.View entering={FadeInDown.duration(300)}>
+    <View>
       <Card animated={false}>
         <View className={"p-4 gap-4"}>
           {/* Header with edit button */}
@@ -263,7 +262,7 @@ function RestaurantInfoCard({ restaurant, onEdit }: { restaurant: RestaurantReco
           )}
         </View>
       </Card>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -290,7 +289,7 @@ function MichelinAwardHistoryCard({ awards }: { awards: MichelinAward[] }) {
   }
 
   return (
-    <Animated.View entering={FadeInDown.delay(100).duration(300)}>
+    <View>
       <Card animated={false}>
         <View className={"p-4 gap-4"}>
           {/* Header */}
@@ -370,7 +369,7 @@ function MichelinAwardHistoryCard({ awards }: { awards: MichelinAward[] }) {
           </View>
         </View>
       </Card>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -487,7 +486,7 @@ function AddVisitModal({
         </View>
 
         <ScrollView className={"flex-1"} contentContainerStyle={{ padding: 16, paddingBottom: 100 }}>
-          <Animated.View entering={FadeIn} className={"gap-6"}>
+          <View className={"gap-6"}>
             {/* Restaurant Name */}
             <View className={"gap-2"}>
               <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
@@ -547,7 +546,7 @@ function AddVisitModal({
 
               {/* Custom date input */}
               {showCustomDate && (
-                <Animated.View entering={FadeIn.duration(200)} className={"gap-2"}>
+                <View className={"gap-2"}>
                   <ThemedText variant={"footnote"} color={"secondary"}>
                     Enter date (YYYY-MM-DD)
                   </ThemedText>
@@ -559,7 +558,7 @@ function AddVisitModal({
                     keyboardType={"numbers-and-punctuation"}
                     className={"bg-secondary rounded-lg px-4 py-3 text-foreground"}
                   />
-                </Animated.View>
+                </View>
               )}
 
               {/* Selected date display */}
@@ -601,7 +600,7 @@ function AddVisitModal({
                 Add Visit
               </ThemedText>
             </Button>
-          </Animated.View>
+          </View>
         </ScrollView>
       </View>
     </Modal>
@@ -630,7 +629,7 @@ function MichelinDetailsCard({ details }: { details: MichelinRestaurantDetails }
     : [];
 
   return (
-    <Animated.View entering={FadeInDown.delay(150).duration(300)}>
+    <View>
       <Card animated={false}>
         <View className={"p-4 gap-4"}>
           {/* Header */}
@@ -697,7 +696,7 @@ function MichelinDetailsCard({ details }: { details: MichelinRestaurantDetails }
           )}
         </View>
       </Card>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -752,12 +751,7 @@ export default function RestaurantDetailScreen() {
     }
   };
 
-  const renderItem = useCallback(
-    ({ item, index }: { item: VisitRecord; index: number }) => (
-      <VisitHistoryCard visit={item} index={index < 10 ? index : 0} />
-    ),
-    [],
-  );
+  const renderItem = useCallback(({ item }: { item: VisitRecord }) => <VisitHistoryCard visit={item} />, []);
 
   const ListHeader = useCallback(
     () => (
