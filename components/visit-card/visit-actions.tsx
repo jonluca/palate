@@ -11,9 +11,16 @@ export function VisitActions({
   onFindRestaurant,
   hasSuggestion,
   isLoading = false,
+  loadingAction = null,
   variant = "pill",
   promptText,
 }: VisitActionsProps) {
+  // Derive per-button loading states (support both legacy isLoading and new loadingAction)
+  const isSkipLoading = loadingAction === "skip" || (isLoading && loadingAction === null);
+  const isConfirmLoading = loadingAction === "confirm" || (isLoading && loadingAction === null);
+  const isFindLoading = loadingAction === "find" || (isLoading && loadingAction === null);
+  const isAnyLoading = loadingAction !== null || isLoading;
+
   const handleSkip = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     onSkip();
@@ -39,21 +46,45 @@ export function VisitActions({
         )}
         <View className={"flex-row gap-3"}>
           <View className={"flex-1"}>
-            <Button onPress={handleSkip} loading={isLoading} variant={"destructive"} className={"w-full"}>
+            <Button
+              onPress={handleSkip}
+              loading={isSkipLoading}
+              disabled={isAnyLoading}
+              variant={"destructive"}
+              className={"w-full"}
+            >
               <ButtonText variant={"destructive"}>Not a Visit</ButtonText>
             </Button>
           </View>
           <View className={"flex-1"}>
             {hasSuggestion ? (
-              <Button onPress={handleConfirm} loading={isLoading} variant={"success"} className={"w-full"}>
+              <Button
+                onPress={handleConfirm}
+                loading={isConfirmLoading}
+                disabled={isAnyLoading}
+                variant={"success"}
+                className={"w-full"}
+              >
                 <ButtonText variant={"success"}>Confirm</ButtonText>
               </Button>
             ) : onFindRestaurant ? (
-              <Button onPress={handleFindRestaurant} loading={isLoading} variant={"secondary"} className={"w-full"}>
+              <Button
+                onPress={handleFindRestaurant}
+                loading={isFindLoading}
+                disabled={isAnyLoading}
+                variant={"secondary"}
+                className={"w-full"}
+              >
                 <ButtonText variant={"secondary"}>Find Restaurant</ButtonText>
               </Button>
             ) : (
-              <Button onPress={handleConfirm} loading={isLoading} variant={"success"} className={"w-full"}>
+              <Button
+                onPress={handleConfirm}
+                loading={isConfirmLoading}
+                disabled={isAnyLoading}
+                variant={"success"}
+                className={"w-full"}
+              >
                 <ButtonText variant={"success"}>Confirm</ButtonText>
               </Button>
             )}
@@ -68,13 +99,19 @@ export function VisitActions({
     <View className={"flex-row items-center gap-3"}>
       <Pressable
         onPress={handleSkip}
-        disabled={isLoading}
+        disabled={isAnyLoading}
         className={"flex-row items-center gap-2 px-4 py-2 bg-red-500/10 rounded-full"}
       >
-        <IconSymbol name={"xmark"} size={16} color={"#ef4444"} />
-        <ThemedText variant={"subhead"} className={"text-red-500 font-medium"}>
-          Skip
-        </ThemedText>
+        {isSkipLoading ? (
+          <ActivityIndicator size={"small"} color={"#ef4444"} />
+        ) : (
+          <>
+            <IconSymbol name={"xmark"} size={16} color={"#ef4444"} />
+            <ThemedText variant={"subhead"} className={"text-red-500 font-medium"}>
+              Skip
+            </ThemedText>
+          </>
+        )}
       </Pressable>
 
       <View className={"flex-1"} />
@@ -82,10 +119,10 @@ export function VisitActions({
       {hasSuggestion ? (
         <Pressable
           onPress={handleConfirm}
-          disabled={isLoading}
+          disabled={isAnyLoading}
           className={"flex-row items-center gap-2 px-4 py-2 bg-green-500/20 rounded-full"}
         >
-          {isLoading ? (
+          {isConfirmLoading ? (
             <ActivityIndicator size={"small"} color={"#22c55e"} />
           ) : (
             <>
@@ -99,13 +136,19 @@ export function VisitActions({
       ) : (
         <Pressable
           onPress={handleFindRestaurant}
-          disabled={isLoading}
+          disabled={isAnyLoading}
           className={"flex-row items-center gap-2 px-4 py-2 bg-orange-500/20 rounded-full"}
         >
-          <IconSymbol name={"magnifyingglass"} size={16} color={"#f97316"} />
-          <ThemedText variant={"subhead"} className={"text-orange-500 font-medium"}>
-            Find Restaurant
-          </ThemedText>
+          {isFindLoading ? (
+            <ActivityIndicator size={"small"} color={"#f97316"} />
+          ) : (
+            <>
+              <IconSymbol name={"magnifyingglass"} size={16} color={"#f97316"} />
+              <ThemedText variant={"subhead"} className={"text-orange-500 font-medium"}>
+                Find Restaurant
+              </ThemedText>
+            </>
+          )}
         </Pressable>
       )}
     </View>

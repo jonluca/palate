@@ -89,12 +89,17 @@ export interface AppleMapsSearchResult {
 }
 
 // Visit actions props
+export type LoadingAction = "skip" | "confirm" | "find" | null;
+
 export interface VisitActionsProps {
   onSkip: () => void;
   onConfirm: () => void;
   onFindRestaurant?: () => void;
   hasSuggestion: boolean;
+  /** @deprecated Use loadingAction instead for per-button loading */
   isLoading?: boolean;
+  /** Which action is currently loading (shows spinner only on that button) */
+  loadingAction?: LoadingAction;
   variant?: "pill" | "full";
   promptText?: string;
 }

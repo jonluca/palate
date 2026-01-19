@@ -242,7 +242,7 @@ export function ReviewModeCard({
                   </ThemedText>
                 </View>
                 <ScrollView
-                  style={{ maxHeight: 260 }}
+                  style={{ maxHeight: 160 }}
                   showsVerticalScrollIndicator={true}
                   nestedScrollEnabled={true}
                   contentContainerStyle={{ gap: 8 }}

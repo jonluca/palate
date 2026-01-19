@@ -17,6 +17,7 @@ import {
   MergeVisitsModal,
   NotesCard,
   type AggregatedFoodLabel,
+  type LoadingAction,
 } from "@/components/visit";
 import {
   useVisitDetail,
@@ -85,6 +86,7 @@ export default function VisitDetailScreen() {
   const [showMergeModal, setShowMergeModal] = useState(false);
   const [selectedRestaurantIndex, setSelectedRestaurantIndex] = useState(0);
   const [foodScanProgress, setFoodScanProgress] = useState<VisitFoodScanProgress | null>(null);
+  const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
   const { showToast } = useToast();
 
   // Track visit view
@@ -130,6 +132,10 @@ export default function VisitDetailScreen() {
 
   const handleStatusChange = useCallback(
     async (newStatus: VisitStatus) => {
+      // Set loading action based on what's being done
+      const action: LoadingAction = newStatus === "rejected" ? "skip" : newStatus === "confirmed" ? "confirm" : "skip";
+      setLoadingAction(action);
+
       Haptics.notificationAsync(
         newStatus === "confirmed"
           ? Haptics.NotificationFeedbackType.Success
@@ -145,6 +151,8 @@ export default function VisitDetailScreen() {
         }
       } catch (error) {
         console.error("Error updating visit:", error);
+      } finally {
+        setLoadingAction(null);
       }
     },
     [updateStatus],
@@ -163,6 +171,7 @@ export default function VisitDetailScreen() {
       return;
     }
 
+    setLoadingAction("confirm");
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     try {
@@ -177,6 +186,8 @@ export default function VisitDetailScreen() {
       router.back();
     } catch (error) {
       console.error("Error confirming visit:", error);
+    } finally {
+      setLoadingAction(null);
     }
   }, [data, confirmVisit, suggestedRestaurants, selectedRestaurantIndex]);
 
@@ -443,12 +454,41 @@ export default function VisitDetailScreen() {
           onMergePress={() => setShowMergeModal(true)}
         />
 
-        {showNoMatch && <NoMatchCard onSearchPress={() => setShowSearch(true)} />}
-
         {visit.calendarEventTitle && (
           <CalendarEventCard title={visit.calendarEventTitle} location={visit.calendarEventLocation} />
         )}
 
+        {showNoMatch && <NoMatchCard onSearchPress={() => setShowSearch(true)} />}
+
+        {showSuggestedRestaurant && (
+          <SuggestedRestaurantCard
+            name={suggestedRestaurant.name}
+            award={suggestedRestaurant.award}
+            cuisine={suggestedRestaurant.cuisine}
+            address={suggestedRestaurant.address}
+            onSearchPress={() => setShowSearch(true)}
+          />
+        )}
+
+        {showNearbyRestaurants && (
+          <NearbyRestaurantsCard
+            restaurants={nearbyRestaurantsForCard}
+            selectedIndex={selectedRestaurantIndex}
+            onSelectIndex={setSelectedRestaurantIndex}
+            onSearchPress={() => setShowSearch(true)}
+          />
+        )}
+
+        <VisitActionButtons
+          status={visit.status}
+          hasSuggestion={Boolean(suggestedRestaurant)}
+          nearbyCount={suggestedRestaurants.length}
+          loadingAction={loadingAction}
+          onStatusChange={handleStatusChange}
+          onConfirmWithSuggestion={handleConfirmWithSuggestion}
+          onFindRestaurant={() => setShowSearch(true)}
+          onIgnoreLocation={handleIgnoreLocation}
+        />
         <PhotosSection
           photos={photoData}
           onPhotoPress={(index) => setGalleryIndex(index)}
@@ -492,36 +532,6 @@ export default function VisitDetailScreen() {
         )}
 
         <NotesCard notes={visit.notes} onSave={handleSaveNotes} isSaving={updateNotes.isPending} />
-
-        {showSuggestedRestaurant && (
-          <SuggestedRestaurantCard
-            name={suggestedRestaurant.name}
-            award={suggestedRestaurant.award}
-            cuisine={suggestedRestaurant.cuisine}
-            address={suggestedRestaurant.address}
-            onSearchPress={() => setShowSearch(true)}
-          />
-        )}
-
-        {showNearbyRestaurants && (
-          <NearbyRestaurantsCard
-            restaurants={nearbyRestaurantsForCard}
-            selectedIndex={selectedRestaurantIndex}
-            onSelectIndex={setSelectedRestaurantIndex}
-            onSearchPress={() => setShowSearch(true)}
-          />
-        )}
-
-        <VisitActionButtons
-          status={visit.status}
-          hasSuggestion={Boolean(suggestedRestaurant)}
-          nearbyCount={suggestedRestaurants.length}
-          isLoading={updateStatus.isPending || confirmVisit.isPending || ignoreLocation.isPending}
-          onStatusChange={handleStatusChange}
-          onConfirmWithSuggestion={handleConfirmWithSuggestion}
-          onFindRestaurant={() => setShowSearch(true)}
-          onIgnoreLocation={handleIgnoreLocation}
-        />
       </ScreenLayout>
 
       <RestaurantSearchModal
