@@ -310,7 +310,7 @@ function WrappedCardContent({ stats }: { stats: WrappedStats }) {
                     </ThemedText>
                     {hasMichelinVisits && (
                       <MichelinBadge
-                        count={stats.michelinStats.totalStarredVisits}
+                        count={stats.michelinStats.totalAccumulatedStars}
                         stars={stats.michelinStats.threeStars > 0 ? 3 : stats.michelinStats.twoStars > 0 ? 2 : 1}
                       />
                     )}
