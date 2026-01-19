@@ -7,7 +7,6 @@ import { Button, ButtonText, Card, AllCaughtUpEmpty, SkeletonVisitCard } from "@
 import { IconSymbol } from "@/components/icon-symbol";
 import { CalendarImportCard } from "@/components/review";
 import { logCalendarImported } from "@/services/analytics";
-import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -65,8 +64,6 @@ export default function CalendarImportScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       try {
         await importCalendarMutation.mutateAsync([calendarEventId]);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        showToast({ type: "success", message: "Calendar event imported as visit." });
         logCalendarImported(1);
       } catch (error) {
         console.error("Error importing calendar event:", error);
@@ -77,10 +74,9 @@ export default function CalendarImportScreen() {
           next.delete(calendarEventId);
           return next;
         });
-        await queryClient.refetchQueries();
       }
     },
-    [importCalendarMutation, showToast, queryClient],
+    [importCalendarMutation, showToast],
   );
 
   const handleDismissCalendarEvent = useCallback(
@@ -89,7 +85,6 @@ export default function CalendarImportScreen() {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       try {
         await dismissCalendarMutation.mutateAsync([calendarEventId]);
-        showToast({ type: "success", message: "Calendar event dismissed." });
       } catch (error) {
         console.error("Error dismissing calendar event:", error);
         showToast({ type: "error", message: "Failed to dismiss. Please try again." });
@@ -194,7 +189,7 @@ export default function CalendarImportScreen() {
 
         {/* Stats Card */}
         {!isEmpty && (
-          <Animated.View entering={FadeInDown.delay(100).duration(300)}>
+          <View>
             <Card animated={false}>
               <View className={"p-4 gap-4"}>
                 <View className={"flex-row items-center gap-4"}>
@@ -224,7 +219,7 @@ export default function CalendarImportScreen() {
                 </Button>
               </View>
             </Card>
-          </Animated.View>
+          </View>
         )}
       </View>
     );
@@ -236,7 +231,7 @@ export default function CalendarImportScreen() {
     }
 
     return (
-      <Animated.View entering={FadeInDown.delay(300).duration(300)} className={"mt-2"}>
+      <View className={"mt-2"}>
         <View className={"bg-blue-500/10 rounded-xl p-4 flex-row gap-3"}>
           <IconSymbol name={"lightbulb.fill"} size={18} color={"#3b82f6"} />
           <View className={"flex-1"}>
@@ -246,7 +241,7 @@ export default function CalendarImportScreen() {
             </ThemedText>
           </View>
         </View>
-      </Animated.View>
+      </View>
     );
   }, [isEmpty, isLoading]);
 
@@ -256,7 +251,7 @@ export default function CalendarImportScreen() {
     }
 
     return (
-      <Animated.View entering={FadeInDown.delay(100).duration(300)}>
+      <View>
         <AllCaughtUpEmpty />
         <View className={"mt-6 bg-blue-500/10 rounded-xl p-4 flex-row gap-3"}>
           <IconSymbol name={"lightbulb.fill"} size={18} color={"#3b82f6"} />
@@ -267,7 +262,7 @@ export default function CalendarImportScreen() {
             </ThemedText>
           </View>
         </View>
-      </Animated.View>
+      </View>
     );
   }, [isLoading]);
 
