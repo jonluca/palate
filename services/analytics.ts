@@ -1,8 +1,11 @@
-import analytics from "@react-native-firebase/analytics";
+import { getAnalytics, logEvent as firebaseLogEvent } from "@react-native-firebase/analytics";
 
 /**
  * Firebase Analytics service for tracking events and screen views
+ * Using modular API (v22+)
  */
+
+const analytics = getAnalytics();
 
 /**
  * Log a screen view event
@@ -11,7 +14,7 @@ import analytics from "@react-native-firebase/analytics";
  */
 export const logScreenView = async (screenName: string, screenClass?: string) => {
   try {
-    await analytics().logScreenView({
+    await firebaseLogEvent(analytics, "screen_view", {
       screen_name: screenName,
       screen_class: screenClass ?? screenName,
     });
@@ -29,7 +32,7 @@ export const logScreenView = async (screenName: string, screenClass?: string) =>
  */
 const logEvent = async (eventName: string, params?: Record<string, string | number | boolean>) => {
   try {
-    await analytics().logEvent(eventName, params);
+    await firebaseLogEvent(analytics, eventName, params);
   } catch (error) {
     if (__DEV__) {
       console.warn("Analytics event error:", error);
