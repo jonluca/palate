@@ -1398,63 +1398,91 @@ export async function getConfirmedRestaurantsWithVisits(): Promise<RestaurantWit
   const start = DEBUG_TIMING ? performance.now() : 0;
   const database = await getDatabase();
 
-  // Get restaurants with basic stats
-  const restaurants = await database.getAllAsync<
-    RestaurantRecord & { visitCount: number; lastVisit: number; lastConfirmedAt: number | null }
-  >(
-    `SELECT r.*, 
-            COUNT(c.id) as visitCount, 
-            MAX(c.startTime) as lastVisit,
-            MAX(c.updatedAt) as lastConfirmedAt
-     FROM restaurants r
-     INNER JOIN visits c ON c.restaurantId = r.id AND c.status = 'confirmed'
-     GROUP BY r.id
-     ORDER BY lastVisit DESC`,
-  );
-
-  if (restaurants.length === 0) {
-    if (DEBUG_TIMING) {
-      console.log(`[DB] getConfirmedRestaurantsWithVisits: ${(performance.now() - start).toFixed(2)}ms (0 results)`);
+  // Single query with CTEs to get restaurants, stats, and preview photos
+  const rows = await database.getAllAsync<
+    RestaurantRecord & {
+      visitCount: number;
+      lastVisit: number;
+      lastConfirmedAt: number | null;
+      previewPhotosJson: string | null;
     }
-    return [];
-  }
-
-  // Fetch preview photos for each restaurant (up to 3 photos, prioritizing food photos)
-  const restaurantIds = restaurants.map((r) => r.id);
-  const placeholders = restaurantIds.map(() => "?").join(", ");
-
-  const previewPhotos = await database.getAllAsync<{ restaurantId: string; uri: string }>(
-    `SELECT restaurantId, uri FROM (
-      SELECT v.restaurantId, p.uri, ROW_NUMBER() OVER (
-        PARTITION BY v.restaurantId 
-        ORDER BY CASE WHEN p.foodDetected = 1 THEN 0 WHEN p.foodDetected = 0 THEN 1 ELSE 2 END ASC, p.creationTime DESC
-      ) as rn
-      FROM photos p
-      INNER JOIN visits v ON p.visitId = v.id
-      WHERE v.restaurantId IN (${placeholders}) AND v.status = 'confirmed'
-    ) WHERE rn <= 3`,
-    restaurantIds,
+  >(
+    `WITH 
+      -- Get restaurant stats from confirmed visits
+      restaurant_stats AS (
+        SELECT 
+          restaurantId,
+          COUNT(id) as visitCount,
+          MAX(startTime) as lastVisit,
+          MAX(updatedAt) as lastConfirmedAt
+        FROM visits
+        WHERE status = 'confirmed' AND restaurantId IS NOT NULL
+        GROUP BY restaurantId
+      ),
+      
+      -- Rank photos for each restaurant (prioritize food photos, then by time)
+      ranked_photos AS (
+        SELECT 
+          v.restaurantId,
+          p.uri,
+          ROW_NUMBER() OVER (
+            PARTITION BY v.restaurantId 
+            ORDER BY 
+              CASE WHEN p.foodDetected = 1 THEN 0 WHEN p.foodDetected = 0 THEN 1 ELSE 2 END ASC, 
+              p.creationTime DESC
+          ) as rn
+        FROM photos p
+        INNER JOIN visits v ON p.visitId = v.id
+        WHERE v.status = 'confirmed' AND v.restaurantId IS NOT NULL
+      ),
+      
+      -- Aggregate top 3 photos per restaurant as JSON array
+      preview_photos AS (
+        SELECT 
+          restaurantId,
+          json_group_array(uri) as uris
+        FROM ranked_photos
+        WHERE rn <= 3
+        GROUP BY restaurantId
+      )
+      
+    SELECT 
+      r.*,
+      rs.visitCount,
+      rs.lastVisit,
+      rs.lastConfirmedAt,
+      pp.uris as previewPhotosJson
+    FROM restaurants r
+    INNER JOIN restaurant_stats rs ON rs.restaurantId = r.id
+    LEFT JOIN preview_photos pp ON pp.restaurantId = r.id
+    ORDER BY rs.lastVisit DESC`,
   );
-
-  // Group photos by restaurantId
-  const photosByRestaurant = new Map<string, string[]>();
-  for (const photo of previewPhotos) {
-    const existing = photosByRestaurant.get(photo.restaurantId) ?? [];
-    existing.push(photo.uri);
-    photosByRestaurant.set(photo.restaurantId, existing);
-  }
 
   if (DEBUG_TIMING) {
     console.log(
-      `[DB] getConfirmedRestaurantsWithVisits: ${(performance.now() - start).toFixed(2)}ms (${restaurants.length} results)`,
+      `[DB] getConfirmedRestaurantsWithVisits: ${(performance.now() - start).toFixed(2)}ms (${rows.length} results)`,
     );
   }
 
-  // Combine results
-  return restaurants.map((restaurant) => ({
-    ...restaurant,
-    previewPhotos: photosByRestaurant.get(restaurant.id) ?? [],
-  }));
+  // Parse JSON and build result
+  return rows.map((row) => {
+    let previewPhotos: string[] = [];
+    if (row.previewPhotosJson) {
+      try {
+        previewPhotos = JSON.parse(row.previewPhotosJson) as string[];
+      } catch {
+        // Skip malformed JSON
+      }
+    }
+
+    // Destructure to separate previewPhotosJson from the rest
+    const { previewPhotosJson: _, ...restaurantData } = row;
+
+    return {
+      ...restaurantData,
+      previewPhotos,
+    };
+  });
 }
 
 // Get visits (visits) for a specific restaurant
