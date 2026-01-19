@@ -462,15 +462,442 @@ function FunFactCard({
   );
 }
 
+// Location Breakdown Component - shows top cities/countries visited
+function LocationBreakdown({ locations }: { locations: WrappedStats["topLocations"] }) {
+  if (locations.length === 0) {
+    return null;
+  }
+
+  // Group by country and count
+  const countryMap = new Map<string, number>();
+  for (const loc of locations) {
+    if (loc.country) {
+      countryMap.set(loc.country, (countryMap.get(loc.country) ?? 0) + loc.visits);
+    }
+  }
+  const topCountries = Array.from(countryMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  const maxVisits = Math.max(...locations.map((l) => l.visits), 1);
+
+  return (
+    <Animated.View entering={FadeInDown.delay(400).duration(400)} className={"gap-4"}>
+      <ThemedText variant={"title2"} className={"text-white font-bold"}>
+        🌍 Your Dining World
+      </ThemedText>
+
+      {/* Country summary row */}
+      {topCountries.length > 0 && (
+        <View className={"flex-row flex-wrap gap-2 mb-2"}>
+          {topCountries.map(([country, visits], index) => (
+            <Animated.View
+              key={country}
+              entering={FadeIn.delay(450 + index * 60).duration(300)}
+              className={
+                "bg-emerald-500/20 border border-emerald-500/30 rounded-full px-3 py-1.5 flex-row items-center gap-1.5"
+              }
+            >
+              <ThemedText variant={"footnote"} className={"text-emerald-300 font-medium"}>
+                {country}
+              </ThemedText>
+              <View className={"bg-emerald-500/40 rounded-full px-1.5 py-0.5"}>
+                <ThemedText variant={"caption2"} className={"text-emerald-200 font-semibold"}>
+                  {visits}
+                </ThemedText>
+              </View>
+            </Animated.View>
+          ))}
+        </View>
+      )}
+
+      {/* Top cities list */}
+      <View className={"bg-white/5 rounded-2xl p-4 gap-3"}>
+        {locations.slice(0, 5).map((loc, index) => {
+          const widthPercent = (loc.visits / maxVisits) * 100;
+          return (
+            <Animated.View
+              key={loc.location}
+              entering={FadeIn.delay(500 + index * 80).duration(300)}
+              className={"gap-1"}
+            >
+              <View className={"flex-row justify-between items-center"}>
+                <ThemedText variant={"subhead"} className={"text-white font-medium"} numberOfLines={1}>
+                  {loc.city}
+                </ThemedText>
+                <ThemedText variant={"footnote"} className={"text-white/60"}>
+                  {loc.visits} {loc.visits === 1 ? "visit" : "visits"}
+                </ThemedText>
+              </View>
+              <View className={"h-2 bg-white/10 rounded-full overflow-hidden"}>
+                <View className={"h-full bg-emerald-400/70 rounded-full"} style={{ width: `${widthPercent}%` }} />
+              </View>
+            </Animated.View>
+          );
+        })}
+      </View>
+    </Animated.View>
+  );
+}
+
+// Dining Time Chart - shows meal time distribution
+function DiningTimeChart({ mealTimes }: { mealTimes: WrappedStats["mealTimeBreakdown"] }) {
+  const total = mealTimes.breakfast + mealTimes.lunch + mealTimes.dinner + mealTimes.lateNight;
+  if (total === 0) {
+    return null;
+  }
+
+  const segments = [
+    { label: "Breakfast", count: mealTimes.breakfast, emoji: "🌅", color: "bg-orange-400" },
+    { label: "Lunch", count: mealTimes.lunch, emoji: "☀️", color: "bg-yellow-400" },
+    { label: "Dinner", count: mealTimes.dinner, emoji: "🌙", color: "bg-indigo-400" },
+    { label: "Late Night", count: mealTimes.lateNight, emoji: "🌃", color: "bg-purple-400" },
+  ].filter((s) => s.count > 0);
+
+  // Find the dominant meal time
+  const dominant = segments.reduce((max, s) => (s.count > max.count ? s : max), segments[0]);
+
+  return (
+    <Animated.View entering={FadeInDown.delay(600).duration(400)} className={"gap-4"}>
+      <ThemedText variant={"title2"} className={"text-white font-bold"}>
+        🕐 When You Dine
+      </ThemedText>
+
+      <View className={"bg-white/5 rounded-2xl p-4 gap-4"}>
+        {/* Horizontal bar showing distribution */}
+        <View className={"flex-row h-4 rounded-full overflow-hidden"}>
+          {segments.map((segment, index) => {
+            const percent = (segment.count / total) * 100;
+            return (
+              <Animated.View
+                key={segment.label}
+                entering={FadeIn.delay(650 + index * 100).duration(300)}
+                className={`${segment.color}`}
+                style={{ width: `${percent}%` }}
+              />
+            );
+          })}
+        </View>
+
+        {/* Legend */}
+        <View className={"flex-row flex-wrap gap-3"}>
+          {segments.map((segment, index) => {
+            const percent = Math.round((segment.count / total) * 100);
+            const isDominant = segment === dominant;
+            return (
+              <Animated.View
+                key={segment.label}
+                entering={FadeIn.delay(700 + index * 80).duration(300)}
+                className={`flex-row items-center gap-2 px-3 py-2 rounded-xl ${isDominant ? "bg-white/15" : "bg-white/5"}`}
+              >
+                <ThemedText variant={"body"}>{segment.emoji}</ThemedText>
+                <View>
+                  <ThemedText
+                    variant={"footnote"}
+                    className={isDominant ? "text-white font-semibold" : "text-white/70"}
+                  >
+                    {segment.label}
+                  </ThemedText>
+                  <ThemedText variant={"caption2"} className={"text-white/50"}>
+                    {percent}% ({segment.count})
+                  </ThemedText>
+                </View>
+              </Animated.View>
+            );
+          })}
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+// Weekend vs Weekday Chart
+function WeekendWeekdayChart({ weekendVsWeekday }: { weekendVsWeekday: WrappedStats["weekendVsWeekday"] }) {
+  const total = weekendVsWeekday.weekend + weekendVsWeekday.weekday;
+  if (total === 0) {
+    return null;
+  }
+
+  const weekendPercent = Math.round((weekendVsWeekday.weekend / total) * 100);
+  const weekdayPercent = 100 - weekendPercent;
+
+  return (
+    <Animated.View entering={FadeInDown.delay(700).duration(400)} className={"gap-4"}>
+      <ThemedText variant={"title2"} className={"text-white font-bold"}>
+        📅 Weekend vs Weekday
+      </ThemedText>
+
+      <View className={"bg-white/5 rounded-2xl p-4"}>
+        <View className={"flex-row items-center gap-4"}>
+          {/* Weekday */}
+          <View className={"flex-1 items-center gap-2"}>
+            <View
+              className={
+                "w-16 h-16 rounded-full bg-blue-500/20 items-center justify-center border-2 border-blue-400/50"
+              }
+            >
+              <ThemedText variant={"title2"} className={"text-blue-300 font-bold"}>
+                {weekdayPercent}%
+              </ThemedText>
+            </View>
+            <ThemedText variant={"footnote"} className={"text-white/70"}>
+              Weekday
+            </ThemedText>
+            <ThemedText variant={"caption2"} className={"text-white/50"}>
+              {weekendVsWeekday.weekday} visits
+            </ThemedText>
+          </View>
+
+          {/* Divider */}
+          <View className={"h-16 w-px bg-white/20"} />
+
+          {/* Weekend */}
+          <View className={"flex-1 items-center gap-2"}>
+            <View
+              className={
+                "w-16 h-16 rounded-full bg-rose-500/20 items-center justify-center border-2 border-rose-400/50"
+              }
+            >
+              <ThemedText variant={"title2"} className={"text-rose-300 font-bold"}>
+                {weekendPercent}%
+              </ThemedText>
+            </View>
+            <ThemedText variant={"footnote"} className={"text-white/70"}>
+              Weekend
+            </ThemedText>
+            <ThemedText variant={"caption2"} className={"text-white/50"}>
+              {weekendVsWeekday.weekend} visits
+            </ThemedText>
+          </View>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+// Photo Stats Section
+function PhotoStatsSection({ photoStats }: { photoStats: WrappedStats["photoStats"] }) {
+  if (photoStats.totalPhotos === 0) {
+    return null;
+  }
+
+  return (
+    <Animated.View entering={FadeInDown.delay(800).duration(400)} className={"gap-4"}>
+      <ThemedText variant={"title2"} className={"text-white font-bold"}>
+        📸 Your Food Photography
+      </ThemedText>
+
+      <View className={"flex-row gap-3"}>
+        {/* Total Photos */}
+        <View className={"flex-1 bg-white/5 rounded-2xl p-4 items-center gap-1"}>
+          <ThemedText variant={"largeTitle"} className={"text-cyan-400 font-bold"}>
+            {photoStats.totalPhotos.toLocaleString()}
+          </ThemedText>
+          <ThemedText variant={"footnote"} className={"text-white/60 text-center"}>
+            Total Photos
+          </ThemedText>
+        </View>
+
+        {/* Average Per Visit */}
+        <View className={"flex-1 bg-white/5 rounded-2xl p-4 items-center gap-1"}>
+          <ThemedText variant={"largeTitle"} className={"text-pink-400 font-bold"}>
+            {photoStats.averagePerVisit}
+          </ThemedText>
+          <ThemedText variant={"footnote"} className={"text-white/60 text-center"}>
+            Avg Per Visit
+          </ThemedText>
+        </View>
+      </View>
+
+      {/* Most Photographed Visit */}
+      {photoStats.mostPhotographedVisit && (
+        <Animated.View
+          entering={FadeIn.delay(900).duration(300)}
+          className={"bg-white/10 rounded-2xl p-4 flex-row items-center gap-3"}
+        >
+          <View className={"w-10 h-10 rounded-full bg-cyan-500/30 items-center justify-center"}>
+            <ThemedText variant={"body"}>🏆</ThemedText>
+          </View>
+          <View className={"flex-1"}>
+            <ThemedText variant={"footnote"} className={"text-white/60"}>
+              Most Photographed
+            </ThemedText>
+            <ThemedText variant={"body"} className={"text-white font-semibold"} numberOfLines={1}>
+              {photoStats.mostPhotographedVisit.restaurantName}
+            </ThemedText>
+            <ThemedText variant={"caption2"} className={"text-cyan-300"}>
+              {photoStats.mostPhotographedVisit.photoCount} photos
+            </ThemedText>
+          </View>
+        </Animated.View>
+      )}
+    </Animated.View>
+  );
+}
+
+// Dining Style Card - Explorer vs Regular ratio
+function DiningStyleCard({
+  diningStyle,
+  totalVisits,
+}: {
+  diningStyle: WrappedStats["diningStyle"];
+  totalVisits: number;
+}) {
+  if (totalVisits === 0) {
+    return null;
+  }
+
+  const explorerPercent = Math.round(diningStyle.explorerRatio * 100);
+  const isExplorer = explorerPercent >= 60;
+  const isLoyal = explorerPercent <= 40;
+
+  let title = "Balanced Foodie";
+  let emoji = "⚖️";
+  let description = "You enjoy both discovering new places and returning to favorites";
+
+  if (isExplorer) {
+    title = "Adventurous Explorer";
+    emoji = "🧭";
+    description = "You love discovering new restaurants!";
+  } else if (isLoyal) {
+    title = "Loyal Regular";
+    emoji = "💝";
+    description = "You have your favorite spots and stick with them";
+  }
+
+  return (
+    <Animated.View entering={FadeInDown.delay(900).duration(400)} className={"gap-4"}>
+      <ThemedText variant={"title2"} className={"text-white font-bold"}>
+        🎯 Your Dining Style
+      </ThemedText>
+
+      <View className={"bg-white/5 rounded-2xl p-5 gap-4"}>
+        {/* Title and emoji */}
+        <View className={"flex-row items-center gap-3"}>
+          <View className={"w-14 h-14 rounded-full bg-violet-500/30 items-center justify-center"}>
+            <ThemedText style={{ fontSize: 28 }}>{emoji}</ThemedText>
+          </View>
+          <View className={"flex-1"}>
+            <ThemedText variant={"title3"} className={"text-violet-300 font-bold"}>
+              {title}
+            </ThemedText>
+            <ThemedText variant={"footnote"} className={"text-white/60"}>
+              {description}
+            </ThemedText>
+          </View>
+        </View>
+
+        {/* Explorer bar */}
+        <View className={"gap-2"}>
+          <View className={"flex-row justify-between"}>
+            <ThemedText variant={"caption1"} className={"text-white/70"}>
+              New Places
+            </ThemedText>
+            <ThemedText variant={"caption1"} className={"text-white/70"}>
+              Return Visits
+            </ThemedText>
+          </View>
+          <View className={"h-3 bg-white/10 rounded-full overflow-hidden flex-row"}>
+            <View className={"h-full bg-violet-400"} style={{ width: `${explorerPercent}%` }} />
+            <View className={"h-full bg-rose-400"} style={{ width: `${100 - explorerPercent}%` }} />
+          </View>
+          <View className={"flex-row justify-between"}>
+            <ThemedText variant={"caption2"} className={"text-violet-300"}>
+              {diningStyle.newRestaurants} unique
+            </ThemedText>
+            <ThemedText variant={"caption2"} className={"text-rose-300"}>
+              {diningStyle.returningVisits} revisits
+            </ThemedText>
+          </View>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+// Green Star Section - Eco-conscious dining
+function GreenStarSection({ greenStarVisits }: { greenStarVisits: number }) {
+  if (greenStarVisits === 0) {
+    return null;
+  }
+
+  return (
+    <Animated.View entering={FadeInDown.delay(350).duration(400)}>
+      <View className={"bg-green-500/15 border border-green-500/30 rounded-2xl p-4 flex-row items-center gap-4"}>
+        <View className={"w-14 h-14 rounded-full bg-green-500/30 items-center justify-center"}>
+          <ThemedText style={{ fontSize: 28 }}>🌿</ThemedText>
+        </View>
+        <View className={"flex-1"}>
+          <ThemedText variant={"subhead"} className={"text-green-300 font-bold"}>
+            Eco-Conscious Diner
+          </ThemedText>
+          <ThemedText variant={"footnote"} className={"text-white/70"}>
+            You visited{" "}
+            <ThemedText variant={"footnote"} className={"text-green-400 font-semibold"}>
+              {greenStarVisits} Michelin Green Star
+            </ThemedText>{" "}
+            {greenStarVisits === 1 ? "restaurant" : "restaurants"}
+          </ThemedText>
+          <ThemedText variant={"caption2"} className={"text-white/50 mt-1"}>
+            Supporting sustainable gastronomy
+          </ThemedText>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+const HOUR_LABELS = [
+  "12 AM",
+  "1 AM",
+  "2 AM",
+  "3 AM",
+  "4 AM",
+  "5 AM",
+  "6 AM",
+  "7 AM",
+  "8 AM",
+  "9 AM",
+  "10 AM",
+  "11 AM",
+  "12 PM",
+  "1 PM",
+  "2 PM",
+  "3 PM",
+  "4 PM",
+  "5 PM",
+  "6 PM",
+  "7 PM",
+  "8 PM",
+  "9 PM",
+  "10 PM",
+  "11 PM",
+];
+
 function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selectedYear: number | null }) {
   const hasMichelinData = stats.michelinStats.totalStarredVisits > 0;
   const hasCuisineData = stats.topCuisines.length > 0;
   const hasMonthlyData = stats.monthlyVisits.length > 0;
+  const hasLocationData = stats.topLocations.length > 0;
+  const hasPhotoData = stats.photoStats.totalPhotos > 0;
+  const hasMealTimeData =
+    stats.mealTimeBreakdown.breakfast +
+      stats.mealTimeBreakdown.lunch +
+      stats.mealTimeBreakdown.dinner +
+      stats.mealTimeBreakdown.lateNight >
+    0;
+  const hasGreenStar = stats.michelinStats.greenStarVisits > 0;
 
-  // Determine the 4th stat to show
+  // Determine the 4th stat to show - now can include photo count or countries
   const fourthStat = useMemo(() => {
+    if (stats.uniqueCountries > 1) {
+      return { icon: "🌍", value: stats.uniqueCountries, label: "Countries" };
+    }
     if (stats.michelinStats.totalAccumulatedStars > 0) {
       return { icon: "⭐", value: stats.michelinStats.totalAccumulatedStars, label: "Michelin Stars" };
+    }
+    if (stats.photoStats.totalPhotos > 0) {
+      return { icon: "📸", value: stats.photoStats.totalPhotos, label: "Photos" };
     }
     if (stats.topCuisines.length > 0) {
       return { icon: "🍜", value: stats.topCuisines.length, label: "Cuisines" };
@@ -478,7 +905,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
     if (stats.longestStreak && stats.longestStreak.days >= 2) {
       return { icon: "🔥", value: stats.longestStreak.days, label: "Day Streak" };
     }
-    return { icon: "📸", value: "—", label: "Photos" };
+    return { icon: "📅", value: stats.averageVisitsPerMonth || "—", label: "Per Month" };
   }, [stats]);
 
   return (
@@ -497,9 +924,9 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
         </View>
         <View className={"flex-row gap-3"}>
           <StatCard
-            icon={"📅"}
-            value={stats.averageVisitsPerMonth > 0 ? stats.averageVisitsPerMonth : "—"}
-            label={"Per Month"}
+            icon={"🏙️"}
+            value={stats.uniqueCities > 0 ? stats.uniqueCities : "—"}
+            label={"Cities"}
             accentColor={"violet"}
             delay={200}
           />
@@ -513,8 +940,14 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
         </View>
       </Animated.View>
 
+      {/* Green Star Badge - highlight eco-conscious dining early */}
+      {hasGreenStar && <GreenStarSection greenStarVisits={stats.michelinStats.greenStarVisits} />}
+
       {/* Monthly Chart */}
       {hasMonthlyData && <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />}
+
+      {/* Geographic Breakdown */}
+      {hasLocationData && <LocationBreakdown locations={stats.topLocations} />}
 
       {/* Michelin Stars */}
       {hasMichelinData && <StarBreakdown stats={stats.michelinStats} />}
@@ -522,12 +955,35 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
       {/* Cuisine Breakdown */}
       {hasCuisineData && <CuisineCloud cuisines={stats.topCuisines} />}
 
+      {/* Dining Time Patterns */}
+      {hasMealTimeData && <DiningTimeChart mealTimes={stats.mealTimeBreakdown} />}
+
+      {/* Weekend vs Weekday */}
+      <WeekendWeekdayChart weekendVsWeekday={stats.weekendVsWeekday} />
+
+      {/* Photo Stats */}
+      {hasPhotoData && <PhotoStatsSection photoStats={stats.photoStats} />}
+
+      {/* Dining Style */}
+      <DiningStyleCard diningStyle={stats.diningStyle} totalVisits={stats.totalConfirmedVisits} />
+
       {/* Fun Facts */}
       <View className={"gap-4"}>
         <ThemedText variant={"title2"} className={"text-white font-bold"}>
           ✨ Fun Facts
         </ThemedText>
         <View className={"gap-3"}>
+          {stats.peakDiningHour && (
+            <FunFactCard
+              icon={"⏰"}
+              iconBg={"bg-cyan-500/30"}
+              title={"Peak Dining Hour"}
+              value={HOUR_LABELS[stats.peakDiningHour.hour]}
+              subtitle={`${stats.peakDiningHour.visits} visits at this time`}
+              delay={700}
+            />
+          )}
+
           {stats.busiestMonth && (
             <FunFactCard
               icon={"🔥"}
@@ -535,7 +991,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
               title={"Busiest Month"}
               value={`${MONTH_NAMES[stats.busiestMonth.month - 1]} ${stats.busiestMonth.year}`}
               subtitle={`${stats.busiestMonth.visits.toLocaleString()} visits`}
-              delay={700}
+              delay={750}
             />
           )}
 
@@ -557,7 +1013,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
               title={"Your Favorite Spot"}
               value={stats.mostRevisitedRestaurant.name}
               subtitle={`${stats.mostRevisitedRestaurant.visits.toLocaleString()} visits`}
-              delay={900}
+              delay={850}
             />
           )}
 
@@ -568,7 +1024,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
               title={"Longest Streak"}
               value={`${stats.longestStreak.days.toLocaleString()} consecutive days`}
               subtitle={`${formatDateShort(stats.longestStreak.startDate)} - ${formatDateShort(stats.longestStreak.endDate)}`}
-              delay={1000}
+              delay={900}
             />
           )}
 
@@ -582,7 +1038,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
                 day: "numeric",
                 year: "numeric",
               })}
-              delay={1100}
+              delay={950}
             />
           )}
         </View>

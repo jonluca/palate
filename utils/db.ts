@@ -2323,6 +2323,7 @@ export interface WrappedStats {
     distinctStarredRestaurants: number; // unique starred restaurants visited
     totalAccumulatedStars: number; // sum of stars across all visits (2 visits to 3-star = 6)
     distinctStars: number; // sum of star rating across distinct starred restaurants (5 visits to 3-star = 3)
+    greenStarVisits: number; // eco-conscious Green Star restaurant visits
   };
   // Cuisine breakdown (top 5)
   topCuisines: Array<{ cuisine: string; count: number }>;
@@ -2337,6 +2338,34 @@ export interface WrappedStats {
   // Fun facts
   mostRevisitedRestaurant: { name: string; visits: number } | null;
   averageVisitsPerMonth: number;
+  // Geographic stats - parsed from michelin_restaurants.location
+  topLocations: Array<{ location: string; country: string; city: string; visits: number }>;
+  uniqueCountries: number;
+  uniqueCities: number;
+  // Dining time patterns
+  mealTimeBreakdown: {
+    breakfast: number; // 6-10am
+    lunch: number; // 11am-2pm
+    dinner: number; // 5-9pm
+    lateNight: number; // 9pm+
+  };
+  weekendVsWeekday: {
+    weekend: number;
+    weekday: number;
+  };
+  peakDiningHour: { hour: number; visits: number } | null;
+  // Photo stats
+  photoStats: {
+    totalPhotos: number;
+    averagePerVisit: number;
+    mostPhotographedVisit: { restaurantName: string; photoCount: number } | null;
+  };
+  // Dining style / loyalty
+  diningStyle: {
+    newRestaurants: number; // restaurants visited only once
+    returningVisits: number; // visits to restaurants visited more than once
+    explorerRatio: number; // percentage of unique restaurants vs total visits (0-1)
+  };
 }
 
 // Get wrapped statistics for confirmed visits
@@ -2364,6 +2393,15 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     firstVisit,
     mostRevisitedRestaurant,
     visitDates,
+    // New stats queries
+    topLocationsData,
+    greenStarResult,
+    mealTimeData,
+    weekendWeekdayData,
+    peakHourData,
+    photoStatsResult,
+    mostPhotographedVisit,
+    diningStyleData,
   ] = await Promise.all([
     // Yearly stats (only for all-time view)
     year
@@ -2494,6 +2532,103 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       WHERE status = 'confirmed' ${yearFilter}
       ORDER BY date ASC`,
     ),
+    // Top locations (cities/countries from michelin_restaurants.location)
+    // Normalize locations by trimming whitespace and using case-insensitive grouping
+    database.getAllAsync<{ location: string; visits: number }>(
+      `SELECT 
+        TRIM(m.location) as location, 
+        COUNT(DISTINCT v.id) as visits
+      FROM visits v
+      JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
+      JOIN michelin_restaurants m ON vsr.restaurantId = m.id
+      WHERE v.status = 'confirmed' 
+        AND TRIM(COALESCE(m.location, '')) != '' 
+        ${yearFilterForV}
+      GROUP BY LOWER(TRIM(m.location))
+      ORDER BY visits DESC
+      LIMIT 10`,
+    ),
+    // Green star visits count
+    database.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(DISTINCT v.id) as count
+      FROM visits v
+      JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
+      JOIN michelin_restaurants m ON vsr.restaurantId = m.id
+      WHERE v.status = 'confirmed' ${yearFilterForV}
+        AND (COALESCE(v.awardAtVisit, m.award) LIKE '%Green Star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%green star%')`,
+    ),
+    // Meal time breakdown (using local time approximation)
+    database.getAllAsync<{ mealTime: string; count: number }>(
+      `SELECT 
+        CASE 
+          WHEN CAST(strftime('%H', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) BETWEEN 6 AND 10 THEN 'breakfast'
+          WHEN CAST(strftime('%H', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) BETWEEN 11 AND 14 THEN 'lunch'
+          WHEN CAST(strftime('%H', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) BETWEEN 17 AND 20 THEN 'dinner'
+          WHEN CAST(strftime('%H', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) >= 21 THEN 'lateNight'
+          ELSE 'other'
+        END as mealTime,
+        COUNT(*) as count
+      FROM visits 
+      WHERE status = 'confirmed' ${yearFilter}
+      GROUP BY mealTime`,
+    ),
+    // Weekend vs weekday breakdown
+    database.getAllAsync<{ dayType: string; count: number }>(
+      `SELECT 
+        CASE 
+          WHEN strftime('%w', datetime(startTime/1000, 'unixepoch')) IN ('0','6') THEN 'weekend' 
+          ELSE 'weekday' 
+        END as dayType,
+        COUNT(*) as count
+      FROM visits 
+      WHERE status = 'confirmed' ${yearFilter}
+      GROUP BY dayType`,
+    ),
+    // Peak dining hour
+    database.getFirstAsync<{ hour: number; visits: number }>(
+      `SELECT 
+        CAST(strftime('%H', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) as hour,
+        COUNT(*) as visits
+      FROM visits 
+      WHERE status = 'confirmed' ${yearFilter}
+      GROUP BY hour
+      ORDER BY visits DESC
+      LIMIT 1`,
+    ),
+    // Photo stats (total and average)
+    database.getFirstAsync<{ totalPhotos: number; avgPhotos: number }>(
+      `SELECT 
+        COALESCE(SUM(photoCount), 0) as totalPhotos,
+        COALESCE(AVG(photoCount), 0) as avgPhotos
+      FROM visits 
+      WHERE status = 'confirmed' ${yearFilter}`,
+    ),
+    // Most photographed visit
+    database.getFirstAsync<{ restaurantName: string; photoCount: number }>(
+      `SELECT r.name as restaurantName, v.photoCount
+      FROM visits v
+      JOIN restaurants r ON v.restaurantId = r.id
+      WHERE v.status = 'confirmed' AND v.photoCount > 0 ${yearFilterForV}
+      ORDER BY v.photoCount DESC
+      LIMIT 1`,
+    ),
+    // Dining style: count restaurants visited only once vs more than once
+    database.getFirstAsync<{
+      singleVisitRestaurants: number;
+      multiVisitRestaurants: number;
+      totalVisitsToReturning: number;
+    }>(
+      `SELECT 
+        SUM(CASE WHEN visitCount = 1 THEN 1 ELSE 0 END) as singleVisitRestaurants,
+        SUM(CASE WHEN visitCount > 1 THEN 1 ELSE 0 END) as multiVisitRestaurants,
+        SUM(CASE WHEN visitCount > 1 THEN visitCount ELSE 0 END) as totalVisitsToReturning
+      FROM (
+        SELECT restaurantId, COUNT(*) as visitCount
+        FROM visits 
+        WHERE status = 'confirmed' AND restaurantId IS NOT NULL ${yearFilter}
+        GROUP BY restaurantId
+      )`,
+    ),
   ]);
 
   // Get top restaurant per year (parallelized)
@@ -2530,6 +2665,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     distinctStarredRestaurants: distinctStarredResult?.count ?? 0,
     totalAccumulatedStars: 0,
     distinctStars: distinctStarsResult?.distinctStars ?? 0,
+    greenStarVisits: greenStarResult?.count ?? 0,
   };
 
   for (const row of michelinData) {
@@ -2599,6 +2735,71 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     averageVisitsPerMonth = monthsDiff > 0 ? totalConfirmedVisits.count / monthsDiff : totalConfirmedVisits.count;
   }
 
+  // Process location data - parse "City, Country" format
+  const topLocations = topLocationsData.map((loc) => {
+    const parts = loc.location.split(",").map((s) => s.trim());
+    // Location format is typically "City, Region/Country" or "City, Country"
+    const city = parts[0] || loc.location;
+    const country = parts.length > 1 ? parts[parts.length - 1] : "";
+    return {
+      location: loc.location,
+      city,
+      country,
+      visits: loc.visits,
+    };
+  });
+
+  // Count unique countries and cities
+  const uniqueCountriesSet = new Set(topLocations.map((l) => l.country).filter(Boolean));
+  const uniqueCitiesSet = new Set(topLocations.map((l) => l.city).filter(Boolean));
+
+  // Process meal time breakdown
+  const mealTimeBreakdown = {
+    breakfast: 0,
+    lunch: 0,
+    dinner: 0,
+    lateNight: 0,
+  };
+  for (const row of mealTimeData) {
+    if (row.mealTime === "breakfast") {
+      mealTimeBreakdown.breakfast = row.count;
+    } else if (row.mealTime === "lunch") {
+      mealTimeBreakdown.lunch = row.count;
+    } else if (row.mealTime === "dinner") {
+      mealTimeBreakdown.dinner = row.count;
+    } else if (row.mealTime === "lateNight") {
+      mealTimeBreakdown.lateNight = row.count;
+    }
+  }
+
+  // Process weekend vs weekday
+  const weekendVsWeekday = { weekend: 0, weekday: 0 };
+  for (const row of weekendWeekdayData) {
+    if (row.dayType === "weekend") {
+      weekendVsWeekday.weekend = row.count;
+    } else if (row.dayType === "weekday") {
+      weekendVsWeekday.weekday = row.count;
+    }
+  }
+
+  // Process photo stats
+  const photoStats = {
+    totalPhotos: photoStatsResult?.totalPhotos ?? 0,
+    averagePerVisit: Math.round((photoStatsResult?.avgPhotos ?? 0) * 10) / 10,
+    mostPhotographedVisit: mostPhotographedVisit ?? null,
+  };
+
+  // Process dining style
+  const totalVisitsCount = totalConfirmedVisits?.count ?? 0;
+  const newRestaurants = diningStyleData?.singleVisitRestaurants ?? 0;
+  const returningVisits = diningStyleData?.totalVisitsToReturning ?? 0;
+  const uniqueRestaurantsCount = totalUniqueRestaurants?.count ?? 0;
+  const diningStyle = {
+    newRestaurants,
+    returningVisits,
+    explorerRatio: totalVisitsCount > 0 ? uniqueRestaurantsCount / totalVisitsCount : 0,
+  };
+
   if (DEBUG_TIMING) {
     console.log(`[DB] getWrappedStats: ${(performance.now() - start).toFixed(2)}ms`);
   }
@@ -2620,6 +2821,15 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     longestStreak,
     mostRevisitedRestaurant: mostRevisitedRestaurant ?? null,
     averageVisitsPerMonth: Math.round(averageVisitsPerMonth * 10) / 10,
+    // New stats
+    topLocations,
+    uniqueCountries: uniqueCountriesSet.size,
+    uniqueCities: uniqueCitiesSet.size,
+    mealTimeBreakdown,
+    weekendVsWeekday,
+    peakDiningHour: peakHourData ?? null,
+    photoStats,
+    diningStyle,
   };
 }
 
