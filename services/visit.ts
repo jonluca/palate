@@ -542,7 +542,7 @@ interface DetectFoodOptions {
  * Samples photos from visits and runs batch food detection.
  */
 async function detectFoodInVisits(options: DetectFoodOptions = {}): Promise<FoodDetectionProgress> {
-  const { samplePercentage = 0.1, confidenceThreshold = 0.3, onProgress } = options;
+  const { samplePercentage = 0.2, confidenceThreshold = 0.3, onProgress } = options;
 
   const progress: FoodDetectionProgress = {
     totalVisits: 0,
@@ -594,7 +594,7 @@ async function detectFoodInVisits(options: DetectFoodOptions = {}): Promise<Food
       progress.samplesPerSecond = stats.perSecond;
       progress.etaMs = stats.etaMs;
       progress.processedVisits = new Set(allSamples.slice(0, processed).map((s) => s.visitId)).size;
-      onProgress?.(progress);
+      onProgress?.({ ...progress });
     },
   );
 
@@ -613,7 +613,7 @@ async function detectFoodInVisits(options: DetectFoodOptions = {}): Promise<Food
   progress.foodVisitsFound = visitFoodResults.size;
   progress.isComplete = true;
   progress.etaMs = 0;
-  onProgress?.(progress);
+  onProgress?.({ ...progress });
 
   return progress;
 }

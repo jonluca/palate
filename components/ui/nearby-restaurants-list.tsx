@@ -75,10 +75,10 @@ export function NearbyRestaurantsList({
     (variant === "compact"
       ? `${restaurants.length.toLocaleString()} Nearby${
           michelinCount > 0 && mapKitCount > 0
-            ? ` (${michelinCount} Michelin, ${mapKitCount} MapKit)`
+            ? ` (${michelinCount} Michelin, ${mapKitCount} Apple Maps)`
             : michelinCount > 0
               ? " Michelin"
-              : " MapKit"
+              : " Maps"
         }`
       : michelinCount > 0 && mapKitCount > 0
         ? `${restaurants.length} Nearby Restaurants`
@@ -87,7 +87,7 @@ export function NearbyRestaurantsList({
           : `${mapKitCount} Nearby Restaurants`);
 
   const isCompact = variant === "compact";
-  const maxHeight = isCompact ? 160 : 240;
+  const maxHeight = isCompact ? 200 : 240;
 
   return (
     <View className={"gap-2"}>
@@ -167,7 +167,7 @@ export function NearbyRestaurantsList({
                         color={isCompact ? undefined : "tertiary"}
                         className={isCompact ? "text-blue-500" : undefined}
                       >
-                        {isCompact ? "MapKit" : "Apple Maps"}
+                        {isCompact ? "Apple" : "Apple Maps"}
                       </ThemedText>
                     </View>
                   )}

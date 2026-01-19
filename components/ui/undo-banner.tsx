@@ -60,7 +60,8 @@ function UndoBanner({
 }) {
   const translateY = useSharedValue(0);
   const progress = useSharedValue(1);
-  const SWIPE_THRESHOLD = 50;
+  const SWIPE_THRESHOLD = 20; // Lower threshold for easier dismissal
+  const VELOCITY_THRESHOLD = 300; // Dismiss if swiping fast enough
 
   useEffect(() => {
     // Animate the progress bar
@@ -75,13 +76,17 @@ function UndoBanner({
   }, [onDismiss, progress]);
 
   const panGesture = Gesture.Pan()
+    .activeOffsetY([-10, 10]) // Start recognizing after small movement
     .onUpdate((event) => {
       // Allow downward swipe to dismiss
       translateY.value = event.translationY > 0 ? event.translationY : event.translationY * 0.3;
     })
-    .onEnd(() => {
-      if (translateY.value > SWIPE_THRESHOLD) {
-        translateY.value = withTiming(200, { duration: 200 }, () => {
+    .onEnd((event) => {
+      // Dismiss if dragged past threshold OR if velocity is high enough (quick flick)
+      const shouldDismiss = translateY.value > SWIPE_THRESHOLD || event.velocityY > VELOCITY_THRESHOLD;
+
+      if (shouldDismiss) {
+        translateY.value = withTiming(200, { duration: 150 }, () => {
           runOnJS(onDismiss)();
         });
       } else {

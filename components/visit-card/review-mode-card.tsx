@@ -260,7 +260,7 @@ export function ReviewModeCard({
                       />
                     </View>
                     <ThemedText variant={"footnote"} color={"secondary"}>
-                      {displayRestaurants[0].source === "michelin" ? "Michelin Match Found" : "MapKit Restaurant"}
+                      {displayRestaurants[0].source === "michelin" ? "Michelin Match Found" : "Apple Maps Restaurant"}
                     </ThemedText>
                   </View>
                 </View>
