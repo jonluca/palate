@@ -15,6 +15,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
     newArchEnabled: true,
     ios: {
       ...config.ios,
+      googleServicesFile: "./GoogleService-Info.plist",
       supportsTablet: false,
       bundleIdentifier: "com.jonluca.photo-restaurant-matcher",
       infoPlist: {
@@ -73,6 +74,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
       edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
       package: "com.jonluca.restaurantmatcher",
+      googleServicesFile: "./google-services.json",
       permissions: [
         "READ_EXTERNAL_STORAGE",
         "READ_MEDIA_IMAGES",
@@ -87,6 +89,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: [
       ...(config.plugins ?? []),
+      "@react-native-firebase/app",
       "expo-router",
       [
         "expo-splash-screen",
@@ -110,6 +113,14 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
         "expo-calendar",
         {
           calendarPermission: "The app needs to access your calendar to cross reference with your restaurant visits.",
+        },
+      ],
+      [
+        "expo-build-properties",
+        {
+          ios: {
+            useFrameworks: "static",
+          },
         },
       ],
     ],

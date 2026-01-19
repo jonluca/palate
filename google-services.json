@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "550732995833",
+    "project_id": "palate-dining",
+    "storage_bucket": "palate-dining.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:550732995833:android:cd7ec76b2205f151205628",
+        "android_client_info": {
+          "package_name": "com.jonluca.restaurantmatcher"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAPAoVcjS5Jqr8-wQNgvBlMREW3B-TWMm8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
