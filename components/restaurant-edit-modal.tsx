@@ -1,9 +1,11 @@
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { Card, Button } from "@/components/ui";
-import { getPlaceDetails, searchPlaceByText, type PlaceResult } from "@/services/places";
+import { usePlaceTextSearch, type PlaceResult } from "@/hooks/queries";
+import { getPlaceDetails } from "@/services/places";
+import { useGoogleMapsApiKey } from "@/store";
 import type { RestaurantRecord, UpdateRestaurantData } from "@/utils/db";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Pressable,
@@ -151,10 +153,27 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
   // Google search state
   const [showGoogleSearch, setShowGoogleSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<PlaceResult[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [loadingPlaceId, setLoadingPlaceId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Check if Google Maps API key is configured
+  const googleMapsApiKey = useGoogleMapsApiKey();
+  const hasGoogleMapsKey = !!googleMapsApiKey;
+
+  // Track if we've triggered the initial auto-search for this modal session
+  const hasAutoSearched = useRef(false);
+
+  // Use the query hook for place text search
+  const {
+    data: searchResults = [],
+    isLoading: isSearching,
+    refetch: refetchSearch,
+  } = usePlaceTextSearch(
+    searchQuery,
+    restaurant.latitude,
+    restaurant.longitude,
+    showGoogleSearch && searchQuery.trim().length > 0,
+  );
 
   // Reset form when restaurant changes
   useEffect(() => {
@@ -167,23 +186,30 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
     setNotes(restaurant.notes ?? "");
     setShowGoogleSearch(false);
     setSearchQuery("");
-    setSearchResults([]);
+    hasAutoSearched.current = false;
   }, [restaurant]);
 
-  const handleSearch = async () => {
+  // Auto-search when modal becomes visible and Google Maps key is configured
+  useEffect(() => {
+    if (visible && hasGoogleMapsKey && !hasAutoSearched.current) {
+      hasAutoSearched.current = true;
+      setShowGoogleSearch(true);
+      setSearchQuery(restaurant.name);
+    }
+  }, [visible, hasGoogleMapsKey, restaurant.name]);
+
+  // Reset auto-search flag when modal closes
+  useEffect(() => {
+    if (!visible) {
+      hasAutoSearched.current = false;
+    }
+  }, [visible]);
+
+  const handleSearch = () => {
     if (!searchQuery.trim()) {
       return;
     }
-
-    setIsSearching(true);
-    try {
-      const results = await searchPlaceByText(searchQuery, restaurant.latitude, restaurant.longitude);
-      setSearchResults(results);
-    } catch (error) {
-      console.error("Search failed:", error);
-    } finally {
-      setIsSearching(false);
-    }
+    refetchSearch();
   };
 
   const handleSelectPlace = async (place: PlaceResult) => {
@@ -208,7 +234,6 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
 
         // Exit search mode
         setShowGoogleSearch(false);
-        setSearchResults([]);
         setSearchQuery("");
 
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -426,7 +451,7 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
                 <Pressable
                   onPress={() => {
                     setShowGoogleSearch(false);
-                    setSearchResults([]);
+                    setSearchQuery("");
                   }}
                 >
                   <IconSymbol name={"chevron.left"} size={20} color={"#6b7280"} />

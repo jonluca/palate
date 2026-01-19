@@ -145,6 +145,7 @@ import {
   type MichelinAward,
   type MichelinRestaurantDetails,
 } from "@/services/michelin";
+import { searchPlaceByText, type PlaceResult } from "@/services/places";
 
 // Types
 export interface Stats {
@@ -196,6 +197,8 @@ export const queryKeys = {
   exportedCalendarEvents: ["exportedCalendarEvents"] as const,
   foodKeywords: ["foodKeywords"] as const,
   photosWithLabelsCount: ["photosWithLabelsCount"] as const,
+  placeTextSearch: (query: string, lat?: number, lon?: number) =>
+    ["placeTextSearch", query, lat?.toFixed(4), lon?.toFixed(4)] as const,
 };
 
 // Hooks
@@ -1260,10 +1263,30 @@ export function useUpdateRestaurant(restaurantId: string | undefined) {
       await updateRestaurant(restaurantId, data);
       return data;
     },
-    onSuccess: (data) => {
-      queryClient.setQueryData<RestaurantRecord | null>(queryKeys.restaurantDetail(restaurantId ?? ""), (old) =>
-        old ? { ...old, ...data, name: data.name ?? old.name } : old,
-      );
+    onMutate: async (data) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({ queryKey: queryKeys.confirmedRestaurants });
+
+      // Snapshot the previous value
+      const previousRestaurants = queryClient.getQueryData<RestaurantWithVisits[]>(queryKeys.confirmedRestaurants);
+
+      // Optimistically update the restaurant in the list
+      if (previousRestaurants && restaurantId) {
+        queryClient.setQueryData<RestaurantWithVisits[]>(queryKeys.confirmedRestaurants, (old) =>
+          old?.map((r) => (r.id === restaurantId ? { ...r, ...data, name: data.name ?? r.name } : r)),
+        );
+      }
+
+      return { previousRestaurants };
+    },
+    onError: (_err, _data, context) => {
+      // Rollback on error
+      if (context?.previousRestaurants) {
+        queryClient.setQueryData(queryKeys.confirmedRestaurants, context.previousRestaurants);
+      }
+    },
+    onSettled: () => {
+      // Refetch to ensure consistency with server
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
     },
   });
@@ -1694,5 +1717,30 @@ export function useRemovePhotosFromVisit(visitId: string | undefined) {
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
     },
+  });
+}
+
+// ============================================================================
+// GOOGLE PLACES SEARCH
+// ============================================================================
+
+// Re-export PlaceResult type
+export type { PlaceResult };
+
+/**
+ * Search for places by text query using Google Places API.
+ * Results are biased towards the provided location if lat/lon are provided.
+ *
+ * @param query - The search query text
+ * @param lat - Optional latitude to bias results
+ * @param lon - Optional longitude to bias results
+ * @param enabled - Whether the query should run (default: true when query is non-empty)
+ */
+export function usePlaceTextSearch(query: string, lat?: number, lon?: number, enabled: boolean = true) {
+  return useQuery({
+    queryKey: queryKeys.placeTextSearch(query, lat, lon),
+    queryFn: () => searchPlaceByText(query, lat, lon),
+    enabled: enabled && query.trim().length > 0,
+    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
   });
 }

@@ -811,6 +811,7 @@ export default function RestaurantDetailScreen() {
             </Pressable>
           ),
         }}
+        key={restaurant?.id}
       />
       <ScreenLayout scrollable={false} className={"p-0"} style={{ paddingTop: 0, paddingBottom: 0 }}>
         <FlashList
@@ -832,6 +833,7 @@ export default function RestaurantDetailScreen() {
       {restaurant && (
         <RestaurantEditModal
           visible={editModalVisible}
+          key={restaurant.id}
           onClose={() => setEditModalVisible(false)}
           onSave={handleSaveRestaurant}
           restaurant={restaurant}
@@ -844,6 +846,7 @@ export default function RestaurantDetailScreen() {
         onClose={() => setAddVisitModalVisible(false)}
         onSave={handleAddVisit}
         restaurantName={restaurantName}
+        key={restaurant ? `${restaurant.id}-add-visit-modal` : undefined}
         isLoading={createManualVisitMutation.isPending}
       />
     </>
