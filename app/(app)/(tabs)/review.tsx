@@ -135,13 +135,14 @@ export default function ReviewScreen() {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             onToggle();
           }}
-          className={`px-4 py-2 rounded-full ${value ? "bg-primary" : "bg-card"}`}
+          className={`px-3 py-1.5 rounded-full ${value ? "bg-primary" : "bg-secondary/30"}`}
         >
-          <View className={"flex-row items-center gap-2"}>
-            <ThemedText className={`text-sm font-medium ${value ? "text-primary-foreground" : "text-foreground"}`}>
-              {label}
-            </ThemedText>
-          </View>
+          <ThemedText
+            variant={"footnote"}
+            className={`font-medium ${value ? "text-primary-foreground" : "text-foreground"}`}
+          >
+            {label}
+          </ThemedText>
         </Pressable>
       );
     },
@@ -179,23 +180,6 @@ export default function ReviewScreen() {
     }
     return max;
   }, []);
-
-  const filtersSummary = useMemo(() => {
-    const parts: string[] = [];
-
-    parts.push(foodFilter === "on" ? "Food" : "No Food");
-    parts.push(matchesFilter === "on" ? "Restaurant Matches" : "No Restaurant Matches");
-
-    if (starFilter === "1plus") {
-      parts.push("1★+");
-    } else if (starFilter === "2plus") {
-      parts.push("2★+");
-    } else if (starFilter === "3") {
-      parts.push("3★");
-    }
-
-    return parts.join(" · ");
-  }, [foodFilter, matchesFilter, starFilter]);
 
   const filteredReviewableVisits = useMemo(() => {
     return reviewableVisits.filter((v) => {
@@ -340,41 +324,39 @@ export default function ReviewScreen() {
   // List headers
   const RegularListHeader = useCallback(
     () => (
-      <View className={"gap-2"}>
-        <ThemedText variant={"largeTitle"} className={"font-bold"}>
+      <View className={"gap-1"}>
+        <ThemedText variant={"largeTitle"} className={"font-bold p-0 m-0"}>
           Review Visits
         </ThemedText>
-        <ThemedText variant={"body"} color={"secondary"}>
+        <ThemedText variant={"footnote"} color={"secondary"}>
           {filteredReviewableVisits.length.toLocaleString()}{" "}
           {filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"} manual review
         </ThemedText>
 
         {/* Filters */}
         {reviewableVisits.length > 0 && (
-          <View className={"pt-2"}>
-            <Pressable
-              className={"bg-card rounded-2xl px-4 py-3"}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setFiltersCollapsed(!filtersCollapsed);
-              }}
-            >
-              <View className={"flex-row items-center justify-between gap-3"}>
-                <View className={"flex-1 gap-1"}>
-                  <ThemedText className={"font-semibold"}>Filters</ThemedText>
-                  <ThemedText variant={"footnote"} color={"tertiary"} numberOfLines={2}>
-                    {filtersSummary}
-                  </ThemedText>
-                </View>
-                <IconSymbol name={filtersCollapsed ? "chevron.down" : "chevron.up"} size={18} color={"#999"} />
+          <Pressable
+            className={`bg-card rounded-xl px-3 py-2`}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setFiltersCollapsed(!filtersCollapsed);
+            }}
+          >
+            <View className={"flex-row items-center justify-between gap-2"}>
+              <View className={"flex-row items-center gap-2 flex-1"}>
+                <IconSymbol name={"line.3.horizontal.decrease"} size={14} color={"#999"} />
+                <ThemedText variant={"footnote"} color={"secondary"} numberOfLines={1} className={"flex-1"}>
+                  Filters
+                </ThemedText>
               </View>
-            </Pressable>
+              <IconSymbol name={filtersCollapsed ? "chevron.down" : "chevron.up"} size={14} color={"#999"} />
+            </View>
 
             {!filtersCollapsed && (
-              <Animated.View layout={LinearTransition.duration(200)} className={"gap-3 pt-3"}>
+              <Animated.View layout={LinearTransition.duration(200)} className={"gap-2.5 pt-2.5"}>
                 <View className={"flex-row gap-2 flex-wrap"}>
                   <ToggleChip
-                    label={"Food"}
+                    label={"Has Food"}
                     value={foodFilter === "on"}
                     onToggle={() => setFoodFilter(foodFilter === "on" ? "off" : "on")}
                   />
@@ -397,7 +379,7 @@ export default function ReviewScreen() {
                 />
               </Animated.View>
             )}
-          </View>
+          </Pressable>
         )}
       </View>
     ),
@@ -412,7 +394,6 @@ export default function ReviewScreen() {
       setMatchesFilter,
       starFilter,
       setStarFilter,
-      filtersSummary,
       ToggleChip,
     ],
   );
@@ -448,7 +429,7 @@ export default function ReviewScreen() {
 
   const listContentStyle = useMemo(
     () => ({
-      paddingTop: 16,
+      paddingTop: 0,
       paddingBottom: insets.bottom + 32,
       paddingHorizontal: 16,
     }),
@@ -496,7 +477,7 @@ export default function ReviewScreen() {
             refreshing={refreshing}
             contentContainerStyle={listContentStyle}
             ListHeaderComponent={RegularListHeader}
-            ListHeaderComponentStyle={{ marginBottom: 24 }}
+            ListHeaderComponentStyle={{ marginTop: 0, paddingTop: 0, marginBottom: 12 }}
             ListEmptyComponent={
               isLoading ? (
                 <LoadingState />

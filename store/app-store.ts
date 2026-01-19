@@ -52,6 +52,10 @@ interface AppState {
   selectedCalendarIds: string[] | null;
   setSelectedCalendarIds: (ids: string[] | null) => void;
 
+  // Add photos alert seen state (persisted)
+  hasSeenAddPhotosAlert: boolean;
+  setHasSeenAddPhotosAlert: (seen: boolean) => void;
+
   // Scan state
   isScanning: boolean;
   scanProgress: ScanProgress;
@@ -118,6 +122,10 @@ export const useAppStore = create<AppState>()(
       // Selected calendars for syncing (persisted) - null means sync all
       selectedCalendarIds: null,
       setSelectedCalendarIds: (ids) => set({ selectedCalendarIds: ids }),
+
+      // Add photos alert seen state (persisted)
+      hasSeenAddPhotosAlert: false,
+      setHasSeenAddPhotosAlert: (seen) => set({ hasSeenAddPhotosAlert: seen }),
 
       // Scan state
       isScanning: false,
@@ -199,6 +207,7 @@ export const useAppStore = create<AppState>()(
           hasCompletedOnboarding: false,
           hasCompletedInitialScan: false,
           selectedCalendarIds: null,
+          hasSeenAddPhotosAlert: false,
           isScanning: false,
           scanProgress: initialScanProgress,
           selectedVisitId: null,
@@ -220,6 +229,7 @@ export const useAppStore = create<AppState>()(
         hasCompletedInitialScan: state.hasCompletedInitialScan,
         googleMapsApiKey: state.googleMapsApiKey,
         selectedCalendarIds: state.selectedCalendarIds,
+        hasSeenAddPhotosAlert: state.hasSeenAddPhotosAlert,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
@@ -254,6 +264,9 @@ export const useSetGoogleMapsApiKey = () => useAppStore((state) => state.setGoog
 
 export const useSelectedCalendarIds = () => useAppStore((state) => state.selectedCalendarIds);
 export const useSetSelectedCalendarIds = () => useAppStore((state) => state.setSelectedCalendarIds);
+
+export const useHasSeenAddPhotosAlert = () => useAppStore((state) => state.hasSeenAddPhotosAlert);
+export const useSetHasSeenAddPhotosAlert = () => useAppStore((state) => state.setHasSeenAddPhotosAlert);
 
 /** Get the Google Maps API key directly from the store (for non-React contexts) */
 export const getGoogleMapsApiKey = () => useAppStore.getState().googleMapsApiKey;

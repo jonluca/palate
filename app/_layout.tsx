@@ -11,6 +11,7 @@ import { AppState, Platform } from "react-native";
 import type { AppStateStatus } from "react-native";
 import { focusManager } from "@tanstack/react-query";
 import { useDrizzleStudioInspector, useAnalyticsScreenTracking } from "@/hooks";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 function onAppStateChange(status: AppStateStatus) {
   if (Platform.OS !== "web") {
@@ -44,16 +45,18 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <ToastProvider>
-          <UndoProvider>
-            <Slot />
-            {/* {__DEV__ && <FloatingDevTools disableHints />} */}
-          </UndoProvider>
-        </ToastProvider>
-      </GestureHandlerRootView>
-      <StatusBar style={"light"} />
-    </QueryClientProvider>
+    <SafeAreaProvider>
+      <QueryClientProvider client={queryClient}>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <ToastProvider>
+            <UndoProvider>
+              <Slot />
+              {/* {__DEV__ && <FloatingDevTools disableHints />} */}
+            </UndoProvider>
+          </ToastProvider>
+        </GestureHandlerRootView>
+        <StatusBar style={"light"} />
+      </QueryClientProvider>
+    </SafeAreaProvider>
   );
 }

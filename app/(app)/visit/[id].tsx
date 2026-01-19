@@ -44,6 +44,7 @@ import { cleanCalendarEventTitle } from "@/services/calendar";
 import { logVisitViewed } from "@/services/analytics";
 import { ActivityIndicator, View, Alert, Pressable } from "react-native";
 import { useToast } from "@/components/ui/toast";
+import { useHasSeenAddPhotosAlert, useSetHasSeenAddPhotosAlert } from "@/store";
 
 // Hook to aggregate food labels from photos
 function useAggregatedFoodLabels(
@@ -88,6 +89,8 @@ export default function VisitDetailScreen() {
   const [foodScanProgress, setFoodScanProgress] = useState<VisitFoodScanProgress | null>(null);
   const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
   const { showToast } = useToast();
+  const hasSeenAddPhotosAlert = useHasSeenAddPhotosAlert();
+  const setHasSeenAddPhotosAlert = useSetHasSeenAddPhotosAlert();
 
   // Track visit view
   useEffect(() => {
@@ -313,79 +316,87 @@ export default function VisitDetailScreen() {
     [updateNotes, showToast],
   );
 
-  const handleAddPhotos = useCallback(async () => {
-    // Show warning first about photo association
-    Alert.alert(
-      "Add Photos to Visit",
-      "Each photo can only be associated with one visit. If a selected photo is already linked to another visit, it will be moved to this visit.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Select Photos",
-          onPress: async () => {
-            try {
-              // Request media library permission
-              const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-              if (status !== "granted") {
-                showToast({ type: "error", message: "Photo library permission is required to add photos" });
-                return;
-              }
+  const selectAndAddPhotos = useCallback(async () => {
+    try {
+      // Request media library permission
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        showToast({ type: "error", message: "Photo library permission is required to add photos" });
+        return;
+      }
 
-              // Open image picker
-              const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ["images"],
-                allowsMultipleSelection: true,
-                quality: 1,
-                orderedSelection: true,
-              });
+      // Open image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: true,
+        quality: 1,
+        orderedSelection: true,
+      });
 
-              if (result.canceled || result.assets.length === 0) {
-                return;
-              }
+      if (result.canceled || result.assets.length === 0) {
+        return;
+      }
 
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-              // Extract asset IDs from the selected images
-              const assetIds = result.assets
-                .map((asset) => asset.assetId)
-                .filter((id): id is string => id !== null && id !== undefined);
+      // Extract asset IDs from the selected images
+      const assetIds = result.assets
+        .map((asset) => asset.assetId)
+        .filter((id): id is string => id !== null && id !== undefined);
 
-              if (assetIds.length === 0) {
-                showToast({
-                  type: "info",
-                  message: "Selected photos don't have asset IDs. Only photos from your camera roll can be added.",
-                });
-                return;
-              }
+      if (assetIds.length === 0) {
+        showToast({
+          type: "info",
+          message: "Selected photos don't have asset IDs. Only photos from your camera roll can be added.",
+        });
+        return;
+      }
 
-              // Add the photos to this visit
-              const moveResult = await addPhotosToVisit.mutateAsync(assetIds);
+      // Add the photos to this visit
+      const moveResult = await addPhotosToVisit.mutateAsync(assetIds);
 
-              if (moveResult.movedCount > 0) {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                const movedFromOther = moveResult.fromVisitIds.length > 0;
-                showToast({
-                  type: "success",
-                  message: movedFromOther
-                    ? `Added ${moveResult.movedCount.toLocaleString()} photo${moveResult.movedCount === 1 ? "" : "s"} (moved from ${moveResult.fromVisitIds.length} other visit${moveResult.fromVisitIds.length === 1 ? "" : "s"})`
-                    : `Added ${moveResult.movedCount.toLocaleString()} photo${moveResult.movedCount === 1 ? "" : "s"} to this visit`,
-                });
-              } else {
-                showToast({
-                  type: "info",
-                  message: "No matching photos found in your library. Photos must be scanned first.",
-                });
-              }
-            } catch (error) {
-              console.error("Error adding photos:", error);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              showToast({ type: "error", message: "Failed to add photos. Please try again." });
-            }
-          },
-        },
-      ],
-    );
+      if (moveResult.movedCount > 0) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        const movedFromOther = moveResult.fromVisitIds.length > 0;
+        showToast({
+          type: "success",
+          message: movedFromOther
+            ? `Added ${moveResult.movedCount.toLocaleString()} photo${moveResult.movedCount === 1 ? "" : "s"} (moved from ${moveResult.fromVisitIds.length} other visit${moveResult.fromVisitIds.length === 1 ? "" : "s"})`
+            : `Added ${moveResult.movedCount.toLocaleString()} photo${moveResult.movedCount === 1 ? "" : "s"} to this visit`,
+        });
+      } else {
+        showToast({
+          type: "info",
+          message: "No matching photos found in your library. Photos must be scanned first.",
+        });
+      }
+    } catch (error) {
+      console.error("Error adding photos:", error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      showToast({ type: "error", message: "Failed to add photos. Please try again." });
+    }
   }, [addPhotosToVisit, showToast]);
+
+  const handleAddPhotos = useCallback(async () => {
+    // Only show the warning alert the first time
+    if (!hasSeenAddPhotosAlert) {
+      setHasSeenAddPhotosAlert(true);
+      Alert.alert(
+        "Add Photos to Visit",
+        "Each photo can only be associated with one visit. If a selected photo is already linked to another visit, it will be moved to this visit.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Select Photos",
+            onPress: selectAndAddPhotos,
+          },
+        ],
+      );
+    } else {
+      // User has already seen the alert, go directly to photo picker
+      await selectAndAddPhotos();
+    }
+  }, [hasSeenAddPhotosAlert, setHasSeenAddPhotosAlert, selectAndAddPhotos]);
 
   if (isLoading) {
     return (
