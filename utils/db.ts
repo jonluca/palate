@@ -2735,19 +2735,34 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     averageVisitsPerMonth = monthsDiff > 0 ? totalConfirmedVisits.count / monthsDiff : totalConfirmedVisits.count;
   }
 
-  // Process location data - parse "City, Country" format
-  const topLocations = topLocationsData.map((loc) => {
+  // Process location data - parse "City, Country" format and dedupe by city
+  const cityVisitsMap = new Map<string, { city: string; country: string; visits: number }>();
+  for (const loc of topLocationsData) {
     const parts = loc.location.split(",").map((s) => s.trim());
     // Location format is typically "City, Region/Country" or "City, Country"
     const city = parts[0] || loc.location;
     const country = parts.length > 1 ? parts[parts.length - 1] : "";
-    return {
-      location: loc.location,
-      city,
-      country,
-      visits: loc.visits,
-    };
-  });
+    // Normalize city key for deduplication (lowercase, trimmed)
+    const cityKey = city.toLowerCase().trim();
+
+    const existing = cityVisitsMap.get(cityKey);
+    if (existing) {
+      // Sum visits for the same city
+      existing.visits += loc.visits;
+    } else {
+      cityVisitsMap.set(cityKey, { city, country, visits: loc.visits });
+    }
+  }
+  // Convert to array and sort by visits descending
+  const topLocations = Array.from(cityVisitsMap.values())
+    .sort((a, b) => b.visits - a.visits)
+    .slice(0, 10)
+    .map((item) => ({
+      location: item.city, // Use city as the primary location now
+      city: item.city,
+      country: item.country,
+      visits: item.visits,
+    }));
 
   // Count unique countries and cities
   const uniqueCountriesSet = new Set(topLocations.map((l) => l.country).filter(Boolean));

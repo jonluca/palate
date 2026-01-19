@@ -89,6 +89,15 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
     },
     plugins: [
       ...(config.plugins ?? []),
+      [
+        "expo-build-properties",
+        {
+          ios: {
+            useFrameworks: "static",
+            forceStaticLinking: ["RNFBApp", "RNFBAuth", "RNFBDatabase", "RNFBStorage", "RNFBAnalytics"],
+          },
+        },
+      ],
       "@react-native-firebase/app",
       "expo-router",
       [
@@ -113,14 +122,6 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
         "expo-calendar",
         {
           calendarPermission: "The app needs to access your calendar to cross reference with your restaurant visits.",
-        },
-      ],
-      [
-        "expo-build-properties",
-        {
-          ios: {
-            useFrameworks: "static",
-          },
         },
       ],
     ],

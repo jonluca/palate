@@ -10,7 +10,7 @@ import { Slot } from "expo-router";
 import { AppState, Platform } from "react-native";
 import type { AppStateStatus } from "react-native";
 import { focusManager } from "@tanstack/react-query";
-import { useDrizzleStudioInspector } from "@/hooks";
+import { useDrizzleStudioInspector, useAnalyticsScreenTracking } from "@/hooks";
 
 function onAppStateChange(status: AppStateStatus) {
   if (Platform.OS !== "web") {
@@ -35,6 +35,7 @@ export const queryClient = new QueryClient({
 
 export default function RootLayout() {
   useDrizzleStudioInspector();
+  useAnalyticsScreenTracking();
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", onAppStateChange);
