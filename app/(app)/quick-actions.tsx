@@ -9,7 +9,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { usePendingReview, useBatchUpdateVisitStatus, useBatchConfirmVisits } from "@/hooks/queries";
 
-const PHOTO_THRESHOLD_OPTIONS = [1, 2, 3, 5, 10];
+const PHOTO_THRESHOLD_OPTIONS = [3, 5, 10, 20, 50];
 
 // Aggregate all unique food labels with visit counts
 function useAllFoodLabels(pendingVisits: Array<{ id: string; foodLabels: Array<{ label: string }> }>) {
