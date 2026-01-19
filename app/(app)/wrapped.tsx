@@ -300,7 +300,7 @@ function StatCard({
         }}
       />
       <View className={"flex-1 items-center justify-center p-4 gap-1"}>
-        <ThemedText style={{ fontSize: 28 }}>{icon}</ThemedText>
+        <ThemedText style={{ fontSize: 22 }}>{icon}</ThemedText>
         <ThemedText variant={"title1"} className={`font-bold ${accent.text}`}>
           {typeof value === "number" ? value.toLocaleString() : value}
         </ThemedText>
@@ -486,9 +486,9 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
       {/* Hero Stats - 2x2 Grid */}
       <Animated.View entering={FadeIn.delay(100).duration(500)} className={"gap-3"}>
         <View className={"flex-row gap-3"}>
-          <StatCard icon={"🍽️"} value={stats.totalConfirmedVisits} label={"Visits"} accentColor={"amber"} delay={100} />
+          <StatCard icon={"📍"} value={stats.totalConfirmedVisits} label={"Visits"} accentColor={"amber"} delay={100} />
           <StatCard
-            icon={"🏠"}
+            icon={"👨🏻‍🍳"}
             value={stats.totalUniqueRestaurants}
             label={"Restaurants"}
             accentColor={"emerald"}
