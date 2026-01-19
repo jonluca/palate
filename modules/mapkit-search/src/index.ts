@@ -31,23 +31,12 @@ const MapKitSearchModule = Platform.OS === "ios" ? requireNativeModule("MapKitSe
 /** Cache for nearby restaurant searches */
 const nearbyCache = new Map<string, Promise<MapKitSearchResult[]>>();
 
-/** Cache for text searches */
-const textSearchCache = new Map<string, Promise<MapKitSearchResult[]>>();
-
 /**
  * Generate a cache key for nearby search
  * Uses fixed precision (4 decimal places ≈ 11m accuracy) to improve cache hits
  */
 function nearbyKey(lat: number, lon: number, radius: number): string {
   return `${lat.toFixed(4)}:${lon.toFixed(4)}:${radius}`;
-}
-
-/**
- * Generate a cache key for text search
- * Uses fixed precision for coordinates
- */
-function textSearchKey(query: string, lat: number, lon: number, radius: number): string {
-  return `${query.toLowerCase().trim()}:${lat.toFixed(4)}:${lon.toFixed(4)}:${radius}`;
 }
 
 // ============================================================================

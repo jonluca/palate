@@ -60,34 +60,6 @@ export type ReviewModeProps = BaseVisitCardProps & {
 
 export type VisitCardProps = ListModeProps | ReviewModeProps;
 
-// Apple Maps verification result for a restaurant
-export interface AppleMapsVerification {
-  restaurantId: string;
-  isVerified: boolean;
-  mapKitResult?: MapKitSearchResult;
-  isLoading: boolean;
-}
-
-// Merged restaurant suggestion with source info
-export interface MergedRestaurantSuggestion extends SuggestedRestaurant {
-  source: "michelin" | "apple-maps";
-  isVerified: boolean;
-}
-
-// Result from Apple Maps search hook
-export interface AppleMapsSearchResult {
-  /** Merged list of restaurants (Michelin + Apple Maps, deduped) */
-  mergedRestaurants: MergedRestaurantSuggestion[];
-  /** Verification status for Michelin restaurants */
-  verifications: Map<string, AppleMapsVerification>;
-  /** Whether the search is still loading */
-  isLoading: boolean;
-  /** Count of Apple Maps restaurants added */
-  appleMapsCount: number;
-  /** Count of verified Michelin restaurants */
-  verifiedCount: number;
-}
-
 // Visit actions props
 export type LoadingAction = "skip" | "confirm" | "find" | null;
 

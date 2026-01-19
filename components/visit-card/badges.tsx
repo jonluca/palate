@@ -46,23 +46,3 @@ export function ExactMatchBadge() {
     </View>
   );
 }
-
-function AppleMapsVerifiedBadge({ isLoading }: { isLoading?: boolean }) {
-  if (isLoading) {
-    return (
-      <View className={"flex-row items-center gap-1 bg-blue-500/10 px-2 py-0.5 rounded-full"}>
-        <ThemedText variant={"caption2"} className={"text-blue-500"}>
-          Verifying...
-        </ThemedText>
-      </View>
-    );
-  }
-  return (
-    <View className={"flex-row items-center gap-1 bg-blue-500/10 px-2 py-0.5 rounded-full"}>
-      <IconSymbol name={"map.fill"} size={12} color={"#3b82f6"} />
-      <ThemedText variant={"caption2"} className={"text-blue-500"}>
-        Apple Maps ✓
-      </ThemedText>
-    </View>
-  );
-}

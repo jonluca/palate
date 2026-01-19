@@ -80,13 +80,6 @@ export default function RootLayoutNav() {
         }}
       />
       <Stack.Screen
-        name={"wrapped"}
-        options={{
-          headerShown: false,
-          presentation: "modal",
-        }}
-      />
-      <Stack.Screen
         name={"rescan"}
         options={{
           headerShown: false,

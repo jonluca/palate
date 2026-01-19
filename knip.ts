@@ -11,6 +11,10 @@ const config = async (): Promise<KnipConfig> => {
     ignore: ["babel.config.js", "app.config.ts", "metro.config.js"],
     ignoreBinaries: ["eas"],
     ignoreDependencies: ["@buoy-gg/react-query", "@buoy-gg/highlight-updates", "@buoy-gg/core"],
+    // False positive: LoadingAction is re-exported and used via @/components/visit-card
+    ignoreExportsUsedInFile: {
+      type: true,
+    },
   } satisfies KnipConfig;
 };
 
