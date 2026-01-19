@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Pressable, Modal } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BlurView } from "expo-blur";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { Gallery } from "@/components/AwesomeGallery";
@@ -43,7 +44,7 @@ export function PhotoGalleryModal({ visible, photos, currentIndex, onIndexChange
           <IconSymbol name={"xmark.circle.fill"} size={30} color={"white"} />
         </Pressable>
 
-        {/* Food labels for current image */}
+        {/* Food labels for current image with blur effect */}
         {foodLabels && foodLabels.length > 0 && (
           <View
             style={{
@@ -54,46 +55,48 @@ export function PhotoGalleryModal({ visible, photos, currentIndex, onIndexChange
               zIndex: 10,
             }}
           >
-            <View
+            <BlurView
+              intensity={40}
+              tint={"dark"}
               style={{
-                backgroundColor: "rgba(0, 0, 0, 0.6)",
                 borderRadius: 12,
-                padding: 12,
-                gap: 8,
+                overflow: "hidden",
               }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                <ThemedText variant={"caption1"} style={{ color: "white" }}>
-                  🍽️
-                </ThemedText>
-                <ThemedText variant={"footnote"} style={{ color: "rgba(255,255,255,0.7)" }}>
-                  Detected in this photo
-                </ThemedText>
+              <View style={{ padding: 12, gap: 8 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <ThemedText variant={"caption1"} style={{ color: "white" }}>
+                    🍽️
+                  </ThemedText>
+                  <ThemedText variant={"footnote"} style={{ color: "rgba(255,255,255,0.7)" }}>
+                    Detected in this photo
+                  </ThemedText>
+                </View>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                  {foodLabels.map((label) => (
+                    <View
+                      key={label.label}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        gap: 4,
+                        backgroundColor: "rgba(245, 158, 11, 0.3)",
+                        paddingHorizontal: 10,
+                        paddingVertical: 4,
+                        borderRadius: 12,
+                      }}
+                    >
+                      <ThemedText variant={"caption1"} style={{ color: "#fbbf24", fontWeight: "600" }}>
+                        {label.label}
+                      </ThemedText>
+                      <ThemedText variant={"caption2"} style={{ color: "rgba(251, 191, 36, 0.7)" }}>
+                        {Math.round(label.confidence * 100).toLocaleString()}%
+                      </ThemedText>
+                    </View>
+                  ))}
+                </View>
               </View>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                {foodLabels.map((label) => (
-                  <View
-                    key={label.label}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 4,
-                      backgroundColor: "rgba(245, 158, 11, 0.3)",
-                      paddingHorizontal: 10,
-                      paddingVertical: 4,
-                      borderRadius: 12,
-                    }}
-                  >
-                    <ThemedText variant={"caption1"} style={{ color: "#fbbf24", fontWeight: "600" }}>
-                      {label.label}
-                    </ThemedText>
-                    <ThemedText variant={"caption2"} style={{ color: "rgba(251, 191, 36, 0.7)" }}>
-                      {Math.round(label.confidence * 100).toLocaleString()}%
-                    </ThemedText>
-                  </View>
-                ))}
-              </View>
-            </View>
+            </BlurView>
           </View>
         )}
 
