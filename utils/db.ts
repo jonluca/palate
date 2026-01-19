@@ -155,20 +155,34 @@ const DEFAULT_FOOD_KEYWORDS = [
 ];
 
 let db: SQLite.SQLiteDatabase | null = null;
+let dbInitPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 // Spatial index cache for Michelin restaurants
 let restaurantIndex: KDBush | null = null;
 let indexedRestaurants: MichelinRestaurantRecord[] = [];
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
+  // Return cached instance if already initialized
   if (db) {
     return db;
   }
-  db = await SQLite.openDatabaseAsync("photo_foodie.db");
-  await initializeDatabase(db);
-  // Auto-reject any pending visits within ignored locations on startup
-  await rejectVisitsInIgnoredLocationsInternal(db);
-  return db;
+
+  // Return existing initialization promise if in progress (prevents race conditions)
+  if (dbInitPromise) {
+    return dbInitPromise;
+  }
+
+  // Start initialization and cache the promise
+  dbInitPromise = (async () => {
+    const database = await SQLite.openDatabaseAsync("photo_foodie.db");
+    await initializeDatabase(database);
+    // Auto-reject any pending visits within ignored locations on startup
+    await rejectVisitsInIgnoredLocationsInternal(database);
+    db = database;
+    return database;
+  })();
+
+  return dbInitPromise;
 }
 
 async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
