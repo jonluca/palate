@@ -4,6 +4,7 @@ export * from "./button";
 export * from "./card";
 export * from "./empty-state";
 export * from "./filter-pills";
+export * from "./nearby-restaurants-list";
 export * from "./photo-grid";
 export * from "./skeleton";
 export * from "./stat-row";

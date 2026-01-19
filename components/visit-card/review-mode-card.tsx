@@ -1,16 +1,16 @@
 import { cn } from "@/utils/cn";
 import { IconSymbol } from "@/components/icon-symbol";
-import { Card } from "@/components/ui";
+import { Card, NearbyRestaurantsList } from "@/components/ui";
 import { ThemedText } from "@/components/themed-text";
 import { cleanCalendarEventTitle, isFuzzyRestaurantMatch } from "@/services/calendar";
 import * as Haptics from "expo-haptics";
 import React, { useState, useEffect, useMemo } from "react";
-import { Pressable, View, ScrollView } from "react-native";
+import { Pressable, View } from "react-native";
 import { PhotoPreview } from "./photo-preview";
-import { CalendarBadge, NearbyRestaurantsBadge, ExactMatchBadge, AppleMapsVerifiedBadge } from "./badges";
+import { CalendarBadge, NearbyRestaurantsBadge, ExactMatchBadge } from "./badges";
 import { VisitActions } from "./visit-actions";
-import { formatDate, formatTime, formatDistance, getMichelinBadge } from "./utils";
-import { useAppleMapsSearch } from "@/hooks/use-apple-maps-search";
+import { formatDate, formatTime, getMichelinBadge } from "./utils";
+import { useUnifiedNearbyRestaurants, type NearbyRestaurant } from "@/hooks";
 import type { ReviewModeProps, SuggestedRestaurant } from "./types";
 
 export function ReviewModeCard({
@@ -46,18 +46,30 @@ export function ReviewModeCard({
   // When we have an exact match, use that directly - no need for suggestions
   const hasMatch = Boolean(match);
 
-  // Apple Maps search and merge with Michelin suggestions (only when enabled and no match)
-  const appleMapsSearch = useAppleMapsSearch(
-    suggestedRestaurants,
-    centerLat ?? suggestedRestaurants[0]?.latitude ?? 0,
-    centerLon ?? suggestedRestaurants[0]?.longitude ?? 0,
-    enableAppleMapsVerification && !hasMatch,
+  // Fetch nearby restaurants using unified hook (Michelin + MapKit)
+  const shouldFetchNearby = enableAppleMapsVerification && !hasMatch && Boolean(centerLat) && Boolean(centerLon);
+  const { data: unifiedRestaurants = [] } = useUnifiedNearbyRestaurants(
+    centerLat,
+    centerLon,
+    500, // Michelin radius
+    200, // MapKit radius
+    shouldFetchNearby,
   );
 
-  // Use merged restaurants when Apple Maps search is enabled, otherwise use original
-  const unsortedDisplayRestaurants = enableAppleMapsVerification
-    ? appleMapsSearch.mergedRestaurants
-    : suggestedRestaurants.map((r) => ({ ...r, source: "michelin" as const, isVerified: false }));
+  // Use unified results when fetching is enabled, otherwise fall back to passed suggestedRestaurants
+  const unsortedDisplayRestaurants: NearbyRestaurant[] = shouldFetchNearby
+    ? unifiedRestaurants
+    : suggestedRestaurants.map((r) => ({
+        id: r.id,
+        name: r.name,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        distance: r.distance,
+        award: r.award || null,
+        cuisine: r.cuisine,
+        address: r.address,
+        source: "michelin" as const,
+      }));
 
   // Sort restaurants by match likelihood: name match with calendar event first, then distance
   const displayRestaurants = useMemo(() => {
@@ -98,9 +110,6 @@ export function ReviewModeCard({
 
   const hasMultipleSuggestions = !hasMatch && displayRestaurants.length > 1;
   const hasSingleSuggestion = !hasMatch && hasSuggestion && displayRestaurants.length === 1;
-  const isVerifying = appleMapsSearch.isLoading;
-  const appleMapsCount = appleMapsSearch.appleMapsCount;
-  const michelinCount = displayRestaurants.filter((r) => r.source === "michelin").length;
 
   // Determine what to display based on match vs suggestions
   const selectedRestaurant = hasMultipleSuggestions ? displayRestaurants[selectedIndex] : null;
@@ -130,16 +139,16 @@ export function ReviewModeCard({
       // Confirm with matched restaurant
       onConfirm?.(matchedRestaurant);
     } else if (selectedRestaurant) {
-      // Convert merged restaurant back to SuggestedRestaurant format
+      // Convert NearbyRestaurant to SuggestedRestaurant format
       const restaurant: SuggestedRestaurant = {
         id: selectedRestaurant.id,
         name: selectedRestaurant.name,
         latitude: selectedRestaurant.latitude,
         longitude: selectedRestaurant.longitude,
-        address: selectedRestaurant.address,
-        location: selectedRestaurant.location,
-        cuisine: selectedRestaurant.cuisine,
-        award: selectedRestaurant.award,
+        address: selectedRestaurant.address ?? "",
+        location: selectedRestaurant.address ?? "",
+        cuisine: selectedRestaurant.cuisine ?? "",
+        award: selectedRestaurant.award ?? "",
         distance: selectedRestaurant.distance,
       };
       onConfirm?.(restaurant);
@@ -192,7 +201,6 @@ export function ReviewModeCard({
               {calendarEventTitle && <CalendarBadge title={calendarEventTitle} />}
               {hasMatch && <ExactMatchBadge />}
               {hasMultipleSuggestions && <NearbyRestaurantsBadge count={displayRestaurants.length} />}
-              {!hasMatch && (isVerifying || appleMapsCount > 0) && <AppleMapsVerifiedBadge isLoading={isVerifying} />}
             </View>
 
             {/* Exact Match Card - shown when we have a calendar match */}
@@ -227,99 +235,12 @@ export function ReviewModeCard({
 
             {/* Multiple Suggestions Picker - only when no match */}
             {hasMultipleSuggestions && (
-              <View className={"gap-2"}>
-                <View className={"flex-row items-center gap-2"}>
-                  <View className={"w-6 h-6 rounded-full bg-amber-500/20 items-center justify-center"}>
-                    <IconSymbol name={"list.bullet"} size={14} color={"#f59e0b"} />
-                  </View>
-                  <ThemedText variant={"footnote"} color={"secondary"}>
-                    {displayRestaurants.length.toLocaleString()} Nearby
-                    {michelinCount > 0 && appleMapsCount > 0
-                      ? ` (${michelinCount} Michelin, ${appleMapsCount} Apple Maps)`
-                      : michelinCount > 0
-                        ? " Michelin"
-                        : " Apple Maps"}
-                  </ThemedText>
-                </View>
-                <ScrollView
-                  style={{ maxHeight: 160 }}
-                  showsVerticalScrollIndicator={true}
-                  nestedScrollEnabled={true}
-                  contentContainerStyle={{ gap: 8 }}
-                >
-                  {displayRestaurants.map((restaurant, idx) => {
-                    const isSelected = idx === selectedIndex;
-                    const restaurantBadge = getMichelinBadge(restaurant.award);
-                    const isMichelin = restaurant.source === "michelin";
-                    const isAppleMaps = restaurant.source === "apple-maps";
-                    const isVerified = restaurant.isVerified;
-                    return (
-                      <Pressable
-                        key={`${restaurant.id}-${idx}`}
-                        onPress={() => handleSelectRestaurant(idx)}
-                        className={cn(
-                          "rounded-xl p-3 border-2",
-                          isSelected
-                            ? "bg-green-500/15 border-green-500/30"
-                            : isAppleMaps
-                              ? "bg-blue-500/5 border-blue-500/10"
-                              : isVerified
-                                ? "bg-amber-500/5 border-amber-500/20"
-                                : "bg-card border-transparent",
-                        )}
-                      >
-                        <View className={"flex-row items-start justify-between"}>
-                          <View className={"flex-1 gap-1"}>
-                            <View className={"flex-row items-center gap-1"}>
-                              {isSelected && <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#22c55e"} />}
-                              <ThemedText variant={"subhead"} className={"font-medium flex-1"} numberOfLines={1}>
-                                {restaurant.name}
-                              </ThemedText>
-                              {isAppleMaps && (
-                                <View
-                                  className={"flex-row items-center gap-1 bg-blue-500/15 px-1.5 py-0.5 rounded-full"}
-                                >
-                                  <IconSymbol name={"map.fill"} size={8} color={"#3b82f6"} />
-                                </View>
-                              )}
-                              {isMichelin && isVerified && (
-                                <View
-                                  className={"flex-row items-center gap-1 bg-green-500/15 px-1.5 py-0.5 rounded-full"}
-                                >
-                                  <IconSymbol name={"checkmark.seal.fill"} size={8} color={"#22c55e"} />
-                                </View>
-                              )}
-                              <ThemedText variant={"caption2"} color={"tertiary"}>
-                                {formatDistance(restaurant.distance)}
-                              </ThemedText>
-                            </View>
-                            <View className={"flex-row items-center gap-2 flex-wrap"}>
-                              {restaurantBadge && (
-                                <View className={"flex-row items-center gap-1"}>
-                                  <ThemedText variant={"caption1"}>{restaurantBadge.emoji}</ThemedText>
-                                  <ThemedText variant={"caption2"} color={"secondary"}>
-                                    {restaurantBadge.label}
-                                  </ThemedText>
-                                </View>
-                              )}
-                              {isAppleMaps && !restaurantBadge && (
-                                <ThemedText variant={"caption2"} className={"text-blue-500"}>
-                                  Apple Maps
-                                </ThemedText>
-                              )}
-                            </View>
-                            {restaurant.cuisine && (
-                              <ThemedText variant={"caption2"} color={"tertiary"}>
-                                {restaurant.cuisine}
-                              </ThemedText>
-                            )}
-                          </View>
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              </View>
+              <NearbyRestaurantsList
+                restaurants={displayRestaurants}
+                selectedIndex={selectedIndex}
+                onSelectIndex={handleSelectRestaurant}
+                variant={"compact"}
+              />
             )}
 
             {/* Single Suggestion - only when no match and exactly one suggestion */}
@@ -345,17 +266,9 @@ export function ReviewModeCard({
                       />
                     </View>
                     <ThemedText variant={"footnote"} color={"secondary"}>
-                      {displayRestaurants[0].source === "michelin" ? "Michelin Match Found" : "Apple Maps Restaurant"}
+                      {displayRestaurants[0].source === "michelin" ? "Michelin Match Found" : "MapKit Restaurant"}
                     </ThemedText>
                   </View>
-                  {displayRestaurants[0].isVerified && displayRestaurants[0].source === "michelin" && (
-                    <View className={"flex-row items-center gap-1 bg-blue-500/15 px-2 py-0.5 rounded-full"}>
-                      <IconSymbol name={"checkmark.seal.fill"} size={10} color={"#22c55e"} />
-                      <ThemedText variant={"caption2"} className={"text-green-500"}>
-                        Verified
-                      </ThemedText>
-                    </View>
-                  )}
                 </View>
                 <ThemedText numberOfLines={1} variant={"heading"} className={"font-semibold"}>
                   {displayName}
