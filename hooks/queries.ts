@@ -851,14 +851,33 @@ export function useImportableCalendarEvents() {
 }
 
 /**
+ * Input for importing calendar events with optional restaurant selection
+ */
+export interface ImportCalendarEventsInput {
+  calendarEventIds: string[];
+  /** Map of calendarEventId -> restaurantId to use instead of the default matched restaurant */
+  restaurantOverrides?: Map<string, string>;
+}
+
+/**
  * Import calendar events as visits
  */
 export function useImportCalendarEvents() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (calendarEventIds: string[]) => importCalendarEvents(calendarEventIds),
-    onMutate: async (calendarEventIds) => {
+    mutationFn: (input: string[] | ImportCalendarEventsInput) => {
+      // Support both old simple array and new object format
+      if (Array.isArray(input)) {
+        return importCalendarEvents(input);
+      }
+      return importCalendarEvents(input.calendarEventIds, {
+        restaurantOverrides: input.restaurantOverrides,
+      });
+    },
+    onMutate: async (input) => {
+      const calendarEventIds = Array.isArray(input) ? input : input.calendarEventIds;
+
       // Cancel any outgoing refetches to avoid overwriting optimistic update
       await queryClient.cancelQueries({ queryKey: queryKeys.importableCalendarEvents });
 
@@ -873,16 +892,11 @@ export function useImportCalendarEvents() {
 
       return { previousEvents };
     },
-    onError: (_error, _calendarEventIds, context) => {
+    onError: (_error, _input, context) => {
       // Rollback to previous state on error
       if (context?.previousEvents) {
         queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, context.previousEvents);
       }
-    },
-    onSettled: () => {
-      // Always refetch after mutation settles to ensure data consistency
-      invalidateVisitQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: queryKeys.importableCalendarEvents });
     },
   });
 }
@@ -912,10 +926,6 @@ export function useDismissCalendarEvents() {
       if (context?.previousEvents) {
         queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, context.previousEvents);
       }
-    },
-    onSettled: () => {
-      // Refetch to ensure data consistency
-      queryClient.invalidateQueries({ queryKey: queryKeys.importableCalendarEvents });
     },
   });
 }

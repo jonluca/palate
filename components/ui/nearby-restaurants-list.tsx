@@ -41,8 +41,13 @@ export interface NearbyRestaurantsListProps {
   restaurants: NearbyRestaurant[];
   selectedIndex: number;
   onSelectIndex: (index: number) => void;
-  /** Variant affects styling - compact has shorter max height and more visual differentiation for sources */
-  variant?: "default" | "compact";
+  /**
+   * Variant affects styling:
+   * - "default": Shows distance on the side, address only when no cuisine
+   * - "compact": Shorter max height, inline distance, more visual source differentiation
+   * - "calendar": Shows address, hides distance (for calendar import where distance isn't relevant)
+   */
+  variant?: "default" | "compact" | "calendar";
   /** Whether to show the header with icon and count */
   showHeader?: boolean;
   /** Custom header text - if not provided, will generate based on restaurant counts */
@@ -80,13 +85,17 @@ export function NearbyRestaurantsList({
               ? " Michelin"
               : " Maps"
         }`
-      : michelinCount > 0 && mapKitCount > 0
-        ? `${restaurants.length} Nearby Restaurants`
-        : michelinCount > 0
-          ? `${michelinCount} Nearby Michelin Restaurants`
-          : `${mapKitCount} Nearby Restaurants`);
+      : variant === "calendar"
+        ? `${restaurants.length} Matching Restaurants`
+        : michelinCount > 0 && mapKitCount > 0
+          ? `${restaurants.length} Nearby Restaurants`
+          : michelinCount > 0
+            ? `${michelinCount} Nearby Michelin Restaurants`
+            : `${mapKitCount} Nearby Restaurants`);
 
   const isCompact = variant === "compact";
+  const isCalendar = variant === "calendar";
+  const showDistance = !isCalendar; // Hide distance for calendar variant
   const maxHeight = isCompact ? 200 : 240;
 
   return (
@@ -142,7 +151,7 @@ export function NearbyRestaurantsList({
                         <IconSymbol name={"map.fill"} size={8} color={"#3b82f6"} />
                       </View>
                     )}
-                    {isCompact && (
+                    {isCompact && showDistance && (
                       <ThemedText variant={"caption2"} color={"tertiary"}>
                         {formatDistance(restaurant.distance)}
                       </ThemedText>
@@ -178,15 +187,16 @@ export function NearbyRestaurantsList({
                     </ThemedText>
                   )}
 
-                  {!isCompact && restaurant.address && !restaurant.cuisine && (
+                  {/* Show address for calendar variant (always) or default variant (when no cuisine) */}
+                  {restaurant.address && (isCalendar || (!isCompact && !restaurant.cuisine)) && (
                     <ThemedText variant={"caption2"} color={"tertiary"} numberOfLines={1}>
                       {restaurant.address}
                     </ThemedText>
                   )}
                 </View>
 
-                {/* Distance on the side for default variant */}
-                {!isCompact && (
+                {/* Distance on the side for default variant (not calendar) */}
+                {!isCompact && showDistance && (
                   <ThemedText variant={"caption2"} color={"tertiary"}>
                     {formatDistance(restaurant.distance)}
                   </ThemedText>

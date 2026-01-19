@@ -1,13 +1,15 @@
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
-import { Button, ButtonText } from "@/components/ui";
-import type { ImportableCalendarEvent } from "@/hooks/queries";
+import { Button, ButtonText, NearbyRestaurantsList } from "@/components/ui";
+import type { ImportableCalendarEvent, NearbyRestaurant } from "@/hooks/queries";
 import { router } from "expo-router";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { Pressable, View } from "react-native";
+import * as Haptics from "expo-haptics";
 
 interface CalendarImportCardProps {
   event: ImportableCalendarEvent;
-  onImport: () => void;
+  onImport: (selectedRestaurantId?: string) => void;
   onDismiss: () => void;
   isImporting: boolean;
   isDismissing: boolean;
@@ -15,6 +17,13 @@ interface CalendarImportCardProps {
 
 /** Card for displaying an importable calendar event that matches a Michelin restaurant */
 export function CalendarImportCard({ event, onImport, onDismiss, isImporting, isDismissing }: CalendarImportCardProps) {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  // Reset selected index when event changes (handles list recycling)
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [event.calendarEventId]);
+
   const eventDate = new Date(event.startDate);
   const formattedDate = eventDate.toLocaleDateString("en-US", {
     weekday: "short",
@@ -26,6 +35,36 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
     hour: "numeric",
     minute: "2-digit",
   });
+
+  const hasMultipleMatches = event.matchedRestaurants.length > 1;
+  const selectedRestaurant = event.matchedRestaurants[selectedIndex] ?? event.matchedRestaurant;
+
+  // Convert to NearbyRestaurant format for the list component
+  const restaurantsForList: NearbyRestaurant[] = useMemo(
+    () =>
+      event.matchedRestaurants.map((r) => ({
+        id: r.id,
+        name: r.name,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        distance: 0, // Calendar matches don't have a distance from the event
+        award: r.award ?? null,
+        cuisine: r.cuisine,
+        address: r.address,
+        source: "michelin" as const,
+      })),
+    [event.matchedRestaurants],
+  );
+
+  const handleSelectIndex = useCallback((idx: number) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedIndex(idx);
+  }, []);
+
+  const handleImport = useCallback(() => {
+    // Pass the selected restaurant ID to the import handler
+    onImport(selectedRestaurant.id);
+  }, [onImport, selectedRestaurant.id]);
 
   return (
     <View className={"bg-card rounded-2xl p-4 gap-3 mb-4"}>
@@ -49,64 +88,83 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
         </View>
       </View>
 
-      {/* Matched Restaurant */}
-      <Pressable
-        onPress={() => router.push(`/restaurant/${event.matchedRestaurant.id}`)}
-        accessibilityRole={"button"}
-        className={"bg-background/50 rounded-xl p-3"}
-        hitSlop={6}
-      >
-        <View className={"flex-row items-center justify-between"}>
+      {/* Multiple Matches - Show Restaurant List */}
+      {hasMultipleMatches ? (
+        <View className={"gap-2"}>
           <View className={"flex-row items-center gap-2"}>
-            <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#34C759"} />
+            <IconSymbol name={"list.bullet"} size={14} color={"#f59e0b"} />
             <ThemedText variant={"caption1"} color={"secondary"}>
-              Matches Michelin Restaurant
+              {event.matchedRestaurants.length} matching Michelin restaurants found
             </ThemedText>
           </View>
-          <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
+          <NearbyRestaurantsList
+            restaurants={restaurantsForList}
+            selectedIndex={selectedIndex}
+            onSelectIndex={handleSelectIndex}
+            variant={"calendar"}
+            showHeader={false}
+          />
         </View>
-
-        <ThemedText className={"font-medium mt-1 text-blue-400"} numberOfLines={2}>
-          {event.matchedRestaurant.name}
-        </ThemedText>
-
-        {/* Award badge */}
-        {event.matchedRestaurant.award && (
-          <View className={"flex-row items-center gap-1 mt-1"}>
-            <IconSymbol name={"star.fill"} size={12} color={"#f59e0b"} />
-            <ThemedText variant={"caption1"} color={"secondary"}>
-              {event.matchedRestaurant.award}
-            </ThemedText>
+      ) : (
+        /* Single Match - Show Detailed Card */
+        <Pressable
+          onPress={() => router.push(`/restaurant/${selectedRestaurant.id}`)}
+          accessibilityRole={"button"}
+          className={"bg-background/50 rounded-xl p-3"}
+          hitSlop={6}
+        >
+          <View className={"flex-row items-center justify-between"}>
+            <View className={"flex-row items-center gap-2"}>
+              <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#34C759"} />
+              <ThemedText variant={"caption1"} color={"secondary"}>
+                Matches Michelin Restaurant
+              </ThemedText>
+            </View>
+            <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
           </View>
-        )}
 
-        {/* Location details */}
-        <View className={"mt-1.5 gap-0.5"}>
-          {event.matchedRestaurant.location && (
-            <View className={"flex-row items-center gap-1"}>
-              <IconSymbol name={"mappin"} size={12} color={"#9ca3af"} />
-              <ThemedText variant={"caption1"} color={"tertiary"} numberOfLines={1}>
-                {event.matchedRestaurant.location}
+          <ThemedText className={"font-medium mt-1 text-blue-400"} numberOfLines={2}>
+            {selectedRestaurant.name}
+          </ThemedText>
+
+          {/* Award badge */}
+          {selectedRestaurant.award && (
+            <View className={"flex-row items-center gap-1 mt-1"}>
+              <IconSymbol name={"star.fill"} size={12} color={"#f59e0b"} />
+              <ThemedText variant={"caption1"} color={"secondary"}>
+                {selectedRestaurant.award}
               </ThemedText>
             </View>
           )}
-          {event.matchedRestaurant.address && (
-            <ThemedText variant={"caption2"} color={"tertiary"} numberOfLines={1} className={"ml-4"}>
-              {event.matchedRestaurant.address}
-            </ThemedText>
-          )}
-        </View>
 
-        {/* Cuisine */}
-        {event.matchedRestaurant.cuisine && (
-          <View className={"flex-row items-center gap-1 mt-1"}>
-            <IconSymbol name={"fork.knife"} size={12} color={"#9ca3af"} />
-            <ThemedText variant={"caption1"} color={"tertiary"}>
-              {event.matchedRestaurant.cuisine}
-            </ThemedText>
+          {/* Location details */}
+          <View className={"mt-1.5 gap-0.5"}>
+            {selectedRestaurant.location && (
+              <View className={"flex-row items-center gap-1"}>
+                <IconSymbol name={"mappin"} size={12} color={"#9ca3af"} />
+                <ThemedText variant={"caption1"} color={"tertiary"} numberOfLines={1}>
+                  {selectedRestaurant.location}
+                </ThemedText>
+              </View>
+            )}
+            {selectedRestaurant.address && (
+              <ThemedText variant={"caption2"} color={"tertiary"} numberOfLines={1} className={"ml-4"}>
+                {selectedRestaurant.address}
+              </ThemedText>
+            )}
           </View>
-        )}
-      </Pressable>
+
+          {/* Cuisine */}
+          {selectedRestaurant.cuisine && (
+            <View className={"flex-row items-center gap-1 mt-1"}>
+              <IconSymbol name={"fork.knife"} size={12} color={"#9ca3af"} />
+              <ThemedText variant={"caption1"} color={"tertiary"}>
+                {selectedRestaurant.cuisine}
+              </ThemedText>
+            </View>
+          )}
+        </Pressable>
+      )}
 
       {/* Action Buttons */}
       <View className={"flex-row gap-2"}>
@@ -124,7 +182,7 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
         <Button
           size={"sm"}
           variant={"default"}
-          onPress={onImport}
+          onPress={handleImport}
           loading={isImporting}
           disabled={isImporting || isDismissing}
           className={"flex-1"}

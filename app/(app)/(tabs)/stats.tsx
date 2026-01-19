@@ -910,7 +910,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
   }, [stats]);
 
   return (
-    <View className={"gap-8"}>
+    <View className={"gap-6"}>
       {/* Hero Stats - 2x2 Grid */}
       <Animated.View entering={FadeIn.delay(100).duration(500)} className={"gap-3"}>
         <View className={"flex-row gap-3"}>
@@ -1120,22 +1120,6 @@ export default function StatsScreen() {
         paddingHorizontal: 16,
       }}
     >
-      <LinearGradient
-        colors={["#0f0f23", "#1a1a2e", "#16213e", "#0f3460"]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
-      />
-      {/* Confetti celebration */}
-      <Confetti enabled={showConfetti} />
-      {/* Decorative background elements */}
-      <View className={"absolute top-0 right-0 w-64 h-64 opacity-5"}>
-        <View className={"absolute top-20 right-8 w-40 h-40 rounded-full bg-amber-400"} />
-        <View className={"absolute top-40 right-24 w-24 h-24 rounded-full bg-orange-500"} />
-      </View>
-      <View className={"absolute bottom-0 left-0 w-48 h-48 opacity-5"}>
-        <View className={"absolute bottom-20 left-8 w-32 h-32 rounded-full bg-purple-500"} />
-      </View>
       {/* Header */}
       <Animated.View entering={FadeInDown.duration(500)} className={"gap-2 mb-4"}>
         <ThemedText variant={"largeTitle"} className={"text-white font-bold"}>

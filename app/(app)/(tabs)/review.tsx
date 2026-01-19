@@ -1,7 +1,7 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { AnimatedListItem, ReviewVisitCard, TabButton, type ReviewTab } from "@/components/review";
-import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText, Card, FilterPills, useUndo } from "@/components/ui";
+import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText, Card, useUndo } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import {
   usePendingReview,
@@ -23,8 +23,6 @@ import {
   useSetReviewFoodFilter,
   useReviewMatchesFilter,
   useSetReviewMatchesFilter,
-  useReviewStarFilter,
-  useSetReviewStarFilter,
   useReviewFiltersCollapsed,
   useSetReviewFiltersCollapsed,
 } from "@/store";
@@ -95,8 +93,6 @@ export default function ReviewScreen() {
   const setFoodFilter = useSetReviewFoodFilter();
   const matchesFilter = useReviewMatchesFilter();
   const setMatchesFilter = useSetReviewMatchesFilter();
-  const starFilter = useReviewStarFilter();
-  const setStarFilter = useSetReviewStarFilter();
   const filtersCollapsed = useReviewFiltersCollapsed();
   const setFiltersCollapsed = useSetReviewFiltersCollapsed();
 
@@ -150,38 +146,6 @@ export default function ReviewScreen() {
     [],
   );
 
-  function parseMichelinStars(award: string | null | undefined): number {
-    if (!award) {
-      return 0;
-    }
-    const s = award.toLowerCase();
-    const digitMatch = s.match(/(\d)\s*star/);
-    if (digitMatch) {
-      return Number(digitMatch[1]) || 0;
-    }
-    if (s.includes("three star")) {
-      return 3;
-    }
-    if (s.includes("two star")) {
-      return 2;
-    }
-    if (s.includes("one star")) {
-      return 1;
-    }
-    return 0;
-  }
-
-  const visitMaxStars = useCallback((visit: PendingVisitForReview) => {
-    let max = 0;
-    for (const r of visit.suggestedRestaurants) {
-      max = Math.max(max, parseMichelinStars(r.award));
-      if (max >= 3) {
-        return 3;
-      }
-    }
-    return max;
-  }, []);
-
   const filteredReviewableVisits = useMemo(() => {
     return reviewableVisits.filter((v) => {
       // Food toggle: ON => must have food, OFF => must not have food (covers 0/false/null/undefined)
@@ -203,20 +167,9 @@ export default function ReviewScreen() {
         return false;
       }
 
-      const maxStars = visitMaxStars(v);
-      if (starFilter === "1plus" && maxStars < 1) {
-        return false;
-      }
-      if (starFilter === "2plus" && maxStars < 2) {
-        return false;
-      }
-      if (starFilter === "3" && maxStars < 3) {
-        return false;
-      }
-
       return true;
     });
-  }, [reviewableVisits, foodFilter, matchesFilter, starFilter, visitMaxStars]);
+  }, [reviewableVisits, foodFilter, matchesFilter]);
 
   // UI state
   const hasExactMatches = exactMatches.length > 0;
@@ -370,22 +323,11 @@ export default function ReviewScreen() {
                     onToggle={() => setFoodFilter(foodFilter === "on" ? "off" : "on")}
                   />
                   <ToggleChip
-                    label={"Restaurant Matches"}
+                    label={"Has Restaurant Matches"}
                     value={matchesFilter === "on"}
                     onToggle={() => setMatchesFilter(matchesFilter === "on" ? "off" : "on")}
                   />
                 </View>
-
-                <FilterPills
-                  options={[
-                    { value: "any" as const, label: "Stars: Any" },
-                    { value: "1plus" as const, label: "1★+" },
-                    { value: "2plus" as const, label: "2★+" },
-                    { value: "3" as const, label: "3★" },
-                  ]}
-                  value={starFilter}
-                  onChange={setStarFilter}
-                />
               </Animated.View>
             )}
           </Pressable>
@@ -401,8 +343,6 @@ export default function ReviewScreen() {
       setFoodFilter,
       matchesFilter,
       setMatchesFilter,
-      starFilter,
-      setStarFilter,
       ToggleChip,
     ],
   );

@@ -822,6 +822,9 @@ export interface ImportableCalendarEvent {
   calendarEventLocation: string | null;
   startDate: number;
   endDate: number;
+  /** All matching restaurants - sorted by best match first (using location disambiguation) */
+  matchedRestaurants: MichelinRestaurantRecord[];
+  /** Convenience getter for the best match (first in the list) - for backward compatibility */
   matchedRestaurant: MichelinRestaurantRecord;
 }
 
@@ -916,41 +919,46 @@ function buildRestaurantsByNormalizedName(restaurants: MichelinRestaurantRecord[
 }
 
 /**
- * When multiple Michelin restaurants share the exact same normalized name, prefer the one whose
- * location/address best matches the event location. This is NOT fuzzy name matching; it's only
- * a disambiguation step after an exact-name match.
+ * Calculate a location relevance score for a restaurant based on how well it matches the event location.
  */
-function pickBestRestaurantForEventLocation(
-  matches: MichelinRestaurantRecord[],
-  eventLocation: string | null,
-): MichelinRestaurantRecord {
-  if (matches.length === 1 || !eventLocation) {
-    return matches[0];
+function calculateLocationRelevanceScore(restaurant: MichelinRestaurantRecord, eventLocation: string | null): number {
+  if (!eventLocation) {
+    return 0;
   }
 
   const eventLocNorm = normalizeForComparison(eventLocation);
-  let best = matches[0];
-  let bestScore = -1;
+  const locNorm = normalizeForComparison(restaurant.location);
+  const addrNorm = normalizeForComparison(restaurant.address);
 
-  for (const r of matches) {
-    const locNorm = normalizeForComparison(r.location);
-    const addrNorm = normalizeForComparison(r.address);
-
-    let score = 0;
-    if (eventLocNorm.includes(addrNorm) || addrNorm.includes(eventLocNorm)) {
-      score += 2;
-    }
-    if (eventLocNorm.includes(locNorm) || locNorm.includes(eventLocNorm)) {
-      score += 1;
-    }
-
-    if (score > bestScore) {
-      bestScore = score;
-      best = r;
-    }
+  let score = 0;
+  if (eventLocNorm.includes(addrNorm) || addrNorm.includes(eventLocNorm)) {
+    score += 2;
+  }
+  if (eventLocNorm.includes(locNorm) || locNorm.includes(eventLocNorm)) {
+    score += 1;
   }
 
-  return best;
+  return score;
+}
+
+/**
+ * Sort restaurants by location relevance - best match first.
+ * Used when multiple Michelin restaurants share the exact same normalized name.
+ */
+function sortRestaurantsByLocationRelevance(
+  matches: MichelinRestaurantRecord[],
+  eventLocation: string | null,
+): MichelinRestaurantRecord[] {
+  if (matches.length <= 1) {
+    return matches;
+  }
+
+  // Calculate scores and sort
+  return [...matches].sort((a, b) => {
+    const scoreA = calculateLocationRelevanceScore(a, eventLocation);
+    const scoreB = calculateLocationRelevanceScore(b, eventLocation);
+    return scoreB - scoreA; // Higher score first
+  });
 }
 
 /**
@@ -1053,10 +1061,14 @@ export async function getImportableCalendarEvents(
       continue;
     }
 
-    const bestMatch = pickBestRestaurantForEventLocation(matches, event.location);
+    // Sort all matches by location relevance (best match first)
+    const sortedMatches = sortRestaurantsByLocationRelevance(matches, event.location);
 
-    // Skip if there's already a confirmed visit to this restaurant within ±1 day
-    if (hasNearbyConfirmedVisit(bestMatch.id, event.startDate)) {
+    // Filter out restaurants that already have a confirmed visit within ±1 day
+    const hasSimilarVisit = sortedMatches.some((r) => hasNearbyConfirmedVisit(r.id, event.startDate));
+
+    // Skip if no matches remain after filtering
+    if (hasSimilarVisit) {
       continue;
     }
 
@@ -1066,7 +1078,8 @@ export async function getImportableCalendarEvents(
       calendarEventLocation: event.location,
       startDate: event.startDate,
       endDate: event.endDate,
-      matchedRestaurant: bestMatch,
+      matchedRestaurants: sortedMatches,
+      matchedRestaurant: sortedMatches[0], // Best match for backward compatibility
     });
 
     // Yield to event loop periodically
@@ -1140,11 +1153,27 @@ function dedupeImportableEvents(
 }
 
 /**
+ * Options for importing calendar events.
+ */
+export interface ImportCalendarEventOptions {
+  /** Map of calendarEventId -> restaurantId to use instead of the default matched restaurant */
+  restaurantOverrides?: Map<string, string>;
+}
+
+/**
  * Import specific calendar events as visits.
  * Takes an array of calendar event IDs to import.
  * The matched restaurant is auto-confirmed on the created visit.
+ *
+ * @param calendarEventIds - Array of calendar event IDs to import
+ * @param options - Optional configuration including restaurant overrides
  */
-export async function importCalendarEvents(calendarEventIds: string[]): Promise<number> {
+export async function importCalendarEvents(
+  calendarEventIds: string[],
+  options: ImportCalendarEventOptions = {},
+): Promise<number> {
+  const { restaurantOverrides } = options;
+
   if (calendarEventIds.length === 0) {
     return 0;
   }
@@ -1159,25 +1188,39 @@ export async function importCalendarEvents(calendarEventIds: string[]): Promise<
     return 0;
   }
 
-  const visitsToCreate = eventsToImport.map((event) => ({
-    id: generateCalendarVisitHash(event.calendarEventId, event.startDate),
-    calendarEventId: event.calendarEventId,
-    calendarEventTitle: event.calendarEventTitle,
-    calendarEventLocation: event.calendarEventLocation,
-    startTime: event.startDate,
-    endTime: event.endDate,
-    centerLat: event.matchedRestaurant.latitude,
-    centerLon: event.matchedRestaurant.longitude,
-    // Pass full restaurant data for auto-confirmation
-    matchedRestaurant: {
-      id: event.matchedRestaurant.id,
-      name: event.matchedRestaurant.name,
-      latitude: event.matchedRestaurant.latitude,
-      longitude: event.matchedRestaurant.longitude,
-      address: event.matchedRestaurant.address,
-      cuisine: event.matchedRestaurant.cuisine,
-    },
-  }));
+  const visitsToCreate = eventsToImport.map((event) => {
+    // Check if there's an override for this event's restaurant
+    const overrideRestaurantId = restaurantOverrides?.get(event.calendarEventId);
+    let restaurant = event.matchedRestaurant;
+
+    // If override provided, find the restaurant in matchedRestaurants
+    if (overrideRestaurantId) {
+      const overrideRestaurant = event.matchedRestaurants.find((r) => r.id === overrideRestaurantId);
+      if (overrideRestaurant) {
+        restaurant = overrideRestaurant;
+      }
+    }
+
+    return {
+      id: generateCalendarVisitHash(event.calendarEventId, event.startDate),
+      calendarEventId: event.calendarEventId,
+      calendarEventTitle: event.calendarEventTitle,
+      calendarEventLocation: event.calendarEventLocation,
+      startTime: event.startDate,
+      endTime: event.endDate,
+      centerLat: restaurant.latitude,
+      centerLon: restaurant.longitude,
+      // Pass full restaurant data for auto-confirmation
+      matchedRestaurant: {
+        id: restaurant.id,
+        name: restaurant.name,
+        latitude: restaurant.latitude,
+        longitude: restaurant.longitude,
+        address: restaurant.address,
+        cuisine: restaurant.cuisine,
+      },
+    };
+  });
 
   // Insert visits with auto-confirmation
   await insertCalendarOnlyVisits(visitsToCreate);

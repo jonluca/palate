@@ -59,11 +59,21 @@ export default function CalendarImportScreen() {
   }, [queryClient]);
 
   const handleImportCalendarEvent = useCallback(
-    async (calendarEventId: string) => {
+    async (calendarEventId: string, selectedRestaurantId?: string) => {
       setImportingEventIds((prev) => new Set(prev).add(calendarEventId));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       try {
-        await importCalendarMutation.mutateAsync([calendarEventId]);
+        // If a specific restaurant was selected, pass it as an override
+        if (selectedRestaurantId) {
+          const restaurantOverrides = new Map<string, string>();
+          restaurantOverrides.set(calendarEventId, selectedRestaurantId);
+          await importCalendarMutation.mutateAsync({
+            calendarEventIds: [calendarEventId],
+            restaurantOverrides,
+          });
+        } else {
+          await importCalendarMutation.mutateAsync([calendarEventId]);
+        }
         logCalendarImported(1);
       } catch (error) {
         console.error("Error importing calendar event:", error);
@@ -285,7 +295,9 @@ export default function CalendarImportScreen() {
       return (
         <CalendarImportCard
           event={item.event}
-          onImport={() => handleImportCalendarEvent(item.event.calendarEventId)}
+          onImport={(selectedRestaurantId) =>
+            handleImportCalendarEvent(item.event.calendarEventId, selectedRestaurantId)
+          }
           onDismiss={() => handleDismissCalendarEvent(item.event.calendarEventId)}
           isImporting={importingEventIds.has(item.event.calendarEventId)}
           isDismissing={dismissingEventIds.has(item.event.calendarEventId)}
