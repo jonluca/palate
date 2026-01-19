@@ -1948,7 +1948,7 @@ export async function rejectVisitsInIgnoredLocations(): Promise<number> {
 
 // Constants for restaurant matching (same as services/visit.ts)
 const RESTAURANT_MATCH_THRESHOLD = 100; // 100 meters for primary suggestion
-const RESTAURANT_SEARCH_RADIUS = 200; // 200 meters for multiple suggestions
+const RESTAURANT_SEARCH_RADIUS = 400; // 200 meters for multiple suggestions
 const RESTAURANT_SUGGESTION_LIMIT = 5;
 
 /**

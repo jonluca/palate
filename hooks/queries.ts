@@ -36,6 +36,7 @@ import {
   resetFoodKeywordsToDefaults,
   reclassifyPhotosWithCurrentKeywords,
   getPhotosWithLabelsCount,
+  recomputeSuggestedRestaurants,
   type VisitWithDetails,
   type PhotoRecord,
   type RestaurantRecord,
@@ -1601,6 +1602,25 @@ export function useReclassifyPhotos(onProgress?: (progress: ReclassifyProgress) 
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       queryClient.invalidateQueries({ queryKey: queryKeys.photosWithLabelsCount });
+    },
+  });
+}
+
+/**
+ * Recompute suggested restaurants for all pending visits.
+ * This recalculates which restaurants are near each visit based on location.
+ */
+export function useRecomputeSuggestedRestaurants() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      return recomputeSuggestedRestaurants();
+    },
+    onSuccess: () => {
+      // Invalidate visit-related queries to reflect new suggestions
+      invalidateVisitQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
     },
   });
 }

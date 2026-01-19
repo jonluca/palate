@@ -166,7 +166,7 @@ interface AnalyzingVisitsOptions {
 
 const DEFAULT_TIME_GAP_MS = 2 * 60 * 60 * 1000; // 2 hours
 const DEFAULT_DISTANCE_THRESHOLD = 200; // 200 meters
-const DEFAULT_RESTAURANT_MATCH_THRESHOLD = 100; // 100 meters
+const DEFAULT_RESTAURANT_MATCH_THRESHOLD = 400; // 100 meters
 
 /**
  * Initialize Michelin restaurant reference data in the database
@@ -439,7 +439,7 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
           centroid.lat,
           centroid.lon,
           michelinRestaurants,
-          restaurantMatchThreshold * 2, // 200m for multiple matches
+          restaurantMatchThreshold * 2,
           5, // limit to 5 suggestions
         );
 

@@ -35,6 +35,7 @@ import {
   useResetFoodKeywords,
   useReclassifyPhotos,
   usePhotosWithLabelsCount,
+  useRecomputeSuggestedRestaurants,
   type IgnoredLocationRecord,
   type WritableCalendar,
   type FoodKeywordRecord,
@@ -757,6 +758,78 @@ function RescanCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Recompute Suggestions Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function RecomputeSuggestionsCard() {
+  const { showToast } = useToast();
+  const recomputeMutation = useRecomputeSuggestedRestaurants();
+
+  const handleRecompute = useCallback(() => {
+    Alert.alert(
+      "Recompute Suggestions",
+      "This will recalculate nearby restaurant suggestions for all pending visits based on their location. This may take a moment.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Recompute",
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            try {
+              const updatedCount = await recomputeMutation.mutateAsync();
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              showToast({
+                type: "success",
+                message: `Updated suggestions for ${updatedCount.toLocaleString()} visit${updatedCount === 1 ? "" : "s"}`,
+              });
+            } catch (error) {
+              console.error("Error recomputing suggestions:", error);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              showToast({ type: "error", message: "Failed to recompute suggestions" });
+            }
+          },
+        },
+      ],
+    );
+  }, [recomputeMutation, showToast]);
+
+  return (
+    <Card animated={false}>
+      <View className={"p-4 gap-4"}>
+        <View className={"flex-row items-center gap-3"}>
+          <CardIcon name={"arrow.triangle.2.circlepath"} color={"#8b5cf6"} bgColor={"bg-violet-500/15"} />
+          <View className={"flex-1"}>
+            <ThemedText variant={"subhead"} className={"font-medium"}>
+              Recompute Suggestions
+            </ThemedText>
+            <ThemedText variant={"footnote"} color={"secondary"}>
+              Recalculate nearby restaurants for pending visits
+            </ThemedText>
+          </View>
+        </View>
+        <Button
+          variant={"secondary"}
+          onPress={handleRecompute}
+          loading={recomputeMutation.isPending}
+          disabled={recomputeMutation.isPending}
+        >
+          <IconSymbol name={"arrow.triangle.2.circlepath"} size={16} color={"#8b5cf6"} />
+          <ButtonText variant={"secondary"} className={"ml-2"}>
+            Recompute Suggestions
+          </ButtonText>
+        </Button>
+        <View className={"flex-row items-center gap-2"}>
+          <IconSymbol name={"info.circle"} size={14} color={"#9ca3af"} />
+          <ThemedText variant={"caption1"} color={"tertiary"}>
+            Uses current Michelin data to find nearby restaurants
+          </ThemedText>
+        </View>
+      </View>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Ignored Locations Card
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1293,7 +1366,10 @@ export default function SettingsScreen() {
       {/* Scan Section */}
       <Animated.View entering={FadeInDown.delay(450).duration(300)} className={"mb-6"}>
         <SectionHeader>Scanning</SectionHeader>
-        <RescanCard />
+        <View className={"gap-3"}>
+          <RescanCard />
+          <RecomputeSuggestionsCard />
+        </View>
       </Animated.View>
 
       {/* Ignored Locations */}
