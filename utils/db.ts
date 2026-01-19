@@ -743,14 +743,6 @@ export async function dismissCalendarEvents(calendarEventIds: string[]): Promise
 }
 
 /**
- * Undismiss a calendar event (remove from dismissed list).
- */
-async function undismissCalendarEvent(calendarEventId: string): Promise<void> {
-  const database = await getDatabase();
-  await database.runAsync(`DELETE FROM dismissed_calendar_events WHERE calendarEventId = ?`, [calendarEventId]);
-}
-
-/**
  * Insert calendar-only visits (visits created from calendar events without photos).
  * These visits have photoCount = 0 and get their location from the matched restaurant.
  * If a matched restaurant is provided, the visit is auto-confirmed with that restaurant.
