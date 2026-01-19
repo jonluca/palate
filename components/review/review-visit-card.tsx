@@ -1,6 +1,6 @@
 import { RestaurantSearchModal, type RestaurantOption } from "@/components/restaurant-search-modal";
 import { SwipeableCard, useUndo } from "@/components/ui";
-import { VisitCard, type SuggestedRestaurant } from "@/components/visit-card";
+import { type LoadingAction, VisitCard, type SuggestedRestaurant } from "@/components/visit-card";
 import {
   useConfirmVisit,
   useQuickUpdateVisitStatus,
