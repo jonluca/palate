@@ -37,35 +37,6 @@ const logEvent = async (eventName: string, params?: Record<string, string | numb
   }
 };
 
-/**
- * Set user property for segmentation
- * @param name - Property name
- * @param value - Property value
- */
-const setUserProperty = async (name: string, value: string | null) => {
-  try {
-    await analytics().setUserProperty(name, value);
-  } catch (error) {
-    if (__DEV__) {
-      console.warn("Analytics user property error:", error);
-    }
-  }
-};
-
-/**
- * Set user ID for cross-device tracking
- * @param userId - Unique user identifier
- */
-const setUserId = async (userId: string | null) => {
-  try {
-    await analytics().setUserId(userId);
-  } catch (error) {
-    if (__DEV__) {
-      console.warn("Analytics user ID error:", error);
-    }
-  }
-};
-
 // Pre-defined event helpers for common actions
 
 export const logVisitViewed = (visitId: number) => {
