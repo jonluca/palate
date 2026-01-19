@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import * as Location from "expo-location";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { logVisitConfirmed, logVisitRejected } from "@/services/analytics";
 import {
   getVisitsWithDetails,
@@ -1300,9 +1300,12 @@ export type { DeepScanProgress, VisitFoodScanProgress };
  */
 export function useDeepScan(onProgress?: (progress: DeepScanProgress) => void) {
   const queryClient = useQueryClient();
+  // Use ref to always call the latest callback
+  const onProgressRef = useRef(onProgress);
+  onProgressRef.current = onProgress;
 
   return useMutation({
-    mutationFn: () => deepScanAllPhotosForFood({ onProgress }),
+    mutationFn: () => deepScanAllPhotosForFood({ onProgress: (p) => onProgressRef.current?.(p) }),
     onSuccess: () => invalidateVisitQueries(queryClient),
   });
 }

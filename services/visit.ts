@@ -1235,7 +1235,7 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
 
   if (!isBatchAssetInfoAvailable()) {
     progress.isComplete = true;
-    onProgress?.(progress);
+    onProgress?.({ ...progress });
     return progress;
   }
 
@@ -1245,25 +1245,26 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
 
   if (allPhotos.length === 0) {
     progress.isComplete = true;
-    onProgress?.(progress);
+    onProgress?.({ ...progress });
     return progress;
   }
 
-  onProgress?.(progress);
+  onProgress?.({ ...progress });
 
   const tracker = createProgressTracker();
 
   const { results, foodFoundCount } = await processFoodDetectionBatches(
     allPhotos,
     confidenceThreshold,
-    async (processed, foodFound) => {
+    (processed, foodFound) => {
       progress.processedPhotos = processed;
       progress.foodPhotosFound = foodFound;
       const stats = tracker.update(processed, allPhotos.length);
       progress.elapsedMs = stats.elapsedMs;
       progress.photosPerSecond = stats.perSecond;
       progress.etaMs = stats.etaMs;
-      onProgress?.(progress);
+      // Spread to create new object reference so React detects the change
+      onProgress?.({ ...progress });
     },
   );
 
@@ -1274,7 +1275,7 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
   progress.foodPhotosFound = foodFoundCount;
   progress.isComplete = true;
   progress.etaMs = 0;
-  onProgress?.(progress);
+  onProgress?.({ ...progress });
 
   return progress;
 }

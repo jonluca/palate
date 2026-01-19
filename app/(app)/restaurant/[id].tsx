@@ -811,7 +811,7 @@ export default function RestaurantDetailScreen() {
             </Pressable>
           ),
         }}
-        key={restaurant?.id}
+        key={restaurant ? `${restaurant.id}-restaurant-detail-screen` : undefined}
       />
       <ScreenLayout scrollable={false} className={"p-0"} style={{ paddingTop: 0, paddingBottom: 0 }}>
         <FlashList
