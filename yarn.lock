@@ -6343,6 +6343,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"expo-sharing@npm:~14.0.8":
+  version: 14.0.8
+  resolution: "expo-sharing@npm:14.0.8"
+  peerDependencies:
+    expo: "*"
+  checksum: 10c0/64c6f42272b7e762988dbb92af6eabb71bd8229366cdc675cda78513fea39c46c9a46bb250ffaf5587b8361bd824a89820e46771cb5f97fc16bbfc87e3f00518
+  languageName: node
+  linkType: hard
+
 "expo-splash-screen@npm:31.0.13":
   version: 31.0.13
   resolution: "expo-splash-screen@npm:31.0.13"
@@ -9125,6 +9134,7 @@ __metadata:
     expo-media-library: "npm:^18.2.1"
     expo-modules-core: "npm:^3.0.29"
     expo-router: "npm:^6.0.21"
+    expo-sharing: "npm:~14.0.8"
     expo-splash-screen: "npm:31.0.13"
     expo-sqlite: "npm:^16.0.10"
     expo-status-bar: "npm:^3.0.9"

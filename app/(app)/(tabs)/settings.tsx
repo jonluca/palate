@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
-import { ExportButton, StatsCard, WrappedCard } from "@/components/home";
+import { ExportButton, StatsCard } from "@/components/home";
 import { IconSymbol } from "@/components/icon-symbol";
 import type { SymbolViewProps } from "expo-symbols";
 import { nukeDatabase } from "@/utils/db";
@@ -156,45 +156,45 @@ function GoogleMapsApiKeyCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Calendar Imports Card
+// Calendar Section - All calendar-related settings in one place
 // ─────────────────────────────────────────────────────────────────────────────
 
-function CalendarImportsCard() {
-  return (
-    <Pressable onPress={() => router.push("/calendar-import")}>
-      <Card animated={false}>
-        <View className={"p-4 flex-row items-center justify-between"}>
-          <View className={"flex-row items-center gap-3 flex-1"}>
-            <CardIcon name={"calendar.badge.checkmark"} color={"#3b82f6"} bgColor={"bg-blue-500/15"} />
-            <View className={"flex-1"}>
-              <ThemedText variant={"subhead"} className={"font-medium"}>
-                Calendar Imports
-              </ThemedText>
-              <ThemedText variant={"footnote"} color={"secondary"}>
-                Import restaurant reservations from calendar
-              </ThemedText>
-            </View>
-          </View>
-          <View className={"flex-row items-center gap-2"}>
-            <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
-          </View>
-        </View>
-      </Card>
-    </Pressable>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Calendar Sync Selection Card - Choose which calendars to sync from
-// ─────────────────────────────────────────────────────────────────────────────
-
-function CalendarSyncCard() {
+function CalendarSection() {
   const { showToast } = useToast();
-  const { data: calendars = [], isLoading, refetch } = useSyncableCalendars();
+
+  // Section collapsed state
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Calendar Sync state
+  const {
+    data: syncableCalendars = [],
+    isLoading: isLoadingSyncable,
+    refetch: refetchSyncable,
+  } = useSyncableCalendars();
   const selectedCalendarIds = useSelectedCalendarIds();
   const setSelectedCalendarIds = useSetSelectedCalendarIds();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isSourcesExpanded, setIsSourcesExpanded] = useState(false);
+
+  // Calendar Export state
+  const [isExportModalVisible, setIsExportModalVisible] = useState(false);
+  const [selectedExportCalendar, setSelectedExportCalendar] = useState<WritableCalendar | null>(null);
+  const {
+    data: writableCalendars = [],
+    isLoading: _isLoadingWritable,
+    refetch: refetchWritable,
+  } = useWritableCalendars();
+  const { data: visitsWithoutEvents = [], isLoading: isLoadingVisits } = useVisitsWithoutCalendarEvents();
+  const createEventsMutation = useCreateCalendarEventsForVisits();
+
+  // Delete exported events state
+  const { data: exportedEvents = [], isLoading: isLoadingExported } = useExportedCalendarEvents();
+  const deleteEventsMutation = useDeleteExportedCalendarEvents();
+
+  const visitCount = visitsWithoutEvents.length;
+  const eventCount = exportedEvents.length;
+  const selectedCount = selectedCalendarIds === null ? syncableCalendars.length : selectedCalendarIds.length;
+  const isAllSelected = selectedCalendarIds === null;
 
   // Check permission on mount
   React.useEffect(() => {
@@ -205,33 +205,32 @@ function CalendarSyncCard() {
     const granted = await requestCalendarPermission();
     setHasPermission(granted);
     if (granted) {
-      refetch();
+      refetchSyncable();
+      refetchWritable();
       showToast({ type: "success", message: "Calendar access granted" });
     } else {
       showToast({ type: "error", message: "Calendar access denied" });
     }
-  }, [refetch, showToast]);
+  }, [refetchSyncable, refetchWritable, showToast]);
 
+  // Calendar sync handlers
   const handleToggleCalendar = useCallback(
     (calendarId: string) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       if (selectedCalendarIds === null) {
-        // Currently syncing all - switch to only this calendar
-        setSelectedCalendarIds(calendars.map((c) => c.id).filter((id) => id !== calendarId));
+        setSelectedCalendarIds(syncableCalendars.map((c) => c.id).filter((id) => id !== calendarId));
       } else {
         const isCurrentlySelected = selectedCalendarIds.includes(calendarId);
         if (isCurrentlySelected) {
-          // Remove from selection
           const newIds = selectedCalendarIds.filter((id) => id !== calendarId);
           setSelectedCalendarIds(newIds.length === 0 ? null : newIds);
         } else {
-          // Add to selection
           setSelectedCalendarIds([...selectedCalendarIds, calendarId]);
         }
       }
     },
-    [selectedCalendarIds, setSelectedCalendarIds, calendars],
+    [selectedCalendarIds, setSelectedCalendarIds, syncableCalendars],
   );
 
   const handleSelectAll = useCallback(() => {
@@ -243,198 +242,38 @@ function CalendarSyncCard() {
   const isCalendarSelected = useCallback(
     (calendarId: string) => {
       if (selectedCalendarIds === null) {
-        return true; // All calendars selected
+        return true;
       }
       return selectedCalendarIds.includes(calendarId);
     },
     [selectedCalendarIds],
   );
 
-  const selectedCount = selectedCalendarIds === null ? calendars.length : selectedCalendarIds.length;
-  const isAllSelected = selectedCalendarIds === null;
-
-  if (hasPermission === false) {
-    return (
-      <Card animated={false}>
-        <View className={"p-4 gap-4"}>
-          <View className={"flex-row items-center gap-3"}>
-            <CardIcon name={"calendar"} color={"#3b82f6"} bgColor={"bg-blue-500/15"} />
-            <View className={"flex-1"}>
-              <ThemedText variant={"subhead"} className={"font-medium"}>
-                Calendar Sources
-              </ThemedText>
-              <ThemedText variant={"footnote"} color={"secondary"}>
-                Grant access to choose which calendars to sync
-              </ThemedText>
-            </View>
-          </View>
-          <Button variant={"secondary"} onPress={handleRequestPermission}>
-            <IconSymbol name={"calendar"} size={16} color={"#3b82f6"} />
-            <ButtonText variant={"secondary"} className={"ml-2"}>
-              Grant Calendar Access
-            </ButtonText>
-          </Button>
-        </View>
-      </Card>
-    );
-  }
-
-  return (
-    <Card animated={false}>
-      <Pressable onPress={() => setIsExpanded(!isExpanded)}>
-        <View className={"p-4"}>
-          <View className={"flex-row items-center gap-3"}>
-            <CardIcon name={"calendar"} color={"#3b82f6"} bgColor={"bg-blue-500/15"} />
-            <View className={"flex-1"}>
-              <ThemedText variant={"subhead"} className={"font-medium"}>
-                Calendar Sources
-              </ThemedText>
-              <ThemedText variant={"footnote"} color={"secondary"}>
-                {isLoading
-                  ? "Loading..."
-                  : isAllSelected
-                    ? `Syncing from all ${calendars.length} calendar${calendars.length === 1 ? "" : "s"}`
-                    : `Syncing from ${selectedCount} of ${calendars.length} calendar${calendars.length === 1 ? "" : "s"}`}
-              </ThemedText>
-            </View>
-            <IconSymbol name={isExpanded ? "chevron.up" : "chevron.down"} size={16} color={"#9ca3af"} />
-          </View>
-        </View>
-      </Pressable>
-
-      {isExpanded && (
-        <View className={"px-4 pb-4 gap-3"}>
-          {/* Select All / Deselect All */}
-          {calendars.length > 1 && (
-            <Pressable
-              onPress={handleSelectAll}
-              className={"flex-row items-center justify-between py-2 px-3 bg-background/50 rounded-xl"}
-            >
-              <View className={"flex-row items-center gap-3"}>
-                <IconSymbol
-                  name={isAllSelected ? "checkmark.circle.fill" : "circle"}
-                  size={22}
-                  color={isAllSelected ? "#3b82f6" : "#6b7280"}
-                />
-                <ThemedText variant={"subhead"} className={"font-medium"}>
-                  All Calendars
-                </ThemedText>
-              </View>
-              {isAllSelected && (
-                <View className={"bg-blue-500/15 px-2 py-1 rounded-full"}>
-                  <ThemedText variant={"caption2"} className={"text-blue-500 font-medium"}>
-                    Active
-                  </ThemedText>
-                </View>
-              )}
-            </Pressable>
-          )}
-
-          {/* Calendar List */}
-          {calendars.map((calendar) => {
-            const isSelected = isCalendarSelected(calendar.id);
-            return (
-              <Pressable
-                key={calendar.id}
-                onPress={() => handleToggleCalendar(calendar.id)}
-                className={"flex-row items-center gap-3 py-2 px-3 bg-background/50 rounded-xl"}
-              >
-                <View className={"w-4 h-4 rounded-full"} style={{ backgroundColor: calendar.color }} />
-                <View className={"flex-1"}>
-                  <ThemedText variant={"subhead"} className={"font-medium"} numberOfLines={1}>
-                    {calendar.title}
-                  </ThemedText>
-                  <ThemedText variant={"caption2"} color={"tertiary"}>
-                    {calendar.source}
-                  </ThemedText>
-                </View>
-                <IconSymbol
-                  name={isSelected ? "checkmark.circle.fill" : "circle"}
-                  size={22}
-                  color={isSelected ? "#3b82f6" : "#6b7280"}
-                />
-              </Pressable>
-            );
-          })}
-
-          {calendars.length === 0 && !isLoading && (
-            <View className={"items-center py-4"}>
-              <ThemedText variant={"footnote"} color={"tertiary"}>
-                No calendars found
-              </ThemedText>
-            </View>
-          )}
-
-          {/* Info Text */}
-          <View className={"flex-row items-center gap-2 pt-2"}>
-            <IconSymbol name={"info.circle"} size={14} color={"#9ca3af"} />
-            <ThemedText variant={"caption1"} color={"tertiary"}>
-              Selected calendars are used to match events with visits
-            </ThemedText>
-          </View>
-        </View>
-      )}
-    </Card>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Calendar Export Card - Create calendar events for confirmed visits
-// ─────────────────────────────────────────────────────────────────────────────
-
-function CalendarExportCard() {
-  const { showToast } = useToast();
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [selectedCalendar, setSelectedCalendar] = useState<WritableCalendar | null>(null);
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
-
-  const { data: calendars = [], isLoading: isLoadingCalendars, refetch: refetchCalendars } = useWritableCalendars();
-  const { data: visitsWithoutEvents = [], isLoading: isLoadingVisits } = useVisitsWithoutCalendarEvents();
-  const createEventsMutation = useCreateCalendarEventsForVisits();
-
-  const visitCount = visitsWithoutEvents.length;
-  const isLoading = isLoadingCalendars || isLoadingVisits;
-
-  // Check permission on mount
-  React.useEffect(() => {
-    hasCalendarPermission().then(setHasPermission).catch(console.error);
-  }, []);
-
-  const handleRequestPermission = useCallback(async () => {
-    const granted = await requestCalendarPermission();
-    setHasPermission(granted);
-    if (granted) {
-      refetchCalendars();
-      showToast({ type: "success", message: "Calendar access granted" });
-    } else {
-      showToast({ type: "error", message: "Calendar access denied" });
-    }
-  }, [refetchCalendars, showToast]);
-
-  const handleOpenModal = useCallback(() => {
+  // Export handlers
+  const handleOpenExportModal = useCallback(() => {
     if (hasPermission === false) {
       handleRequestPermission();
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setIsModalVisible(true);
+    setIsExportModalVisible(true);
   }, [hasPermission, handleRequestPermission]);
 
-  const handleSelectCalendar = useCallback((calendar: WritableCalendar) => {
+  const handleSelectExportCalendar = useCallback((calendar: WritableCalendar) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedCalendar(calendar);
+    setSelectedExportCalendar(calendar);
   }, []);
 
   const handleCreateEvents = useCallback(async () => {
-    if (!selectedCalendar || visitCount === 0) {
+    if (!selectedExportCalendar || visitCount === 0) {
       return;
     }
 
-    setIsModalVisible(false);
+    setIsExportModalVisible(false);
 
     Alert.alert(
       "Create Calendar Events",
-      `This will create ${visitCount.toLocaleString()} calendar event${visitCount === 1 ? "" : "s"} in "${selectedCalendar.title}" for your confirmed restaurant visits.`,
+      `This will create ${visitCount.toLocaleString()} calendar event${visitCount === 1 ? "" : "s"} in "${selectedExportCalendar.title}" for your confirmed restaurant visits.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -445,7 +284,7 @@ function CalendarExportCard() {
             try {
               const result = await createEventsMutation.mutateAsync({
                 visits: visitsWithoutEvents,
-                calendarId: selectedCalendar.id,
+                calendarId: selectedExportCalendar.id,
               });
 
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -469,65 +308,290 @@ function CalendarExportCard() {
         },
       ],
     );
-  }, [selectedCalendar, visitCount, visitsWithoutEvents, createEventsMutation, showToast]);
+  }, [selectedExportCalendar, visitCount, visitsWithoutEvents, createEventsMutation, showToast]);
 
-  // Don't show if no visits without events
-  if (!isLoading && visitCount === 0) {
-    return null;
+  // Delete exported events handler
+  const handleDeleteAllEvents = useCallback(() => {
+    if (eventCount === 0) {
+      return;
+    }
+
+    Alert.alert(
+      "Delete Exported Calendar Events",
+      `This will delete ${eventCount.toLocaleString()} calendar event${eventCount === 1 ? "" : "s"} that were created by this app. This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete All",
+          style: "destructive",
+          onPress: async () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            try {
+              const result = await deleteEventsMutation.mutateAsync(exportedEvents);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              if (result.failed > 0) {
+                showToast({
+                  type: "success",
+                  message: `Deleted ${result.deleted.toLocaleString()} events (${result.failed} failed)`,
+                });
+              } else {
+                showToast({
+                  type: "success",
+                  message: `Deleted ${result.deleted.toLocaleString()} calendar event${result.deleted === 1 ? "" : "s"}`,
+                });
+              }
+            } catch (error) {
+              console.error("Error deleting calendar events:", error);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              showToast({ type: "error", message: "Failed to delete calendar events" });
+            }
+          },
+        },
+      ],
+    );
+  }, [eventCount, exportedEvents, deleteEventsMutation, showToast]);
+
+  // If no permission, show the permission request card
+  if (hasPermission === false) {
+    return (
+      <Card animated={false}>
+        <View className={"p-4 gap-4"}>
+          <View className={"flex-row items-center gap-3"}>
+            <CardIcon name={"calendar"} color={"#3b82f6"} bgColor={"bg-blue-500/15"} />
+            <View className={"flex-1"}>
+              <ThemedText variant={"subhead"} className={"font-medium"}>
+                Calendar Integration
+              </ThemedText>
+              <ThemedText variant={"footnote"} color={"secondary"}>
+                Grant access to sync and export calendar events
+              </ThemedText>
+            </View>
+          </View>
+          <Button variant={"secondary"} onPress={handleRequestPermission}>
+            <IconSymbol name={"calendar"} size={16} color={"#3b82f6"} />
+            <ButtonText variant={"secondary"} className={"ml-2"}>
+              Grant Calendar Access
+            </ButtonText>
+          </Button>
+        </View>
+      </Card>
+    );
   }
 
   return (
     <>
       <Card animated={false}>
-        <View className={"p-4 gap-4"}>
-          <View className={"flex-row items-center gap-3"}>
-            <CardIcon name={"calendar.badge.plus"} color={"#8b5cf6"} bgColor={"bg-violet-500/15"} />
+        {/* Header - Collapsible Toggle */}
+        <Pressable onPress={() => setIsExpanded(!isExpanded)}>
+          <View className={"p-4 flex-row items-center gap-3"}>
+            <CardIcon name={"calendar"} color={"#3b82f6"} bgColor={"bg-blue-500/15"} />
             <View className={"flex-1"}>
               <ThemedText variant={"subhead"} className={"font-medium"}>
-                Export to Calendar
+                Calendar Integration
               </ThemedText>
               <ThemedText variant={"footnote"} color={"secondary"}>
-                {isLoading
-                  ? "Loading..."
-                  : `${visitCount.toLocaleString()} confirmed visit${visitCount === 1 ? "" : "s"} without calendar events`}
+                Import reservations and export visits
+              </ThemedText>
+            </View>
+            <IconSymbol name={isExpanded ? "chevron.up" : "chevron.down"} size={16} color={"#9ca3af"} />
+          </View>
+        </Pressable>
+
+        {isExpanded && (
+          <View className={"px-4 pb-4 gap-4"}>
+            {/* Calendar Sources - Expandable */}
+            <View className={"bg-background/30 rounded-xl overflow-hidden"}>
+              <Pressable
+                onPress={() => setIsSourcesExpanded(!isSourcesExpanded)}
+                className={"p-3 flex-row items-center justify-between"}
+              >
+                <View className={"flex-row items-center gap-3"}>
+                  <IconSymbol name={"list.bullet"} size={18} color={"#3b82f6"} />
+                  <View>
+                    <ThemedText variant={"subhead"} className={"font-medium"}>
+                      Calendar Sources
+                    </ThemedText>
+                    <ThemedText variant={"caption1"} color={"tertiary"}>
+                      {isLoadingSyncable
+                        ? "Loading..."
+                        : isAllSelected
+                          ? `All ${syncableCalendars.length} calendar${syncableCalendars.length === 1 ? "" : "s"}`
+                          : `${selectedCount} of ${syncableCalendars.length} selected`}
+                    </ThemedText>
+                  </View>
+                </View>
+                <IconSymbol name={isSourcesExpanded ? "chevron.up" : "chevron.down"} size={16} color={"#9ca3af"} />
+              </Pressable>
+
+              {isSourcesExpanded && (
+                <View className={"px-3 pb-3 gap-2"}>
+                  {/* Select All */}
+                  {syncableCalendars.length > 1 && (
+                    <Pressable
+                      onPress={handleSelectAll}
+                      className={"flex-row items-center justify-between py-2 px-3 bg-background/50 rounded-xl"}
+                    >
+                      <View className={"flex-row items-center gap-3"}>
+                        <IconSymbol
+                          name={isAllSelected ? "checkmark.circle.fill" : "circle"}
+                          size={22}
+                          color={isAllSelected ? "#3b82f6" : "#6b7280"}
+                        />
+                        <ThemedText variant={"subhead"} className={"font-medium"}>
+                          All Calendars
+                        </ThemedText>
+                      </View>
+                      {isAllSelected && (
+                        <View className={"bg-blue-500/15 px-2 py-1 rounded-full"}>
+                          <ThemedText variant={"caption2"} className={"text-blue-500 font-medium"}>
+                            Active
+                          </ThemedText>
+                        </View>
+                      )}
+                    </Pressable>
+                  )}
+
+                  {/* Calendar List */}
+                  {syncableCalendars.map((calendar) => {
+                    const isSelected = isCalendarSelected(calendar.id);
+                    return (
+                      <Pressable
+                        key={calendar.id}
+                        onPress={() => handleToggleCalendar(calendar.id)}
+                        className={"flex-row items-center gap-3 py-2 px-3 bg-background/50 rounded-xl"}
+                      >
+                        <View className={"w-4 h-4 rounded-full"} style={{ backgroundColor: calendar.color }} />
+                        <View className={"flex-1"}>
+                          <ThemedText variant={"subhead"} className={"font-medium"} numberOfLines={1}>
+                            {calendar.title}
+                          </ThemedText>
+                          <ThemedText variant={"caption2"} color={"tertiary"}>
+                            {calendar.source}
+                          </ThemedText>
+                        </View>
+                        <IconSymbol
+                          name={isSelected ? "checkmark.circle.fill" : "circle"}
+                          size={22}
+                          color={isSelected ? "#3b82f6" : "#6b7280"}
+                        />
+                      </Pressable>
+                    );
+                  })}
+
+                  {syncableCalendars.length === 0 && !isLoadingSyncable && (
+                    <View className={"items-center py-4"}>
+                      <ThemedText variant={"footnote"} color={"tertiary"}>
+                        No calendars found
+                      </ThemedText>
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
+
+            {/* Import from Calendar */}
+            <Pressable
+              onPress={() => router.push("/calendar-import")}
+              className={"bg-background/30 rounded-xl p-3 flex-row items-center justify-between"}
+            >
+              <View className={"flex-row items-center gap-3"}>
+                <IconSymbol name={"calendar.badge.checkmark"} size={18} color={"#22c55e"} />
+                <View>
+                  <ThemedText variant={"subhead"} className={"font-medium"}>
+                    Import Reservations
+                  </ThemedText>
+                  <ThemedText variant={"caption1"} color={"tertiary"}>
+                    Match calendar events with visits
+                  </ThemedText>
+                </View>
+              </View>
+              <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
+            </Pressable>
+
+            {/* Export to Calendar */}
+            {(isLoadingVisits || visitCount > 0) && (
+              <View className={"bg-background/30 rounded-xl p-3 gap-3"}>
+                <View className={"flex-row items-center gap-3"}>
+                  <IconSymbol name={"calendar.badge.plus"} size={18} color={"#8b5cf6"} />
+                  <View className={"flex-1"}>
+                    <ThemedText variant={"subhead"} className={"font-medium"}>
+                      Export to Calendar
+                    </ThemedText>
+                    <ThemedText variant={"caption1"} color={"tertiary"}>
+                      {isLoadingVisits
+                        ? "Loading..."
+                        : `${visitCount.toLocaleString()} visit${visitCount === 1 ? "" : "s"} without events`}
+                    </ThemedText>
+                  </View>
+                </View>
+                <Button
+                  variant={"secondary"}
+                  size={"sm"}
+                  onPress={handleOpenExportModal}
+                  disabled={isLoadingVisits || visitCount === 0}
+                  loading={createEventsMutation.isPending}
+                >
+                  <IconSymbol name={"calendar.badge.plus"} size={14} color={"#8b5cf6"} />
+                  <ButtonText variant={"secondary"} className={"ml-2"}>
+                    Choose Calendar
+                  </ButtonText>
+                </Button>
+              </View>
+            )}
+
+            {/* Delete Exported Events */}
+            {(isLoadingExported || eventCount > 0) && (
+              <View className={"bg-background/30 rounded-xl p-3 gap-3"}>
+                <View className={"flex-row items-center gap-3"}>
+                  <IconSymbol name={"calendar.badge.minus"} size={18} color={"#ef4444"} />
+                  <View className={"flex-1"}>
+                    <ThemedText variant={"subhead"} className={"font-medium"}>
+                      Exported Events
+                    </ThemedText>
+                    <ThemedText variant={"caption1"} color={"tertiary"}>
+                      {isLoadingExported
+                        ? "Loading..."
+                        : `${eventCount.toLocaleString()} event${eventCount === 1 ? "" : "s"} created by this app`}
+                    </ThemedText>
+                  </View>
+                </View>
+                <Button
+                  variant={"destructive"}
+                  size={"sm"}
+                  onPress={handleDeleteAllEvents}
+                  disabled={isLoadingExported || eventCount === 0}
+                  loading={deleteEventsMutation.isPending}
+                >
+                  <IconSymbol name={"trash"} size={14} color={"#fff"} />
+                  <ButtonText variant={"destructive"} className={"ml-2"}>
+                    Delete All
+                  </ButtonText>
+                </Button>
+              </View>
+            )}
+
+            {/* Info */}
+            <View className={"flex-row items-center gap-2"}>
+              <IconSymbol name={"info.circle"} size={14} color={"#9ca3af"} />
+              <ThemedText variant={"caption1"} color={"tertiary"}>
+                Calendar events help match reservations with photo visits
               </ThemedText>
             </View>
           </View>
-
-          {hasPermission === false ? (
-            <Button variant={"secondary"} onPress={handleRequestPermission}>
-              <IconSymbol name={"calendar"} size={16} color={"#8b5cf6"} />
-              <ButtonText variant={"secondary"} className={"ml-2"}>
-                Grant Calendar Access
-              </ButtonText>
-            </Button>
-          ) : (
-            <Button
-              variant={"secondary"}
-              onPress={handleOpenModal}
-              disabled={isLoading || visitCount === 0}
-              loading={createEventsMutation.isPending}
-            >
-              <IconSymbol name={"calendar.badge.plus"} size={16} color={"#8b5cf6"} />
-              <ButtonText variant={"secondary"} className={"ml-2"}>
-                Choose Calendar
-              </ButtonText>
-            </Button>
-          )}
-        </View>
+        )}
       </Card>
 
-      {/* Calendar Selection Modal */}
+      {/* Calendar Export Selection Modal */}
       <Modal
-        visible={isModalVisible}
+        visible={isExportModalVisible}
         animationType={"slide"}
         presentationStyle={"pageSheet"}
-        onRequestClose={() => setIsModalVisible(false)}
+        onRequestClose={() => setIsExportModalVisible(false)}
       >
         <View className={"flex-1 bg-background"}>
           {/* Modal Header */}
           <View className={"flex-row items-center justify-between px-4 py-4 border-b border-white/10"}>
-            <Pressable onPress={() => setIsModalVisible(false)} hitSlop={8}>
+            <Pressable onPress={() => setIsExportModalVisible(false)} hitSlop={8}>
               <ThemedText variant={"body"} className={"text-blue-500"}>
                 Cancel
               </ThemedText>
@@ -535,10 +599,10 @@ function CalendarExportCard() {
             <ThemedText variant={"subhead"} className={"font-semibold"}>
               Select Calendar
             </ThemedText>
-            <Pressable onPress={handleCreateEvents} disabled={!selectedCalendar} hitSlop={8}>
+            <Pressable onPress={handleCreateEvents} disabled={!selectedExportCalendar} hitSlop={8}>
               <ThemedText
                 variant={"body"}
-                className={selectedCalendar ? "text-blue-500 font-semibold" : "text-gray-500"}
+                className={selectedExportCalendar ? "text-blue-500 font-semibold" : "text-gray-500"}
               >
                 Done
               </ThemedText>
@@ -554,14 +618,14 @@ function CalendarExportCard() {
 
           {/* Calendar List */}
           <FlatList<WritableCalendar>
-            data={calendars}
+            data={writableCalendars}
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ padding: 16 }}
             ItemSeparatorComponent={() => <View className={"h-2"} />}
             renderItem={({ item: calendar }) => {
-              const isSelected = selectedCalendar?.id === calendar.id;
+              const isSelected = selectedExportCalendar?.id === calendar.id;
               return (
-                <Pressable onPress={() => handleSelectCalendar(calendar)}>
+                <Pressable onPress={() => handleSelectExportCalendar(calendar)}>
                   <View
                     className={`p-4 rounded-xl border ${
                       isSelected ? "border-violet-500 bg-violet-500/10" : "border-white/10 bg-white/5"
@@ -603,98 +667,29 @@ function CalendarExportCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Delete Exported Calendar Events Card
+// All Visits Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DeleteExportedCalendarEventsCard() {
-  const { showToast } = useToast();
-  const { data: exportedEvents = [], isLoading } = useExportedCalendarEvents();
-  const deleteEventsMutation = useDeleteExportedCalendarEvents();
-
-  const eventCount = exportedEvents.length;
-
-  const handleDeleteAllEvents = useCallback(() => {
-    if (eventCount === 0) {
-      return;
-    }
-
-    Alert.alert(
-      "Delete Exported Calendar Events",
-      `This will delete ${eventCount.toLocaleString()} calendar event${eventCount === 1 ? "" : "s"} that were created by this app. This cannot be undone.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete All",
-          style: "destructive",
-          onPress: async () => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            try {
-              const result = await deleteEventsMutation.mutateAsync(exportedEvents);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              if (result.failed > 0) {
-                showToast({
-                  type: "success",
-                  message: `Deleted ${result.deleted.toLocaleString()} events (${result.failed} failed)`,
-                });
-              } else {
-                showToast({
-                  type: "success",
-                  message: `Deleted ${result.deleted.toLocaleString()} calendar event${result.deleted === 1 ? "" : "s"}`,
-                });
-              }
-            } catch (error) {
-              console.error("Error deleting calendar events:", error);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              showToast({ type: "error", message: "Failed to delete calendar events" });
-            }
-          },
-        },
-      ],
-    );
-  }, [eventCount, exportedEvents, deleteEventsMutation, showToast]);
-
-  // Don't show if no exported events
-  if (!isLoading && eventCount === 0) {
-    return null;
-  }
-
+function AllVisitsCard() {
   return (
-    <Card animated={false}>
-      <View className={"p-4 gap-4"}>
-        <View className={"flex-row items-center gap-3"}>
-          <CardIcon name={"calendar.badge.minus"} color={"#ef4444"} bgColor={"bg-red-500/15"} />
-          <View className={"flex-1"}>
-            <ThemedText variant={"subhead"} className={"font-medium"}>
-              Exported Calendar Events
-            </ThemedText>
-            <ThemedText variant={"footnote"} color={"secondary"}>
-              {isLoading
-                ? "Loading..."
-                : `${eventCount.toLocaleString()} event${eventCount === 1 ? "" : "s"} created by this app`}
-            </ThemedText>
+    <Pressable onPress={() => router.push("/visits")}>
+      <Card animated={false}>
+        <View className={"p-4 flex-row items-center justify-between"}>
+          <View className={"flex-row items-center gap-3 flex-1"}>
+            <CardIcon name={"photo.stack"} color={"#8b5cf6"} bgColor={"bg-violet-500/15"} />
+            <View className={"flex-1"}>
+              <ThemedText variant={"subhead"} className={"font-medium"}>
+                All Visits
+              </ThemedText>
+              <ThemedText variant={"footnote"} color={"secondary"}>
+                Browse and filter all your restaurant visits
+              </ThemedText>
+            </View>
           </View>
+          <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
         </View>
-
-        <Button
-          variant={"destructive"}
-          onPress={handleDeleteAllEvents}
-          disabled={isLoading || eventCount === 0}
-          loading={deleteEventsMutation.isPending}
-        >
-          <IconSymbol name={"trash"} size={16} color={"#fff"} />
-          <ButtonText variant={"destructive"} className={"ml-2"}>
-            Delete All Exported Events
-          </ButtonText>
-        </Button>
-
-        <View className={"flex-row items-center gap-2"}>
-          <IconSymbol name={"info.circle"} size={14} color={"#9ca3af"} />
-          <ThemedText variant={"caption1"} color={"tertiary"}>
-            Events are identified by metadata added during export
-          </ThemedText>
-        </View>
-      </View>
-    </Card>
+      </Card>
+    </Pressable>
   );
 }
 
@@ -1333,10 +1328,11 @@ export default function SettingsScreen() {
         </Animated.View>
       )}
 
-      {/* Wrapped Card */}
-      <View className={"mb-6"}>
-        <WrappedCard />
-      </View>
+      {/* Browse Section */}
+      <Animated.View entering={FadeInDown.delay(150).duration(300)} className={"mb-6"}>
+        <SectionHeader>Browse</SectionHeader>
+        <AllVisitsCard />
+      </Animated.View>
 
       {/* Export Section */}
       {stats && stats.confirmedVisits > 0 && (
@@ -1346,15 +1342,10 @@ export default function SettingsScreen() {
         </Animated.View>
       )}
 
-      {/* Calendar & Quick Actions Section */}
+      {/* Calendar Section */}
       <Animated.View entering={FadeInDown.delay(350).duration(300)} className={"mb-6"}>
         <SectionHeader>Calendar</SectionHeader>
-        <View className={"gap-3"}>
-          <CalendarSyncCard />
-          <CalendarImportsCard />
-          <CalendarExportCard />
-          <DeleteExportedCalendarEventsCard />
-        </View>
+        <CalendarSection />
       </Animated.View>
 
       {/* Quick Actions Section */}

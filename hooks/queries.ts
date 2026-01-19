@@ -39,8 +39,10 @@ import {
   recomputeSuggestedRestaurants,
   getPhotosByAssetIds,
   movePhotosToVisit,
+  removePhotosFromVisit,
   type VisitWithDetails,
   type MovePhotosResult,
+  type RemovePhotosResult,
   type PhotoRecord,
   type RestaurantRecord,
   type MichelinRestaurantRecord,
@@ -1656,6 +1658,32 @@ export function useAddPhotosToVisit(visitId: string | undefined) {
         queryClient.invalidateQueries({ queryKey: ["visitDetail", visitId] });
       }
       // Also invalidate any affected source visits and general queries
+      invalidateVisitQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+    },
+  });
+}
+
+/**
+ * Remove photos from a visit.
+ * This disassociates the photos from the visit without deleting them from the device.
+ */
+export function useRemovePhotosFromVisit(visitId: string | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (photoIds: string[]): Promise<RemovePhotosResult> => {
+      if (!visitId) {
+        throw new Error("Visit ID is required");
+      }
+      return removePhotosFromVisit(photoIds, visitId);
+    },
+    onSuccess: (_result, _vars) => {
+      // Invalidate visit detail query for this visit
+      if (visitId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId) });
+      }
+      // Also invalidate general queries
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
     },

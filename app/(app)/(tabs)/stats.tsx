@@ -1059,25 +1059,25 @@ function EmptyState() {
           No Dining Data Yet
         </ThemedText>
         <ThemedText variant={"body"} className={"text-white/60 text-center"}>
-          Start confirming restaurant visits to see your personalized dining wrapped!
+          Start confirming restaurant visits to see your personalized dining stats!
         </ThemedText>
       </View>
       <Pressable
         onPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          router.back();
+          router.push("/");
         }}
         className={"bg-white/20 rounded-full px-6 py-3 mt-4"}
       >
         <ThemedText variant={"body"} className={"text-white font-semibold"}>
-          Go Back
+          Go to Restaurants
         </ThemedText>
       </Pressable>
     </View>
   );
 }
 
-export default function WrappedScreen() {
+export default function StatsScreen() {
   const insets = useSafeAreaInsets();
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
 
@@ -1112,17 +1112,22 @@ export default function WrappedScreen() {
     : "A look back at your culinary adventures";
 
   return (
-    <View style={{ flex: 1 }}>
+    <ScrollView
+      className={"flex-1 bg-background"}
+      contentContainerStyle={{
+        paddingTop: 16,
+        paddingBottom: insets.bottom,
+        paddingHorizontal: 16,
+      }}
+    >
       <LinearGradient
         colors={["#0f0f23", "#1a1a2e", "#16213e", "#0f3460"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
       />
-
       {/* Confetti celebration */}
       <Confetti enabled={showConfetti} />
-
       {/* Decorative background elements */}
       <View className={"absolute top-0 right-0 w-64 h-64 opacity-5"}>
         <View className={"absolute top-20 right-8 w-40 h-40 rounded-full bg-amber-400"} />
@@ -1131,70 +1136,49 @@ export default function WrappedScreen() {
       <View className={"absolute bottom-0 left-0 w-48 h-48 opacity-5"}>
         <View className={"absolute bottom-20 left-8 w-32 h-32 rounded-full bg-purple-500"} />
       </View>
-
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{
-          paddingTop: 16,
-          paddingBottom: insets.bottom + 32,
-          paddingHorizontal: 20,
-          flexGrow: 1,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
-        <Animated.View entering={FadeInDown.duration(500)} className={"gap-2 mb-4"}>
-          <ThemedText variant={"caption1"} className={"text-amber-400 uppercase tracking-widest font-bold"}>
-            ✨ Your Dining Years
-          </ThemedText>
-          <ThemedText variant={"largeTitle"} className={"text-white font-bold"}>
-            Wrapped
-          </ThemedText>
-          <ThemedText variant={"body"} className={"text-white/60"}>
-            {headerSubtitle}
-          </ThemedText>
-        </Animated.View>
-
-        {/* Year Tabs */}
-        {availableYears.length > 0 && (
-          <Animated.View entering={FadeIn.delay(200).duration(400)} className={"mb-6"}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingVertical: 8 }}
-            >
+      {/* Header */}
+      <Animated.View entering={FadeInDown.duration(500)} className={"gap-2 mb-4"}>
+        <ThemedText variant={"largeTitle"} className={"text-white font-bold"}>
+          Stats
+        </ThemedText>
+        <ThemedText variant={"body"} className={"text-white/60"}>
+          {headerSubtitle}
+        </ThemedText>
+      </Animated.View>
+      {/* Year Tabs */}
+      {availableYears.length > 0 && (
+        <Animated.View entering={FadeIn.delay(200).duration(400)} className={"mb-6"}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 8 }}>
+            <YearTab
+              label={"All Time"}
+              isActive={selectedYear === null}
+              onPress={() => setSelectedYear(null)}
+              delay={100}
+            />
+            {availableYears.map((year, index) => (
               <YearTab
-                label={"All Time"}
-                isActive={selectedYear === null}
-                onPress={() => setSelectedYear(null)}
-                delay={100}
+                key={year}
+                label={String(year)}
+                isActive={selectedYear === year}
+                onPress={() => setSelectedYear(year)}
+                delay={150 + index * 50}
               />
-              {availableYears.map((year, index) => (
-                <YearTab
-                  key={year}
-                  label={String(year)}
-                  isActive={selectedYear === year}
-                  onPress={() => setSelectedYear(year)}
-                  delay={150 + index * 50}
-                />
-              ))}
-            </ScrollView>
-          </Animated.View>
-        )}
-
-        {/* Content */}
-        {isLoading ? (
-          <View className={"flex-1 items-center justify-center"}>
-            <ThemedText variant={"body"} className={"text-white/60"}>
-              Loading your stats...
-            </ThemedText>
-          </View>
-        ) : hasData ? (
-          <WrappedContent stats={stats} selectedYear={selectedYear} />
-        ) : (
-          <EmptyState />
-        )}
-      </ScrollView>
-    </View>
+            ))}
+          </ScrollView>
+        </Animated.View>
+      )}
+      {/* Content */}
+      {isLoading ? (
+        <View className={"flex-1 items-center justify-center"}>
+          <ThemedText variant={"body"} className={"text-white/60"}>
+            Loading your stats...
+          </ThemedText>
+        </View>
+      ) : hasData ? (
+        <WrappedContent stats={stats} selectedYear={selectedYear} />
+      ) : (
+        <EmptyState />
+      )}
+    </ScrollView>
   );
 }

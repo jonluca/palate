@@ -30,6 +30,7 @@ import {
   useReverseGeocode,
   useUnifiedNearbyRestaurants,
   useAddPhotosToVisit,
+  useRemovePhotosFromVisit,
   type VisitStatus,
   type VisitFoodScanProgress,
   type NearbyRestaurant,
@@ -87,6 +88,7 @@ export default function VisitDetailScreen() {
   const [selectedRestaurantIndex, setSelectedRestaurantIndex] = useState(0);
   const [foodScanProgress, setFoodScanProgress] = useState<VisitFoodScanProgress | null>(null);
   const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
+  const [isSharingPhotos, setIsSharingPhotos] = useState(false);
   const { showToast } = useToast();
   const hasSeenAddPhotosAlert = useHasSeenAddPhotosAlert();
   const setHasSeenAddPhotosAlert = useSetHasSeenAddPhotosAlert();
@@ -107,6 +109,7 @@ export default function VisitDetailScreen() {
   const ignoreLocation = useIgnoreLocation();
   const scanForFood = useScanVisitForFood(id, setFoodScanProgress);
   const addPhotosToVisit = useAddPhotosToVisit(id);
+  const removePhotosFromVisit = useRemovePhotosFromVisit(id);
 
   // Get mergeable visits when modal is open
   const { data: mergeableVisits = [], isLoading: isMergeableLoading } = useMergeableVisits(
@@ -395,6 +398,45 @@ export default function VisitDetailScreen() {
     }
   }, [hasSeenAddPhotosAlert, setHasSeenAddPhotosAlert, selectAndAddPhotos]);
 
+  const handleRemovePhotos = useCallback(
+    async (photoIds: string[]) => {
+      if (photoIds.length === 0) {
+        return;
+      }
+
+      // Show confirmation alert
+      Alert.alert(
+        "Remove Photos",
+        `Remove ${photoIds.length} photo${photoIds.length === 1 ? "" : "s"} from this visit? The photos will remain in your library but won't be associated with this visit.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                const result = await removePhotosFromVisit.mutateAsync(photoIds);
+                if (result.removedCount > 0) {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  showToast({
+                    type: "success",
+                    message: `Removed ${result.removedCount} photo${result.removedCount === 1 ? "" : "s"} from this visit`,
+                  });
+                }
+              } catch (error) {
+                console.error("Error removing photos:", error);
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                showToast({ type: "error", message: "Failed to remove photos. Please try again." });
+              }
+            },
+          },
+        ],
+      );
+    },
+    [removePhotosFromVisit, showToast],
+  );
+
   if (isLoading) {
     return (
       <View className={"flex-1 bg-background items-center justify-center"}>
@@ -495,6 +537,9 @@ export default function VisitDetailScreen() {
           onPhotoPress={(index) => setGalleryIndex(index)}
           onAddPhotos={handleAddPhotos}
           isAddingPhotos={addPhotosToVisit.isPending}
+          onRemovePhotos={handleRemovePhotos}
+          isRemovingPhotos={removePhotosFromVisit.isPending}
+          isSharingPhotos={isSharingPhotos}
         />
 
         {showFoodScanCard && (

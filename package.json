@@ -52,6 +52,7 @@
     "expo-media-library": "^18.2.1",
     "expo-modules-core": "^3.0.29",
     "expo-router": "^6.0.21",
+    "expo-sharing": "~14.0.8",
     "expo-splash-screen": "31.0.13",
     "expo-sqlite": "^16.0.10",
     "expo-status-bar": "^3.0.9",

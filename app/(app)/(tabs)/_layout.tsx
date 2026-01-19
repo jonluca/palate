@@ -38,11 +38,11 @@ export default function TabLayout() {
         })}
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name={"visits"}>
-        <Label>All Visits</Label>
+      <NativeTabs.Trigger name={"stats"}>
+        <Label>Stats</Label>
         {Platform.select({
-          ios: <Icon sf={"photo.stack"} />,
-          android: <Icon src={<VectorIcon family={MaterialIcons} name={"photo-library"} />} />,
+          ios: <Icon sf={"chart.bar.fill"} />,
+          android: <Icon src={<VectorIcon family={MaterialIcons} name={"bar-chart"} />} />,
         })}
       </NativeTabs.Trigger>
 

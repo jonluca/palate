@@ -18,10 +18,10 @@ const getScreenName = (pathname: string, segments: string[]): string => {
   const screenMap: Record<string, string> = {
     "/": "Home",
     "/review": "Review",
-    "/visits": "All Visits",
+    "/stats": "Stats",
     "/settings": "Settings",
+    "/visits": "All Visits",
     "/scan": "Scan",
-    "/wrapped": "Wrapped",
     "/rescan": "Rescan",
     "/quick-actions": "Quick Actions",
     "/calendar-import": "Calendar Import",

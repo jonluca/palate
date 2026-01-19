@@ -5,13 +5,14 @@ import { FilterPills, NoVisitsEmpty, SkeletonVisitCard } from "@/components/ui";
 import { useStats, useVisits, useQuickUpdateVisitStatus, type VisitWithRestaurant } from "@/hooks/queries";
 import { useVisitsFilter, useSetVisitsFilter } from "@/store";
 import { FlashList } from "@shopify/flash-list";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { View, RefreshControl } from "react-native";
+import { View, RefreshControl, Pressable } from "react-native";
 import Animated, { LinearTransition } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { useIsFocused } from "@react-navigation/native";
+import { IconSymbol } from "@/components/icon-symbol";
 
 function LoadingState() {
   return (
@@ -99,8 +100,11 @@ export default function VisitsScreen() {
     () => (
       <View className={"gap-6"}>
         {/* Header */}
-        <View className={"gap-2"}>
-          <ThemedText variant={"largeTitle"} className={"font-bold"}>
+        <View className={"flex-row items-center gap-3"}>
+          <Pressable onPress={() => router.back()} hitSlop={8} className={"p-2 -ml-2"}>
+            <IconSymbol name={"chevron.left"} size={24} color={"#f97316"} />
+          </Pressable>
+          <ThemedText variant={"largeTitle"} className={"font-bold flex-1"}>
             All Visits
           </ThemedText>
         </View>
@@ -133,28 +137,31 @@ export default function VisitsScreen() {
   const ItemSeparator = useCallback(() => <View style={{ height: 24 }} />, []);
 
   return (
-    <ScreenLayout scrollable={false} className={"p-0"} style={{ paddingTop: 0, paddingBottom: 0 }}>
-      <FlashList
-        data={visits}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        contentContainerStyle={{
-          paddingTop: insets.top + 16,
-          paddingBottom: insets.bottom + 32,
-          paddingHorizontal: 16,
-        }}
-        ListHeaderComponent={ListHeader}
-        ListHeaderComponentStyle={{ marginBottom: 24 }}
-        ListEmptyComponent={
-          visitsLoading ? (
-            <LoadingState />
-          ) : stats && stats.totalVisits === 0 ? (
-            <NoVisitsEmpty onScan={() => router.push("/rescan")} />
-          ) : null
-        }
-        ItemSeparatorComponent={ItemSeparator}
-      />
-    </ScreenLayout>
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenLayout scrollable={false} className={"p-0"} style={{ paddingTop: 0, paddingBottom: 0 }}>
+        <FlashList
+          data={visits}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          contentContainerStyle={{
+            paddingTop: insets.top + 16,
+            paddingBottom: insets.bottom + 32,
+            paddingHorizontal: 16,
+          }}
+          ListHeaderComponent={ListHeader}
+          ListHeaderComponentStyle={{ marginBottom: 24 }}
+          ListEmptyComponent={
+            visitsLoading ? (
+              <LoadingState />
+            ) : stats && stats.totalVisits === 0 ? (
+              <NoVisitsEmpty onScan={() => router.push("/rescan")} />
+            ) : null
+          }
+          ItemSeparatorComponent={ItemSeparator}
+        />
+      </ScreenLayout>
+    </>
   );
 }
