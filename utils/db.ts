@@ -2187,6 +2187,7 @@ export async function nukeDatabase(): Promise<void> {
 
   // Reset the module-level db reference so initializeDatabase runs again
   db = null;
+  dbInitPromise = null;
 
   // Invalidate spatial index since Michelin data is wiped
   invalidateRestaurantIndex();
