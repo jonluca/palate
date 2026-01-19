@@ -191,7 +191,7 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
       {currentAction && (
         <View
           className={"absolute bottom-0 left-0 right-0 px-4 z-50"}
-          style={{ paddingBottom: insets.bottom + 16 }}
+          style={{ paddingBottom: insets.bottom }}
           pointerEvents={"box-none"}
         >
           <UndoBanner key={currentAction.id} action={currentAction} onUndo={handleUndo} onDismiss={clearUndo} />
