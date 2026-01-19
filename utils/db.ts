@@ -473,11 +473,22 @@ export async function getPhotosByVisitId(visitId: string): Promise<PhotoRecord[]
 }
 
 /**
- * Get all photo IDs
+ * Get all photo IDs (ordered deterministically by creationTime and id)
  */
 export async function getAllPhotoIds(): Promise<{ id: string }[]> {
   const database = await getDatabase();
-  return database.getAllAsync<{ id: string }>(`SELECT id FROM photos`);
+  return database.getAllAsync<{ id: string }>(`SELECT id FROM photos ORDER BY creationTime ASC, id ASC`);
+}
+
+/**
+ * Get photo IDs that haven't been analyzed for food yet (foodDetected IS NULL)
+ * Ordered deterministically by creationTime and id
+ */
+export async function getUnanalyzedPhotoIds(): Promise<{ id: string }[]> {
+  const database = await getDatabase();
+  return database.getAllAsync<{ id: string }>(
+    `SELECT id FROM photos WHERE foodDetected IS NULL ORDER BY creationTime ASC, id ASC`,
+  );
 }
 
 export async function getTotalPhotoCount(): Promise<number> {
@@ -1169,11 +1180,12 @@ export async function batchUpdateVisitSuggestedRestaurants(
 
 export async function getVisitsNeedingFoodDetection(): Promise<VisitRecord[]> {
   const database = await getDatabase();
-  // Get visits that haven't had food detection run yet (no photos with foodDetected set)
+  // Get visits that have any unanalyzed photos (foodDetected IS NULL)
+  // This includes both visits with no analyzed photos and visits with some unanalyzed photos
   return database.getAllAsync<VisitRecord>(
     `SELECT v.* FROM visits v
-     WHERE NOT EXISTS (
-       SELECT 1 FROM photos p WHERE p.visitId = v.id AND p.foodDetected IS NOT NULL
+     WHERE EXISTS (
+       SELECT 1 FROM photos p WHERE p.visitId = v.id AND p.foodDetected IS NULL
      )
      ORDER BY v.startTime DESC`,
   );
@@ -1219,9 +1231,15 @@ export async function getVisitPhotoSamples(
   const samples: { visitId: string; photoId: string }[] = [];
 
   for (const visitId of visitIds) {
-    // Get random sample of photos for this visit
+    // Get deterministic sample of photos for this visit:
+    // - Only select photos that haven't been analyzed yet (foodDetected IS NULL)
+    // - Order by creationTime and id for deterministic selection
+    // - Sample based on percentage of total photos in the visit (including analyzed ones)
     const photos = await database.getAllAsync<{ id: string }>(
-      `SELECT id FROM photos WHERE visitId = ? ORDER BY RANDOM() LIMIT MAX(1, CAST((SELECT COUNT(*) FROM photos WHERE visitId = ?) * ? AS INTEGER))`,
+      `SELECT id FROM photos 
+       WHERE visitId = ? AND foodDetected IS NULL 
+       ORDER BY creationTime ASC, id ASC 
+       LIMIT MAX(1, CAST((SELECT COUNT(*) FROM photos WHERE visitId = ?) * ? AS INTEGER))`,
       [visitId, visitId, samplePercentage],
     );
 

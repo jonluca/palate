@@ -110,6 +110,7 @@ export default function ReviewScreen() {
   const regularListRef = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const exactMatchListRef = useRef<any>(null);
+  const hasSetInitialTab = useRef(false);
 
   // Data queries
   const { data, isLoading } = usePendingReview();
@@ -221,6 +222,14 @@ export default function ReviewScreen() {
   const hasExactMatches = exactMatches.length > 0;
   const hasTabs = hasExactMatches;
   const isAllCaughtUp = !isLoading && pendingVisits.length === 0;
+
+  // Set initial tab to "exact" if there are exact matches on first load
+  useEffect(() => {
+    if (!isLoading && !hasSetInitialTab.current && hasExactMatches) {
+      hasSetInitialTab.current = true;
+      setActiveTab("exact");
+    }
+  }, [isLoading, hasExactMatches]);
 
   // Switch back to "all" tab if current tab becomes empty
   useEffect(() => {

@@ -14,7 +14,7 @@ import {
   getVisitsNeedingFoodDetection,
   getVisitPhotoSamples,
   insertVisitSuggestedRestaurants,
-  getAllPhotoIds,
+  getUnanalyzedPhotoIds,
   getSuggestedRestaurantsForVisits,
   batchUpdateVisitSuggestedRestaurants,
   recomputeSuggestedRestaurants,
@@ -1217,6 +1217,8 @@ export interface DeepScanOptions {
 /**
  * Deep scan ALL photos for food detection.
  * Scans every photo in the library (not just samples).
+ * Skips photos that have already been analyzed (foodDetected IS NOT NULL).
+ * Photos are processed in deterministic order (by creationTime, then id).
  */
 export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): Promise<DeepScanProgress> {
   const { confidenceThreshold = 0.3, onProgress } = options;
@@ -1237,7 +1239,8 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
     return progress;
   }
 
-  const allPhotos = await getAllPhotoIds();
+  // Only get photos that haven't been analyzed yet (deterministic order)
+  const allPhotos = await getUnanalyzedPhotoIds();
   progress.totalPhotos = allPhotos.length;
 
   if (allPhotos.length === 0) {
