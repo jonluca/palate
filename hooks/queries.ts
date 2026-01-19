@@ -373,7 +373,7 @@ export function usePendingReview() {
 /**
  * Fetch all Michelin restaurants (for searching)
  */
-function useMichelinRestaurants() {
+export function useMichelinRestaurants() {
   return useQuery({
     queryKey: queryKeys.michelinRestaurants,
     queryFn: getAllMichelinRestaurants,

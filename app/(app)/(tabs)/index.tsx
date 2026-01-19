@@ -1,8 +1,9 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
-import { Card, SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills } from "@/components/ui";
+import { Card, SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills, Badge } from "@/components/ui";
 import { HomeHeader, NewPhotosCard } from "@/components/home";
-import { useConfirmedRestaurants, type RestaurantWithVisits } from "@/hooks/queries";
+import { useConfirmedRestaurants, useMichelinRestaurants, type RestaurantWithVisits } from "@/hooks/queries";
+import type { MichelinRestaurantRecord } from "@/utils/db";
 import { FlashList } from "@shopify/flash-list";
 import { router } from "expo-router";
 import React, { useCallback, useMemo, useState, useRef } from "react";
@@ -88,6 +89,50 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
   );
 }
 
+function MichelinRestaurantCard({ restaurant, index }: { restaurant: MichelinRestaurantRecord; index: number }) {
+  const handlePress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/restaurant/${restaurant.id}`);
+  };
+
+  return (
+    <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>
+      <Pressable onPress={handlePress}>
+        <Card animated={false}>
+          <View className={"p-4 gap-2"}>
+            <View className={"flex-row items-start justify-between"}>
+              <View className={"flex-1 gap-1"}>
+                <ThemedText variant={"heading"} className={"font-semibold"} numberOfLines={1}>
+                  {restaurant.name}
+                </ThemedText>
+                <View className={"flex-row items-center gap-2 flex-wrap"}>
+                  {restaurant.award ? <Badge variant={"warning"} label={restaurant.award} /> : null}
+                  {restaurant.cuisine ? (
+                    <ThemedText variant={"footnote"} color={"tertiary"}>
+                      {restaurant.cuisine}
+                    </ThemedText>
+                  ) : null}
+                </View>
+                {restaurant.location ? (
+                  <ThemedText variant={"footnote"} color={"tertiary"} numberOfLines={1}>
+                    {restaurant.location}
+                  </ThemedText>
+                ) : null}
+              </View>
+              <View className={"flex-row items-center gap-1 ml-3"}>
+                <ThemedText variant={"footnote"} color={"tertiary"}>
+                  Not visited
+                </ThemedText>
+                <IconSymbol name={"chevron.right"} size={14} color={"gray"} />
+              </View>
+            </View>
+          </View>
+        </Card>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 function LoadingState() {
   return (
     <View className={"gap-4"}>
@@ -137,6 +182,12 @@ function SearchBar({
   );
 }
 
+// Union type for list items
+type ListItem =
+  | { type: "visited"; data: RestaurantWithVisits }
+  | { type: "michelin"; data: MichelinRestaurantRecord }
+  | { type: "section-header"; title: string };
+
 export default function RestaurantsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -147,41 +198,68 @@ export default function RestaurantsScreen() {
   const listRef = useRef<any>(null);
 
   const { data: restaurants = [], isLoading } = useConfirmedRestaurants();
+  const { data: michelinRestaurants = [] } = useMichelinRestaurants();
 
   const scrollToTop = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, []);
 
-  // Filter and sort restaurants
-  const filteredAndSortedRestaurants = useMemo(() => {
-    let result = [...restaurants];
+  // Create a set of visited restaurant IDs for filtering
+  const visitedRestaurantIds = useMemo(() => {
+    return new Set(restaurants.map((r) => r.id));
+  }, [restaurants]);
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      result = result.filter((r) => r.name.toLowerCase().includes(query));
+  // Filter and sort restaurants, and add Michelin results when searching
+  const listItems = useMemo((): ListItem[] => {
+    const query = searchQuery.toLowerCase().trim();
+    const isSearching = query.length > 0;
+
+    // Filter visited restaurants
+    let visitedResults = [...restaurants];
+    if (isSearching) {
+      visitedResults = visitedResults.filter((r) => r.name.toLowerCase().includes(query));
     }
 
-    // Sort restaurants
+    // Sort visited restaurants
     switch (sortBy) {
       case "name":
-        result.sort((a, b) => a.name.localeCompare(b.name));
+        visitedResults.sort((a, b) => a.name.localeCompare(b.name));
         break;
       case "visits":
-        result.sort((a, b) => b.visitCount - a.visitCount);
+        visitedResults.sort((a, b) => b.visitCount - a.visitCount);
         break;
       case "confirmed":
-        result.sort((a, b) => (b.lastConfirmedAt ?? 0) - (a.lastConfirmedAt ?? 0));
+        visitedResults.sort((a, b) => (b.lastConfirmedAt ?? 0) - (a.lastConfirmedAt ?? 0));
         break;
       case "recent":
       default:
-        result.sort((a, b) => b.lastVisit - a.lastVisit);
+        visitedResults.sort((a, b) => b.lastVisit - a.lastVisit);
         break;
     }
 
-    return result;
-  }, [restaurants, searchQuery, sortBy]);
+    const items: ListItem[] = visitedResults.map((data) => ({ type: "visited", data }));
+
+    // When searching, also include unvisited Michelin restaurants
+    if (isSearching && michelinRestaurants.length > 0) {
+      const unvisitedMichelin = michelinRestaurants
+        .filter((r) => !visitedRestaurantIds.has(r.id) && r.name.toLowerCase().includes(query))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .slice(0, 50); // Limit to 50 results for performance
+
+      if (unvisitedMichelin.length > 0) {
+        items.push({ type: "section-header", title: `All Restaurants (${unvisitedMichelin.length})` });
+        items.push(...unvisitedMichelin.map((data) => ({ type: "michelin" as const, data })));
+      }
+    }
+
+    return items;
+  }, [restaurants, michelinRestaurants, visitedRestaurantIds, searchQuery, sortBy]);
+
+  // For backward compatibility with existing code
+  const filteredAndSortedRestaurants = useMemo(() => {
+    return listItems.filter((item): item is { type: "visited"; data: RestaurantWithVisits } => item.type === "visited");
+  }, [listItems]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -198,20 +276,29 @@ export default function RestaurantsScreen() {
     setSearchQuery("");
   }, []);
 
-  const renderItem = useCallback(
-    ({ item, index }: { item: RestaurantWithVisits; index: number }) => (
-      <RestaurantCard restaurant={item} index={index < 10 ? index : 0} />
-    ),
-    [],
-  );
+  const renderItem = useCallback(({ item, index }: { item: ListItem; index: number }) => {
+    if (item.type === "section-header") {
+      return (
+        <Animated.View entering={FadeIn.duration(200)} className={"pt-4 pb-2"}>
+          <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase font-semibold tracking-wide px-1"}>
+            {item.title}
+          </ThemedText>
+        </Animated.View>
+      );
+    }
+    if (item.type === "michelin") {
+      return <MichelinRestaurantCard restaurant={item.data} index={index < 10 ? index : 0} />;
+    }
+    return <RestaurantCard restaurant={item.data} index={index < 10 ? index : 0} />;
+  }, []);
 
   const ListEmpty = useCallback(() => {
     if (isLoading) {
       return <LoadingState />;
     }
 
-    // If we have restaurants but filtered results are empty
-    if (restaurants.length > 0 && filteredAndSortedRestaurants.length === 0) {
+    // If we have restaurants but no results at all (including Michelin)
+    if (restaurants.length > 0 && listItems.length === 0) {
       return (
         <Animated.View entering={FadeIn.duration(200)} className={"py-8 items-center gap-3"}>
           <IconSymbol name={"magnifyingglass"} size={40} color={"gray"} />
@@ -233,7 +320,7 @@ export default function RestaurantsScreen() {
     }
 
     return <NoRestaurantsEmpty onPress={() => router.push("/review")} />;
-  }, [isLoading, restaurants.length, filteredAndSortedRestaurants.length, searchQuery]);
+  }, [isLoading, restaurants.length, listItems.length, searchQuery]);
 
   const ItemSeparator = useCallback(() => <View style={{ height: 16 }} />, []);
 
@@ -271,7 +358,7 @@ export default function RestaurantsScreen() {
               color={"tertiary"}
               className={"uppercase font-semibold tracking-wide px-1"}
             >
-              My Restaurants ({filteredAndSortedRestaurants.length.toLocaleString()})
+              My Restaurants ({filteredAndSortedRestaurants.length})
             </ThemedText>
           )}
         </View>
@@ -280,9 +367,15 @@ export default function RestaurantsScreen() {
       <View className={"flex-1"}>
         <FlashList
           ref={listRef}
-          data={filteredAndSortedRestaurants}
+          data={listItems}
           renderItem={renderItem}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => {
+            if (item.type === "section-header") {
+              return `section-${item.title}`;
+            }
+            return item.data.id;
+          }}
+          getItemType={(item) => item.type}
           drawDistance={250}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{

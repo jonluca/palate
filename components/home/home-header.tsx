@@ -20,9 +20,6 @@ export function HomeHeader() {
           <ThemedText variant={"largeTitle"} className={"font-bold"}>
             Restaurant Visits
           </ThemedText>
-          <ThemedText variant={"body"} color={"secondary"}>
-            Discover your dining history from photos
-          </ThemedText>
         </Animated.View>
 
         {/* Scan Button */}

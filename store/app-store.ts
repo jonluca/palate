@@ -3,6 +3,11 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "expo-sqlite/kv-store";
 import type { FilterType } from "@/hooks/queries";
 
+// Review filter types
+export type ReviewFoodFilter = "on" | "off";
+export type ReviewMatchesFilter = "on" | "off";
+export type ReviewStarFilter = "any" | "1plus" | "2plus" | "3";
+
 // Scan progress state
 interface ScanProgress {
   phase: "idle" | "scanning" | "analyzing-visits" | "enriching" | "complete" | "error";
@@ -20,6 +25,16 @@ interface AppState {
   // Visits filter
   visitsFilter: FilterType;
   setVisitsFilter: (filter: FilterType) => void;
+
+  // Review filters
+  reviewFoodFilter: ReviewFoodFilter;
+  setReviewFoodFilter: (filter: ReviewFoodFilter) => void;
+  reviewMatchesFilter: ReviewMatchesFilter;
+  setReviewMatchesFilter: (filter: ReviewMatchesFilter) => void;
+  reviewStarFilter: ReviewStarFilter;
+  setReviewStarFilter: (filter: ReviewStarFilter) => void;
+  reviewFiltersCollapsed: boolean;
+  setReviewFiltersCollapsed: (collapsed: boolean) => void;
 
   // Onboarding state (persisted)
   hasCompletedOnboarding: boolean;
@@ -77,6 +92,16 @@ export const useAppStore = create<AppState>()(
       // Visits filter
       visitsFilter: "all",
       setVisitsFilter: (filter) => set({ visitsFilter: filter }),
+
+      // Review filters
+      reviewFoodFilter: "on",
+      setReviewFoodFilter: (filter) => set({ reviewFoodFilter: filter }),
+      reviewMatchesFilter: "on",
+      setReviewMatchesFilter: (filter) => set({ reviewMatchesFilter: filter }),
+      reviewStarFilter: "any",
+      setReviewStarFilter: (filter) => set({ reviewStarFilter: filter }),
+      reviewFiltersCollapsed: true,
+      setReviewFiltersCollapsed: (collapsed) => set({ reviewFiltersCollapsed: collapsed }),
 
       // Onboarding state (persisted)
       hasCompletedOnboarding: false,
@@ -167,6 +192,10 @@ export const useAppStore = create<AppState>()(
       resetAllState: () =>
         set({
           visitsFilter: "all",
+          reviewFoodFilter: "on",
+          reviewMatchesFilter: "on",
+          reviewStarFilter: "any",
+          reviewFiltersCollapsed: true,
           hasCompletedOnboarding: false,
           hasCompletedInitialScan: false,
           selectedCalendarIds: null,
@@ -183,6 +212,10 @@ export const useAppStore = create<AppState>()(
       // Only persist user preferences, not transient UI state
       partialize: (state): Partial<AppState> => ({
         visitsFilter: state.visitsFilter,
+        reviewFoodFilter: state.reviewFoodFilter,
+        reviewMatchesFilter: state.reviewMatchesFilter,
+        reviewStarFilter: state.reviewStarFilter,
+        reviewFiltersCollapsed: state.reviewFiltersCollapsed,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
         hasCompletedInitialScan: state.hasCompletedInitialScan,
         googleMapsApiKey: state.googleMapsApiKey,
@@ -200,6 +233,15 @@ export const useHasHydrated = () => useAppStore((state) => state.hasHydrated);
 
 export const useVisitsFilter = () => useAppStore((state) => state.visitsFilter);
 export const useSetVisitsFilter = () => useAppStore((state) => state.setVisitsFilter);
+
+export const useReviewFoodFilter = () => useAppStore((state) => state.reviewFoodFilter);
+export const useSetReviewFoodFilter = () => useAppStore((state) => state.setReviewFoodFilter);
+export const useReviewMatchesFilter = () => useAppStore((state) => state.reviewMatchesFilter);
+export const useSetReviewMatchesFilter = () => useAppStore((state) => state.setReviewMatchesFilter);
+export const useReviewStarFilter = () => useAppStore((state) => state.reviewStarFilter);
+export const useSetReviewStarFilter = () => useAppStore((state) => state.setReviewStarFilter);
+export const useReviewFiltersCollapsed = () => useAppStore((state) => state.reviewFiltersCollapsed);
+export const useSetReviewFiltersCollapsed = () => useAppStore((state) => state.setReviewFiltersCollapsed);
 
 export const useHasCompletedOnboarding = () => useAppStore((state) => state.hasCompletedOnboarding);
 export const useSetHasCompletedOnboarding = () => useAppStore((state) => state.setHasCompletedOnboarding);

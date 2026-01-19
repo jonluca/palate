@@ -18,6 +18,16 @@ import * as Haptics from "expo-haptics";
 import { useToast } from "@/components/ui/toast";
 import Animated, { LinearTransition } from "react-native-reanimated";
 import { router } from "expo-router";
+import {
+  useReviewFoodFilter,
+  useSetReviewFoodFilter,
+  useReviewMatchesFilter,
+  useSetReviewMatchesFilter,
+  useReviewStarFilter,
+  useSetReviewStarFilter,
+  useReviewFiltersCollapsed,
+  useSetReviewFiltersCollapsed,
+} from "@/store";
 
 function LoadingState() {
   return (
@@ -80,14 +90,15 @@ export default function ReviewScreen() {
   const [isApproving, setIsApproving] = useState(false);
   const [activeTab, setActiveTab] = useState<ReviewTab>("all");
 
-  type FoodFilter = "on" | "off";
-  type MatchesFilter = "on" | "off";
-  type StarFilter = "any" | "1plus" | "2plus" | "3";
-
-  const [filtersCollapsed, setFiltersCollapsed] = useState(true);
-  const [foodFilter, setFoodFilter] = useState<FoodFilter>("on");
-  const [matchesFilter, setMatchesFilter] = useState<MatchesFilter>("on");
-  const [starFilter, setStarFilter] = useState<StarFilter>("any");
+  // Review filters from store
+  const foodFilter = useReviewFoodFilter();
+  const setFoodFilter = useSetReviewFoodFilter();
+  const matchesFilter = useReviewMatchesFilter();
+  const setMatchesFilter = useSetReviewMatchesFilter();
+  const starFilter = useReviewStarFilter();
+  const setStarFilter = useSetReviewStarFilter();
+  const filtersCollapsed = useReviewFiltersCollapsed();
+  const setFiltersCollapsed = useSetReviewFiltersCollapsed();
 
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -345,7 +356,7 @@ export default function ReviewScreen() {
               className={"bg-card rounded-2xl px-4 py-3"}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setFiltersCollapsed((v) => !v);
+                setFiltersCollapsed(!filtersCollapsed);
               }}
             >
               <View className={"flex-row items-center justify-between gap-3"}>
@@ -365,12 +376,12 @@ export default function ReviewScreen() {
                   <ToggleChip
                     label={"Food"}
                     value={foodFilter === "on"}
-                    onToggle={() => setFoodFilter((v) => (v === "on" ? "off" : "on"))}
+                    onToggle={() => setFoodFilter(foodFilter === "on" ? "off" : "on")}
                   />
                   <ToggleChip
                     label={"Restaurant Matches"}
                     value={matchesFilter === "on"}
-                    onToggle={() => setMatchesFilter((v) => (v === "on" ? "off" : "on"))}
+                    onToggle={() => setMatchesFilter(matchesFilter === "on" ? "off" : "on")}
                   />
                 </View>
 
@@ -394,9 +405,13 @@ export default function ReviewScreen() {
       filteredReviewableVisits.length,
       reviewableVisits.length,
       filtersCollapsed,
+      setFiltersCollapsed,
       foodFilter,
+      setFoodFilter,
       matchesFilter,
+      setMatchesFilter,
       starFilter,
+      setStarFilter,
       filtersSummary,
       ToggleChip,
     ],
