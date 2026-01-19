@@ -8,13 +8,14 @@ import type { OnboardingSlide } from "./types";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 interface SlideItemProps {
+  currentIndex: number;
   slide: OnboardingSlide;
   index: number;
   scrollX: SharedValue<number>;
   setParentScrollEnabled?: (enabled: boolean) => void;
 }
 
-export function SlideItem({ slide, index, scrollX, setParentScrollEnabled }: SlideItemProps) {
+export function SlideItem({ currentIndex, slide, index, scrollX, setParentScrollEnabled }: SlideItemProps) {
   const inputRange = [(index - 1) * SCREEN_WIDTH, index * SCREEN_WIDTH, (index + 1) * SCREEN_WIDTH];
 
   const animatedIconStyle = useAnimatedStyle(() => {
@@ -80,7 +81,12 @@ export function SlideItem({ slide, index, scrollX, setParentScrollEnabled }: Sli
 
       {/* Custom Content */}
       {slide.CustomContent && (
-        <slide.CustomContent scrollX={scrollX} index={index} setParentScrollEnabled={setParentScrollEnabled} />
+        <slide.CustomContent
+          key={currentIndex}
+          scrollX={scrollX}
+          index={index}
+          setParentScrollEnabled={setParentScrollEnabled}
+        />
       )}
     </View>
   );

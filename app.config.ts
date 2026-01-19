@@ -1,6 +1,6 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
-const VERSION = "1.0.1";
+const VERSION = "1.0.2";
 
 const getConfig = ({ config }: ConfigContext): ExpoConfig => {
   return {
@@ -106,7 +106,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
           image: "./assets/images/splash-icon.png",
           imageWidth: 100,
           resizeMode: "contain",
-          backgroundColor: "#ffffff",
+          backgroundColor: "#000000",
         },
       ],
       [

@@ -130,7 +130,13 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         renderItem={({ item, index }) => (
-          <SlideItem slide={item} index={index} scrollX={scrollX} setParentScrollEnabled={setIsPagerScrollEnabled} />
+          <SlideItem
+            currentIndex={currentIndex}
+            slide={item}
+            index={index}
+            scrollX={scrollX}
+            setParentScrollEnabled={setIsPagerScrollEnabled}
+          />
         )}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{
@@ -143,10 +149,10 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
       <Animated.View
         entering={FadeInUp.delay(200).duration(400)}
         className={"absolute bottom-0 left-0 right-0 px-6"}
-        style={{ paddingBottom: insets.bottom + 32 }}
+        style={{ paddingBottom: insets.bottom + 16 }}
       >
         {/* Dot Indicator */}
-        <View className={"mb-8"}>
+        <View className={"mb-4"}>
           <DotIndicator currentIndex={currentIndex} total={ONBOARDING_SLIDES.length} />
         </View>
 

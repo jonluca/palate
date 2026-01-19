@@ -7,7 +7,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
     icon: "camera.viewfinder",
     iconColor: "#f97316",
     iconBg: "bg-orange-500/20",
-    title: "Welcome to\nPhoto Foodie",
+    title: "Welcome to\nPalate",
     subtitle: "Your dining journal, automated",
     description:
       "We scan your photos and calendar events to find restaurant visits and create a beautiful log of your culinary adventures.",
