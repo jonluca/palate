@@ -17,7 +17,7 @@ export function formatTime(timestamp: number): string {
   });
 }
 
-export function formatDistance(meters: number): string {
+function formatDistance(meters: number): string {
   if (meters < 1000) {
     return `${Math.round(meters).toLocaleString()}m`;
   }
@@ -49,7 +49,7 @@ export function getMichelinBadge(award: string): MichelinBadge | null {
 }
 
 // Calculate distance between two coordinates in meters
-export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000; // Earth's radius in meters
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;

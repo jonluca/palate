@@ -324,3 +324,84 @@ export async function getPhotoCount(): Promise<number> {
   });
   return response.totalCount;
 }
+
+export interface CreateAlbumResult {
+  success: boolean;
+  albumName: string;
+  photoCount: number;
+  error?: string;
+}
+
+/**
+ * Create a photo album with the given photos.
+ * If an album with the same name exists, adds photos to it.
+ */
+export async function createAlbumWithPhotos(albumName: string, assetIds: string[]): Promise<CreateAlbumResult> {
+  if (assetIds.length === 0) {
+    return { success: false, albumName, photoCount: 0, error: "No photos to add" };
+  }
+
+  try {
+    // Get the assets from their IDs
+    const assets = await MediaLibrary.getAssetsAsync({
+      first: assetIds.length,
+      mediaType: MediaLibrary.MediaType.photo,
+    });
+
+    // Filter to only include assets that match our IDs
+    const matchingAssets = assets.assets.filter((asset) => assetIds.includes(asset.id));
+
+    if (matchingAssets.length === 0) {
+      // If we couldn't find assets by listing, try to get them directly
+      // This can happen if the assets are older and not in the first batch
+      const directAssets: MediaLibrary.Asset[] = [];
+      for (const id of assetIds) {
+        try {
+          const asset = await MediaLibrary.getAssetInfoAsync(id);
+          if (asset) {
+            directAssets.push(asset);
+          }
+        } catch {
+          // Asset may have been deleted, skip it
+        }
+      }
+
+      if (directAssets.length === 0) {
+        return { success: false, albumName, photoCount: 0, error: "Could not find any of the photos" };
+      }
+
+      return createOrUpdateAlbum(albumName, directAssets);
+    }
+
+    return createOrUpdateAlbum(albumName, matchingAssets);
+  } catch (error) {
+    console.error("Error creating album:", error);
+    return {
+      success: false,
+      albumName,
+      photoCount: 0,
+      error: error instanceof Error ? error.message : "Unknown error occurred",
+    };
+  }
+}
+
+async function createOrUpdateAlbum(albumName: string, assets: MediaLibrary.Asset[]): Promise<CreateAlbumResult> {
+  // Check if album already exists
+  const existingAlbum = await MediaLibrary.getAlbumAsync(albumName);
+
+  if (existingAlbum) {
+    // Add photos to existing album (don't copy, just reference)
+    await MediaLibrary.addAssetsToAlbumAsync(assets, existingAlbum, false);
+    return { success: true, albumName, photoCount: assets.length };
+  }
+
+  // Create new album with the first asset, then add the rest
+  const [firstAsset, ...restAssets] = assets;
+  const album = await MediaLibrary.createAlbumAsync(albumName, firstAsset, false);
+
+  if (restAssets.length > 0) {
+    await MediaLibrary.addAssetsToAlbumAsync(restAssets, album, false);
+  }
+
+  return { success: true, albumName, photoCount: assets.length };
+}

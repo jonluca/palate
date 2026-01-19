@@ -1689,6 +1689,3 @@ export function useRemovePhotosFromVisit(visitId: string | undefined) {
     },
   });
 }
-
-/** Re-export for external use */
-export { getPhotosByAssetIds };

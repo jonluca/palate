@@ -19,7 +19,8 @@ interface PhotosSectionProps {
   isAddingPhotos?: boolean;
   onRemovePhotos?: (photoIds: string[]) => void;
   isRemovingPhotos?: boolean;
-  isSharingPhotos?: boolean;
+  onCreateAlbum?: () => void;
+  isCreatingAlbum?: boolean;
   /** Maximum number of visible rows (can be fractional, e.g. 3.5). Default: 3.5 */
   maxRows?: number;
 }
@@ -85,7 +86,8 @@ export function PhotosSection({
   isAddingPhotos,
   onRemovePhotos,
   isRemovingPhotos,
-  isSharingPhotos,
+  onCreateAlbum,
+  isCreatingAlbum,
   maxRows = 3.5,
 }: PhotosSectionProps) {
   const { width: screenWidth } = useWindowDimensions();
@@ -224,6 +226,22 @@ export function PhotosSection({
             </>
           ) : (
             <>
+              {onCreateAlbum && photos.length > 0 && (
+                <Pressable
+                  onPress={onCreateAlbum}
+                  disabled={isCreatingAlbum}
+                  className={"flex-row items-center gap-1 px-2 py-1 rounded-full bg-purple-500/10 active:opacity-70"}
+                >
+                  <Ionicons
+                    name={isCreatingAlbum ? "hourglass-outline" : "albums-outline"}
+                    size={14}
+                    color={"#a855f7"}
+                  />
+                  <ThemedText variant={"caption2"} style={{ color: "#a855f7" }} className={"font-medium"}>
+                    {isCreatingAlbum ? "Creating..." : "Create Album"}
+                  </ThemedText>
+                </Pressable>
+              )}
               {onAddPhotos && (
                 <Pressable
                   onPress={onAddPhotos}

@@ -1,5 +1,4 @@
 import type { ExactCalendarMatch } from "@/hooks/queries";
-import type { MapKitSearchResult } from "@/modules/mapkit-search";
 
 export type VisitStatus = "pending" | "confirmed" | "rejected";
 

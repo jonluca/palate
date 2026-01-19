@@ -47,7 +47,7 @@ export function ExactMatchBadge() {
   );
 }
 
-export function AppleMapsVerifiedBadge({ isLoading }: { isLoading?: boolean }) {
+function AppleMapsVerifiedBadge({ isLoading }: { isLoading?: boolean }) {
   if (isLoading) {
     return (
       <View className={"flex-row items-center gap-1 bg-blue-500/10 px-2 py-0.5 rounded-full"}>

@@ -4,9 +4,9 @@ import AsyncStorage from "expo-sqlite/kv-store";
 import type { FilterType } from "@/hooks/queries";
 
 // Review filter types
-export type ReviewFoodFilter = "on" | "off";
-export type ReviewMatchesFilter = "on" | "off";
-export type ReviewStarFilter = "any" | "1plus" | "2plus" | "3";
+type ReviewFoodFilter = "on" | "off";
+type ReviewMatchesFilter = "on" | "off";
+type ReviewStarFilter = "any" | "1plus" | "2plus" | "3";
 
 // Scan progress state
 interface ScanProgress {

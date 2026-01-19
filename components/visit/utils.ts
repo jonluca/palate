@@ -16,7 +16,7 @@ export const formatTime = (timestamp: number) => {
   });
 };
 
-export const formatDuration = (start: number, end: number) => {
+const formatDuration = (start: number, end: number) => {
   const diffMs = end - start;
   const diffMins = Math.round(diffMs / (1000 * 60));
   if (diffMins < 60) {

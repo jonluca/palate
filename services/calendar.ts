@@ -441,7 +441,7 @@ const CALENDAR_TITLE_SUFFIXES_TO_STRIP = [
 ];
 
 /** Clean and normalize a calendar event title to extract the likely restaurant name */
-export function _cleanCalendarEventTitle(title: string): string {
+function _cleanCalendarEventTitle(title: string): string {
   if (!title) {
     return "";
   }
@@ -603,7 +603,7 @@ function _normalizeForComparison(str: string): string {
 }
 export const normalizeForComparison = memoize(_normalizeForComparison);
 
-export const INSIGNIFICANT_WORDS = new Set([
+const INSIGNIFICANT_WORDS = new Set([
   "the",
   "restaurant",
   "cafe",

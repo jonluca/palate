@@ -15,7 +15,7 @@ import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/icon-symbol";
 import * as Haptics from "expo-haptics";
 
-export type UndoActionType = "confirm" | "reject";
+type UndoActionType = "confirm" | "reject";
 
 export interface UndoableAction {
   id: string;

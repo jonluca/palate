@@ -42,6 +42,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { FoodLabel } from "@/utils/db";
 import { cleanCalendarEventTitle } from "@/services/calendar";
 import { logVisitViewed } from "@/services/analytics";
+import { createAlbumWithPhotos } from "@/services/scanner";
 import { ActivityIndicator, View, Alert, Pressable } from "react-native";
 import { useToast } from "@/components/ui/toast";
 import { useHasSeenAddPhotosAlert, useSetHasSeenAddPhotosAlert } from "@/store";
@@ -88,7 +89,7 @@ export default function VisitDetailScreen() {
   const [selectedRestaurantIndex, setSelectedRestaurantIndex] = useState(0);
   const [foodScanProgress, setFoodScanProgress] = useState<VisitFoodScanProgress | null>(null);
   const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
-  const [isSharingPhotos, setIsSharingPhotos] = useState(false);
+  const [isCreatingAlbum, setIsCreatingAlbum] = useState(false);
   const { showToast } = useToast();
   const hasSeenAddPhotosAlert = useHasSeenAddPhotosAlert();
   const setHasSeenAddPhotosAlert = useSetHasSeenAddPhotosAlert();
@@ -437,6 +438,55 @@ export default function VisitDetailScreen() {
     [removePhotosFromVisit, showToast],
   );
 
+  const handleCreateAlbum = useCallback(async () => {
+    if (!data?.photos || data.photos.length === 0) {
+      return;
+    }
+
+    // Build the album name from the restaurant/visit info
+    const albumName =
+      data.restaurant?.name ??
+      data.suggestedRestaurant?.name ??
+      (data.visit?.calendarEventTitle ? cleanCalendarEventTitle(data.visit.calendarEventTitle) : null) ??
+      `Visit ${new Date(data.visit?.startTime ?? Date.now()).toLocaleDateString()}`;
+
+    Alert.alert("Create Album", `Create a Photos album named "${albumName}" with ${data.photos.length} photos?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Create Album",
+        onPress: async () => {
+          setIsCreatingAlbum(true);
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+          try {
+            const photoIds = data.photos.map((p) => p.id);
+            const result = await createAlbumWithPhotos(albumName, photoIds);
+
+            if (result.success) {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              showToast({
+                type: "success",
+                message: `Album "${albumName}" created with ${result.photoCount} photos`,
+              });
+            } else {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              showToast({
+                type: "error",
+                message: result.error ?? "Failed to create album",
+              });
+            }
+          } catch (error) {
+            console.error("Error creating album:", error);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            showToast({ type: "error", message: "Failed to create album. Please try again." });
+          } finally {
+            setIsCreatingAlbum(false);
+          }
+        },
+      },
+    ]);
+  }, [data, showToast]);
+
   if (isLoading) {
     return (
       <View className={"flex-1 bg-background items-center justify-center"}>
@@ -539,7 +589,8 @@ export default function VisitDetailScreen() {
           isAddingPhotos={addPhotosToVisit.isPending}
           onRemovePhotos={handleRemovePhotos}
           isRemovingPhotos={removePhotosFromVisit.isPending}
-          isSharingPhotos={isSharingPhotos}
+          onCreateAlbum={handleCreateAlbum}
+          isCreatingAlbum={isCreatingAlbum}
         />
 
         {showFoodScanCard && (

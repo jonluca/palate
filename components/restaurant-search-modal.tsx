@@ -29,7 +29,7 @@ export interface RestaurantOption {
   source: "michelin" | "mapkit" | "google";
 }
 
-export function formatDistance(meters: number): string {
+function formatDistance(meters: number): string {
   if (meters < 1000) {
     return `${Math.round(meters).toLocaleString()}m`;
   }

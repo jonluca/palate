@@ -112,7 +112,7 @@ export async function searchNearbyRestaurants(
  * @param radiusMeters - Search radius in meters (default: 5000)
  * @returns Array of matching places sorted by distance
  */
-export async function searchByText(
+async function searchByText(
   query: string,
   latitude: number,
   longitude: number,

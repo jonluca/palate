@@ -103,7 +103,7 @@ export interface FoodKeywordRecord {
 }
 
 // Default food keywords - these will be prepopulated in the database
-export const DEFAULT_FOOD_KEYWORDS = [
+const DEFAULT_FOOD_KEYWORDS = [
   "food",
   "dish",
   "meal",
@@ -745,7 +745,7 @@ export async function dismissCalendarEvents(calendarEventIds: string[]): Promise
 /**
  * Undismiss a calendar event (remove from dismissed list).
  */
-export async function undismissCalendarEvent(calendarEventId: string): Promise<void> {
+async function undismissCalendarEvent(calendarEventId: string): Promise<void> {
   const database = await getDatabase();
   await database.runAsync(`DELETE FROM dismissed_calendar_events WHERE calendarEventId = ?`, [calendarEventId]);
 }
@@ -3007,9 +3007,7 @@ export async function resetFoodKeywordsToDefaults(): Promise<void> {
 /**
  * Get photos that have allLabels stored (for reclassification)
  */
-export async function getPhotosWithAllLabels(): Promise<
-  Array<{ id: string; visitId: string | null; allLabels: string }>
-> {
+async function getPhotosWithAllLabels(): Promise<Array<{ id: string; visitId: string | null; allLabels: string }>> {
   const database = await getDatabase();
   return database.getAllAsync<{ id: string; visitId: string | null; allLabels: string }>(
     `SELECT id, visitId, allLabels FROM photos WHERE allLabels IS NOT NULL`,
