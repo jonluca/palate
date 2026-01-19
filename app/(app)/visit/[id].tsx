@@ -35,9 +35,10 @@ import {
 } from "@/hooks";
 import * as Haptics from "expo-haptics";
 import { router, useLocalSearchParams } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { FoodLabel } from "@/utils/db";
 import { cleanCalendarEventTitle } from "@/services/calendar";
+import { logVisitViewed } from "@/services/analytics";
 import { ActivityIndicator, View, Alert } from "react-native";
 import { useToast } from "@/components/ui/toast";
 
@@ -83,6 +84,13 @@ export default function VisitDetailScreen() {
   const [selectedRestaurantIndex, setSelectedRestaurantIndex] = useState(0);
   const [foodScanProgress, setFoodScanProgress] = useState<VisitFoodScanProgress | null>(null);
   const { showToast } = useToast();
+
+  // Track visit view
+  useEffect(() => {
+    if (id) {
+      logVisitViewed(parseInt(id, 10) || 0);
+    }
+  }, [id]);
 
   // React Query hooks
   const { data, isLoading } = useVisitDetail(id);

@@ -6,6 +6,7 @@ import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card, AllCaughtUpEmpty, SkeletonVisitCard } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import { CalendarImportCard } from "@/components/review";
+import { logCalendarImported } from "@/services/analytics";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { useQueryClient } from "@tanstack/react-query";
@@ -66,6 +67,7 @@ export default function CalendarImportScreen() {
         await importCalendarMutation.mutateAsync([calendarEventId]);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         showToast({ type: "success", message: "Calendar event imported as visit." });
+        logCalendarImported(1);
       } catch (error) {
         console.error("Error importing calendar event:", error);
         showToast({ type: "error", message: "Failed to import. Please try again." });
@@ -126,6 +128,7 @@ export default function CalendarImportScreen() {
                 type: "success",
                 message: `Imported ${count.toLocaleString()} visit${count === 1 ? "" : "s"} from calendar.`,
               });
+              logCalendarImported(count);
             } catch (error) {
               console.error("Error importing calendar events:", error);
               showToast({ type: "error", message: "Failed to import. Please try again." });

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import * as Location from "expo-location";
 import { useMemo } from "react";
+import { logVisitConfirmed, logVisitRejected } from "@/services/analytics";
 import {
   getVisitsWithDetails,
   getVisitById,
@@ -709,9 +710,11 @@ export function useConfirmVisit() {
         queryClient.setQueryData(queryKeys.stats, context.previousStats);
       }
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       // Only invalidate confirmed restaurants list, not pending reviews (handled optimistically)
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      // Track analytics
+      logVisitConfirmed(parseInt(variables.visitId, 10) || 0);
     },
   });
 }
@@ -949,6 +952,12 @@ export function useUpdateVisitStatus(visitId: string | undefined) {
         old ? { ...old, visit: { ...old.visit, status: newStatus } } : old,
       );
       invalidateVisitQueries(queryClient);
+      // Track analytics
+      if (newStatus === "confirmed" && visitId) {
+        logVisitConfirmed(parseInt(visitId, 10) || 0);
+      } else if (newStatus === "rejected" && visitId) {
+        logVisitRejected(parseInt(visitId, 10) || 0);
+      }
     },
   });
 }
@@ -1011,10 +1020,13 @@ export function useQuickUpdateVisitStatus() {
         queryClient.setQueryData(queryKeys.stats, context.previousStats);
       }
     },
-    onSuccess: (_data, { newStatus }) => {
+    onSuccess: (_data, { visitId, newStatus }) => {
       // Only invalidate confirmed restaurants list if confirming, not pending reviews (handled optimistically)
       if (newStatus === "confirmed") {
         queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+        logVisitConfirmed(parseInt(visitId, 10) || 0);
+      } else if (newStatus === "rejected") {
+        logVisitRejected(parseInt(visitId, 10) || 0);
       }
     },
   });

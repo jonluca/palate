@@ -10,6 +10,7 @@ import {
 import { useScanProgress, type ProgressSharedValues } from "./use-progress";
 import { useAppStore, useHasCompletedInitialScan } from "@/store/app-store";
 import { formatEta } from "@/services/scanner";
+import { logScanStarted, logScanCompleted } from "@/services/analytics";
 
 export interface UseScanReturn {
   // Permission state
@@ -98,12 +99,14 @@ export function useScan(): UseScanReturn {
 
     start();
     startScan();
+    logScanStarted();
 
     try {
-      await scanMutation.mutateAsync();
+      const result = await scanMutation.mutateAsync();
       const message = `Done!`;
       complete(message);
       completeScan(message);
+      logScanCompleted(result?.photosProcessed ?? 0, result?.visitsCreated ?? 0);
     } catch (err) {
       console.error("Scan error:", err);
       const errorMessage = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
@@ -120,12 +123,15 @@ export function useScan(): UseScanReturn {
 
     start();
     startScan();
+    logScanStarted();
 
     try {
-      await deepScanMutation.mutateAsync();
+      const result = await deepScanMutation.mutateAsync();
       const message = `Done!`;
       complete(message);
       completeScan(message);
+      // Deep scan returns DeepScanProgress which tracks food detection, not visit creation
+      logScanCompleted(result?.processedPhotos ?? 0, result?.foodPhotosFound ?? 0);
     } catch (err) {
       console.error("Deep scan error:", err);
       const errorMessage = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;

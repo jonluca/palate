@@ -15,10 +15,11 @@ import {
   useCreateManualVisit,
 } from "@/hooks/queries";
 import type { RestaurantRecord, UpdateRestaurantData } from "@/utils/db";
+import { logRestaurantViewed } from "@/services/analytics";
 import { FlashList } from "@shopify/flash-list";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useLocalSearchParams, router, Stack } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { View, Pressable, Platform, type LayoutChangeEvent, ScrollView, Modal, TextInput } from "react-native";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -721,6 +722,13 @@ export default function RestaurantDetailScreen() {
   const { data: visits = [] } = useRestaurantVisits(id);
   const updateRestaurantMutation = useUpdateRestaurant(id);
   const createManualVisitMutation = useCreateManualVisit();
+
+  // Track restaurant view
+  useEffect(() => {
+    if (id && restaurant?.name) {
+      logRestaurantViewed(parseInt(id.replace(/\D/g, ""), 10) || 0, restaurant.name);
+    }
+  }, [id, restaurant?.name]);
 
   // Check if this is a Michelin restaurant and fetch award history
   const isMichelinRestaurant = id?.startsWith("michelin-") ?? false;

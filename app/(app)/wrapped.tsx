@@ -17,6 +17,7 @@ import { useWrappedStats, type WrappedStats } from "@/hooks/queries";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
+import { logWrappedViewed } from "@/services/analytics";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -1098,6 +1099,13 @@ export default function WrappedScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
   }, [showConfetti]);
+
+  // Track wrapped view
+  useEffect(() => {
+    if (hasData) {
+      logWrappedViewed(selectedYear ?? new Date().getFullYear());
+    }
+  }, [hasData, selectedYear]);
 
   const headerSubtitle = selectedYear
     ? `Your ${selectedYear} culinary journey`
