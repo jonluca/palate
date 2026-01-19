@@ -1334,14 +1334,6 @@ export default function SettingsScreen() {
         <AllVisitsCard />
       </Animated.View>
 
-      {/* Export Section */}
-      {stats && stats.confirmedVisits > 0 && (
-        <Animated.View entering={FadeInDown.delay(250).duration(300)} className={"mb-6"}>
-          <SectionHeader>Export</SectionHeader>
-          <ExportButton />
-        </Animated.View>
-      )}
-
       {/* Calendar Section */}
       <Animated.View entering={FadeInDown.delay(350).duration(300)} className={"mb-6"}>
         <SectionHeader>Calendar</SectionHeader>
@@ -1382,6 +1374,14 @@ export default function SettingsScreen() {
         <SectionHeader>Integrations</SectionHeader>
         <GoogleMapsApiKeyCard />
       </Animated.View>
+
+      {/* Export Section */}
+      {stats && stats.confirmedVisits > 0 && (
+        <Animated.View entering={FadeInDown.delay(250).duration(300)} className={"mb-6"}>
+          <SectionHeader>Export</SectionHeader>
+          <ExportButton />
+        </Animated.View>
+      )}
 
       {/* Danger Zone */}
       <Animated.View entering={FadeInDown.delay(hasIgnoredLocations ? 650 : 550).duration(300)} className={"mb-6"}>

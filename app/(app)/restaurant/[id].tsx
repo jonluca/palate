@@ -181,16 +181,6 @@ function RestaurantInfoCard({ restaurant, onEdit }: { restaurant: RestaurantReco
                 </View>
               )}
             </View>
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                onEdit();
-              }}
-              className={"bg-secondary rounded-full p-2"}
-              hitSlop={8}
-            >
-              <IconSymbol name={"pencil"} size={18} color={"#6b7280"} />
-            </Pressable>
           </View>
 
           {/* Details */}
