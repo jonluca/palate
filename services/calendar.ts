@@ -445,20 +445,29 @@ function _cleanCalendarEventTitle(title: string): string {
   if (!title) {
     return "";
   }
-  let cleaned = title.trim();
-  for (const p of CALENDAR_TITLE_PREFIXES_TO_STRIP) {
-    cleaned = cleaned.replace(p, "");
-  }
-  for (const p of CALENDAR_TITLE_SUFFIXES_TO_STRIP) {
-    cleaned = cleaned.replace(p, "");
-  }
-  return cleaned.trim();
+  let cleaned = title
+    .trim()
+    .replace(/[–—−‐‑‒―-]/g, " ")
+    .replace(/\s+/g, " ");
+  let prev: string;
+  do {
+    prev = cleaned;
+    for (const p of CALENDAR_TITLE_PREFIXES_TO_STRIP) {
+      cleaned = cleaned.replace(p, "");
+    }
+    for (const p of CALENDAR_TITLE_SUFFIXES_TO_STRIP) {
+      cleaned = cleaned.replace(p, "");
+    }
+    cleaned = cleaned.trim();
+  } while (cleaned !== prev);
+  return cleaned;
 }
 export const cleanCalendarEventTitle = memoize(_cleanCalendarEventTitle);
 
 const COMPARISON_SUFFIXES_TO_STRIP = [
   /\s+bar\s+(and|&)\s+restaurant\s*$/i,
   /\s+restaurant\s*$/i,
+  /\s+steak ?house\s*$/i,
   /\s+gourmet\s*$/i,
   /\s+cafe\s*$/i,
   /\s+café\s*$/i,
@@ -466,6 +475,8 @@ const COMPARISON_SUFFIXES_TO_STRIP = [
   /\s+bistro\s*$/i,
   /\s+kitchen\s*$/i,
   /\s+grill\s*$/i,
+  /\s+company\s*$/i,
+  /\s+brewing\s*$/i,
   /\s+house\s*$/i,
   /\s+japanese\s*$/i,
   /\s+farm\s*$/i,
@@ -514,7 +525,6 @@ const COMPARISON_SUFFIXES_TO_STRIP = [
 ];
 
 const COMPARISON_PREFIXES_TO_STRIP = [
-  /^the\s+/i,
   /^reservation\s+(at|for|@)\s+/i,
   /^upcoming reservation (at|for|@)\s+/i,
   /^reservation\s*:\s+/i,
@@ -541,6 +551,7 @@ const COMPARISON_PREFIXES_TO_STRIP = [
   /^anniversary\s+(at|@)\s+/i,
   /^birthday\s+(at|@)\s+/i,
   /^celebration\s+(at|@)\s+/i,
+  /^the\s+/i,
   // Platform prefixes
   /^resy\s*[-:@]?\s*/i,
   /^opentable\s*[-:@]?\s*/i,
@@ -551,14 +562,22 @@ const COMPARISON_PREFIXES_TO_STRIP = [
 
 /** Strip comparison-specific prefixes and suffixes from a name */
 function _stripComparisonAffixes(str: string): string {
-  let result = str.trim();
-  for (const p of COMPARISON_PREFIXES_TO_STRIP) {
-    result = result.replace(p, "");
-  }
-  for (const p of COMPARISON_SUFFIXES_TO_STRIP) {
-    result = result.replace(p, "");
-  }
-  return result.trim();
+  let result = str
+    .trim()
+    .replace(/[–—−‐‑‒―-]/g, " ")
+    .replace(/\s+/g, " ");
+  let prev: string;
+  do {
+    prev = result;
+    for (const p of COMPARISON_PREFIXES_TO_STRIP) {
+      result = result.replace(p, "");
+    }
+    for (const p of COMPARISON_SUFFIXES_TO_STRIP) {
+      result = result.replace(p, "");
+    }
+    result = result.trim();
+  } while (result !== prev);
+  return result;
 }
 export const stripComparisonAffixes = memoize(_stripComparisonAffixes);
 /** Compare a restaurant name with a calendar event title to determine if they match */
