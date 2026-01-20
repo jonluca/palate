@@ -977,7 +977,7 @@ function sortRestaurantsByLocationRelevance(
 export async function getImportableCalendarEvents(
   options: { lookbackDays?: number; lookforwardDays?: number } = {},
 ): Promise<ImportableCalendarEvent[]> {
-  const { lookbackDays = 1000, lookforwardDays = 30 } = options;
+  const { lookbackDays = 1000, lookforwardDays = 1 } = options;
 
   // Check calendar permission
   const hasPermission = await hasCalendarPermission();
