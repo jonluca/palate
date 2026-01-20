@@ -384,7 +384,7 @@ export default function RestaurantsScreen() {
             paddingHorizontal: 16,
           }}
           ListEmptyComponent={ListEmpty}
-          key={`${sortBy}`}
+          key={`${sortBy}-${searchQuery}`}
           ItemSeparatorComponent={ItemSeparator}
           extraData={{ searchQuery, sortBy }}
         />
