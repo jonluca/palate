@@ -90,7 +90,7 @@ export default function VisitsScreen() {
             : router.push(`/visit/${item.id}`)
         }
         onStatusChange={(newStatus) => handleStatusChange(item.id, newStatus)}
-        index={index < 10 ? index : 0}
+        enableAppleMapsVerification={index < 10}
       />
     ),
     [handleStatusChange],

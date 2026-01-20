@@ -1,6 +1,5 @@
 import React from "react";
 import { View } from "react-native";
-import Animated, { FadeInDown } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
 import { Badge } from "@/components/ui";
 import { getMichelinBadge } from "@/components/restaurant-search-modal";
@@ -20,7 +19,7 @@ export function VisitHeader({ displayName, status, startTime, endTime, foodProba
   const badge = award ? getMichelinBadge(award) : null;
 
   return (
-    <Animated.View entering={FadeInDown.duration(500)} className={"gap-3"}>
+    <View className={"gap-3"}>
       <View className={"flex-row items-center gap-2"}>
         <Badge variant={statusVariant[status]} label={status} />
         {Boolean(foodProbable) && (
@@ -49,6 +48,6 @@ export function VisitHeader({ displayName, status, startTime, endTime, foodProba
       <ThemedText variant={"body"} color={"secondary"}>
         {formatDate(startTime)} · {formatTime(startTime)} – {formatTime(endTime)}
       </ThemedText>
-    </Animated.View>
+    </View>
   );
 }

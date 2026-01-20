@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import { router } from "expo-router";
 import { View, Pressable } from "react-native";
 import { ThemedText } from "@/components/themed-text";
@@ -7,35 +7,43 @@ import type { NearbyRestaurant } from "@/hooks/queries";
 
 interface NearbyRestaurantsCardProps {
   restaurants: NearbyRestaurant[];
-  selectedIndex: number;
-  onSelectIndex: (index: number) => void;
+  isShowingSuggestedRestaurant: boolean;
+  /** The currently selected restaurant (null means first in list) */
+  selectedRestaurant: NearbyRestaurant | null;
+  /** Called when user selects a restaurant from the list */
+  onSelectRestaurant: (restaurant: NearbyRestaurant) => void;
   onSearchPress: () => void;
 }
 
 export function NearbyRestaurantsCard({
   restaurants,
-  selectedIndex,
-  onSelectIndex,
+  selectedRestaurant,
+  onSelectRestaurant,
   onSearchPress,
+  isShowingSuggestedRestaurant,
 }: NearbyRestaurantsCardProps) {
   const handleDeepLink = useCallback((restaurant: NearbyRestaurant) => {
     router.push(`/restaurant/${restaurant.id}`);
   }, []);
 
-  if (restaurants.length <= 1) {
-    return null;
-  }
+  // Default to first restaurant if none selected
+  const currentSelectedRestaurant = useMemo(
+    () => selectedRestaurant ?? restaurants[0] ?? null,
+    [selectedRestaurant, restaurants],
+  );
 
   return (
     <Card delay={200}>
       <View className={"p-4 gap-3"}>
-        <NearbyRestaurantsList
-          restaurants={restaurants}
-          selectedIndex={selectedIndex}
-          onSelectIndex={onSelectIndex}
-          onDeepLink={handleDeepLink}
-          variant={"default"}
-        />
+        {!isShowingSuggestedRestaurant && (
+          <NearbyRestaurantsList
+            restaurants={restaurants}
+            selectedRestaurant={currentSelectedRestaurant}
+            onSelectRestaurant={onSelectRestaurant}
+            onDeepLink={handleDeepLink}
+            variant={"default"}
+          />
+        )}
 
         <Pressable onPress={onSearchPress} className={"self-end"} hitSlop={8}>
           <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>

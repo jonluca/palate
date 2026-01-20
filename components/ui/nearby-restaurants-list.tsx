@@ -39,8 +39,8 @@ function formatDistance(meters: number): string {
 
 export interface NearbyRestaurantsListProps {
   restaurants: NearbyRestaurant[];
-  selectedIndex: number;
-  onSelectIndex: (index: number) => void;
+  selectedRestaurant: NearbyRestaurant | null;
+  onSelectRestaurant: (restaurant: NearbyRestaurant) => void;
   /**
    * Variant affects styling:
    * - "default": Shows distance on the side, address only when no cuisine
@@ -61,8 +61,8 @@ export interface NearbyRestaurantsListProps {
 
 export function NearbyRestaurantsList({
   restaurants,
-  selectedIndex,
-  onSelectIndex,
+  selectedRestaurant,
+  onSelectRestaurant,
   variant = "default",
   showHeader = true,
   headerText,
@@ -72,13 +72,12 @@ export function NearbyRestaurantsList({
     return null;
   }
 
-  const handleSelect = (index: number) => {
+  const handleSelect = (restaurant: NearbyRestaurant) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
     // If tapping on an already-selected restaurant and we have a deep link handler,
     // trigger the deep link instead of just selecting
-    if (index === selectedIndex && onDeepLink) {
-      const restaurant = restaurants[index];
+    if (selectedRestaurant?.id === restaurant.id && onDeepLink) {
       // Only deep link for Michelin restaurants (they exist in our database)
       if (restaurant.source === "michelin") {
         onDeepLink(restaurant);
@@ -86,7 +85,7 @@ export function NearbyRestaurantsList({
       }
     }
 
-    onSelectIndex(index);
+    onSelectRestaurant(restaurant);
   };
 
   const michelinCount = restaurants.filter((r) => r.source === "michelin").length;
@@ -136,14 +135,14 @@ export function NearbyRestaurantsList({
         contentContainerStyle={{ gap: 8 }}
       >
         {restaurants.map((restaurant, idx) => {
-          const isSelected = idx === selectedIndex;
+          const isSelected = selectedRestaurant?.id === restaurant.id;
           const badge = restaurant.award ? getMichelinBadge(restaurant.award) : null;
           const isMapKit = restaurant.source === "mapkit";
 
           return (
             <Pressable
               key={`${restaurant.id}-${idx}`}
-              onPress={() => handleSelect(idx)}
+              onPress={() => handleSelect(restaurant)}
               className={cn(
                 "rounded-xl p-3 border-2",
                 isSelected

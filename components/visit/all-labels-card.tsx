@@ -12,14 +12,24 @@ export interface AggregatedLabel {
 }
 
 interface AllLabelsCardProps {
-  photos: Array<{ allLabels?: FoodLabel[] | null }>;
+  photos: Array<{ allLabels?: FoodLabel[] | null; foodLabels?: FoodLabel[] | null }>;
 }
 
 export function AllLabelsCard({ photos }: AllLabelsCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Aggregate all labels from photos
+  // Aggregate all labels from photos, excluding food labels
   const aggregatedLabels = useMemo(() => {
+    // First, collect all food label names to exclude
+    const foodLabelNames = new Set<string>();
+    for (const photo of photos) {
+      if (photo.foodLabels) {
+        for (const label of photo.foodLabels) {
+          foodLabelNames.add(label.label.toLowerCase());
+        }
+      }
+    }
+
     const labelMap = new Map<string, { maxConfidence: number; photoCount: number }>();
 
     for (const photo of photos) {
@@ -28,6 +38,11 @@ export function AllLabelsCard({ photos }: AllLabelsCardProps) {
       }
 
       for (const label of photo.allLabels) {
+        // Skip labels that are already in the food labels
+        if (foodLabelNames.has(label.label.toLowerCase())) {
+          continue;
+        }
+
         const existing = labelMap.get(label.label);
         if (existing) {
           existing.maxConfidence = Math.max(existing.maxConfidence, label.confidence);

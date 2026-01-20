@@ -12,7 +12,8 @@ interface BaseVisitCardProps {
   calendarEventIsAllDay?: boolean | null;
   /** Called when card is pressed. Optional photoIndex if a specific photo was tapped. */
   onPress?: (photoIndex?: number) => void;
-  index?: number;
+  /** Whether to perform Apple Maps verification searches (expensive, use sparingly) */
+  enableAppleMapsVerification?: boolean;
 }
 
 // List mode: simple card for the visits list
@@ -53,8 +54,7 @@ export type ReviewModeProps = BaseVisitCardProps & {
   centerLat?: number;
   /** Center longitude for Apple Maps verification searches */
   centerLon?: number;
-  /** Whether to perform Apple Maps verification searches (expensive, use sparingly) */
-  enableAppleMapsVerification?: boolean;
+
   match?: ExactCalendarMatch;
 };
 
@@ -68,8 +68,6 @@ export interface VisitActionsProps {
   onConfirm: () => void;
   onFindRestaurant?: () => void;
   hasSuggestion: boolean;
-  /** @deprecated Use loadingAction instead for per-button loading */
-  isLoading?: boolean;
   /** Which action is currently loading (shows spinner only on that button) */
   loadingAction?: LoadingAction;
   variant?: "pill" | "full";

@@ -263,7 +263,7 @@ export default function ReviewScreen() {
   const renderRegularItem = useCallback(
     ({ item, index }: { item: PendingVisitForReview; index: number }) => (
       <AnimatedListItem itemKey={item.id}>
-        <ReviewVisitCard visit={item} index={index < 10 ? index : 0} enableAppleMapsVerification={index < 8} />
+        <ReviewVisitCard visit={item} enableAppleMapsVerification={index < 8} />
       </AnimatedListItem>
     ),
     [],
@@ -272,12 +272,7 @@ export default function ReviewScreen() {
   const renderExactMatchItem = useCallback(
     ({ item, index }: { item: ExactCalendarMatch; index: number }) => (
       <AnimatedListItem itemKey={item.visitId}>
-        <ReviewVisitCard
-          visit={item.visit}
-          match={item}
-          index={index < 10 ? index : 0}
-          enableAppleMapsVerification={index < 3}
-        />
+        <ReviewVisitCard visit={item.visit} match={item} enableAppleMapsVerification={index < 3} />
       </AnimatedListItem>
     ),
     [],
@@ -323,7 +318,7 @@ export default function ReviewScreen() {
                     onToggle={() => setFoodFilter(foodFilter === "on" ? "off" : "on")}
                   />
                   <ToggleChip
-                    label={"Has Restaurant Matches"}
+                    label={"Has Calendar Matches"}
                     value={matchesFilter === "on"}
                     onToggle={() => setMatchesFilter(matchesFilter === "on" ? "off" : "on")}
                   />

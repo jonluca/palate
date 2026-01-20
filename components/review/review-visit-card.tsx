@@ -14,13 +14,12 @@ import { useEffect, useState } from "react";
 
 interface ReviewVisitCardProps {
   visit: PendingVisitForReview;
-  index: number;
   match?: ExactCalendarMatch;
   enableAppleMapsVerification?: boolean;
 }
 
 /** Card for reviewing a visit with swipe actions and restaurant confirmation */
-export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerification = false }: ReviewVisitCardProps) {
+export function ReviewVisitCard({ visit, match, enableAppleMapsVerification = false }: ReviewVisitCardProps) {
   const [showSearch, setShowSearch] = useState(false);
   const confirmMutation = useConfirmVisit();
   const updateStatusMutation = useQuickUpdateVisitStatus();
@@ -165,7 +164,6 @@ export function ReviewVisitCard({ visit, index, match, enableAppleMapsVerificati
           calendarEventIsAllDay={visit.calendarEventIsAllDay}
           onPress={handleViewVisit}
           match={match}
-          index={index}
           suggestedRestaurantName={suggestedRestaurantName}
           suggestedRestaurantAward={visit.suggestedRestaurantAward}
           suggestedRestaurantCuisine={visit.suggestedRestaurantCuisine}

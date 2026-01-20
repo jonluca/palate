@@ -1,17 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, ScrollView, Pressable, Dimensions } from "react-native";
+import { View, ScrollView, Pressable } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import Animated, {
-  FadeIn,
-  FadeInDown,
-  FadeInUp,
-  useSharedValue,
-  useAnimatedStyle,
-  withDelay,
-  withTiming,
-  withSequence,
-  Easing,
-} from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
 import { useWrappedStats, type WrappedStats } from "@/hooks/queries";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,97 +9,11 @@ import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { logWrappedViewed } from "@/services/analytics";
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-const CONFETTI_COLORS = ["#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899"];
-
 function formatDateShort(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-// Confetti particle
-function ConfettiPiece({ index, color, startX }: { index: number; color: string; startX: number }) {
-  const translateY = useSharedValue(-50);
-  const translateX = useSharedValue(0);
-  const rotate = useSharedValue(0);
-  const opacity = useSharedValue(1);
-
-  const randomDuration = 3000 + Math.random() * 2000;
-  const randomDelay = index * 80;
-  const randomSwing = (Math.random() - 0.5) * 100;
-
-  useEffect(() => {
-    translateY.value = withDelay(
-      randomDelay,
-      withTiming(SCREEN_HEIGHT + 50, { duration: randomDuration, easing: Easing.out(Easing.quad) }),
-    );
-    translateX.value = withDelay(
-      randomDelay,
-      withSequence(
-        withTiming(randomSwing, { duration: randomDuration / 3 }),
-        withTiming(-randomSwing / 2, { duration: randomDuration / 3 }),
-        withTiming(randomSwing / 3, { duration: randomDuration / 3 }),
-      ),
-    );
-    rotate.value = withDelay(
-      randomDelay,
-      withTiming(360 * (Math.random() > 0.5 ? 1 : -1) * 3, { duration: randomDuration }),
-    );
-    opacity.value = withDelay(randomDelay + randomDuration * 0.7, withTiming(0, { duration: randomDuration * 0.3 }));
-  }, [translateY, translateX, rotate, opacity, randomDelay, randomDuration, randomSwing]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }, { translateX: translateX.value }, { rotate: `${rotate.value}deg` }],
-    opacity: opacity.value,
-  }));
-
-  const size = 8 + Math.random() * 8;
-
-  return (
-    <Animated.View
-      style={[
-        {
-          position: "absolute",
-          left: startX,
-          top: -50,
-          width: size,
-          height: size * (Math.random() > 0.5 ? 1 : 0.5),
-          backgroundColor: color,
-          borderRadius: Math.random() > 0.5 ? size / 2 : 2,
-        },
-        animatedStyle,
-      ]}
-    />
-  );
-}
-
-// Confetti burst
-function Confetti({ enabled }: { enabled: boolean }) {
-  const pieces = useMemo(() => {
-    if (!enabled) {
-      return [];
-    }
-    return Array.from({ length: 50 }).map((_, i) => ({
-      id: i,
-      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-      startX: Math.random() * SCREEN_WIDTH,
-    }));
-  }, [enabled]);
-
-  if (!enabled) {
-    return null;
-  }
-
-  return (
-    <View className={"absolute inset-0 z-50"} pointerEvents={"none"}>
-      {pieces.map((piece) => (
-        <ConfettiPiece key={piece.id} index={piece.id} color={piece.color} startX={piece.startX} />
-      ))}
-    </View>
-  );
 }
 
 // Year Tab Component

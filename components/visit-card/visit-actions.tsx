@@ -10,16 +10,15 @@ export function VisitActions({
   onConfirm,
   onFindRestaurant,
   hasSuggestion,
-  isLoading = false,
   loadingAction = null,
   variant = "pill",
   promptText,
 }: VisitActionsProps) {
   // Derive per-button loading states (support both legacy isLoading and new loadingAction)
-  const isSkipLoading = loadingAction === "skip" || (isLoading && loadingAction === null);
-  const isConfirmLoading = loadingAction === "confirm" || (isLoading && loadingAction === null);
-  const isFindLoading = loadingAction === "find" || (isLoading && loadingAction === null);
-  const isAnyLoading = loadingAction !== null || isLoading;
+  const isSkipLoading = loadingAction === "skip";
+  const isConfirmLoading = loadingAction === "confirm";
+  const isFindLoading = loadingAction === "find";
+  const isAnyLoading = loadingAction !== null;
 
   const handleSkip = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);

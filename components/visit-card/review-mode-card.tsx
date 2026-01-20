@@ -22,7 +22,6 @@ export function ReviewModeCard({
   foodProbable = false,
   calendarEventTitle,
   onPress,
-  index: _index = 0,
   suggestedRestaurantName,
   suggestedRestaurantAward,
   suggestedRestaurantCuisine,
@@ -37,11 +36,11 @@ export function ReviewModeCard({
   enableAppleMapsVerification = false,
   match,
 }: ReviewModeProps) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedRestaurant, setSelectedRestaurant] = useState<NearbyRestaurant | null>(null);
 
-  // Reset selected index when card identity changes (handles FlashList recycling)
+  // Reset selected restaurant when card identity changes (handles FlashList recycling)
   useEffect(() => {
-    setSelectedIndex(0);
+    setSelectedRestaurant(null);
   }, [id]);
 
   // When we have an exact match, use that directly - no need for suggestions
@@ -106,18 +105,22 @@ export function ReviewModeCard({
   const hasMultipleSuggestions = !hasMatch && displayRestaurants.length > 1;
   const hasSingleSuggestion = !hasMatch && hasSuggestion && displayRestaurants.length === 1;
 
-  // Determine what to display based on match vs suggestions
-  const selectedRestaurant = hasMultipleSuggestions ? displayRestaurants[selectedIndex] : null;
+  // Determine the currently selected restaurant from the list (or default to first)
+  const currentSelectedRestaurant = hasMultipleSuggestions
+    ? (selectedRestaurant ?? displayRestaurants[0] ?? null)
+    : null;
 
   // Find matched restaurant details from suggestions if we have a match
   const matchedRestaurant = hasMatch ? suggestedRestaurants.find((r) => r.id === match?.restaurantId) : null;
 
   // Display values: match takes priority, then selected restaurant, then primary suggestion
-  const displayName = hasMatch ? match?.restaurantName : (selectedRestaurant?.name ?? suggestedRestaurantName);
-  const displayAward = hasMatch ? matchedRestaurant?.award : (selectedRestaurant?.award ?? suggestedRestaurantAward);
+  const displayName = hasMatch ? match?.restaurantName : (currentSelectedRestaurant?.name ?? suggestedRestaurantName);
+  const displayAward = hasMatch
+    ? matchedRestaurant?.award
+    : (currentSelectedRestaurant?.award ?? suggestedRestaurantAward);
   const displayCuisine = hasMatch
     ? matchedRestaurant?.cuisine
-    : (selectedRestaurant?.cuisine ?? suggestedRestaurantCuisine);
+    : (currentSelectedRestaurant?.cuisine ?? suggestedRestaurantCuisine);
 
   const badge = displayAward ? getMichelinBadge(displayAward) : null;
 
@@ -133,18 +136,18 @@ export function ReviewModeCard({
     if (hasMatch && matchedRestaurant) {
       // Confirm with matched restaurant
       onConfirm?.(matchedRestaurant);
-    } else if (selectedRestaurant) {
+    } else if (currentSelectedRestaurant) {
       // Convert NearbyRestaurant to SuggestedRestaurant format
       const restaurant: SuggestedRestaurant = {
-        id: selectedRestaurant.id,
-        name: selectedRestaurant.name,
-        latitude: selectedRestaurant.latitude,
-        longitude: selectedRestaurant.longitude,
-        address: selectedRestaurant.address ?? "",
-        location: selectedRestaurant.address ?? "",
-        cuisine: selectedRestaurant.cuisine ?? "",
-        award: selectedRestaurant.award ?? "",
-        distance: selectedRestaurant.distance,
+        id: currentSelectedRestaurant.id,
+        name: currentSelectedRestaurant.name,
+        latitude: currentSelectedRestaurant.latitude,
+        longitude: currentSelectedRestaurant.longitude,
+        address: currentSelectedRestaurant.address ?? "",
+        location: currentSelectedRestaurant.address ?? "",
+        cuisine: currentSelectedRestaurant.cuisine ?? "",
+        award: currentSelectedRestaurant.award ?? "",
+        distance: currentSelectedRestaurant.distance,
       };
       onConfirm?.(restaurant);
     } else {
@@ -156,10 +159,10 @@ export function ReviewModeCard({
     onReject?.();
   };
 
-  const handleSelectRestaurant = (idx: number) => {
+  const handleSelectRestaurant = useCallback((restaurant: NearbyRestaurant) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedIndex(idx);
-  };
+    setSelectedRestaurant(restaurant);
+  }, []);
 
   const handleDeepLink = useCallback((restaurant: NearbyRestaurant) => {
     // Navigate to restaurant detail page
@@ -237,8 +240,8 @@ export function ReviewModeCard({
             {hasMultipleSuggestions && (
               <NearbyRestaurantsList
                 restaurants={displayRestaurants}
-                selectedIndex={selectedIndex}
-                onSelectIndex={handleSelectRestaurant}
+                selectedRestaurant={currentSelectedRestaurant}
+                onSelectRestaurant={handleSelectRestaurant}
                 onDeepLink={handleDeepLink}
                 variant={"compact"}
               />

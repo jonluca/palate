@@ -1,54 +1,62 @@
 import React from "react";
-import { Pressable, ActivityIndicator } from "react-native";
-import Animated, { FadeInUp, LinearTransition } from "react-native-reanimated";
+import { Pressable, ActivityIndicator, View } from "react-native";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { VisitActions, type LoadingAction } from "@/components/visit-card";
-import type { VisitStatus } from "@/hooks/queries";
+import type { VisitStatus, NearbyRestaurant } from "@/hooks/queries";
+
+/** Minimal restaurant shape needed for confirmation */
+type ConfirmableRestaurant = Pick<NearbyRestaurant, "id" | "name" | "latitude" | "longitude">;
 
 interface VisitActionButtonsProps {
   status: VisitStatus;
-  hasSuggestion: boolean;
-  nearbyCount: number;
+  /** The restaurant that will be confirmed (from nearby list or suggested) */
+  restaurantToConfirm: ConfirmableRestaurant | null;
   /** Which action is currently loading */
   loadingAction: LoadingAction;
   onStatusChange: (status: VisitStatus) => void;
-  onConfirmWithSuggestion: () => void;
+  /** Called when user confirms with a restaurant */
+  onConfirmRestaurant: (restaurant: ConfirmableRestaurant) => void;
   onFindRestaurant: () => void;
   onIgnoreLocation: () => void;
 }
 
 export function VisitActionButtons({
   status,
-  hasSuggestion,
-  nearbyCount,
+  restaurantToConfirm,
   loadingAction,
   onStatusChange,
-  onConfirmWithSuggestion,
+  onConfirmRestaurant,
   onFindRestaurant,
   onIgnoreLocation,
 }: VisitActionButtonsProps) {
   const isAnyLoading = loadingAction !== null;
+  const hasRestaurant = restaurantToConfirm !== null;
 
   const getPromptText = () => {
-    if (nearbyCount > 1) {
-      return "Select and confirm a restaurant";
-    }
-    if (hasSuggestion) {
+    if (hasRestaurant) {
       return "Confirm this restaurant?";
     }
     return "Is this a restaurant visit?";
   };
 
+  const handleConfirm = () => {
+    if (restaurantToConfirm) {
+      onConfirmRestaurant(restaurantToConfirm);
+    } else {
+      onStatusChange("confirmed");
+    }
+  };
+
   return (
-    <Animated.View entering={FadeInUp.delay(400).duration(500)} layout={LinearTransition} className={"gap-4 mt-2"}>
+    <View className={"gap-4 mt-2"}>
       {status === "pending" ? (
         <>
           <VisitActions
             onSkip={() => onStatusChange("rejected")}
-            onConfirm={hasSuggestion || nearbyCount > 0 ? onConfirmWithSuggestion : () => onStatusChange("confirmed")}
+            onConfirm={handleConfirm}
             onFindRestaurant={onFindRestaurant}
-            hasSuggestion={hasSuggestion || nearbyCount > 0}
+            hasSuggestion={hasRestaurant}
             loadingAction={loadingAction}
             variant={"full"}
             promptText={getPromptText()}
@@ -71,6 +79,6 @@ export function VisitActionButtons({
           </Pressable>
         </>
       ) : null}
-    </Animated.View>
+    </View>
   );
 }

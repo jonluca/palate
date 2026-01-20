@@ -139,6 +139,8 @@ const DEFAULT_FOOD_KEYWORDS = [
   "baked_goods",
   "cookie",
   "ice_cream",
+  "fork",
+  "drinking_glass",
   "chocolate",
   "candy",
   "beverage",

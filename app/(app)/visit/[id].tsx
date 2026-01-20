@@ -1,7 +1,7 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
-import { RestaurantSearchModal, type RestaurantOption } from "@/components/restaurant-search-modal";
+import { RestaurantSearchModal } from "@/components/restaurant-search-modal";
 import { Ionicons } from "@expo/vector-icons";
 import {
   VisitHeader,
@@ -81,13 +81,16 @@ function useAggregatedFoodLabels(
   }, [photos]);
 }
 
+// Common shape for restaurants that can be confirmed
+type ConfirmableRestaurant = Pick<NearbyRestaurant, "id" | "name" | "latitude" | "longitude">;
+
 export default function VisitDetailScreen() {
   const { id, photo } = useLocalSearchParams<{ id: string; photo?: string }>();
   const initialPhotoIndex = photo !== undefined ? parseInt(photo, 10) : null;
   const [galleryIndex, setGalleryIndex] = useState<number | null>(initialPhotoIndex);
   const [showSearch, setShowSearch] = useState(false);
   const [showMergeModal, setShowMergeModal] = useState(false);
-  const [selectedRestaurantIndex, setSelectedRestaurantIndex] = useState(0);
+  const [selectedRestaurant, setSelectedRestaurant] = useState<NearbyRestaurant | null>(null);
   const [foodScanProgress, setFoodScanProgress] = useState<VisitFoodScanProgress | null>(null);
   const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
   const [isCreatingAlbum, setIsCreatingAlbum] = useState(false);
@@ -163,45 +166,14 @@ export default function VisitDetailScreen() {
     [updateStatus],
   );
 
-  const handleConfirmWithSuggestion = useCallback(async () => {
-    if (!data?.visit) {
-      return;
-    }
-
-    const hasMultipleNearby = suggestedRestaurants.length > 1;
-    const selectedNearby = hasMultipleNearby ? suggestedRestaurants[selectedRestaurantIndex] : null;
-    const restaurantToConfirm = selectedNearby ?? data.suggestedRestaurant;
-
-    if (!restaurantToConfirm) {
-      return;
-    }
-
-    setLoadingAction("confirm");
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-    try {
-      await confirmVisit.mutateAsync({
-        visitId: data.visit.id,
-        restaurantId: restaurantToConfirm.id,
-        restaurantName: restaurantToConfirm.name,
-        latitude: restaurantToConfirm.latitude,
-        longitude: restaurantToConfirm.longitude,
-        startTime: data.visit.startTime,
-      });
-      router.back();
-    } catch (error) {
-      console.error("Error confirming visit:", error);
-    } finally {
-      setLoadingAction(null);
-    }
-  }, [data, confirmVisit, suggestedRestaurants, selectedRestaurantIndex]);
-
-  const handleSelectRestaurant = useCallback(
-    async (restaurant: RestaurantOption) => {
+  // Unified confirmation handler that takes the restaurant directly
+  const handleConfirmRestaurant = useCallback(
+    async (restaurant: ConfirmableRestaurant) => {
       if (!data?.visit) {
         return;
       }
 
+      setLoadingAction("confirm");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
       try {
@@ -216,10 +188,15 @@ export default function VisitDetailScreen() {
         router.back();
       } catch (error) {
         console.error("Error confirming visit:", error);
+      } finally {
+        setLoadingAction(null);
       }
     },
     [data, confirmVisit],
   );
+
+  // Derive the restaurant to confirm from state or fallback to suggested
+  const restaurantToConfirm = selectedRestaurant ?? data?.suggestedRestaurant ?? null;
 
   const handleMergeVisit = useCallback(
     async (sourceVisit: { id: string }) => {
@@ -526,7 +503,6 @@ export default function VisitDetailScreen() {
   // Nearby restaurants are already in the correct format
   const nearbyRestaurantsForCard: NearbyRestaurant[] = suggestedRestaurants;
 
-  const showNearbyRestaurants = visit.status === "pending" && !restaurant && suggestedRestaurants.length > 1;
   const showSuggestedRestaurant =
     visit.status === "pending" && suggestedRestaurant && !restaurant && suggestedRestaurants.length <= 1;
   const showNoMatch =
@@ -564,22 +540,20 @@ export default function VisitDetailScreen() {
           />
         )}
 
-        {showNearbyRestaurants && (
-          <NearbyRestaurantsCard
-            restaurants={nearbyRestaurantsForCard}
-            selectedIndex={selectedRestaurantIndex}
-            onSelectIndex={setSelectedRestaurantIndex}
-            onSearchPress={() => setShowSearch(true)}
-          />
-        )}
+        <NearbyRestaurantsCard
+          isShowingSuggestedRestaurant={Boolean(showSuggestedRestaurant)}
+          restaurants={nearbyRestaurantsForCard}
+          selectedRestaurant={selectedRestaurant}
+          onSelectRestaurant={setSelectedRestaurant}
+          onSearchPress={() => setShowSearch(true)}
+        />
 
         <VisitActionButtons
           status={visit.status}
-          hasSuggestion={Boolean(suggestedRestaurant)}
-          nearbyCount={suggestedRestaurants.length}
+          restaurantToConfirm={restaurantToConfirm}
           loadingAction={loadingAction}
           onStatusChange={handleStatusChange}
-          onConfirmWithSuggestion={handleConfirmWithSuggestion}
+          onConfirmRestaurant={handleConfirmRestaurant}
           onFindRestaurant={() => setShowSearch(true)}
           onIgnoreLocation={handleIgnoreLocation}
         />
@@ -656,7 +630,7 @@ export default function VisitDetailScreen() {
       <RestaurantSearchModal
         visible={showSearch}
         onClose={() => setShowSearch(false)}
-        onSelect={handleSelectRestaurant}
+        onSelect={handleConfirmRestaurant}
         centerLat={visit.centerLat}
         centerLon={visit.centerLon}
         visit={visit}

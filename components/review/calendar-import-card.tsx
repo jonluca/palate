@@ -17,11 +17,11 @@ interface CalendarImportCardProps {
 
 /** Card for displaying an importable calendar event that matches a Michelin restaurant */
 export function CalendarImportCard({ event, onImport, onDismiss, isImporting, isDismissing }: CalendarImportCardProps) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedRestaurant, setSelectedRestaurant] = useState<NearbyRestaurant | null>(null);
 
-  // Reset selected index when event changes (handles list recycling)
+  // Reset selected restaurant when event changes (handles list recycling)
   useEffect(() => {
-    setSelectedIndex(0);
+    setSelectedRestaurant(null);
   }, [event.calendarEventId]);
 
   const eventDate = new Date(event.startDate);
@@ -37,7 +37,6 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
   });
 
   const hasMultipleMatches = event.matchedRestaurants.length > 1;
-  const selectedRestaurant = event.matchedRestaurants[selectedIndex] ?? event.matchedRestaurant;
 
   // Convert to NearbyRestaurant format for the list component
   const restaurantsForList: NearbyRestaurant[] = useMemo(
@@ -56,9 +55,15 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
     [event.matchedRestaurants],
   );
 
-  const handleSelectIndex = useCallback((idx: number) => {
+  // Get the currently selected restaurant (default to first)
+  const currentSelectedRestaurant = selectedRestaurant ?? restaurantsForList[0] ?? null;
+  // Find the matched restaurant object for display (from the original event data)
+  const displayRestaurant =
+    event.matchedRestaurants.find((r) => r.id === currentSelectedRestaurant?.id) ?? event.matchedRestaurant;
+
+  const handleSelectRestaurant = useCallback((restaurant: NearbyRestaurant) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setSelectedIndex(idx);
+    setSelectedRestaurant(restaurant);
   }, []);
 
   const handleDeepLink = useCallback((restaurant: NearbyRestaurant) => {
@@ -67,8 +72,8 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
 
   const handleImport = useCallback(() => {
     // Pass the selected restaurant ID to the import handler
-    onImport(selectedRestaurant.id);
-  }, [onImport, selectedRestaurant.id]);
+    onImport(displayRestaurant.id);
+  }, [onImport, displayRestaurant.id]);
 
   return (
     <View className={"bg-card rounded-2xl p-4 gap-3 mb-4"}>
@@ -103,8 +108,8 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
           </View>
           <NearbyRestaurantsList
             restaurants={restaurantsForList}
-            selectedIndex={selectedIndex}
-            onSelectIndex={handleSelectIndex}
+            selectedRestaurant={currentSelectedRestaurant}
+            onSelectRestaurant={handleSelectRestaurant}
             onDeepLink={handleDeepLink}
             variant={"calendar"}
             showHeader={false}
@@ -113,7 +118,7 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
       ) : (
         /* Single Match - Show Detailed Card */
         <Pressable
-          onPress={() => router.push(`/restaurant/${selectedRestaurant.id}`)}
+          onPress={() => router.push(`/restaurant/${displayRestaurant.id}`)}
           accessibilityRole={"button"}
           className={"bg-background/50 rounded-xl p-3"}
           hitSlop={6}
@@ -129,42 +134,42 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
           </View>
 
           <ThemedText className={"font-medium mt-1 text-blue-400"} numberOfLines={2}>
-            {selectedRestaurant.name}
+            {displayRestaurant.name}
           </ThemedText>
 
           {/* Award badge */}
-          {selectedRestaurant.award && (
+          {displayRestaurant.award && (
             <View className={"flex-row items-center gap-1 mt-1"}>
               <IconSymbol name={"star.fill"} size={12} color={"#f59e0b"} />
               <ThemedText variant={"caption1"} color={"secondary"}>
-                {selectedRestaurant.award}
+                {displayRestaurant.award}
               </ThemedText>
             </View>
           )}
 
           {/* Location details */}
           <View className={"mt-1.5 gap-0.5"}>
-            {selectedRestaurant.location && (
+            {displayRestaurant.location && (
               <View className={"flex-row items-center gap-1"}>
                 <IconSymbol name={"mappin"} size={12} color={"#9ca3af"} />
                 <ThemedText variant={"caption1"} color={"tertiary"} numberOfLines={1}>
-                  {selectedRestaurant.location}
+                  {displayRestaurant.location}
                 </ThemedText>
               </View>
             )}
-            {selectedRestaurant.address && (
+            {displayRestaurant.address && (
               <ThemedText variant={"caption2"} color={"tertiary"} numberOfLines={1} className={"ml-4"}>
-                {selectedRestaurant.address}
+                {displayRestaurant.address}
               </ThemedText>
             )}
           </View>
 
           {/* Cuisine */}
-          {selectedRestaurant.cuisine && (
+          {displayRestaurant.cuisine && (
             <View className={"flex-row items-center gap-1 mt-1"}>
               <IconSymbol name={"fork.knife"} size={12} color={"#9ca3af"} />
               <ThemedText variant={"caption1"} color={"tertiary"}>
-                {selectedRestaurant.cuisine}
+                {displayRestaurant.cuisine}
               </ThemedText>
             </View>
           )}
