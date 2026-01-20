@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { View, Pressable, ScrollView } from "react-native";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { cn } from "@/utils/cn";
 import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
 import type { NearbyRestaurant } from "@/hooks/queries";
 
 // Inline getMichelinBadge to avoid circular dependencies
@@ -68,25 +69,29 @@ export function NearbyRestaurantsList({
   headerText,
   onDeepLink,
 }: NearbyRestaurantsListProps) {
-  if (restaurants.length === 0) {
-    return null;
-  }
+  // Default deep link navigates to restaurant detail page
+  const defaultDeepLink = useCallback((restaurant: NearbyRestaurant) => {
+    router.push(`/restaurant/${restaurant.id}`);
+  }, []);
+
+  const deepLinkHandler = onDeepLink ?? defaultDeepLink;
 
   const handleSelect = (restaurant: NearbyRestaurant) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    // If tapping on an already-selected restaurant and we have a deep link handler,
-    // trigger the deep link instead of just selecting
-    if (selectedRestaurant?.id === restaurant.id && onDeepLink) {
-      // Only deep link for Michelin restaurants (they exist in our database)
-      if (restaurant.source === "michelin") {
-        onDeepLink(restaurant);
-        return;
-      }
+    // If tapping on an already-selected restaurant, trigger the deep link instead of just selecting
+    // Only deep link for Michelin restaurants (they exist in our database)
+    if (selectedRestaurant?.id === restaurant.id && restaurant.source === "michelin") {
+      deepLinkHandler(restaurant);
+      return;
     }
 
     onSelectRestaurant(restaurant);
   };
+
+  if (restaurants.length === 0) {
+    return null;
+  }
 
   const michelinCount = restaurants.filter((r) => r.source === "michelin").length;
   const mapKitCount = restaurants.filter((r) => r.source === "mapkit").length;

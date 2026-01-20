@@ -1,5 +1,4 @@
-import React, { useCallback, useMemo } from "react";
-import { router } from "expo-router";
+import React, { useMemo } from "react";
 import { View, Pressable } from "react-native";
 import { ThemedText } from "@/components/themed-text";
 import { Card, NearbyRestaurantsList } from "@/components/ui";
@@ -22,10 +21,6 @@ export function NearbyRestaurantsCard({
   onSearchPress,
   isShowingSuggestedRestaurant,
 }: NearbyRestaurantsCardProps) {
-  const handleDeepLink = useCallback((restaurant: NearbyRestaurant) => {
-    router.push(`/restaurant/${restaurant.id}`);
-  }, []);
-
   // Default to first restaurant if none selected
   const currentSelectedRestaurant = useMemo(
     () => selectedRestaurant ?? restaurants[0] ?? null,
@@ -40,7 +35,6 @@ export function NearbyRestaurantsCard({
             restaurants={restaurants}
             selectedRestaurant={currentSelectedRestaurant}
             onSelectRestaurant={onSelectRestaurant}
-            onDeepLink={handleDeepLink}
             variant={"default"}
           />
         )}

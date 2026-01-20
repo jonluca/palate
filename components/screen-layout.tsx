@@ -38,7 +38,7 @@ export function ScreenLayout({
     return (
       <ScrollView
         className={cn("flex-1 bg-background", className)}
-        contentContainerClassName={cn("p-4 gap-6", contentClassName)}
+        contentContainerClassName={cn("p-4 gap-4", contentClassName)}
         contentContainerStyle={contentStyle}
         showsVerticalScrollIndicator={false}
         refreshControl={

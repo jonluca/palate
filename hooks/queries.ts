@@ -494,7 +494,7 @@ function mergeNearbyRestaurants(
   const mapKit: NearbyRestaurant[] = mapKitResults
     .filter((r) => r.name) // Ensure name exists
     .map((r) => ({
-      id: `mapkit-${r.latitude.toFixed(6)}-${r.longitude.toFixed(6)}`,
+      id: `mapkit-${r.latitude.toFixed(6)}-${r.longitude.toFixed(6)}-${r.name?.toLowerCase().trim()}`,
       name: r.name!,
       latitude: r.latitude,
       longitude: r.longitude,

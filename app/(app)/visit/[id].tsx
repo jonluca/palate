@@ -547,13 +547,15 @@ export default function VisitDetailScreen() {
           />
         )}
 
-        <NearbyRestaurantsCard
-          isShowingSuggestedRestaurant={Boolean(showSuggestedRestaurant)}
-          restaurants={nearbyRestaurantsForCard}
-          selectedRestaurant={selectedRestaurant}
-          onSelectRestaurant={setSelectedRestaurant}
-          onSearchPress={() => setShowSearch(true)}
-        />
+        {visit.status === "pending" && (
+          <NearbyRestaurantsCard
+            isShowingSuggestedRestaurant={Boolean(showSuggestedRestaurant)}
+            restaurants={nearbyRestaurantsForCard}
+            selectedRestaurant={selectedRestaurant}
+            onSelectRestaurant={setSelectedRestaurant}
+            onSearchPress={() => setShowSearch(true)}
+          />
+        )}
 
         <VisitActionButtons
           status={visit.status}
@@ -638,8 +640,6 @@ export default function VisitDetailScreen() {
         visible={showSearch}
         onClose={() => setShowSearch(false)}
         onSelect={handleConfirmRestaurant}
-        centerLat={visit.centerLat}
-        centerLon={visit.centerLon}
         visit={visit}
       />
 

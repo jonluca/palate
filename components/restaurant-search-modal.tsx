@@ -125,19 +125,10 @@ interface RestaurantSearchModalProps {
   visible: boolean;
   onClose: () => void;
   onSelect: (restaurant: RestaurantOption) => void;
-  centerLat: number;
-  centerLon: number;
   visit: VisitRecord;
 }
 
-export function RestaurantSearchModal({
-  visible,
-  onClose,
-  onSelect,
-  centerLat,
-  centerLon,
-  visit,
-}: RestaurantSearchModalProps) {
+export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: RestaurantSearchModalProps) {
   const [searchingGoogle, setSearchingGoogle] = useState(false);
   const [googleResults, setGoogleResults] = useState<PlaceResult[]>([]);
   const [showGoogle, setShowGoogle] = useState(false);
@@ -145,6 +136,7 @@ export function RestaurantSearchModal({
   const scrollViewRef = useRef<ScrollView>(null);
   const searchInputRef = useRef<TextInput>(null);
   const googleMapsApiKey = useGoogleMapsApiKey();
+  const { centerLat, centerLon } = visit;
 
   // Use unified hook for Michelin + MapKit results
   // Pass a minimal visit object with coordinates (suggestedRestaurants not available here)

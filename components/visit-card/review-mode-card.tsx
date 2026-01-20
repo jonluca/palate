@@ -1,6 +1,4 @@
-import { IconSymbol } from "@/components/icon-symbol";
 import { Card, NearbyRestaurantsList, SwipeableCard, useUndo } from "@/components/ui";
-import { ThemedText } from "@/components/themed-text";
 import { RestaurantSearchModal, type RestaurantOption } from "@/components/restaurant-search-modal";
 import { cleanCalendarEventTitle, isFuzzyRestaurantMatch } from "@/services/calendar";
 import { useConfirmVisit, useQuickUpdateVisitStatus, useUndoVisitAction } from "@/hooks/queries";
@@ -9,9 +7,8 @@ import { router } from "expo-router";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Pressable, View } from "react-native";
 import { PhotoPreview } from "./photo-preview";
-import { CalendarBadge, NearbyRestaurantsBadge, ExactMatchBadge } from "./badges";
 import { VisitActions } from "./visit-actions";
-import { formatDate, formatTime, getMichelinBadge } from "./utils";
+import { VisitMetaHeader, BadgesRow, ExactMatchCard, NotThisRestaurantLink } from "./review-mode-components";
 import { useUnifiedNearbyRestaurants, type NearbyRestaurant } from "@/hooks";
 import type { ReviewModeProps, SuggestedRestaurant, LoadingAction } from "./types";
 
@@ -32,16 +29,7 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
   }, [visit.id]);
 
   // Extract visit properties for easier access
-  const {
-    id,
-    startTime,
-    photoCount,
-    previewPhotos = [],
-    foodProbable = false,
-    calendarEventTitle,
-    centerLat,
-    centerLon,
-  } = visit;
+  const { id, startTime, photoCount, previewPhotos = [], foodProbable = false, calendarEventTitle } = visit;
 
   // When we have an exact match, use that directly - no need for suggestions
   const hasMatch = Boolean(match);
@@ -90,9 +78,12 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
 
   // Determine the currently selected restaurant from the list (or default to first)
   const currentSelectedRestaurant =
-    (selectedRestaurant ?? visit.suggestedRestaurantId)
+    selectedRestaurant ??
+    (visit.suggestedRestaurantId
       ? (displayRestaurants.find((r) => r.id === visit.suggestedRestaurantId) ?? null)
-      : (displayRestaurants[0] ?? null);
+      : null) ??
+    displayRestaurants[0] ??
+    null;
 
   // Find matched restaurant details from suggestions if we have a match
   // This lookup provides additional details (award, cuisine) not stored in the ExactCalendarMatch
@@ -104,8 +95,6 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
   const displayName = hasMatch ? match?.restaurantName : currentSelectedRestaurant?.name;
   const displayAward = hasMatch ? matchedRestaurant?.award : currentSelectedRestaurant?.award;
   const displayCuisine = hasMatch ? matchedRestaurant?.cuisine : currentSelectedRestaurant?.cuisine;
-
-  const badge = displayAward ? getMichelinBadge(displayAward) : null;
 
   // Has any suggestion to confirm (match, selected, or single suggestion)
   const canConfirm = hasMatch || Boolean(displayRestaurants.length);
@@ -258,15 +247,6 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
     setSelectedRestaurant(restaurant);
   }, []);
 
-  const handleDeepLink = useCallback((restaurant: NearbyRestaurant) => {
-    // Navigate to restaurant detail page
-    router.push(`/restaurant/${restaurant.id}`);
-  }, []);
-
-  const handleFindRestaurant = useCallback(() => {
-    setShowSearch(true);
-  }, []);
-
   return (
     <>
       <SwipeableCard
@@ -283,95 +263,34 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
               <PhotoPreview photos={previewPhotos} onPhotoPress={handleViewVisit} />
 
               <View className={"p-4 gap-3"}>
-                {/* Date and Food Badge */}
-                <View className={"flex-row items-center justify-between"}>
-                  <View>
-                    <ThemedText variant={"subhead"} className={"font-medium"}>
-                      {formatDate(startTime)}
-                    </ThemedText>
-                    <ThemedText variant={"footnote"} color={"tertiary"}>
-                      at {formatTime(startTime)} • {photoCount.toLocaleString()} photos
-                    </ThemedText>
-                  </View>
-                  <View className={"flex-row items-center gap-2"}>
-                    {Boolean(foodProbable) && (
-                      <View className={"flex-row items-center gap-1 bg-amber-500/10 px-2 py-1 rounded-full"}>
-                        <ThemedText variant={"caption1"}>🍽️</ThemedText>
-                        <ThemedText variant={"caption2"} className={"text-amber-600"}>
-                          Food Detected
-                        </ThemedText>
-                      </View>
-                    )}
-                    <IconSymbol name={"chevron.right"} size={16} color={"gray"} />
-                  </View>
-                </View>
+                <VisitMetaHeader startTime={startTime} photoCount={photoCount} foodProbable={foodProbable} />
 
-                {/* Badges row */}
-                <View className={"flex-row items-center gap-2 flex-1 overflow-x-auto"}>
-                  {calendarEventTitle && <CalendarBadge title={calendarEventTitle} />}
-                  {hasMatch && <ExactMatchBadge />}
-                  {displayRestaurants.length > 0 && <NearbyRestaurantsBadge count={displayRestaurants.length} />}
-                </View>
+                <BadgesRow calendarEventTitle={calendarEventTitle} hasMatch={hasMatch} />
 
-                {/* Exact Match Card - shown when we have a calendar match */}
-                {hasMatch && (
-                  <View className={"rounded-xl p-3 gap-2 bg-green-500/10"}>
-                    <View className={"flex-row items-center gap-2"}>
-                      <View className={"w-6 h-6 rounded-full bg-green-500/20 items-center justify-center"}>
-                        <IconSymbol name={"checkmark.seal.fill"} size={14} color={"#22c55e"} />
-                      </View>
-                      <ThemedText variant={"footnote"} color={"secondary"}>
-                        Calendar Match Found
-                      </ThemedText>
-                    </View>
-                    <ThemedText numberOfLines={1} variant={"heading"} className={"font-semibold"}>
-                      {displayName}
-                    </ThemedText>
-                    {badge && (
-                      <View className={"flex-row items-center gap-1"}>
-                        <ThemedText variant={"caption1"}>{badge.emoji}</ThemedText>
-                        <ThemedText variant={"caption2"} color={"secondary"}>
-                          {badge.label}
-                        </ThemedText>
-                      </View>
-                    )}
-                    {displayCuisine && (
-                      <ThemedText numberOfLines={1} variant={"footnote"} color={"tertiary"}>
-                        {displayCuisine}
-                      </ThemedText>
-                    )}
-                  </View>
-                )}
-
-                {/* Multiple Suggestions Picker - only when no match */}
-                {displayRestaurants.length > 0 && (
+                {hasMatch ? (
+                  <ExactMatchCard
+                    displayName={displayName}
+                    displayAward={displayAward}
+                    displayCuisine={displayCuisine}
+                  />
+                ) : (
                   <NearbyRestaurantsList
                     restaurants={displayRestaurants}
                     selectedRestaurant={currentSelectedRestaurant}
                     onSelectRestaurant={handleSelectRestaurantFromList}
-                    onDeepLink={handleDeepLink}
                     variant={"compact"}
                   />
                 )}
-
-                {/* Actions */}
                 <VisitActions
                   onSkip={handleReject}
                   onConfirm={handleConfirmButton}
-                  onFindRestaurant={handleFindRestaurant}
+                  onFindRestaurant={() => setShowSearch(true)}
                   hasSuggestion={canConfirm}
                   loadingAction={loadingAction}
                   variant={"pill"}
                 />
 
-                {/* Alternative: Find Different - only shown when we have a suggestion */}
-                {canConfirm && (
-                  <Pressable onPress={handleFindRestaurant} className={"self-end"} hitSlop={8}>
-                    <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>
-                      Not this restaurant?
-                    </ThemedText>
-                  </Pressable>
-                )}
+                {canConfirm && <NotThisRestaurantLink onPress={() => setShowSearch(true)} />}
               </View>
             </Card>
           </Pressable>
@@ -382,8 +301,6 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
         visible={showSearch}
         onClose={() => setShowSearch(false)}
         onSelect={handleSelectRestaurantFromModal}
-        centerLat={centerLat}
-        centerLon={centerLon}
         visit={visit}
       />
     </>

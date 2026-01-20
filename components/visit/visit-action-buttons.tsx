@@ -48,6 +48,9 @@ export function VisitActionButtons({
     }
   };
 
+  if (status !== "pending") {
+    return null;
+  }
   return (
     <View className={"gap-4 mt-2"}>
       {status === "pending" ? (

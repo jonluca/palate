@@ -91,7 +91,7 @@ export function AllLabelsCard({ photos }: AllLabelsCardProps) {
               </ThemedText>
             </View>
           </View>
-          <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={18} color={"#9ca3af"} />
+          {hasMoreLabels && <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={18} color={"#9ca3af"} />}
         </View>
 
         <View className={"flex-row flex-wrap gap-2"}>
