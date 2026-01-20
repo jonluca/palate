@@ -130,6 +130,8 @@ async function processWithNativeBatch(
         creationTime: asset.creationTime,
         latitude: hasLocation ? asset.location!.latitude : null,
         longitude: hasLocation ? asset.location!.longitude : null,
+        mediaType: asset.mediaType === "video" ? "video" : "photo",
+        duration: asset.mediaType === "video" ? asset.duration : null,
       });
     }
 
@@ -154,7 +156,8 @@ async function processWithPMap(
     assets,
     async (asset) => {
       try {
-        return await MediaLibrary.getAssetInfoAsync(asset);
+        const info = await MediaLibrary.getAssetInfoAsync(asset);
+        return { ...info, originalAsset: asset };
       } catch (error) {
         console.warn(`Failed to get info for asset ${asset.id}:`, error);
         return null;
@@ -177,12 +180,15 @@ async function processWithPMap(
       locCount++;
     }
 
+    const isVideo = asset.originalAsset.mediaType === MediaLibrary.MediaType.video;
     photos.push({
       id: asset.id,
       uri: asset.uri,
       creationTime: asset.creationTime,
       latitude: hasLocation ? asset.location!.latitude : null,
       longitude: hasLocation ? asset.location!.longitude : null,
+      mediaType: isVideo ? "video" : "photo",
+      duration: isVideo ? asset.originalAsset.duration : null,
     });
   }
 
@@ -206,10 +212,10 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     onProgress,
   } = options;
 
-  // First, get the total count
+  // First, get the total count (both photos and videos)
   const totalAssetsResponse = await MediaLibrary.getAssetsAsync({
     first: 1,
-    mediaType: MediaLibrary.MediaType.photo,
+    mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
   });
 
   const totalAssets = totalAssetsResponse.totalCount;
@@ -235,11 +241,11 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
   const startTime = Date.now();
 
   while (hasNextPage) {
-    // Fetch batch of assets (just metadata, not full info)
+    // Fetch batch of assets (just metadata, not full info) - both photos and videos
     const response = await MediaLibrary.getAssetsAsync({
       first: batchSize,
       after: endCursor,
-      mediaType: MediaLibrary.MediaType.photo,
+      mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
       sortBy: [MediaLibrary.SortBy.creationTime],
     });
 
@@ -315,12 +321,12 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
 }
 
 /**
- * Get a quick estimate of photos in camera roll
+ * Get a quick estimate of photos and videos in camera roll
  */
 export async function getPhotoCount(): Promise<number> {
   const response = await MediaLibrary.getAssetsAsync({
     first: 1,
-    mediaType: MediaLibrary.MediaType.photo,
+    mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
   });
   return response.totalCount;
 }
@@ -342,10 +348,10 @@ export async function createAlbumWithPhotos(albumName: string, assetIds: string[
   }
 
   try {
-    // Get the assets from their IDs
+    // Get the assets from their IDs (both photos and videos)
     const assets = await MediaLibrary.getAssetsAsync({
       first: assetIds.length,
-      mediaType: MediaLibrary.MediaType.photo,
+      mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
     });
 
     // Filter to only include assets that match our IDs

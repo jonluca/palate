@@ -10,6 +10,8 @@ import Animated, { FadeIn } from "react-native-reanimated";
 interface PhotoData {
   id: string;
   uri: string;
+  mediaType?: "photo" | "video";
+  duration?: number | null;
 }
 
 interface PhotosSectionProps {
@@ -29,6 +31,12 @@ const NUM_COLUMNS = 3;
 const GAP = 6;
 const CONTAINER_PADDING = 8; // p-2 = 8px
 
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
 function PhotoItem({
   photo,
   size,
@@ -47,6 +55,7 @@ function PhotoItem({
   isSelected?: boolean;
 }) {
   const [isLoading, setIsLoading] = useState(true);
+  const isVideo = photo.mediaType === "video";
 
   return (
     <Animated.View entering={FadeIn.delay(Math.min(index * 30, 300)).duration(300)} style={{ marginBottom: GAP }}>
@@ -64,6 +73,21 @@ function PhotoItem({
             recyclingKey={photo.id}
             onLoad={() => setIsLoading(false)}
           />
+          {/* Video indicator */}
+          {isVideo && (
+            <>
+              <View
+                className={"absolute bottom-1 left-1 flex-row items-center gap-0.5 bg-black/60 px-1 py-0.5 rounded"}
+              >
+                <Ionicons name={"play"} size={10} color={"white"} />
+                {photo.duration != null && (
+                  <ThemedText variant={"caption2"} style={{ color: "white", fontSize: 9 }}>
+                    {formatDuration(photo.duration)}
+                  </ThemedText>
+                )}
+              </View>
+            </>
+          )}
           {isSelectionMode && (
             <View
               className={`absolute top-1 right-1 w-5 h-5 rounded-full items-center justify-center ${

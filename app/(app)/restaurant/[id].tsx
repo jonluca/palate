@@ -23,8 +23,15 @@ import React, { useCallback, useEffect, useState } from "react";
 import { View, Pressable, Platform, type LayoutChangeEvent, ScrollView, Modal, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
+
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
@@ -76,17 +83,34 @@ function VisitHistoryCard({ visit }: { visit: VisitRecord }) {
           {/* Preview Photos */}
           {photos.length > 0 && (
             <View className={"flex-row h-24"} onLayout={handlePreviewLayout}>
-              {photos.slice(0, previewCount).map((photo, i) => (
-                <View key={i} className={"flex-1"}>
-                  <Image
-                    source={{ uri: photo.uri }}
-                    recyclingKey={photo.id}
-                    style={{ width: "100%", height: "100%" }}
-                    contentFit={"cover"}
-                    transition={300}
-                  />
-                </View>
-              ))}
+              {photos.slice(0, previewCount).map((photo, i) => {
+                const isVideo = photo.mediaType === "video";
+                return (
+                  <View key={i} className={"flex-1"}>
+                    <Image
+                      source={{ uri: photo.uri }}
+                      recyclingKey={photo.id}
+                      style={{ width: "100%", height: "100%" }}
+                      contentFit={"cover"}
+                      transition={300}
+                    />
+                    {isVideo && (
+                      <View
+                        className={
+                          "absolute bottom-1 left-1 flex-row items-center gap-0.5 bg-black/60 px-1 py-0.5 rounded"
+                        }
+                      >
+                        <Ionicons name={"play"} size={10} color={"white"} />
+                        {photo.duration != null && (
+                          <ThemedText variant={"caption2"} style={{ color: "white", fontSize: 9 }}>
+                            {formatDuration(photo.duration)}
+                          </ThemedText>
+                        )}
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
             </View>
           )}
 

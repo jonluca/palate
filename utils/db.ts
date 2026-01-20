@@ -24,6 +24,10 @@ export interface PhotoRecord {
   foodConfidence: number | null | undefined;
   /** All classification labels returned by the ML classifier (not just food-related) */
   allLabels: FoodLabel[] | null | undefined;
+  /** Media type: 'photo' or 'video' */
+  mediaType: "photo" | "video";
+  /** Duration in seconds (for videos only) */
+  duration: number | null;
 }
 
 export interface VisitRecord {
@@ -372,6 +376,20 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
     // Column already exists, ignore
   }
 
+  // Migration: Add mediaType column to distinguish between photos and videos
+  try {
+    await database.execAsync(`ALTER TABLE photos ADD COLUMN mediaType TEXT DEFAULT 'photo'`);
+  } catch {
+    // Column already exists, ignore
+  }
+
+  // Migration: Add duration column for video assets
+  try {
+    await database.execAsync(`ALTER TABLE photos ADD COLUMN duration REAL`);
+  } catch {
+    // Column already exists, ignore
+  }
+
   // Prepopulate food_keywords table with default keywords if empty
   await prepopulateFoodKeywords(database);
 }
@@ -401,10 +419,11 @@ async function prepopulateFoodKeywords(database: SQLite.SQLiteDatabase): Promise
 }
 
 // Raw photo record as stored in database (foodLabels and allLabels are JSON strings)
-interface RawPhotoRecord extends Omit<PhotoRecord, "foodLabels" | "foodDetected" | "allLabels"> {
+interface RawPhotoRecord extends Omit<PhotoRecord, "foodLabels" | "foodDetected" | "allLabels" | "mediaType"> {
   foodLabels: string | null;
   foodDetected: number | null;
   allLabels: string | null;
+  mediaType: string | null;
 }
 
 // Helper to parse raw database photo record into proper PhotoRecord
@@ -432,6 +451,7 @@ function parsePhotoRecord(raw: RawPhotoRecord): PhotoRecord {
     foodDetected: raw.foodDetected === null ? null : raw.foodDetected === 1,
     foodLabels,
     allLabels,
+    mediaType: (raw.mediaType === "video" ? "video" : "photo") as "photo" | "video",
   };
 }
 
@@ -448,12 +468,20 @@ export async function insertPhotos(
 
   for (let i = 0; i < photos.length; i += batchSize) {
     const batch = photos.slice(i, i + batchSize);
-    const placeholders = batch.map(() => "(?, ?, ?, ?, ?)").join(", ");
-    const values = batch.flatMap((p) => [p.id, p.uri, p.creationTime, p.latitude, p.longitude]);
+    const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ");
+    const values = batch.flatMap((p) => [
+      p.id,
+      p.uri,
+      p.creationTime,
+      p.latitude,
+      p.longitude,
+      p.mediaType,
+      p.duration,
+    ]);
 
     // foodDetected is left as NULL (not set until food detection runs)
     await database.runAsync(
-      `INSERT OR IGNORE INTO photos (id, uri, creationTime, latitude, longitude) VALUES ${placeholders}`,
+      `INSERT OR IGNORE INTO photos (id, uri, creationTime, latitude, longitude, mediaType, duration) VALUES ${placeholders}`,
       values,
     );
   }

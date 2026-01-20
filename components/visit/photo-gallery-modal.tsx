@@ -1,24 +1,63 @@
-import React from "react";
-import { View, Pressable, Modal } from "react-native";
+import React, { useCallback } from "react";
+import { View, Pressable, Modal, useWindowDimensions, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
-import { Gallery } from "@/components/AwesomeGallery";
+import { Gallery, type RenderItemInfo } from "@/components/AwesomeGallery";
+import { Image } from "expo-image";
+import { useVideoPlayer, VideoView } from "expo-video";
 import type { FoodLabel } from "@/utils/db";
 
-interface PhotoWithLabels {
+interface MediaWithLabels {
   id: string;
   uri: string;
   foodLabels?: FoodLabel[] | null;
+  mediaType?: "photo" | "video";
 }
 
 interface PhotoGalleryModalProps {
   visible: boolean;
-  photos: PhotoWithLabels[];
+  photos: MediaWithLabels[];
   currentIndex: number;
   onIndexChange: (index: number) => void;
   onClose: () => void;
+}
+
+function VideoItem({ item, setImageDimensions }: RenderItemInfo<MediaWithLabels>) {
+  const { width, height } = useWindowDimensions();
+  const player = useVideoPlayer(item.uri, (p) => {
+    p.loop = true;
+    p.play();
+  });
+
+  // Set dimensions based on screen size for videos
+  React.useEffect(() => {
+    setImageDimensions({ width, height: height * 0.6 });
+  }, [width, height, setImageDimensions]);
+
+  return (
+    <View style={[StyleSheet.absoluteFillObject, { justifyContent: "center", alignItems: "center" }]}>
+      <VideoView player={player} style={{ width, height: height * 0.8 }} contentFit={"contain"} nativeControls />
+    </View>
+  );
+}
+
+function ImageItem({ item, setImageDimensions }: RenderItemInfo<MediaWithLabels>) {
+  return (
+    <Image
+      onLoad={(e) => {
+        const { height: h, width: w } = e.source;
+        setImageDimensions({ height: h, width: w });
+      }}
+      source={item.uri}
+      contentFit={"contain"}
+      style={StyleSheet.absoluteFillObject}
+      cachePolicy={"memory-disk"}
+      allowDownscaling={false}
+      placeholderContentFit={"cover"}
+    />
+  );
 }
 
 export function PhotoGalleryModal({ visible, photos, currentIndex, onIndexChange, onClose }: PhotoGalleryModalProps) {
@@ -26,6 +65,17 @@ export function PhotoGalleryModal({ visible, photos, currentIndex, onIndexChange
 
   const currentPhoto = photos[currentIndex];
   const foodLabels = currentPhoto?.foodLabels as FoodLabel[] | undefined;
+  const isVideo = currentPhoto?.mediaType === "video";
+
+  const renderItem = useCallback((info: RenderItemInfo<MediaWithLabels>) => {
+    if (info.item.mediaType === "video") {
+      return <VideoItem {...info} />;
+    }
+    return <ImageItem {...info} />;
+  }, []);
+
+  // Only show food labels for photos, not videos
+  const showFoodLabels = !isVideo && foodLabels && foodLabels.length > 0;
 
   return (
     <Modal visible={visible} transparent={true} animationType={"fade"} onRequestClose={onClose}>
@@ -45,7 +95,7 @@ export function PhotoGalleryModal({ visible, photos, currentIndex, onIndexChange
         </Pressable>
 
         {/* Food labels for current image with blur effect */}
-        {foodLabels && foodLabels.length > 0 && (
+        {showFoodLabels && (
           <View
             style={{
               position: "absolute",
@@ -101,10 +151,11 @@ export function PhotoGalleryModal({ visible, photos, currentIndex, onIndexChange
         )}
 
         <Gallery
-          data={photos.map((p) => p.uri)}
+          data={photos}
           initialIndex={currentIndex}
           onIndexChange={onIndexChange}
           onSwipeToClose={onClose}
+          renderItem={renderItem}
         />
       </View>
     </Modal>

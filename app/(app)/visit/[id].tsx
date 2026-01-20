@@ -225,7 +225,7 @@ export default function VisitDetailScreen() {
         refetchMergeableVisits();
       }
     },
-    [data, mergeVisits, showToast],
+    [data?.visit, mergeVisits, refetchMergeableVisits, showToast],
   );
 
   const handleIgnoreLocation = useCallback(() => {
@@ -313,9 +313,9 @@ export default function VisitDetailScreen() {
         return;
       }
 
-      // Open image picker
+      // Open image picker (supports both images and videos)
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
+        mediaTypes: ["images", "videos"],
         allowsMultipleSelection: true,
         quality: 1,
         orderedSelection: true,
@@ -501,7 +501,13 @@ export default function VisitDetailScreen() {
   }
 
   const { visit, restaurant, suggestedRestaurant, photos } = data;
-  const photoData = photos.map((p) => ({ id: p.id, uri: p.uri, foodLabels: p.foodLabels as FoodLabel[] | null }));
+  const photoData = photos.map((p) => ({
+    id: p.id,
+    uri: p.uri,
+    foodLabels: p.foodLabels as FoodLabel[] | null,
+    mediaType: p.mediaType,
+    duration: p.duration,
+  }));
   const displayName =
     restaurant?.name ??
     suggestedRestaurant?.name ??

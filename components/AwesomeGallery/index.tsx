@@ -15,6 +15,8 @@ import { RTL, SPACE_BETWEEN_IMAGES, DOUBLE_TAP_SCALE, MAX_SCALE, TIMING_CONFIG }
 import { ResizableImage, DefaultImage } from "./components";
 import type { GalleryProps, GalleryReactRef, ItemRef, RenderItem } from "./types";
 
+export type { RenderItemInfo } from "./types";
+
 const GalleryComponent = <T = string,>(
   {
     data,
