@@ -6,7 +6,7 @@ import { useConfirmedRestaurants, useMichelinRestaurants, type RestaurantWithVis
 import type { MichelinRestaurantRecord } from "@/utils/db";
 import { FlashList } from "@shopify/flash-list";
 import { router } from "expo-router";
-import React, { useCallback, useMemo, useState, useRef } from "react";
+import React, { useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { View, RefreshControl, Pressable, TextInput } from "react-native";
 import Animated, { FadeInDown, FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,12 +16,22 @@ import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 
 type SortOption = "recent" | "confirmed" | "name" | "visits";
+type StarFilter = "all" | "1star" | "2star" | "3star" | "lost" | "gained";
 
 const sortOptions: { value: SortOption; label: string }[] = [
   { value: "recent", label: "Recent" },
   { value: "confirmed", label: "Recently Confirmed" },
   { value: "name", label: "A-Z" },
   { value: "visits", label: "Most Visits" },
+];
+
+const starFilterOptions: { value: StarFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "1star", label: "⭐" },
+  { value: "2star", label: "⭐⭐" },
+  { value: "3star", label: "⭐⭐⭐" },
+  { value: "lost", label: "Lost Stars" },
+  { value: "gained", label: "Gained Stars" },
 ];
 
 function formatDate(timestamp: number): string {
@@ -31,6 +41,23 @@ function formatDate(timestamp: number): string {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function getStarCount(award: string | null): number {
+  if (!award) {
+    return 0;
+  }
+  const lower = award.toLowerCase();
+  if (lower.includes("3 star")) {
+    return 3;
+  }
+  if (lower.includes("2 star")) {
+    return 2;
+  }
+  if (lower.includes("1 star")) {
+    return 1;
+  }
+  return 0;
 }
 
 function formatAward(award: string | null): string | null {
@@ -232,6 +259,7 @@ export default function RestaurantsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("recent");
+  const [starFilter, setStarFilter] = useState<StarFilter>("all");
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,6 +273,11 @@ export default function RestaurantsScreen() {
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }, []);
 
+  // Instantly scroll to top when search query or filters change
+  useEffect(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [searchQuery, starFilter, sortBy]);
+
   // Create a set of visited restaurant IDs for filtering
   const visitedRestaurantIds = useMemo(() => {
     return new Set(restaurants.map((r) => r.id));
@@ -257,8 +290,35 @@ export default function RestaurantsScreen() {
 
     // Filter visited restaurants
     let visitedResults = [...restaurants];
+
+    // Apply search filter
     if (isSearching) {
       visitedResults = visitedResults.filter((r) => r.name.toLowerCase().includes(query));
+    }
+
+    // Apply star filter
+    if (starFilter !== "all") {
+      visitedResults = visitedResults.filter((r) => {
+        const currentStars = getStarCount(r.currentAward);
+        const visitedStars = getStarCount(r.visitedAward ?? r.currentAward);
+
+        switch (starFilter) {
+          case "1star":
+            return currentStars === 1;
+          case "2star":
+            return currentStars === 2;
+          case "3star":
+            return currentStars === 3;
+          case "lost":
+            // Restaurant had more stars when visited than it does now
+            return visitedStars > currentStars;
+          case "gained":
+            // Restaurant has more stars now than when visited
+            return currentStars > visitedStars;
+          default:
+            return true;
+        }
+      });
     }
 
     // Sort visited restaurants
@@ -280,8 +340,8 @@ export default function RestaurantsScreen() {
 
     const items: ListItem[] = visitedResults.map((data) => ({ type: "visited", data }));
 
-    // When searching, also include unvisited Michelin restaurants
-    if (isSearching && michelinRestaurants.length > 0) {
+    // When searching, also include unvisited Michelin restaurants (only when no star filter is active)
+    if (isSearching && michelinRestaurants.length > 0 && starFilter === "all") {
       const unvisitedMichelin = michelinRestaurants
         .filter((r) => !visitedRestaurantIds.has(r.id) && r.name.toLowerCase().includes(query))
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -294,7 +354,7 @@ export default function RestaurantsScreen() {
     }
 
     return items;
-  }, [restaurants, michelinRestaurants, visitedRestaurantIds, searchQuery, sortBy]);
+  }, [restaurants, michelinRestaurants, visitedRestaurantIds, searchQuery, sortBy, starFilter]);
 
   // For backward compatibility with existing code
   const filteredAndSortedRestaurants = useMemo(() => {
@@ -310,6 +370,11 @@ export default function RestaurantsScreen() {
   const handleSortChange = useCallback((value: SortOption) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSortBy(value);
+  }, []);
+
+  const handleStarFilterChange = useCallback((value: StarFilter) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setStarFilter(value);
   }, []);
 
   const handleClearSearch = useCallback(() => {
@@ -339,20 +404,27 @@ export default function RestaurantsScreen() {
 
     // If we have restaurants but no results at all (including Michelin)
     if (restaurants.length > 0 && listItems.length === 0) {
+      const hasActiveFilter = starFilter !== "all";
+      const filterLabel = starFilterOptions.find((o) => o.value === starFilter)?.label ?? "";
+
       return (
         <Animated.View entering={FadeIn.duration(200)} className={"py-8 items-center gap-3"}>
           <IconSymbol name={"magnifyingglass"} size={40} color={"gray"} />
           <ThemedText variant={"body"} color={"secondary"} className={"text-center"}>
-            No restaurants match "{searchQuery}"
+            {hasActiveFilter ? `No restaurants with ${filterLabel}` : `No restaurants match "${searchQuery}"`}
           </ThemedText>
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setSearchQuery("");
+              if (hasActiveFilter) {
+                setStarFilter("all");
+              } else {
+                setSearchQuery("");
+              }
             }}
           >
             <ThemedText variant={"subhead"} className={"text-primary font-medium"}>
-              Clear search
+              {hasActiveFilter ? "Clear filter" : "Clear search"}
             </ThemedText>
           </Pressable>
         </Animated.View>
@@ -360,7 +432,7 @@ export default function RestaurantsScreen() {
     }
 
     return <NoRestaurantsEmpty onPress={() => router.push("/review")} />;
-  }, [isLoading, restaurants.length, listItems.length, searchQuery]);
+  }, [isLoading, restaurants.length, listItems.length, searchQuery, starFilter]);
 
   const ItemSeparator = useCallback(() => <View style={{ height: 16 }} />, []);
 
@@ -390,6 +462,7 @@ export default function RestaurantsScreen() {
 
           <SearchBar value={searchQuery} onChangeText={setSearchQuery} onClear={handleClearSearch} />
           <FilterPills options={sortOptions} value={sortBy} onChange={handleSortChange} />
+          <FilterPills options={starFilterOptions} value={starFilter} onChange={handleStarFilterChange} />
 
           {/* Restaurant List Section Title */}
           {filteredAndSortedRestaurants.length > 0 && (
@@ -404,7 +477,12 @@ export default function RestaurantsScreen() {
         </View>
       )}
 
-      <View className={"flex-1"}>
+      <View
+        className={"flex-1"}
+        style={{
+          paddingBottom: insets.bottom,
+        }}
+      >
         <FlashList
           ref={listRef}
           data={listItems}
@@ -424,9 +502,7 @@ export default function RestaurantsScreen() {
             paddingHorizontal: 16,
           }}
           ListEmptyComponent={ListEmpty}
-          key={`${sortBy}-${searchQuery}`}
           ItemSeparatorComponent={ItemSeparator}
-          extraData={{ searchQuery, sortBy }}
         />
       </View>
     </ScreenLayout>
