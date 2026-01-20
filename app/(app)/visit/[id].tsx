@@ -117,11 +117,11 @@ export default function VisitDetailScreen() {
   const removePhotosFromVisit = useRemovePhotosFromVisit(id);
 
   // Get mergeable visits when modal is open
-  const { data: mergeableVisits = [], isLoading: isMergeableLoading } = useMergeableVisits(
-    id,
-    data?.visit?.startTime,
-    showMergeModal,
-  );
+  const {
+    data: mergeableVisits = [],
+    isLoading: isMergeableLoading,
+    refetch: refetchMergeableVisits,
+  } = useMergeableVisits(id, data?.visit?.startTime, showMergeModal);
 
   // Fetch nearby restaurants using unified hook (Michelin + MapKit)
   // Pass visit data with coordinates and pre-computed suggested restaurants
@@ -221,6 +221,8 @@ export default function VisitDetailScreen() {
       } catch (error) {
         console.error("Error merging visits:", error);
         showToast({ type: "error", message: "Failed to merge visits. Please try again." });
+      } finally {
+        refetchMergeableVisits();
       }
     },
     [data, mergeVisits, showToast],
@@ -617,22 +619,30 @@ export default function VisitDetailScreen() {
         <AllLabelsCard photos={photos} />
 
         {visit.status !== "pending" && (
-          <Pressable
-            onPress={() => handleStatusChange("pending")}
-            disabled={loadingAction !== null}
-            className={"flex-row items-center justify-center gap-2 py-4 mt-2"}
-          >
-            {loadingAction === "skip" ? (
-              <ActivityIndicator size={"small"} color={"#9ca3af"} />
-            ) : (
-              <>
-                <Ionicons name={"refresh"} size={14} color={"#9ca3af"} />
-                <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>
-                  Reset to Pending
-                </ThemedText>
-              </>
-            )}
-          </Pressable>
+          <View className={"flex-row items-center justify-center gap-6 py-4 mt-2"}>
+            <Pressable
+              onPress={() => handleStatusChange("pending")}
+              disabled={loadingAction !== null}
+              className={"flex-row items-center gap-2"}
+            >
+              {loadingAction === "skip" ? (
+                <ActivityIndicator size={"small"} color={"#9ca3af"} />
+              ) : (
+                <>
+                  <Ionicons name={"refresh"} size={14} color={"#9ca3af"} />
+                  <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>
+                    Reset to Pending
+                  </ThemedText>
+                </>
+              )}
+            </Pressable>
+            <Pressable onPress={() => setShowMergeModal(true)} className={"flex-row items-center gap-2"}>
+              <Ionicons name={"git-merge-outline"} size={14} color={"#9ca3af"} />
+              <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>
+                Merge Visits
+              </ThemedText>
+            </Pressable>
+          </View>
         )}
       </ScreenLayout>
 

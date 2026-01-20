@@ -39,9 +39,12 @@ export function MergeVisitsModal({ visible, isLoading, visits, onMerge, onClose 
 
   return (
     <Modal visible={visible} transparent={true} animationType={"slide"} onRequestClose={onClose}>
-      <View className={"flex-1 bg-black/50"}>
-        <Pressable className={"flex-1"} onPress={onClose} />
-        <View className={"bg-card rounded-t-3xl"} style={{ paddingBottom: insets.bottom + 16, maxHeight: "80%" }}>
+      <View className={"flex-1 bg-black/50 justify-end"}>
+        <Pressable className={"absolute inset-0"} onPress={onClose} />
+        <View
+          className={"bg-card rounded-t-3xl overflow-hidden"}
+          style={{ paddingBottom: insets.bottom + 16, maxHeight: "80%" }}
+        >
           {/* Header */}
           <View className={"flex-row items-center justify-between p-4 border-b border-border"}>
             <ThemedText variant={"title3"} className={"font-semibold"}>
@@ -60,7 +63,7 @@ export function MergeVisitsModal({ visible, isLoading, visits, onMerge, onClose 
           </View>
 
           {/* Visits List */}
-          <ScrollView className={"flex-1"} contentContainerStyle={{ padding: 16, gap: 12 }}>
+          <ScrollView contentContainerStyle={{ padding: 16, gap: 12, flexGrow: 1 }}>
             {isLoading ? (
               <View className={"py-12 items-center"}>
                 <ActivityIndicator size={"large"} />
