@@ -442,6 +442,11 @@ export default function ReviewScreen() {
                   <ThemedText variant={"body"} color={"secondary"}>
                     Try changing the filters above.
                   </ThemedText>
+                  {foodFilter === "on" && (
+                    <ThemedText variant={"body"} color={"secondary"}>
+                      Pro tip - if you're not seeing any results with food, try deep scanning in settings.
+                    </ThemedText>
+                  )}
                 </View>
               )
             }

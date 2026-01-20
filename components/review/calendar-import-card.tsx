@@ -61,6 +61,10 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
     setSelectedIndex(idx);
   }, []);
 
+  const handleDeepLink = useCallback((restaurant: NearbyRestaurant) => {
+    router.push(`/restaurant/${restaurant.id}`);
+  }, []);
+
   const handleImport = useCallback(() => {
     // Pass the selected restaurant ID to the import handler
     onImport(selectedRestaurant.id);
@@ -101,6 +105,7 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
             restaurants={restaurantsForList}
             selectedIndex={selectedIndex}
             onSelectIndex={handleSelectIndex}
+            onDeepLink={handleDeepLink}
             variant={"calendar"}
             showHeader={false}
           />

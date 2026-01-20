@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useCallback } from "react";
+import { router } from "expo-router";
 import { View, Pressable } from "react-native";
 import { ThemedText } from "@/components/themed-text";
 import { Card, NearbyRestaurantsList } from "@/components/ui";
@@ -17,6 +18,10 @@ export function NearbyRestaurantsCard({
   onSelectIndex,
   onSearchPress,
 }: NearbyRestaurantsCardProps) {
+  const handleDeepLink = useCallback((restaurant: NearbyRestaurant) => {
+    router.push(`/restaurant/${restaurant.id}`);
+  }, []);
+
   if (restaurants.length <= 1) {
     return null;
   }
@@ -28,6 +33,7 @@ export function NearbyRestaurantsCard({
           restaurants={restaurants}
           selectedIndex={selectedIndex}
           onSelectIndex={onSelectIndex}
+          onDeepLink={handleDeepLink}
           variant={"default"}
         />
 

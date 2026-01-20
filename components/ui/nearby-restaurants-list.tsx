@@ -52,6 +52,11 @@ export interface NearbyRestaurantsListProps {
   showHeader?: boolean;
   /** Custom header text - if not provided, will generate based on restaurant counts */
   headerText?: string;
+  /**
+   * Callback fired when user taps on an already-selected restaurant.
+   * Use this to deep link to the restaurant detail page if it exists in the database.
+   */
+  onDeepLink?: (restaurant: NearbyRestaurant) => void;
 }
 
 export function NearbyRestaurantsList({
@@ -61,6 +66,7 @@ export function NearbyRestaurantsList({
   variant = "default",
   showHeader = true,
   headerText,
+  onDeepLink,
 }: NearbyRestaurantsListProps) {
   if (restaurants.length === 0) {
     return null;
@@ -68,6 +74,18 @@ export function NearbyRestaurantsList({
 
   const handleSelect = (index: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    // If tapping on an already-selected restaurant and we have a deep link handler,
+    // trigger the deep link instead of just selecting
+    if (index === selectedIndex && onDeepLink) {
+      const restaurant = restaurants[index];
+      // Only deep link for Michelin restaurants (they exist in our database)
+      if (restaurant.source === "michelin") {
+        onDeepLink(restaurant);
+        return;
+      }
+    }
+
     onSelectIndex(index);
   };
 

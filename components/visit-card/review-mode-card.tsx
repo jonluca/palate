@@ -4,7 +4,8 @@ import { Card, NearbyRestaurantsList } from "@/components/ui";
 import { ThemedText } from "@/components/themed-text";
 import { cleanCalendarEventTitle, isFuzzyRestaurantMatch } from "@/services/calendar";
 import * as Haptics from "expo-haptics";
-import React, { useState, useEffect, useMemo } from "react";
+import { router } from "expo-router";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Pressable, View } from "react-native";
 import { PhotoPreview } from "./photo-preview";
 import { CalendarBadge, NearbyRestaurantsBadge, ExactMatchBadge } from "./badges";
@@ -160,6 +161,11 @@ export function ReviewModeCard({
     setSelectedIndex(idx);
   };
 
+  const handleDeepLink = useCallback((restaurant: NearbyRestaurant) => {
+    // Navigate to restaurant detail page
+    router.push(`/restaurant/${restaurant.id}`);
+  }, []);
+
   return (
     <View className={"mb-4"}>
       <Pressable onPress={() => handleViewVisit()}>
@@ -233,6 +239,7 @@ export function ReviewModeCard({
                 restaurants={displayRestaurants}
                 selectedIndex={selectedIndex}
                 onSelectIndex={handleSelectRestaurant}
+                onDeepLink={handleDeepLink}
                 variant={"compact"}
               />
             )}
