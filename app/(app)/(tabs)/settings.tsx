@@ -948,7 +948,7 @@ function IgnoredLocationsCard({
             </ThemedText>
           </View>
         </View>
-        <View className={"gap-2"}>
+        <ScrollView className={"gap-2 max-h-[200px] overflow-y-auto"}>
           {locations.map((location) => (
             <View key={location.id} className={"flex-row items-center justify-between bg-background/50 rounded-xl p-3"}>
               <View className={"flex-1"}>
@@ -964,7 +964,7 @@ function IgnoredLocationsCard({
               </Pressable>
             </View>
           ))}
-        </View>
+        </ScrollView>
       </View>
     </Card>
   );
