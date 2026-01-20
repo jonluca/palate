@@ -15,6 +15,7 @@ import {
   PhotoGalleryModal,
   MergeVisitsModal,
   NotesCard,
+  AllLabelsCard,
   type AggregatedFoodLabel,
   type LoadingAction,
 } from "@/components/visit";
@@ -629,6 +630,8 @@ export default function VisitDetailScreen() {
         )}
 
         <NotesCard notes={visit.notes} onSave={handleSaveNotes} isSaving={updateNotes.isPending} />
+
+        <AllLabelsCard photos={photos} />
 
         {visit.status !== "pending" && (
           <Pressable
