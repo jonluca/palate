@@ -124,12 +124,19 @@ export default function VisitDetailScreen() {
   );
 
   // Fetch nearby restaurants using unified hook (Michelin + MapKit)
+  // Pass visit data with coordinates and pre-computed suggested restaurants
   const shouldFetchNearby = data?.visit?.status === "pending" && !data?.restaurant;
-  const { data: suggestedRestaurants = [] } = useUnifiedNearbyRestaurants(
-    data?.visit?.centerLat,
-    data?.visit?.centerLon,
-    shouldFetchNearby,
-  );
+  const visitForNearby = useMemo(() => {
+    if (!data?.visit) {
+      return undefined;
+    }
+    return {
+      centerLat: data.visit.centerLat,
+      centerLon: data.visit.centerLon,
+      suggestedRestaurants: data.suggestedRestaurants,
+    };
+  }, [data?.visit, data?.suggestedRestaurants]);
+  const { data: suggestedRestaurants = [] } = useUnifiedNearbyRestaurants(visitForNearby, shouldFetchNearby);
 
   // Reverse geocode the location for display when no restaurant is matched
   const needsGeocode = !data?.restaurant && !data?.suggestedRestaurant && !data?.visit?.calendarEventTitle;

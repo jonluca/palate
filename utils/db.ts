@@ -2398,11 +2398,16 @@ export interface WrappedStats {
   monthlyVisits: Array<{ month: number; year: number; visits: number }>;
   // Michelin stars breakdown
   michelinStats: {
-    threeStars: number;
-    twoStars: number;
-    oneStars: number;
-    bibGourmand: number;
-    selected: number;
+    threeStars: number; // total visits to 3-star restaurants
+    twoStars: number; // total visits to 2-star restaurants
+    oneStars: number; // total visits to 1-star restaurants
+    bibGourmand: number; // total visits to Bib Gourmand restaurants
+    selected: number; // total visits to Selected restaurants
+    distinctThreeStars: number; // unique 3-star restaurants visited
+    distinctTwoStars: number; // unique 2-star restaurants visited
+    distinctOneStars: number; // unique 1-star restaurants visited
+    distinctBibGourmand: number; // unique Bib Gourmand restaurants visited
+    distinctSelected: number; // unique Selected restaurants visited
     totalStarredVisits: number;
     distinctStarredRestaurants: number; // unique starred restaurants visited
     totalAccumulatedStars: number; // sum of stars across all visits (2 visits to 3-star = 6)
@@ -2467,6 +2472,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     yearlyData,
     monthlyVisitsData,
     michelinData,
+    distinctMichelinData,
     distinctStarredResult,
     distinctStarsResult,
     topCuisines,
@@ -2518,6 +2524,15 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     // Michelin stats - uses awardAtVisit for historical accuracy, falls back to current award
     database.getAllAsync<{ award: string; count: number }>(
       `SELECT COALESCE(v.awardAtVisit, m.award) as award, COUNT(DISTINCT v.id) as count
+      FROM visits v
+      JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
+      JOIN michelin_restaurants m ON vsr.restaurantId = m.id
+      WHERE v.status = 'confirmed' ${yearFilterForV}
+      GROUP BY COALESCE(v.awardAtVisit, m.award)`,
+    ),
+    // Distinct restaurant counts per award type - uses awardAtVisit or falls back to current award
+    database.getAllAsync<{ award: string; count: number }>(
+      `SELECT COALESCE(v.awardAtVisit, m.award) as award, COUNT(DISTINCT m.id) as count
       FROM visits v
       JOIN visit_suggested_restaurants vsr ON v.id = vsr.visitId
       JOIN michelin_restaurants m ON vsr.restaurantId = m.id
@@ -2745,6 +2760,11 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     oneStars: 0,
     bibGourmand: 0,
     selected: 0,
+    distinctThreeStars: 0,
+    distinctTwoStars: 0,
+    distinctOneStars: 0,
+    distinctBibGourmand: 0,
+    distinctSelected: 0,
     totalStarredVisits: 0,
     distinctStarredRestaurants: distinctStarredResult?.count ?? 0,
     totalAccumulatedStars: 0,
@@ -2752,6 +2772,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     greenStarVisits: greenStarResult?.count ?? 0,
   };
 
+  // Process visit counts per award type
   for (const row of michelinData) {
     if (!row.award) {
       continue;
@@ -2772,6 +2793,25 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       michelinStats.selected += row.count;
     }
     michelinStats.totalStarredVisits += row.count;
+  }
+
+  // Process distinct restaurant counts per award type
+  for (const row of distinctMichelinData) {
+    if (!row.award) {
+      continue;
+    }
+    const award = row.award.toLowerCase();
+    if (award.includes("3 star")) {
+      michelinStats.distinctThreeStars += row.count;
+    } else if (award.includes("2 star")) {
+      michelinStats.distinctTwoStars += row.count;
+    } else if (award.includes("1 star")) {
+      michelinStats.distinctOneStars += row.count;
+    } else if (award.includes("bib")) {
+      michelinStats.distinctBibGourmand += row.count;
+    } else if (award.includes("selected")) {
+      michelinStats.distinctSelected += row.count;
+    }
   }
 
   // Calculate longest streak of consecutive dining days

@@ -8,7 +8,14 @@ import { FlashList } from "@shopify/flash-list";
 import { router } from "expo-router";
 import React, { useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { View, RefreshControl, Pressable, TextInput } from "react-native";
-import Animated, { FadeInDown, FadeIn, FadeOut } from "react-native-reanimated";
+import Animated, {
+  FadeInDown,
+  FadeIn,
+  FadeOut,
+  useAnimatedStyle,
+  withTiming,
+  useSharedValue,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconSymbol } from "@/components/icon-symbol";
@@ -213,38 +220,66 @@ function SearchBar({
   value,
   onChangeText,
   onClear,
+  filtersExpanded,
+  onToggleFilters,
 }: {
   value: string;
   onChangeText: (text: string) => void;
   onClear: () => void;
+  filtersExpanded: boolean;
+  onToggleFilters: () => void;
 }) {
+  const rotation = useSharedValue(0);
+
+  React.useEffect(() => {
+    rotation.value = withTiming(filtersExpanded ? 180 : 0, { duration: 200 });
+  }, [filtersExpanded, rotation]);
+
+  const arrowStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value}deg` }],
+  }));
+
   return (
-    <View className={"flex-row items-center bg-card rounded-xl px-3 py-2 gap-2"}>
-      <IconSymbol name={"magnifyingglass"} size={18} color={"gray"} />
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={"Search restaurants..."}
-        placeholderTextColor={"#888"}
-        className={"flex-1 text-foreground text-base"}
-        style={{ height: 24 }}
-        autoCapitalize={"none"}
-        autoCorrect={false}
-        clearButtonMode={"never"}
-      />
-      {value.length > 0 && (
-        <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)}>
-          <Pressable
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              onClear();
-            }}
-            hitSlop={8}
-          >
-            <IconSymbol name={"xmark.circle.fill"} size={18} color={"gray"} />
-          </Pressable>
+    <View className={"flex-row items-center gap-2"}>
+      <View className={"flex-1 flex-row items-center bg-card rounded-xl px-3 py-2 gap-2"}>
+        <IconSymbol name={"magnifyingglass"} size={18} color={"gray"} />
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={"Search restaurants..."}
+          placeholderTextColor={"#888"}
+          className={"flex-1 text-foreground text-base"}
+          style={{ height: 24 }}
+          autoCapitalize={"none"}
+          autoCorrect={false}
+          clearButtonMode={"never"}
+        />
+        {value.length > 0 && (
+          <Animated.View entering={FadeIn.duration(150)} exiting={FadeOut.duration(150)}>
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                onClear();
+              }}
+              hitSlop={8}
+            >
+              <IconSymbol name={"xmark.circle.fill"} size={18} color={"gray"} />
+            </Pressable>
+          </Animated.View>
+        )}
+      </View>
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          onToggleFilters();
+        }}
+        hitSlop={8}
+        className={"p-2"}
+      >
+        <Animated.View style={arrowStyle}>
+          <IconSymbol name={"chevron.down"} size={18} color={"gray"} />
         </Animated.View>
-      )}
+      </Pressable>
     </View>
   );
 }
@@ -260,6 +295,7 @@ export default function RestaurantsScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("recent");
   const [starFilter, setStarFilter] = useState<StarFilter>("all");
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -381,6 +417,10 @@ export default function RestaurantsScreen() {
     setSearchQuery("");
   }, []);
 
+  const handleToggleFilters = useCallback(() => {
+    setFiltersExpanded((prev) => !prev);
+  }, []);
+
   const renderItem = useCallback(({ item, index }: { item: ListItem; index: number }) => {
     if (item.type === "section-header") {
       return (
@@ -460,9 +500,19 @@ export default function RestaurantsScreen() {
           {/* New Photos Card */}
           <NewPhotosCard />
 
-          <SearchBar value={searchQuery} onChangeText={setSearchQuery} onClear={handleClearSearch} />
-          <FilterPills options={sortOptions} value={sortBy} onChange={handleSortChange} />
-          <FilterPills options={starFilterOptions} value={starFilter} onChange={handleStarFilterChange} />
+          <SearchBar
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onClear={handleClearSearch}
+            filtersExpanded={filtersExpanded}
+            onToggleFilters={handleToggleFilters}
+          />
+          {filtersExpanded && (
+            <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(150)} className={"gap-3"}>
+              <FilterPills options={sortOptions} value={sortBy} onChange={handleSortChange} />
+              <FilterPills options={starFilterOptions} value={starFilter} onChange={handleStarFilterChange} />
+            </Animated.View>
+          )}
 
           {/* Restaurant List Section Title */}
           {filteredAndSortedRestaurants.length > 0 && (

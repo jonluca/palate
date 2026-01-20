@@ -136,7 +136,6 @@ import {
 } from "@/services/visit";
 import { hasMediaLibraryPermission, requestMediaLibraryPermission, getPhotoCount } from "@/services/scanner";
 import { exportToJSON, exportToCSV, shareExport } from "@/services/export";
-import { findNearbyMichelinRestaurants } from "@/data/restaurants";
 import {
   isMapKitSearchAvailable,
   searchNearbyRestaurants as mapKitSearchNearbyRestaurants,
@@ -414,24 +413,6 @@ export function useMichelinRestaurantDetails(michelinId: string | undefined) {
 }
 
 /**
- * Search nearby Michelin restaurants
- */
-function useNearbyMichelinRestaurants(lat: number | undefined, lon: number | undefined, enabled: boolean = true) {
-  const { data: allRestaurants } = useMichelinRestaurants();
-
-  return useQuery({
-    queryKey: queryKeys.nearbyMichelin(lat ?? 0, lon ?? 0),
-    queryFn: () => {
-      if (!lat || !lon || !allRestaurants) {
-        return [];
-      }
-      return findNearbyMichelinRestaurants(lat, lon, allRestaurants, 500, 10);
-    },
-    enabled: enabled && !!lat && !!lon && !!allRestaurants,
-  });
-}
-
-/**
  * Search nearby restaurants using native MapKit (iOS only)
  * Uses MKLocalPointsOfInterestRequest for finding restaurants, cafes, bakeries, etc.
  */
@@ -542,42 +523,76 @@ function mergeNearbyRestaurants(
   return [...michelin, ...dedupedMapKit].sort((a, b) => a.distance - b.distance);
 }
 
-const MICHELIN_RADIUS_METERS = 500;
 const MAPKIT_RADIUS_METERS = 200;
 
+/** Input type for visit with suggested restaurants */
+interface VisitWithSuggestedRestaurants {
+  centerLat?: number;
+  centerLon?: number;
+  suggestedRestaurants?: Array<{
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    distance: number;
+    award?: string | null;
+    cuisine?: string;
+    address?: string;
+  }>;
+}
+
 /**
- * Unified hook for fetching nearby restaurants from both Michelin database and MapKit.
- * Handles merging and deduplication automatically.
+ * Unified hook for fetching nearby restaurants, merging the visit's suggested Michelin
+ * restaurants with MapKit results.
  *
- * @param lat - Center latitude
- * @param lon - Center longitude
- * @param enabled - Whether to enable the query
+ * - Always includes the visit's suggestedRestaurants (Michelin database)
+ * - When enabled, also fetches from MapKit and merges/deduplicates
+ * - Michelin restaurants are prioritized over MapKit duplicates
+ *
+ * @param visit - The visit containing centerLat, centerLon, and suggestedRestaurants
+ * @param enabled - Whether to fetch additional MapKit results (expensive, use sparingly)
  */
-export function useUnifiedNearbyRestaurants(lat: number | undefined, lon: number | undefined, enabled: boolean = true) {
-  // Fetch Michelin restaurants
-  const { data: michelinResults = [], isLoading: michelinLoading } = useNearbyMichelinRestaurants(lat, lon, enabled);
+export function useUnifiedNearbyRestaurants(visit: VisitWithSuggestedRestaurants | undefined, enabled: boolean = true) {
+  const lat = visit?.centerLat;
+  const lon = visit?.centerLon;
+
+  // Only fetch MapKit if enabled and we have coordinates
+  const shouldFetchMapKit = enabled && Boolean(lat) && Boolean(lon);
 
   // Fetch MapKit restaurants
   const { data: mapKitResults = [], isLoading: mapKitLoading } = useMapKitNearbyRestaurants(
     lat,
     lon,
     MAPKIT_RADIUS_METERS,
-    enabled,
+    shouldFetchMapKit,
   );
 
-  // Merge results
+  // Convert visit's suggestedRestaurants to MichelinRestaurantInput format for merging
+  // Use visit?.suggestedRestaurants directly in dependency to avoid creating new array reference
+  const michelinRestaurants: MichelinRestaurantInput[] = useMemo(() => {
+    const suggestedRestaurants = visit?.suggestedRestaurants ?? [];
+    return suggestedRestaurants.map((r) => ({
+      id: r.id,
+      name: r.name,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      distance: r.distance,
+      award: r.award ?? "",
+      cuisine: r.cuisine ?? "",
+    }));
+  }, [visit?.suggestedRestaurants]);
+
+  // Merge results: Michelin + MapKit, deduplicated and sorted by distance
   const mergedRestaurants = useMemo(() => {
-    // Filter Michelin results by radius (the hook might return more)
-    const filteredMichelin = michelinResults.filter((r) => r.distance <= MICHELIN_RADIUS_METERS);
-    return mergeNearbyRestaurants(filteredMichelin, mapKitResults);
-  }, [michelinResults, mapKitResults]);
+    return mergeNearbyRestaurants(michelinRestaurants, mapKitResults);
+  }, [michelinRestaurants, mapKitResults]);
 
   return {
     data: mergedRestaurants,
-    isLoading: michelinLoading || mapKitLoading,
-    // Expose individual results if needed
-    michelinResults,
+    isLoading: shouldFetchMapKit && mapKitLoading,
     mapKitResults,
+    michelinCount: michelinRestaurants.length,
+    mapKitCount: mapKitResults.length,
   };
 }
 

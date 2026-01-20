@@ -219,12 +219,37 @@ function StatCard({
 
 function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
   const items = [
-    { emoji: "⭐⭐⭐", label: "3 Stars", count: stats.threeStars },
-    { emoji: "⭐⭐", label: "2 Stars", count: stats.twoStars },
-    { emoji: "⭐", label: "1 Star", count: stats.oneStars },
-    { emoji: "🍽️", label: "Bib Gourmand", count: stats.bibGourmand },
-    { emoji: "🏆", label: "Selected", count: stats.selected },
-  ].filter((item) => item.count > 0);
+    {
+      emoji: "⭐⭐⭐",
+      label: "3 Stars",
+      visits: stats.threeStars,
+      unique: stats.distinctThreeStars,
+    },
+    {
+      emoji: "⭐⭐",
+      label: "2 Stars",
+      visits: stats.twoStars,
+      unique: stats.distinctTwoStars,
+    },
+    {
+      emoji: "⭐",
+      label: "1 Star",
+      visits: stats.oneStars,
+      unique: stats.distinctOneStars,
+    },
+    {
+      emoji: "🍽️",
+      label: "Bib Gourmand",
+      visits: stats.bibGourmand,
+      unique: stats.distinctBibGourmand,
+    },
+    {
+      emoji: "🏆",
+      label: "Selected",
+      visits: stats.selected,
+      unique: stats.distinctSelected,
+    },
+  ].filter((item) => item.visits > 0);
 
   if (items.length === 0) {
     return null;
@@ -267,17 +292,38 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
       )}
 
       {/* Breakdown by type */}
-      <View className={"flex-row flex-wrap gap-3"}>
+      <View className={"gap-3"}>
         {items.map((item, index) => (
           <Animated.View
             key={item.label}
             entering={FadeIn.delay(300 + index * 100).duration(300)}
-            className={"bg-white/10 rounded-xl px-4 py-3 flex-row items-center gap-2"}
+            className={"bg-white/10 rounded-xl px-4 py-3 flex-row items-center justify-between"}
           >
-            <ThemedText variant={"title3"}>{item.emoji}</ThemedText>
-            <ThemedText variant={"subhead"} className={"text-white font-medium"}>
-              {item.count.toLocaleString()} {item.count === 1 ? "visit" : "visits"}
-            </ThemedText>
+            <View className={"flex-row items-center gap-3"}>
+              <ThemedText variant={"title3"}>{item.emoji}</ThemedText>
+              <ThemedText variant={"subhead"} className={"text-white font-medium"}>
+                {item.label}
+              </ThemedText>
+            </View>
+            <View className={"flex-row items-center gap-4"}>
+              <View className={"items-end"}>
+                <ThemedText variant={"subhead"} className={"text-amber-400 font-semibold"}>
+                  {item.unique.toLocaleString()}
+                </ThemedText>
+                <ThemedText variant={"caption2"} className={"text-white/50"}>
+                  {item.unique === 1 ? "restaurant" : "restaurants"}
+                </ThemedText>
+              </View>
+              <View className={"w-px h-8 bg-white/20"} />
+              <View className={"items-end"}>
+                <ThemedText variant={"subhead"} className={"text-white font-semibold"}>
+                  {item.visits.toLocaleString()}
+                </ThemedText>
+                <ThemedText variant={"caption2"} className={"text-white/50"}>
+                  {item.visits === 1 ? "visit" : "visits"}
+                </ThemedText>
+              </View>
+            </View>
           </Animated.View>
         ))}
       </View>

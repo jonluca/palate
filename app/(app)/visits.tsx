@@ -1,4 +1,4 @@
-import { VisitCard, type VisitStatus } from "@/components/visit-card";
+import type { VisitStatus } from "@/components/visit-card";
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { FilterPills, NoVisitsEmpty, SkeletonVisitCard } from "@/components/ui";
@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { useIsFocused } from "@react-navigation/native";
 import { IconSymbol } from "@/components/icon-symbol";
+import { ListModeCard } from "@/components/visit-card/list-mode-card";
 
 function LoadingState() {
   return (
@@ -73,7 +74,7 @@ export default function VisitsScreen() {
 
   const renderItem = useCallback(
     ({ item, index }: { item: VisitWithRestaurant; index: number }) => (
-      <VisitCard
+      <ListModeCard
         mode={"list"}
         id={item.id}
         restaurantName={item.restaurantName ?? item.suggestedRestaurantName}

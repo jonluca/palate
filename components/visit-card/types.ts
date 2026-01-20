@@ -1,4 +1,4 @@
-import type { ExactCalendarMatch } from "@/hooks/queries";
+import type { ExactCalendarMatch, PendingVisitForReview } from "@/hooks/queries";
 
 export type VisitStatus = "pending" | "confirmed" | "rejected";
 
@@ -18,7 +18,7 @@ interface BaseVisitCardProps {
 
 // List mode: simple card for the visits list
 export type ListModeProps = BaseVisitCardProps & {
-  mode: "list";
+  mode?: "list"; // Optional for backwards compatibility
   restaurantName: string | null;
   status: VisitStatus;
   onStatusChange?: (status: VisitStatus) => void;
@@ -37,8 +37,18 @@ export interface SuggestedRestaurant {
   distance: number;
 }
 
-// Review mode: card for the review flow with Michelin suggestions
-export type ReviewModeProps = BaseVisitCardProps & {
+// Review mode: simplified props that take a visit directly
+export interface ReviewModeProps {
+  /** The visit to review */
+  visit: PendingVisitForReview;
+  /** Optional exact calendar match for this visit */
+  match?: ExactCalendarMatch;
+  /** Whether to perform Apple Maps verification searches (expensive, use sparingly) */
+  enableAppleMapsVerification?: boolean;
+}
+
+// Legacy review mode props for backwards compatibility during migration
+export type LegacyReviewModeProps = BaseVisitCardProps & {
   mode: "review";
   suggestedRestaurantName?: string | null;
   suggestedRestaurantAward?: string | null;
@@ -58,7 +68,7 @@ export type ReviewModeProps = BaseVisitCardProps & {
   match?: ExactCalendarMatch;
 };
 
-export type VisitCardProps = ListModeProps | ReviewModeProps;
+export type VisitCardProps = ListModeProps;
 
 // Visit actions props
 export type LoadingAction = "skip" | "confirm" | "find" | null;

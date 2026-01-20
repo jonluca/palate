@@ -1,8 +1,9 @@
-import { cn } from "@/utils/cn";
 import { IconSymbol } from "@/components/icon-symbol";
-import { Card, NearbyRestaurantsList } from "@/components/ui";
+import { Card, NearbyRestaurantsList, SwipeableCard, useUndo } from "@/components/ui";
 import { ThemedText } from "@/components/themed-text";
+import { RestaurantSearchModal, type RestaurantOption } from "@/components/restaurant-search-modal";
 import { cleanCalendarEventTitle, isFuzzyRestaurantMatch } from "@/services/calendar";
+import { useConfirmVisit, useQuickUpdateVisitStatus, useUndoVisitAction } from "@/hooks/queries";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
@@ -12,68 +13,53 @@ import { CalendarBadge, NearbyRestaurantsBadge, ExactMatchBadge } from "./badges
 import { VisitActions } from "./visit-actions";
 import { formatDate, formatTime, getMichelinBadge } from "./utils";
 import { useUnifiedNearbyRestaurants, type NearbyRestaurant } from "@/hooks";
-import type { ReviewModeProps, SuggestedRestaurant } from "./types";
+import type { ReviewModeProps, SuggestedRestaurant, LoadingAction } from "./types";
 
-export function ReviewModeCard({
-  id,
-  startTime,
-  photoCount,
-  previewPhotos = [],
-  foodProbable = false,
-  calendarEventTitle,
-  onPress,
-  suggestedRestaurantName,
-  suggestedRestaurantAward,
-  suggestedRestaurantCuisine,
-  suggestedRestaurants = [],
-  hasSuggestion = false,
-  loadingAction = null,
-  onConfirm,
-  onReject,
-  onFindRestaurant,
-  centerLat,
-  centerLon,
-  enableAppleMapsVerification = false,
-  match,
-}: ReviewModeProps) {
+export function ReviewModeCard({ visit, match, enableAppleMapsVerification = false }: ReviewModeProps) {
+  const [showSearch, setShowSearch] = useState(false);
   const [selectedRestaurant, setSelectedRestaurant] = useState<NearbyRestaurant | null>(null);
 
-  // Reset selected restaurant when card identity changes (handles FlashList recycling)
+  // Mutations
+  const confirmMutation = useConfirmVisit();
+  const updateStatusMutation = useQuickUpdateVisitStatus();
+  const undoMutation = useUndoVisitAction();
+  const { showUndo } = useUndo();
+
+  // Reset state when card identity changes (handles FlashList recycling)
   useEffect(() => {
+    setShowSearch(false);
     setSelectedRestaurant(null);
-  }, [id]);
+  }, [visit.id]);
+
+  // Extract visit properties for easier access
+  const {
+    id,
+    startTime,
+    photoCount,
+    previewPhotos = [],
+    foodProbable = false,
+    calendarEventTitle,
+    centerLat,
+    centerLon,
+  } = visit;
 
   // When we have an exact match, use that directly - no need for suggestions
   const hasMatch = Boolean(match);
 
-  // Fetch nearby restaurants using unified hook (Michelin + MapKit)
-  const shouldFetchNearby = enableAppleMapsVerification && !hasMatch && Boolean(centerLat) && Boolean(centerLon);
-  const { data: unifiedRestaurants = [] } = useUnifiedNearbyRestaurants(centerLat, centerLon, shouldFetchNearby);
-
-  // Use unified results when fetching is enabled, otherwise fall back to passed suggestedRestaurants
-  const unsortedDisplayRestaurants: NearbyRestaurant[] = shouldFetchNearby
-    ? unifiedRestaurants
-    : suggestedRestaurants.map((r) => ({
-        id: r.id,
-        name: r.name,
-        latitude: r.latitude,
-        longitude: r.longitude,
-        distance: r.distance,
-        award: r.award || null,
-        cuisine: r.cuisine,
-        address: r.address,
-        source: "michelin" as const,
-      }));
+  // Fetch nearby restaurants using unified hook (Michelin from visit + MapKit when enabled)
+  // The hook merges visit.suggestedRestaurants with MapKit results automatically
+  const shouldFetchMapKit = enableAppleMapsVerification && !hasMatch;
+  const { data: displayRestaurantsUnsorted = [] } = useUnifiedNearbyRestaurants(visit, shouldFetchMapKit);
 
   // Sort restaurants by match likelihood: name match with calendar event first, then distance
   const displayRestaurants = useMemo(() => {
-    if (!calendarEventTitle || unsortedDisplayRestaurants.length === 0) {
-      return unsortedDisplayRestaurants;
+    if (!calendarEventTitle || displayRestaurantsUnsorted.length === 0) {
+      return displayRestaurantsUnsorted;
     }
 
     const cleanedTitle = cleanCalendarEventTitle(calendarEventTitle);
 
-    return [...unsortedDisplayRestaurants].sort((a, b) => {
+    return [...displayRestaurantsUnsorted].sort((a, b) => {
       const aMatches = isFuzzyRestaurantMatch(a.name, cleanedTitle);
       const bMatches = isFuzzyRestaurantMatch(b.name, cleanedTitle);
 
@@ -100,42 +86,154 @@ export function ReviewModeCard({
       // Finally, sort by distance
       return a.distance - b.distance;
     });
-  }, [unsortedDisplayRestaurants, calendarEventTitle]);
-
-  const hasMultipleSuggestions = !hasMatch && displayRestaurants.length > 1;
-  const hasSingleSuggestion = !hasMatch && hasSuggestion && displayRestaurants.length === 1;
+  }, [displayRestaurantsUnsorted, calendarEventTitle]);
 
   // Determine the currently selected restaurant from the list (or default to first)
-  const currentSelectedRestaurant = hasMultipleSuggestions
-    ? (selectedRestaurant ?? displayRestaurants[0] ?? null)
-    : null;
+  const currentSelectedRestaurant =
+    (selectedRestaurant ?? visit.suggestedRestaurantId)
+      ? (displayRestaurants.find((r) => r.id === visit.suggestedRestaurantId) ?? null)
+      : (displayRestaurants[0] ?? null);
 
   // Find matched restaurant details from suggestions if we have a match
-  const matchedRestaurant = hasMatch ? suggestedRestaurants.find((r) => r.id === match?.restaurantId) : null;
+  // This lookup provides additional details (award, cuisine) not stored in the ExactCalendarMatch
+  const matchedRestaurant = hasMatch ? displayRestaurantsUnsorted.find((r) => r.id === match?.restaurantId) : null;
 
   // Display values: match takes priority, then selected restaurant, then primary suggestion
-  const displayName = hasMatch ? match?.restaurantName : (currentSelectedRestaurant?.name ?? suggestedRestaurantName);
-  const displayAward = hasMatch
-    ? matchedRestaurant?.award
-    : (currentSelectedRestaurant?.award ?? suggestedRestaurantAward);
-  const displayCuisine = hasMatch
-    ? matchedRestaurant?.cuisine
-    : (currentSelectedRestaurant?.cuisine ?? suggestedRestaurantCuisine);
+  // When we have a match, always use match.restaurantName for the name
+  // For award/cuisine, try matchedRestaurant first, then fall back to visit's suggested restaurant data
+  const displayName = hasMatch ? match?.restaurantName : currentSelectedRestaurant?.name;
+  const displayAward = hasMatch ? matchedRestaurant?.award : currentSelectedRestaurant?.award;
+  const displayCuisine = hasMatch ? matchedRestaurant?.cuisine : currentSelectedRestaurant?.cuisine;
 
   const badge = displayAward ? getMichelinBadge(displayAward) : null;
 
   // Has any suggestion to confirm (match, selected, or single suggestion)
-  const canConfirm = hasMatch || hasSuggestion || hasMultipleSuggestions;
+  const canConfirm = hasMatch || Boolean(displayRestaurants.length);
 
-  const handleViewVisit = (photoIndex?: number) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onPress?.(photoIndex);
-  };
+  // Determine which action is currently loading
+  const loadingAction: LoadingAction = confirmMutation.isPending
+    ? "confirm"
+    : updateStatusMutation.isPending
+      ? "skip"
+      : null;
+  const isAnyLoading = loadingAction !== null;
 
-  const handleConfirm = () => {
-    if (hasMatch && matchedRestaurant) {
-      // Confirm with matched restaurant
-      onConfirm?.(matchedRestaurant);
+  // Swipe is only enabled when we have a single clear suggestion
+  const canSwipeConfirm = canConfirm;
+
+  const handleViewVisit = useCallback(
+    (photoIndex?: number) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (photoIndex !== undefined) {
+        router.push(`/visit/${id}?photo=${photoIndex}`);
+      } else {
+        router.push(`/visit/${id}`);
+      }
+    },
+    [id],
+  );
+
+  const handleConfirmSuggestion = useCallback(
+    async (restaurant?: SuggestedRestaurant | NearbyRestaurant) => {
+      // Determine the restaurant to confirm
+      let restaurantToConfirm: { id: string; name: string; latitude: number; longitude: number } | null = null;
+
+      if (restaurant) {
+        // A specific restaurant was passed (from picker or match)
+        restaurantToConfirm = {
+          id: restaurant.id,
+          name: restaurant.name,
+          latitude: restaurant.latitude,
+          longitude: restaurant.longitude,
+        };
+      } else if (match) {
+        // Confirming the exact match
+        restaurantToConfirm = {
+          id: match.restaurantId,
+          name: match.restaurantName,
+          latitude: match.latitude,
+          longitude: match.longitude,
+        };
+      } else if (currentSelectedRestaurant) {
+        // Use the currently selected restaurant from the picker
+        restaurantToConfirm = {
+          id: currentSelectedRestaurant.id,
+          name: currentSelectedRestaurant.name,
+          latitude: currentSelectedRestaurant.latitude,
+          longitude: currentSelectedRestaurant.longitude,
+        };
+      }
+
+      if (!restaurantToConfirm) {
+        return;
+      }
+
+      await confirmMutation.mutateAsync({
+        visitId: id,
+        restaurantId: restaurantToConfirm.id,
+        restaurantName: restaurantToConfirm.name,
+        latitude: restaurantToConfirm.latitude,
+        longitude: restaurantToConfirm.longitude,
+        startTime,
+      });
+
+      // Show undo banner
+      showUndo({
+        type: "confirm",
+        visitId: id,
+        message: `Confirmed ${restaurantToConfirm.name}`,
+        onUndo: async () => {
+          await undoMutation.mutateAsync({ visitId: id });
+        },
+      });
+    },
+    [match, currentSelectedRestaurant, id, startTime, confirmMutation, showUndo, undoMutation],
+  );
+
+  const handleReject = useCallback(async () => {
+    await updateStatusMutation.mutateAsync({ visitId: id, newStatus: "rejected" });
+
+    // Show undo banner
+    showUndo({
+      type: "reject",
+      visitId: id,
+      message: "Visit skipped",
+      onUndo: async () => {
+        await undoMutation.mutateAsync({ visitId: id });
+      },
+    });
+  }, [id, updateStatusMutation, showUndo, undoMutation]);
+
+  const handleSelectRestaurantFromModal = useCallback(
+    async (restaurant: RestaurantOption) => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await confirmMutation.mutateAsync({
+        visitId: id,
+        restaurantId: restaurant.id,
+        restaurantName: restaurant.name,
+        latitude: restaurant.latitude,
+        longitude: restaurant.longitude,
+        startTime,
+      });
+
+      // Show undo banner
+      showUndo({
+        type: "confirm",
+        visitId: id,
+        message: `Confirmed ${restaurant.name}`,
+        onUndo: async () => {
+          await undoMutation.mutateAsync({ visitId: id });
+        },
+      });
+    },
+    [id, startTime, confirmMutation, showUndo, undoMutation],
+  );
+
+  const handleConfirmButton = useCallback(() => {
+    if (hasMatch) {
+      // When we have a match, use the match data directly
+      // The match contains the restaurant ID, name, and coordinates
+      handleConfirmSuggestion();
     } else if (currentSelectedRestaurant) {
       // Convert NearbyRestaurant to SuggestedRestaurant format
       const restaurant: SuggestedRestaurant = {
@@ -149,17 +247,13 @@ export function ReviewModeCard({
         award: currentSelectedRestaurant.award ?? "",
         distance: currentSelectedRestaurant.distance,
       };
-      onConfirm?.(restaurant);
+      handleConfirmSuggestion(restaurant);
     } else {
-      onConfirm?.();
+      handleConfirmSuggestion();
     }
-  };
+  }, [hasMatch, currentSelectedRestaurant, handleConfirmSuggestion]);
 
-  const handleReject = () => {
-    onReject?.();
-  };
-
-  const handleSelectRestaurant = useCallback((restaurant: NearbyRestaurant) => {
+  const handleSelectRestaurantFromList = useCallback((restaurant: NearbyRestaurant) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedRestaurant(restaurant);
   }, []);
@@ -169,151 +263,129 @@ export function ReviewModeCard({
     router.push(`/restaurant/${restaurant.id}`);
   }, []);
 
+  const handleFindRestaurant = useCallback(() => {
+    setShowSearch(true);
+  }, []);
+
   return (
-    <View className={"mb-4"}>
-      <Pressable onPress={() => handleViewVisit()}>
-        <Card animated={false}>
-          <PhotoPreview photos={previewPhotos} onPhotoPress={handleViewVisit} />
+    <>
+      <SwipeableCard
+        cardKey={id}
+        onSwipeLeft={handleReject}
+        onSwipeRight={canSwipeConfirm ? () => handleConfirmSuggestion() : undefined}
+        leftLabel={"Skip"}
+        rightLabel={"Confirm"}
+        enabled={!isAnyLoading}
+      >
+        <View className={"mb-4"}>
+          <Pressable onPress={() => handleViewVisit()}>
+            <Card animated={false}>
+              <PhotoPreview photos={previewPhotos} onPhotoPress={handleViewVisit} />
 
-          <View className={"p-4 gap-3"}>
-            {/* Date and Food Badge */}
-            <View className={"flex-row items-center justify-between"}>
-              <View>
-                <ThemedText variant={"subhead"} className={"font-medium"}>
-                  {formatDate(startTime)}
-                </ThemedText>
-                <ThemedText variant={"footnote"} color={"tertiary"}>
-                  at {formatTime(startTime)} • {photoCount.toLocaleString()} photos
-                </ThemedText>
-              </View>
-              <View className={"flex-row items-center gap-2"}>
-                {Boolean(foodProbable) && (
-                  <View className={"flex-row items-center gap-1 bg-amber-500/10 px-2 py-1 rounded-full"}>
-                    <ThemedText variant={"caption1"}>🍽️</ThemedText>
-                    <ThemedText variant={"caption2"} className={"text-amber-600"}>
-                      Food Detected
-                    </ThemedText>
-                  </View>
-                )}
-                <IconSymbol name={"chevron.right"} size={16} color={"gray"} />
-              </View>
-            </View>
-
-            {/* Badges row */}
-            <View className={"flex-row items-center gap-2 flex-1 overflow-x-auto"}>
-              {calendarEventTitle && <CalendarBadge title={calendarEventTitle} />}
-              {hasMatch && <ExactMatchBadge />}
-              {hasMultipleSuggestions && <NearbyRestaurantsBadge count={displayRestaurants.length} />}
-            </View>
-
-            {/* Exact Match Card - shown when we have a calendar match */}
-            {hasMatch && (
-              <View className={"rounded-xl p-3 gap-2 bg-green-500/10"}>
-                <View className={"flex-row items-center gap-2"}>
-                  <View className={"w-6 h-6 rounded-full bg-green-500/20 items-center justify-center"}>
-                    <IconSymbol name={"checkmark.seal.fill"} size={14} color={"#22c55e"} />
-                  </View>
-                  <ThemedText variant={"footnote"} color={"secondary"}>
-                    Calendar Match Found
-                  </ThemedText>
-                </View>
-                <ThemedText numberOfLines={1} variant={"heading"} className={"font-semibold"}>
-                  {displayName}
-                </ThemedText>
-                {badge && (
-                  <View className={"flex-row items-center gap-1"}>
-                    <ThemedText variant={"caption1"}>{badge.emoji}</ThemedText>
-                    <ThemedText variant={"caption2"} color={"secondary"}>
-                      {badge.label}
-                    </ThemedText>
-                  </View>
-                )}
-                {displayCuisine && (
-                  <ThemedText numberOfLines={1} variant={"footnote"} color={"tertiary"}>
-                    {displayCuisine}
-                  </ThemedText>
-                )}
-              </View>
-            )}
-
-            {/* Multiple Suggestions Picker - only when no match */}
-            {hasMultipleSuggestions && (
-              <NearbyRestaurantsList
-                restaurants={displayRestaurants}
-                selectedRestaurant={currentSelectedRestaurant}
-                onSelectRestaurant={handleSelectRestaurant}
-                onDeepLink={handleDeepLink}
-                variant={"compact"}
-              />
-            )}
-
-            {/* Single Suggestion - only when no match and exactly one suggestion */}
-            {hasSingleSuggestion && (
-              <View
-                className={cn(
-                  "rounded-xl p-3 gap-2",
-                  displayRestaurants[0].source === "michelin" ? "bg-green-500/10" : "bg-blue-500/10",
-                )}
-              >
+              <View className={"p-4 gap-3"}>
+                {/* Date and Food Badge */}
                 <View className={"flex-row items-center justify-between"}>
-                  <View className={"flex-row items-center gap-2"}>
-                    <View
-                      className={cn(
-                        "w-6 h-6 rounded-full items-center justify-center",
-                        displayRestaurants[0].source === "michelin" ? "bg-green-500/20" : "bg-blue-500/20",
-                      )}
-                    >
-                      <IconSymbol
-                        name={displayRestaurants[0].source === "michelin" ? "star.fill" : "map.fill"}
-                        size={14}
-                        color={displayRestaurants[0].source === "michelin" ? "#22c55e" : "#3b82f6"}
-                      />
-                    </View>
-                    <ThemedText variant={"footnote"} color={"secondary"}>
-                      {displayRestaurants[0].source === "michelin" ? "Michelin Match Found" : "Apple Maps Restaurant"}
+                  <View>
+                    <ThemedText variant={"subhead"} className={"font-medium"}>
+                      {formatDate(startTime)}
                     </ThemedText>
+                    <ThemedText variant={"footnote"} color={"tertiary"}>
+                      at {formatTime(startTime)} • {photoCount.toLocaleString()} photos
+                    </ThemedText>
+                  </View>
+                  <View className={"flex-row items-center gap-2"}>
+                    {Boolean(foodProbable) && (
+                      <View className={"flex-row items-center gap-1 bg-amber-500/10 px-2 py-1 rounded-full"}>
+                        <ThemedText variant={"caption1"}>🍽️</ThemedText>
+                        <ThemedText variant={"caption2"} className={"text-amber-600"}>
+                          Food Detected
+                        </ThemedText>
+                      </View>
+                    )}
+                    <IconSymbol name={"chevron.right"} size={16} color={"gray"} />
                   </View>
                 </View>
-                <ThemedText numberOfLines={1} variant={"heading"} className={"font-semibold"}>
-                  {displayName}
-                </ThemedText>
-                {badge && (
-                  <View className={"flex-row items-center gap-1"}>
-                    <ThemedText variant={"caption1"}>{badge.emoji}</ThemedText>
-                    <ThemedText variant={"caption2"} color={"secondary"}>
-                      {badge.label}
+
+                {/* Badges row */}
+                <View className={"flex-row items-center gap-2 flex-1 overflow-x-auto"}>
+                  {calendarEventTitle && <CalendarBadge title={calendarEventTitle} />}
+                  {hasMatch && <ExactMatchBadge />}
+                  {displayRestaurants.length > 0 && <NearbyRestaurantsBadge count={displayRestaurants.length} />}
+                </View>
+
+                {/* Exact Match Card - shown when we have a calendar match */}
+                {hasMatch && (
+                  <View className={"rounded-xl p-3 gap-2 bg-green-500/10"}>
+                    <View className={"flex-row items-center gap-2"}>
+                      <View className={"w-6 h-6 rounded-full bg-green-500/20 items-center justify-center"}>
+                        <IconSymbol name={"checkmark.seal.fill"} size={14} color={"#22c55e"} />
+                      </View>
+                      <ThemedText variant={"footnote"} color={"secondary"}>
+                        Calendar Match Found
+                      </ThemedText>
+                    </View>
+                    <ThemedText numberOfLines={1} variant={"heading"} className={"font-semibold"}>
+                      {displayName}
                     </ThemedText>
+                    {badge && (
+                      <View className={"flex-row items-center gap-1"}>
+                        <ThemedText variant={"caption1"}>{badge.emoji}</ThemedText>
+                        <ThemedText variant={"caption2"} color={"secondary"}>
+                          {badge.label}
+                        </ThemedText>
+                      </View>
+                    )}
+                    {displayCuisine && (
+                      <ThemedText numberOfLines={1} variant={"footnote"} color={"tertiary"}>
+                        {displayCuisine}
+                      </ThemedText>
+                    )}
                   </View>
                 )}
-                {displayCuisine && (
-                  <ThemedText numberOfLines={1} variant={"footnote"} color={"tertiary"}>
-                    {displayCuisine}
-                  </ThemedText>
+
+                {/* Multiple Suggestions Picker - only when no match */}
+                {displayRestaurants.length > 0 && (
+                  <NearbyRestaurantsList
+                    restaurants={displayRestaurants}
+                    selectedRestaurant={currentSelectedRestaurant}
+                    onSelectRestaurant={handleSelectRestaurantFromList}
+                    onDeepLink={handleDeepLink}
+                    variant={"compact"}
+                  />
+                )}
+
+                {/* Actions */}
+                <VisitActions
+                  onSkip={handleReject}
+                  onConfirm={handleConfirmButton}
+                  onFindRestaurant={handleFindRestaurant}
+                  hasSuggestion={canConfirm}
+                  loadingAction={loadingAction}
+                  variant={"pill"}
+                />
+
+                {/* Alternative: Find Different - only shown when we have a suggestion */}
+                {canConfirm && (
+                  <Pressable onPress={handleFindRestaurant} className={"self-end"} hitSlop={8}>
+                    <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>
+                      Not this restaurant?
+                    </ThemedText>
+                  </Pressable>
                 )}
               </View>
-            )}
+            </Card>
+          </Pressable>
+        </View>
+      </SwipeableCard>
 
-            {/* Actions */}
-            <VisitActions
-              onSkip={handleReject}
-              onConfirm={handleConfirm}
-              onFindRestaurant={onFindRestaurant}
-              hasSuggestion={canConfirm}
-              loadingAction={loadingAction}
-              variant={"pill"}
-            />
-
-            {/* Alternative: Find Different - only shown when we have a suggestion */}
-            {canConfirm && (
-              <Pressable onPress={onFindRestaurant} className={"self-end"} hitSlop={8}>
-                <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>
-                  Not this restaurant?
-                </ThemedText>
-              </Pressable>
-            )}
-          </View>
-        </Card>
-      </Pressable>
-    </View>
+      <RestaurantSearchModal
+        visible={showSearch}
+        onClose={() => setShowSearch(false)}
+        onSelect={handleSelectRestaurantFromModal}
+        centerLat={centerLat}
+        centerLon={centerLon}
+        visit={visit}
+      />
+    </>
   );
 }

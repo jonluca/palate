@@ -1,6 +1,6 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
-import { AnimatedListItem, ReviewVisitCard, TabButton, type ReviewTab } from "@/components/review";
+import { AnimatedListItem, TabButton, type ReviewTab } from "@/components/review";
 import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText, Card, useUndo } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import {
@@ -26,6 +26,7 @@ import {
   useReviewFiltersCollapsed,
   useSetReviewFiltersCollapsed,
 } from "@/store";
+import { ReviewModeCard } from "@/components/visit-card/review-mode-card";
 
 function LoadingState() {
   return (
@@ -263,7 +264,7 @@ export default function ReviewScreen() {
   const renderRegularItem = useCallback(
     ({ item, index }: { item: PendingVisitForReview; index: number }) => (
       <AnimatedListItem itemKey={item.id}>
-        <ReviewVisitCard visit={item} enableAppleMapsVerification={index < 8} />
+        <ReviewModeCard visit={item} enableAppleMapsVerification={index < 8} />
       </AnimatedListItem>
     ),
     [],
@@ -272,7 +273,7 @@ export default function ReviewScreen() {
   const renderExactMatchItem = useCallback(
     ({ item, index }: { item: ExactCalendarMatch; index: number }) => (
       <AnimatedListItem itemKey={item.visitId}>
-        <ReviewVisitCard visit={item.visit} match={item} enableAppleMapsVerification={index < 3} />
+        <ReviewModeCard visit={item.visit} match={item} enableAppleMapsVerification={index < 3} />
       </AnimatedListItem>
     ),
     [],

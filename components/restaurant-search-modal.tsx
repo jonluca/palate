@@ -147,9 +147,9 @@ export function RestaurantSearchModal({
   const googleMapsApiKey = useGoogleMapsApiKey();
 
   // Use unified hook for Michelin + MapKit results
+  // Pass a minimal visit object with coordinates (suggestedRestaurants not available here)
   const { data: unifiedRestaurants, isLoading: isLoadingNearby } = useUnifiedNearbyRestaurants(
-    centerLat,
-    centerLon,
+    { centerLat, centerLon },
     visible,
   );
 
