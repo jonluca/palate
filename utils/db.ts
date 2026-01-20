@@ -3334,3 +3334,181 @@ export async function removePhotosFromVisit(photoIds: string[], visitId: string)
     removedCount: matchingPhotos.length,
   };
 }
+
+// ============================================================================
+// BATCH MERGE SAME RESTAURANT VISITS
+// ============================================================================
+
+/**
+ * Represents a group of visits to the same restaurant that can be merged.
+ * The first visit in the group is the target (earliest by time), the rest are sources to merge into it.
+ */
+export interface MergeableVisitGroup {
+  restaurantId: string;
+  restaurantName: string;
+  /** All visits in this group, sorted by startTime ascending */
+  visits: Array<{
+    id: string;
+    startTime: number;
+    endTime: number;
+    photoCount: number;
+  }>;
+  /** Total photos across all visits in the group */
+  totalPhotos: number;
+}
+
+/**
+ * Find groups of confirmed visits to the same restaurant closely clustered in time.
+ * Returns groups that have 2+ visits (i.e., visits that can be merged).
+ */
+export async function getMergeableSameRestaurantVisitGroups(): Promise<MergeableVisitGroup[]> {
+  const start = DEBUG_TIMING ? performance.now() : 0;
+  const database = await getDatabase();
+
+  // Get all confirmed visits with restaurant info, ordered by restaurant and time
+  const visits = await database.getAllAsync<{
+    id: string;
+    restaurantId: string;
+    restaurantName: string;
+    startTime: number;
+    endTime: number;
+    photoCount: number;
+  }>(
+    `SELECT 
+      v.id,
+      v.restaurantId,
+      r.name as restaurantName,
+      v.startTime,
+      v.endTime,
+      v.photoCount
+    FROM visits v
+    JOIN restaurants r ON v.restaurantId = r.id
+    WHERE v.status = 'confirmed' AND v.restaurantId IS NOT NULL
+    ORDER BY v.restaurantId, v.startTime ASC`,
+  );
+
+  if (visits.length === 0) {
+    if (DEBUG_TIMING) {
+      console.log(`[DB] getMergeableSameRestaurantVisitGroups: ${(performance.now() - start).toFixed(2)}ms (0 visits)`);
+    }
+    return [];
+  }
+
+  // Group visits by restaurant, then find visits within 12 hours of each other
+  const TWELVE_FOUR_HOURS_MS = 12 * 60 * 60 * 1000;
+  const mergeableGroups: MergeableVisitGroup[] = [];
+
+  let currentGroup: typeof visits = [];
+  let currentRestaurantId: string | null = null;
+
+  const finalizeGroup = () => {
+    if (currentGroup.length >= 2) {
+      const subGroups = findTimeProximityGroups(currentGroup, TWELVE_FOUR_HOURS_MS);
+      for (const subGroup of subGroups) {
+        if (subGroup.length >= 2) {
+          mergeableGroups.push({
+            restaurantId: subGroup[0].restaurantId,
+            restaurantName: subGroup[0].restaurantName,
+            visits: subGroup.map((v) => ({
+              id: v.id,
+              startTime: v.startTime,
+              endTime: v.endTime,
+              photoCount: v.photoCount,
+            })),
+            totalPhotos: subGroup.reduce((sum, v) => sum + v.photoCount, 0),
+          });
+        }
+      }
+    }
+  };
+
+  for (const visit of visits) {
+    if (visit.restaurantId !== currentRestaurantId) {
+      // New restaurant - finalize previous group
+      finalizeGroup();
+      currentGroup = [visit];
+      currentRestaurantId = visit.restaurantId;
+    } else {
+      currentGroup.push(visit);
+    }
+  }
+
+  // Finalize last group
+  finalizeGroup();
+
+  if (DEBUG_TIMING) {
+    console.log(
+      `[DB] getMergeableSameRestaurantVisitGroups: ${(performance.now() - start).toFixed(2)}ms (${mergeableGroups.length} groups)`,
+    );
+  }
+
+  return mergeableGroups;
+}
+
+/**
+ * Helper to find sub-groups of visits where consecutive visits are within the time threshold.
+ * Uses a greedy approach: visits are grouped if they are within threshold of any visit in the current group.
+ */
+function findTimeProximityGroups<T extends { startTime: number; endTime: number }>(
+  visits: T[],
+  thresholdMs: number,
+): T[][] {
+  if (visits.length === 0) {
+    return [];
+  }
+
+  const groups: T[][] = [];
+  let currentGroup: T[] = [visits[0]];
+
+  for (let i = 1; i < visits.length; i++) {
+    const visit = visits[i];
+    // Check if this visit is within threshold of the previous visit's end time
+    const prevVisit = currentGroup[currentGroup.length - 1];
+    const timeDiff = visit.startTime - prevVisit.endTime;
+
+    if (timeDiff <= thresholdMs) {
+      currentGroup.push(visit);
+    } else {
+      groups.push(currentGroup);
+      currentGroup = [visit];
+    }
+  }
+
+  groups.push(currentGroup);
+  return groups;
+}
+
+/**
+ * Batch merge all visits within the given groups.
+ * For each group, merges all visits into the earliest one (by startTime).
+ * Returns the number of merges performed (number of source visits merged).
+ */
+export async function batchMergeSameRestaurantVisits(groups: MergeableVisitGroup[]): Promise<number> {
+  const start = DEBUG_TIMING ? performance.now() : 0;
+
+  let totalMerges = 0;
+
+  for (const group of groups) {
+    if (group.visits.length < 2) {
+      continue;
+    }
+
+    // First visit is the target (earliest by time)
+    const targetVisitId = group.visits[0].id;
+
+    // Merge all other visits into the target
+    for (let i = 1; i < group.visits.length; i++) {
+      const sourceVisitId = group.visits[i].id;
+      await mergeVisits(targetVisitId, sourceVisitId);
+      totalMerges++;
+    }
+  }
+
+  if (DEBUG_TIMING) {
+    console.log(
+      `[DB] batchMergeSameRestaurantVisits: ${(performance.now() - start).toFixed(2)}ms (${totalMerges} merges)`,
+    );
+  }
+
+  return totalMerges;
+}

@@ -7,7 +7,14 @@ import { Button, ButtonText, Card } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
-import { usePendingReview, useBatchUpdateVisitStatus, useBatchConfirmVisits } from "@/hooks/queries";
+import {
+  usePendingReview,
+  useBatchUpdateVisitStatus,
+  useBatchConfirmVisits,
+  useMergeableSameRestaurantVisits,
+  useBatchMergeSameRestaurantVisits,
+  type MergeableVisitGroup,
+} from "@/hooks/queries";
 
 const PHOTO_THRESHOLD_OPTIONS = [3, 5, 10, 20, 50];
 
@@ -50,6 +57,19 @@ export default function QuickActionsScreen() {
 
   const batchUpdateMutation = useBatchUpdateVisitStatus();
   const batchConfirmMutation = useBatchConfirmVisits();
+
+  // Merge same restaurant visits
+  const { data: mergeableGroups = [] } = useMergeableSameRestaurantVisits();
+  const batchMergeMutation = useBatchMergeSameRestaurantVisits();
+
+  // Calculate total visits that can be merged
+  const totalMergeableVisits = useMemo(() => {
+    return mergeableGroups.reduce((sum: number, group) => sum + group.visits.length, 0);
+  }, [mergeableGroups]);
+
+  // Calculate how many visits will remain after merge (one per group)
+  const visitsAfterMerge = mergeableGroups.length;
+  const visitsToMerge = totalMergeableVisits - visitsAfterMerge;
 
   // Get all unique food labels across pending visits
   const allFoodLabels = useAllFoodLabels(pendingVisits);
@@ -300,6 +320,41 @@ export default function QuickActionsScreen() {
     );
   }, [exactCalendarMatches, batchConfirmMutation, showToast]);
 
+  const handleMergeSameRestaurantVisits = useCallback(async () => {
+    if (mergeableGroups.length === 0) {
+      return;
+    }
+
+    Alert.alert(
+      "Merge Same-Restaurant Visits",
+      `This will merge ${visitsToMerge.toLocaleString()} visit${visitsToMerge === 1 ? "" : "s"} into ${mergeableGroups.length.toLocaleString()} visit${mergeableGroups.length === 1 ? "" : "s"}. This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Merge All",
+          style: "default",
+          onPress: async () => {
+            setIsProcessing(true);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            try {
+              const { mergeCount } = await batchMergeMutation.mutateAsync(mergeableGroups);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              showToast({
+                type: "success",
+                message: `Merged ${mergeCount.toLocaleString()} visit${mergeCount === 1 ? "" : "s"}.`,
+              });
+            } catch (error) {
+              console.error("Error merging visits:", error);
+              showToast({ type: "error", message: "Failed to merge visits. Please try again." });
+            } finally {
+              setIsProcessing(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [mergeableGroups, visitsToMerge, batchMergeMutation, showToast]);
+
   return (
     <ScrollView
       className={"flex-1 bg-background"}
@@ -401,6 +456,83 @@ export default function QuickActionsScreen() {
                     disabled={isProcessing}
                   >
                     <ButtonText variant={"success"}>Approve All</ButtonText>
+                  </Button>
+                </View>
+              </View>
+            </View>
+          </Card>
+        </Animated.View>
+      )}
+
+      {/* Merge Same-Restaurant Visits */}
+      {mergeableGroups.length > 0 && (
+        <Animated.View entering={FadeInDown.delay(175).duration(300)} className={"mb-6"}>
+          <ThemedText
+            variant={"footnote"}
+            color={"tertiary"}
+            className={"uppercase font-semibold tracking-wide px-1 mb-3"}
+          >
+            Organize
+          </ThemedText>
+          <Card animated={false}>
+            <View className={"p-4 gap-4"}>
+              <View className={"flex-row items-center gap-3"}>
+                <View className={"w-10 h-10 rounded-full bg-blue-500/15 items-center justify-center"}>
+                  <IconSymbol name={"arrow.triangle.merge"} size={20} color={"#3b82f6"} />
+                </View>
+                <View className={"flex-1"}>
+                  <ThemedText variant={"subhead"} className={"font-medium"}>
+                    Merge Same-Restaurant Visits
+                  </ThemedText>
+                  <ThemedText variant={"footnote"} color={"secondary"}>
+                    Combine visits to the same restaurant closely clustered in time
+                  </ThemedText>
+                </View>
+              </View>
+
+              {/* Preview of merge groups */}
+              <View className={"gap-2"}>
+                {mergeableGroups.slice(0, 3).map((group: MergeableVisitGroup) => (
+                  <View
+                    key={group.restaurantId}
+                    className={"flex-row items-center gap-2 bg-white/5 rounded-lg px-3 py-2"}
+                  >
+                    <IconSymbol name={"arrow.triangle.merge"} size={14} color={"#3b82f6"} />
+                    <ThemedText variant={"caption1"} className={"flex-1"} numberOfLines={1}>
+                      {group.restaurantName}
+                    </ThemedText>
+                    <ThemedText variant={"caption2"} color={"tertiary"}>
+                      {group.visits.length} visits → 1
+                    </ThemedText>
+                  </View>
+                ))}
+                {mergeableGroups.length > 3 && (
+                  <ThemedText variant={"caption2"} color={"tertiary"} className={"px-1"}>
+                    +{mergeableGroups.length - 3} more group{mergeableGroups.length - 3 === 1 ? "" : "s"}
+                  </ThemedText>
+                )}
+              </View>
+
+              {/* Action Button */}
+              <View className={"bg-background/50 rounded-xl p-3"}>
+                <View className={"flex-row items-center justify-between"}>
+                  <View className={"flex-1"}>
+                    <ThemedText variant={"subhead"} className={"font-medium"}>
+                      {visitsToMerge.toLocaleString()} visit{visitsToMerge === 1 ? "" : "s"} to merge
+                    </ThemedText>
+                    <ThemedText variant={"caption2"} color={"tertiary"}>
+                      Into {mergeableGroups.length.toLocaleString()} combined visit
+                      {mergeableGroups.length === 1 ? "" : "s"}
+                    </ThemedText>
+                  </View>
+                  <Button
+                    variant={"default"}
+                    size={"sm"}
+                    onPress={handleMergeSameRestaurantVisits}
+                    loading={isProcessing}
+                    disabled={isProcessing}
+                  >
+                    <ButtonText>Merge All</ButtonText>
                   </Button>
                 </View>
               </View>

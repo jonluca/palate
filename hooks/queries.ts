@@ -55,6 +55,9 @@ import {
   type FoodKeywordRecord,
   type ReclassifyProgress,
   createManualVisit,
+  batchMergeSameRestaurantVisits,
+  type MergeableVisitGroup,
+  getMergeableSameRestaurantVisitGroups,
 } from "@/utils/db";
 import {
   compareRestaurantAndCalendarTitle,
@@ -186,6 +189,7 @@ export const queryKeys = {
     return ["wrapped"] as const;
   },
   mergeableVisits: (visitId: string) => ["visits", "mergeableVisits", visitId] as const,
+  mergeableSameRestaurantVisits: ["visits", "mergeableSameRestaurantVisits"] as const,
   ignoredLocations: ["ignoredLocations"] as const,
   importableCalendarEvents: ["importableCalendarEvents"] as const,
   visitsAtLocation: (lat: number, lon: number, radius: number) =>
@@ -1145,6 +1149,35 @@ export function useMergeVisits() {
     onSuccess: ({ targetVisitId }) => {
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(targetVisitId) });
+    },
+  });
+}
+
+// Re-export MergeableVisitGroup type
+export type { MergeableVisitGroup };
+
+export function useMergeableSameRestaurantVisits() {
+  return useQuery({
+    queryKey: queryKeys.mergeableSameRestaurantVisits,
+    queryFn: getMergeableSameRestaurantVisitGroups,
+  });
+}
+
+export function useBatchMergeSameRestaurantVisits() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (groups: MergeableVisitGroup[]) => {
+      const mergeCount = await batchMergeSameRestaurantVisits(groups);
+      return { mergeCount };
+    },
+    onSuccess: () => {
+      // Invalidate all visit-related queries
+      invalidateVisitQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
+      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
     },
   });
 }
