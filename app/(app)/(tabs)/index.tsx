@@ -160,7 +160,8 @@ function SearchBar({
         onChangeText={onChangeText}
         placeholder={"Search restaurants..."}
         placeholderTextColor={"#888"}
-        className={"flex-1 text-foreground text-base py-1"}
+        className={"flex-1 text-foreground text-base"}
+        style={{ height: 24 }}
         autoCapitalize={"none"}
         autoCorrect={false}
         clearButtonMode={"never"}
