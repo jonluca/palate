@@ -541,7 +541,7 @@ export default function RestaurantsScreen() {
             if (item.type === "section-header") {
               return `section-${item.title}`;
             }
-            return item.data.id;
+            return `${sortBy}-${starFilter}-${searchQuery}-${item.data.id}`;
           }}
           getItemType={(item) => item.type}
           drawDistance={250}
