@@ -142,3 +142,7 @@ yarn typecheck    # Run TypeScript checks
 yarn lint         # Run ESLint
 yarn clean        # Remove build artifacts & node_modules
 ```
+
+## Thanks
+
+Special thanks to Jerry for collecting the dataset - [jerrynsh.com](https://jerrynsh.com/building-what-michelin-wouldnt-its-awards-history/)
