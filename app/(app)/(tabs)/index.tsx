@@ -1,6 +1,6 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
-import { Card, SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills, Badge } from "@/components/ui";
+import { Card, SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills } from "@/components/ui";
 import { HomeHeader, NewPhotosCard } from "@/components/home";
 import { useConfirmedRestaurants, useMichelinRestaurants, type RestaurantWithVisits } from "@/hooks/queries";
 import type { MichelinRestaurantRecord } from "@/utils/db";
@@ -33,6 +33,29 @@ function formatDate(timestamp: number): string {
   });
 }
 
+function formatAward(award: string | null): string | null {
+  if (!award) {
+    return null;
+  }
+  const lower = award.toLowerCase();
+  if (lower.includes("3 star")) {
+    return "⭐⭐⭐";
+  }
+  if (lower.includes("2 star")) {
+    return "⭐⭐";
+  }
+  if (lower.includes("1 star")) {
+    return "⭐";
+  }
+  if (lower.includes("bib gourmand")) {
+    return "🍽️ Bib";
+  }
+  if (lower.includes("green star")) {
+    return "🌿";
+  }
+  return null;
+}
+
 function PhotoPreview({ photos }: { photos: string[] }) {
   if (photos.length === 0) {
     return null;
@@ -56,6 +79,8 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
   };
 
   const hasPhotos = restaurant.previewPhotos.length > 0;
+  const currentAwardDisplay = formatAward(restaurant.currentAward);
+  const visitedAwardDisplay = formatAward(restaurant.visitedAward);
 
   return (
     <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>
@@ -65,12 +90,22 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
           <View className={hasPhotos ? "p-3 gap-1" : "p-4 gap-2"}>
             <View className={"flex-row items-start justify-between"}>
               <View className={"flex-1 gap-0.5"}>
-                <ThemedText variant={"heading"} className={"font-semibold"} numberOfLines={1}>
-                  {restaurant.name}
-                </ThemedText>
-                <ThemedText variant={"footnote"} color={"tertiary"}>
-                  Last visit: {formatDate(restaurant.lastVisit)}
-                </ThemedText>
+                <View className={"flex-row items-center gap-2"}>
+                  <ThemedText variant={"heading"} className={"font-semibold flex-shrink"} numberOfLines={1}>
+                    {restaurant.name}
+                  </ThemedText>
+                  {currentAwardDisplay && <ThemedText variant={"subhead"}>{currentAwardDisplay}</ThemedText>}
+                </View>
+                <View className={"flex-row items-center gap-1"}>
+                  <ThemedText variant={"footnote"} color={"tertiary"}>
+                    Last visit: {formatDate(restaurant.lastVisit)}
+                  </ThemedText>
+                  {visitedAwardDisplay && (
+                    <ThemedText variant={"footnote"} color={"tertiary"}>
+                      · Visited at {visitedAwardDisplay}
+                    </ThemedText>
+                  )}
+                </View>
               </View>
               <View className={"flex-row items-center gap-1 ml-3"}>
                 <ThemedText variant={"subhead"} color={"secondary"} className={"font-medium"}>
@@ -95,6 +130,8 @@ function MichelinRestaurantCard({ restaurant, index }: { restaurant: MichelinRes
     router.push(`/restaurant/${restaurant.id}`);
   };
 
+  const awardDisplay = formatAward(restaurant.award);
+
   return (
     <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>
       <Pressable onPress={handlePress}>
@@ -102,11 +139,13 @@ function MichelinRestaurantCard({ restaurant, index }: { restaurant: MichelinRes
           <View className={"p-4 gap-2"}>
             <View className={"flex-row items-start justify-between"}>
               <View className={"flex-1 gap-1"}>
-                <ThemedText variant={"heading"} className={"font-semibold"} numberOfLines={1}>
-                  {restaurant.name}
-                </ThemedText>
+                <View className={"flex-row items-center gap-2"}>
+                  <ThemedText variant={"heading"} className={"font-semibold flex-shrink"} numberOfLines={1}>
+                    {restaurant.name}
+                  </ThemedText>
+                  {awardDisplay && <ThemedText variant={"subhead"}>{awardDisplay}</ThemedText>}
+                </View>
                 <View className={"flex-row items-center gap-2 flex-wrap"}>
-                  {restaurant.award ? <Badge variant={"warning"} label={restaurant.award} /> : null}
                   {restaurant.cuisine ? (
                     <ThemedText variant={"footnote"} color={"tertiary"}>
                       {restaurant.cuisine}
