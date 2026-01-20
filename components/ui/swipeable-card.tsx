@@ -4,7 +4,7 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withTiming,
+  withSpring,
   runOnJS,
   interpolate,
   Extrapolation,
@@ -109,20 +109,35 @@ export function SwipeableCard({
         runOnJS(resetHaptic)();
       }
     })
-    .onEnd(() => {
+    .onEnd((event) => {
       const shouldTriggerLeft = translateX.value < -threshold && onSwipeLeft;
       const shouldTriggerRight = translateX.value > threshold && onSwipeRight;
 
       if (shouldTriggerLeft) {
-        translateX.value = withTiming(-SCREEN_WIDTH, { duration: 100 }, () => {
-          runOnJS(handleSwipeComplete)("left");
+        // Trigger action immediately - don't wait for animation
+        runOnJS(handleSwipeComplete)("left");
+        // Animate off-screen with spring for snappy feel (uses velocity)
+        translateX.value = withSpring(-SCREEN_WIDTH, {
+          velocity: event.velocityX,
+          damping: 50,
+          stiffness: 500,
         });
       } else if (shouldTriggerRight) {
-        translateX.value = withTiming(SCREEN_WIDTH, { duration: 100 }, () => {
-          runOnJS(handleSwipeComplete)("right");
+        // Trigger action immediately - don't wait for animation
+        runOnJS(handleSwipeComplete)("right");
+        // Animate off-screen with spring for snappy feel (uses velocity)
+        translateX.value = withSpring(SCREEN_WIDTH, {
+          velocity: event.velocityX,
+          damping: 50,
+          stiffness: 500,
         });
       } else {
-        translateX.value = withTiming(0, { duration: 100 });
+        // Snap back with spring
+        translateX.value = withSpring(0, {
+          velocity: event.velocityX,
+          damping: 20,
+          stiffness: 400,
+        });
       }
 
       runOnJS(resetHaptic)();
