@@ -62,7 +62,7 @@
     "expo-video": "^3.0.15",
     "geokdbush": "^2.0.1",
     "kdbush": "^4.0.2",
-    "lodash-es": "^4.17.22",
+    "lodash-es": "^4.17.23",
     "p-map": "^7.0.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
