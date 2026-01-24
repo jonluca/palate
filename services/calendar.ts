@@ -106,14 +106,12 @@ async function getEventsInRange(startDate: number, endDate: number): Promise<Cal
         (event) =>
           !event.allDay &&
           !event.recurrenceRule &&
-          event.title &&
-          event.title.trim() !== "" &&
-          event.title.trim() !== "Untitled Event" &&
-          event.title.trim() !== "Custom",
+          hasValidEventTitle(event.title) &&
+          !isLikelyNonReservationTitle(event.title),
       )
       .map((event) => ({
         id: event.id,
-        title: event.title!,
+        title: event.title!.trim(),
         notes: event.notes ?? null,
         location: event.location ?? null,
         startDate: new Date(event.startDate).getTime(),
@@ -125,6 +123,29 @@ async function getEventsInRange(startDate: number, endDate: number): Promise<Cal
     console.warn("Failed to fetch calendar events:", error);
     return [];
   }
+}
+
+const NON_RESTAURANT_TITLE_PATTERNS: RegExp[] = [
+  // Travel/transport emojis
+  /[✈️✈︎🛫🛬🛩️🚆🚄🚅🚇🚈🚉🚌🚍🚎🚗🚕🚖🚘🚙🛻🚲🚴🚤⛴️🚢🚋🚝🚞🚊🛳️]/u,
+  // Lodging/travel keywords
+  /\b(flight|airport|boarding|gate|airline|itinerary|train|amtrak|bus|station|uber|lyft|taxi|rideshare|hotel|airbnb|check[-\s]?in|check[-\s]?out)\b/i,
+];
+
+function isLikelyNonReservationTitle(title: string): boolean {
+  return NON_RESTAURANT_TITLE_PATTERNS.some((p) => p.test(title));
+}
+
+function hasValidEventTitle(title: string | null | undefined): title is string {
+  if (!title) {
+    return false;
+  }
+  const trimmed = title.trim();
+  if (!trimmed) {
+    return false;
+  }
+  const normalized = trimmed.toLowerCase();
+  return normalized !== "untitled event" && normalized !== "custom";
 }
 
 /** Check if two time ranges overlap (with optional buffer) */
@@ -693,7 +714,7 @@ export async function getReservationEvents(startDate: number, endDate: number): 
   const events = await getEventsInRange(startDate, endDate);
 
   // Filter to timed events that look like reservations
-  return events;
+  return events.filter((event) => hasValidEventTitle(event.title) && !isLikelyNonReservationTitle(event.title));
 }
 
 // ============================================================================

@@ -36,12 +36,15 @@ import {
   useReclassifyPhotos,
   usePhotosWithLabelsCount,
   useRecomputeSuggestedRestaurants,
+  useMergeableSameRestaurantVisits,
+  useBatchMergeSameRestaurantVisits,
   useDeepScan,
   type IgnoredLocationRecord,
   type WritableCalendar,
   type FoodKeywordRecord,
   type ReclassifyProgress,
   type DeepScanProgress,
+  type MergeableVisitGroup,
 } from "@/hooks/queries";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
@@ -708,10 +711,10 @@ function QuickActionsCard() {
             <CardIcon name={"bolt.fill"} color={"#f59e0b"} bgColor={"bg-amber-500/15"} />
             <View className={"flex-1"}>
               <ThemedText variant={"subhead"} className={"font-medium"}>
-                Bulk Operations
+                Bulk Review Actions
               </ThemedText>
               <ThemedText variant={"footnote"} color={"secondary"}>
-                Skip visits by photo count, food detection & more
+                Skip visits by photo count, food detection, and matches
               </ThemedText>
             </View>
           </View>
@@ -719,6 +722,129 @@ function QuickActionsCard() {
         </View>
       </Card>
     </Pressable>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Merge Duplicates Section
+// ─────────────────────────────────────────────────────────────────────────────
+
+function MergeDuplicatesSection() {
+  const { showToast } = useToast();
+  const { data: mergeableGroups = [] } = useMergeableSameRestaurantVisits();
+  const batchMergeMutation = useBatchMergeSameRestaurantVisits();
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const totalMergeableVisits = useMemo(() => {
+    return mergeableGroups.reduce((sum: number, group) => sum + group.visits.length, 0);
+  }, [mergeableGroups]);
+
+  const visitsAfterMerge = mergeableGroups.length;
+  const visitsToMerge = totalMergeableVisits - visitsAfterMerge;
+
+  const handleMergeSameRestaurantVisits = useCallback(async () => {
+    if (mergeableGroups.length === 0) {
+      return;
+    }
+
+    Alert.alert(
+      "Merge Same-Restaurant Visits",
+      `This will merge ${visitsToMerge.toLocaleString()} visit${visitsToMerge === 1 ? "" : "s"} into ${mergeableGroups.length.toLocaleString()} visit${mergeableGroups.length === 1 ? "" : "s"}. This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Merge All",
+          style: "default",
+          onPress: async () => {
+            setIsProcessing(true);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            try {
+              const { mergeCount } = await batchMergeMutation.mutateAsync(mergeableGroups);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              showToast({
+                type: "success",
+                message: `Merged ${mergeCount.toLocaleString()} visit${mergeCount === 1 ? "" : "s"}.`,
+              });
+            } catch (error) {
+              console.error("Error merging visits:", error);
+              showToast({ type: "error", message: "Failed to merge visits. Please try again." });
+            } finally {
+              setIsProcessing(false);
+            }
+          },
+        },
+      ],
+    );
+  }, [mergeableGroups, visitsToMerge, batchMergeMutation, showToast]);
+
+  if (mergeableGroups.length === 0) {
+    return null;
+  }
+
+  return (
+    <Animated.View entering={FadeInDown.delay(220).duration(300)} className={"mb-6"}>
+      <SectionHeader>Cleanup</SectionHeader>
+      <Card animated={false}>
+        <View className={"p-4 gap-4"}>
+          <View className={"flex-row items-center gap-3"}>
+            <CardIcon name={"arrow.triangle.merge"} color={"#3b82f6"} bgColor={"bg-blue-500/15"} />
+            <View className={"flex-1"}>
+              <ThemedText variant={"subhead"} className={"font-medium"}>
+                Merge Duplicate Visits
+              </ThemedText>
+              <ThemedText variant={"footnote"} color={"secondary"}>
+                Combine visits to the same restaurant clustered in time
+              </ThemedText>
+            </View>
+          </View>
+
+          <View className={"gap-2"}>
+            {mergeableGroups.slice(0, 3).map((group: MergeableVisitGroup) => (
+              <View
+                key={group.restaurantId}
+                className={"flex-row items-center gap-2 bg-background/50 rounded-lg px-3 py-2"}
+              >
+                <IconSymbol name={"arrow.triangle.merge"} size={14} color={"#3b82f6"} />
+                <ThemedText variant={"caption1"} className={"flex-1"} numberOfLines={1}>
+                  {group.restaurantName}
+                </ThemedText>
+                <ThemedText variant={"caption2"} color={"tertiary"}>
+                  {group.visits.length} visits → 1
+                </ThemedText>
+              </View>
+            ))}
+            {mergeableGroups.length > 3 && (
+              <ThemedText variant={"caption2"} color={"tertiary"} className={"px-1"}>
+                +{mergeableGroups.length - 3} more group{mergeableGroups.length - 3 === 1 ? "" : "s"}
+              </ThemedText>
+            )}
+          </View>
+
+          <View className={"bg-background/50 rounded-xl p-3"}>
+            <View className={"flex-row items-center justify-between"}>
+              <View className={"flex-1"}>
+                <ThemedText variant={"subhead"} className={"font-medium"}>
+                  {visitsToMerge.toLocaleString()} visit{visitsToMerge === 1 ? "" : "s"} to merge
+                </ThemedText>
+                <ThemedText variant={"caption2"} color={"tertiary"}>
+                  Into {mergeableGroups.length.toLocaleString()} combined visit
+                  {mergeableGroups.length === 1 ? "" : "s"}
+                </ThemedText>
+              </View>
+              <Button
+                variant={"default"}
+                size={"sm"}
+                onPress={handleMergeSameRestaurantVisits}
+                loading={isProcessing}
+                disabled={isProcessing}
+              >
+                <ButtonText>Merge All</ButtonText>
+              </Button>
+            </View>
+          </View>
+        </View>
+      </Card>
+    </Animated.View>
   );
 }
 
@@ -1433,20 +1559,16 @@ export default function SettingsScreen() {
         <AllVisitsCard />
       </Animated.View>
 
-      {/* Calendar Section */}
-      <Animated.View entering={FadeInDown.delay(350).duration(300)} className={"mb-6"}>
-        <SectionHeader>Calendar</SectionHeader>
-        <CalendarSection />
-      </Animated.View>
-
-      {/* Quick Actions Section */}
-      <Animated.View entering={FadeInDown.delay(400).duration(300)} className={"mb-6"}>
-        <SectionHeader>Actions</SectionHeader>
+      {/* Review Actions */}
+      <Animated.View entering={FadeInDown.delay(200).duration(300)} className={"mb-6"}>
+        <SectionHeader>Review</SectionHeader>
         <QuickActionsCard />
       </Animated.View>
 
+      <MergeDuplicatesSection />
+
       {/* Scan Section */}
-      <Animated.View entering={FadeInDown.delay(450).duration(300)} className={"mb-6"}>
+      <Animated.View entering={FadeInDown.delay(300).duration(300)} className={"mb-6"}>
         <SectionHeader>Scanning</SectionHeader>
         <View className={"gap-3"}>
           <RescanCard />
@@ -1455,36 +1577,42 @@ export default function SettingsScreen() {
         </View>
       </Animated.View>
 
-      {/* Ignored Locations */}
-      {hasIgnoredLocations && (
-        <Animated.View entering={FadeInDown.delay(550).duration(300)} className={"mb-6"}>
-          <SectionHeader>Ignored Locations</SectionHeader>
-          <IgnoredLocationsCard locations={ignoredLocations} onRemove={handleRemoveIgnoredLocation} />
-        </Animated.View>
-      )}
-
       {/* Food Detection Section */}
-      <Animated.View entering={FadeInDown.delay(150).duration(300)} className={"mb-6"}>
+      <Animated.View entering={FadeInDown.delay(350).duration(300)} className={"mb-6"}>
         <SectionHeader>Food Detection</SectionHeader>
         <FoodKeywordsCard />
       </Animated.View>
 
+      {/* Calendar Section */}
+      <Animated.View entering={FadeInDown.delay(400).duration(300)} className={"mb-6"}>
+        <SectionHeader>Calendar</SectionHeader>
+        <CalendarSection />
+      </Animated.View>
+
       {/* Google Maps API Key Section */}
-      <Animated.View entering={FadeInDown.delay(200).duration(300)} className={"mb-6"}>
+      <Animated.View entering={FadeInDown.delay(450).duration(300)} className={"mb-6"}>
         <SectionHeader>Integrations</SectionHeader>
         <GoogleMapsApiKeyCard />
       </Animated.View>
 
+      {/* Ignored Locations */}
+      {hasIgnoredLocations && (
+        <Animated.View entering={FadeInDown.delay(500).duration(300)} className={"mb-6"}>
+          <SectionHeader>Locations</SectionHeader>
+          <IgnoredLocationsCard locations={ignoredLocations} onRemove={handleRemoveIgnoredLocation} />
+        </Animated.View>
+      )}
+
       {/* Export Section */}
       {stats && stats.confirmedVisits > 0 && (
-        <Animated.View entering={FadeInDown.delay(250).duration(300)} className={"mb-6"}>
+        <Animated.View entering={FadeInDown.delay(550).duration(300)} className={"mb-6"}>
           <SectionHeader>Export</SectionHeader>
           <ExportButton />
         </Animated.View>
       )}
 
       {/* Danger Zone */}
-      <Animated.View entering={FadeInDown.delay(hasIgnoredLocations ? 650 : 550).duration(300)} className={"mb-6"}>
+      <Animated.View entering={FadeInDown.delay(hasIgnoredLocations ? 650 : 600).duration(300)} className={"mb-6"}>
         <SectionHeader>Danger Zone</SectionHeader>
         <DangerZoneCard />
       </Animated.View>
