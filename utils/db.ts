@@ -185,7 +185,7 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
 
   // Start initialization and cache the promise
   dbInitPromise = (async () => {
-    const database = await SQLite.openDatabaseAsync("photo_foodie.db");
+    const database = await SQLite.openDatabaseAsync(__DEV__ ? "photo_foodie_dev.db" : "photo_foodie.db");
     await initializeDatabase(database);
     // Auto-reject any pending visits within ignored locations on startup
     await rejectVisitsInIgnoredLocationsInternal(database);

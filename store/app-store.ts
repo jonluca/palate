@@ -222,7 +222,7 @@ export const useAppStore = create<AppState>()(
         }),
     }),
     {
-      name: "app-store", // unique name for the storage key
+      name: __DEV__ ? "app-store-dev" : "app-store", // unique name for the storage key
       storage: createJSONStorage(() => AsyncStorage),
       // Only persist user preferences, not transient UI state
       partialize: (state): Partial<AppState> => ({
