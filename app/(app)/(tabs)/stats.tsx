@@ -337,11 +337,7 @@ function InsightCard({
           {label}
         </ThemedText>
       </View>
-      <ThemedText
-        variant={"title3"}
-        className={`font-semibold ${valueClass ?? "text-white"}`}
-        numberOfLines={1}
-      >
+      <ThemedText variant={"title3"} className={`font-semibold ${valueClass ?? "text-white"}`} numberOfLines={1}>
         {value}
       </ThemedText>
       {subtitle && (
@@ -795,8 +791,7 @@ function YearlyHighlights({ yearlyStats }: { yearlyStats: WrappedStats["yearlySt
                 {year.totalVisits.toLocaleString()}
               </ThemedText>
               <ThemedText variant={"caption2"} className={"text-white/50"}>
-                {year.uniqueRestaurants.toLocaleString()}{" "}
-                {year.uniqueRestaurants === 1 ? "restaurant" : "restaurants"}
+                {year.uniqueRestaurants.toLocaleString()} {year.uniqueRestaurants === 1 ? "restaurant" : "restaurants"}
               </ThemedText>
             </View>
           </Animated.View>
@@ -1218,23 +1213,14 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
       {/* Green Star Badge - highlight eco-conscious dining early */}
       {hasGreenStar && <GreenStarSection greenStarVisits={stats.michelinStats.greenStarVisits} />}
 
-      {/* Deep Dive Insights */}
-      <DeepDiveSection stats={stats} selectedYear={selectedYear} />
-
       {/* Monthly Chart */}
       {hasMonthlyData && <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />}
 
-      {/* Seasonal Rhythm */}
-      {hasMonthlyData && <SeasonalitySection monthlyVisits={stats.monthlyVisits} />}
-
-      {/* Yearly Highlights (all-time only) */}
-      {selectedYear === null && hasYearlyData && <YearlyHighlights yearlyStats={stats.yearlyStats} />}
+      {/* Michelin Stars */}
+      {hasMichelinData && <StarBreakdown stats={stats.michelinStats} />}
 
       {/* Geographic Breakdown */}
       {hasLocationData && <LocationBreakdown locations={stats.topLocations} />}
-
-      {/* Michelin Stars */}
-      {hasMichelinData && <StarBreakdown stats={stats.michelinStats} />}
 
       {/* Cuisine Breakdown */}
       {hasCuisineData && <CuisineCloud cuisines={stats.topCuisines} />}
@@ -1247,6 +1233,12 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
 
       {/* Photo Stats */}
       {hasPhotoData && <PhotoStatsSection photoStats={stats.photoStats} />}
+
+      {/* Seasonal Rhythm */}
+      {hasMonthlyData && <SeasonalitySection monthlyVisits={stats.monthlyVisits} />}
+
+      {/* Yearly Highlights (all-time only) */}
+      {selectedYear === null && hasYearlyData && <YearlyHighlights yearlyStats={stats.yearlyStats} />}
 
       {/* Dining Style */}
       <DiningStyleCard diningStyle={stats.diningStyle} totalVisits={stats.totalConfirmedVisits} />
@@ -1346,6 +1338,9 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
             />
           )}
         </View>
+
+        {/* Deep Dive Insights */}
+        <DeepDiveSection stats={stats} selectedYear={selectedYear} />
       </View>
     </View>
   );
