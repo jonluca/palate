@@ -11,9 +11,30 @@ import { logWrappedViewed } from "@/services/analytics";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const SEASON_DEFS = [
+  { key: "Winter", months: [12, 1, 2], emoji: "❄️", color: "bg-sky-400", text: "text-sky-300" },
+  { key: "Spring", months: [3, 4, 5], emoji: "🌸", color: "bg-emerald-400", text: "text-emerald-300" },
+  { key: "Summer", months: [6, 7, 8], emoji: "☀️", color: "bg-amber-400", text: "text-amber-300" },
+  { key: "Fall", months: [9, 10, 11], emoji: "🍂", color: "bg-orange-400", text: "text-orange-300" },
+];
 
 function formatDateShort(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function formatNumber(value: number, decimals = 1): string {
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+  const formatted = value.toFixed(decimals);
+  return formatted.replace(/\.0$/, "");
+}
+
+function formatPercent(value: number, decimals = 0): string {
+  if (!Number.isFinite(value)) {
+    return "—";
+  }
+  return `${(value * 100).toFixed(decimals)}%`;
 }
 
 // Year Tab Component
@@ -146,6 +167,73 @@ function MonthlyVisitsChart({
   );
 }
 
+function SeasonalitySection({ monthlyVisits }: { monthlyVisits: WrappedStats["monthlyVisits"] }) {
+  if (monthlyVisits.length === 0) {
+    return null;
+  }
+
+  const seasonTotals = SEASON_DEFS.map((season) => {
+    const visits = monthlyVisits.reduce((sum, month) => {
+      return season.months.includes(month.month) ? sum + month.visits : sum;
+    }, 0);
+    return { ...season, visits };
+  });
+
+  const totalVisits = seasonTotals.reduce((sum, season) => sum + season.visits, 0);
+  if (totalVisits === 0) {
+    return null;
+  }
+
+  const maxVisits = Math.max(...seasonTotals.map((season) => season.visits), 1);
+  const topSeason = seasonTotals.reduce((max, season) => (season.visits > max.visits ? season : max), seasonTotals[0]);
+
+  return (
+    <Animated.View entering={FadeInDown.delay(360).duration(400)} className={"gap-4"}>
+      <SectionHeading title={"Seasonal Rhythm"} icon={"🍂"} accentClass={"bg-orange-400"} />
+      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4 gap-4"}>
+        <View className={"flex-row items-center justify-between"}>
+          <ThemedText variant={"footnote"} className={"text-white/60"}>
+            Peak season
+          </ThemedText>
+          <ThemedText variant={"subhead"} className={`font-semibold ${topSeason.text}`}>
+            {topSeason.key} · {Math.round((topSeason.visits / totalVisits) * 100)}%
+          </ThemedText>
+        </View>
+        <View className={"gap-3"}>
+          {seasonTotals.map((season, index) => {
+            const percent = Math.round((season.visits / totalVisits) * 100);
+            const widthPercent = (season.visits / maxVisits) * 100;
+            return (
+              <Animated.View
+                key={season.key}
+                entering={FadeIn.delay(420 + index * 80).duration(300)}
+                className={"gap-2"}
+              >
+                <View className={"flex-row items-center justify-between"}>
+                  <View className={"flex-row items-center gap-2"}>
+                    <View className={`w-8 h-8 rounded-full items-center justify-center ${season.color}/20`}>
+                      <ThemedText variant={"footnote"}>{season.emoji}</ThemedText>
+                    </View>
+                    <ThemedText variant={"subhead"} className={"text-white font-medium"}>
+                      {season.key}
+                    </ThemedText>
+                  </View>
+                  <ThemedText variant={"footnote"} className={season.text}>
+                    {percent}% · {season.visits.toLocaleString()}
+                  </ThemedText>
+                </View>
+                <View className={"h-2 bg-white/10 rounded-full overflow-hidden"}>
+                  <View className={`h-full ${season.color}`} style={{ width: `${widthPercent}%` }} />
+                </View>
+              </Animated.View>
+            );
+          })}
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
 function StatCard({
   icon,
   value,
@@ -214,6 +302,191 @@ function StatCard({
         <ThemedText variant={"caption1"} className={"text-white/50 text-center"}>
           {label}
         </ThemedText>
+      </View>
+    </Animated.View>
+  );
+}
+
+function InsightCard({
+  icon,
+  label,
+  value,
+  subtitle,
+  iconBg,
+  valueClass,
+  delay = 0,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  subtitle?: string;
+  iconBg: string;
+  valueClass?: string;
+  delay?: number;
+}) {
+  return (
+    <Animated.View
+      entering={FadeInUp.delay(delay).duration(300)}
+      className={"flex-1 bg-white/5 border border-white/10 rounded-2xl p-3 gap-2"}
+    >
+      <View className={"flex-row items-center gap-2"}>
+        <View className={`w-8 h-8 rounded-full items-center justify-center ${iconBg}`}>
+          <ThemedText variant={"footnote"}>{icon}</ThemedText>
+        </View>
+        <ThemedText variant={"caption2"} className={"text-white/60 flex-1"} numberOfLines={1}>
+          {label}
+        </ThemedText>
+      </View>
+      <ThemedText
+        variant={"title3"}
+        className={`font-semibold ${valueClass ?? "text-white"}`}
+        numberOfLines={1}
+      >
+        {value}
+      </ThemedText>
+      {subtitle && (
+        <ThemedText variant={"caption2"} className={"text-white/50"} numberOfLines={1}>
+          {subtitle}
+        </ThemedText>
+      )}
+    </Animated.View>
+  );
+}
+
+function DeepDiveSection({ stats, selectedYear }: { stats: WrappedStats; selectedYear: number | null }) {
+  const insights = useMemo(() => {
+    const totalVisits = stats.totalConfirmedVisits;
+    const uniqueRestaurants = stats.totalUniqueRestaurants;
+    const starVisits = stats.michelinStats.threeStars + stats.michelinStats.twoStars + stats.michelinStats.oneStars;
+    const activeMonths = stats.monthlyVisits.filter((m) => m.visits > 0).length;
+    const restaurantsPerCity = stats.uniqueCities > 0 ? uniqueRestaurants / stats.uniqueCities : 0;
+    const topSpotShare =
+      stats.mostRevisitedRestaurant && totalVisits > 0 ? stats.mostRevisitedRestaurant.visits / totalVisits : 0;
+
+    return [
+      {
+        key: "avg-visits",
+        icon: "🍽️",
+        label: "Avg visits per spot",
+        value: formatNumber(uniqueRestaurants > 0 ? totalVisits / uniqueRestaurants : 0, 1),
+        subtitle: `${uniqueRestaurants.toLocaleString()} restaurants`,
+        iconBg: "bg-amber-500/30",
+        valueClass: "text-amber-300",
+        isVisible: totalVisits > 0 && uniqueRestaurants > 0,
+      },
+      {
+        key: "revisit-rate",
+        icon: "🔁",
+        label: "Revisit rate",
+        value: formatPercent(totalVisits > 0 ? stats.diningStyle.returningVisits / totalVisits : 0),
+        subtitle: `${stats.diningStyle.returningVisits.toLocaleString()} visits to favorites`,
+        iconBg: "bg-rose-500/30",
+        valueClass: "text-rose-300",
+        isVisible: totalVisits > 0,
+      },
+      {
+        key: "discovery-rate",
+        icon: "🧭",
+        label: "Discovery rate",
+        value: formatPercent(totalVisits > 0 ? uniqueRestaurants / totalVisits : 0),
+        subtitle: `${uniqueRestaurants.toLocaleString()} new spots`,
+        iconBg: "bg-violet-500/30",
+        valueClass: "text-violet-300",
+        isVisible: totalVisits > 0 && uniqueRestaurants > 0,
+      },
+      {
+        key: "michelin-share",
+        icon: "⭐",
+        label: "Michelin Guide share",
+        value: formatPercent(totalVisits > 0 ? stats.michelinStats.totalStarredVisits / totalVisits : 0),
+        subtitle: `${stats.michelinStats.totalStarredVisits.toLocaleString()} guide visits`,
+        iconBg: "bg-amber-500/25",
+        valueClass: "text-amber-300",
+        isVisible: totalVisits > 0,
+      },
+      {
+        key: "avg-stars",
+        icon: "✨",
+        label: "Avg star rating",
+        value: formatNumber(starVisits > 0 ? stats.michelinStats.totalAccumulatedStars / starVisits : 0, 1),
+        subtitle: `${starVisits.toLocaleString()} starred visits`,
+        iconBg: "bg-yellow-500/30",
+        valueClass: "text-yellow-300",
+        isVisible: starVisits > 0,
+      },
+      {
+        key: "photos-per-visit",
+        icon: "📸",
+        label: "Photos per visit",
+        value: formatNumber(totalVisits > 0 ? stats.photoStats.totalPhotos / totalVisits : 0, 1),
+        subtitle: `${stats.photoStats.totalPhotos.toLocaleString()} photos`,
+        iconBg: "bg-cyan-500/30",
+        valueClass: "text-cyan-300",
+        isVisible: totalVisits > 0,
+      },
+      {
+        key: "top-spot-share",
+        icon: "💜",
+        label: "Top spot share",
+        value: formatPercent(topSpotShare),
+        subtitle: stats.mostRevisitedRestaurant?.name,
+        iconBg: "bg-purple-500/30",
+        valueClass: "text-purple-300",
+        isVisible: Boolean(stats.mostRevisitedRestaurant),
+      },
+      {
+        key: "active-months",
+        icon: "📆",
+        label: "Active months",
+        value: activeMonths.toLocaleString(),
+        subtitle: selectedYear ? `months with dining in ${selectedYear}` : "months with dining",
+        iconBg: "bg-blue-500/30",
+        valueClass: "text-blue-300",
+        isVisible: activeMonths > 0,
+      },
+      {
+        key: "restaurants-per-city",
+        icon: "🌆",
+        label: "Restaurants per city",
+        value: formatNumber(restaurantsPerCity, 1),
+        subtitle: `${stats.uniqueCities.toLocaleString()} cities`,
+        iconBg: "bg-emerald-500/30",
+        valueClass: "text-emerald-300",
+        isVisible: stats.uniqueCities > 0 && uniqueRestaurants > 0,
+      },
+    ].filter((item) => item.isVisible);
+  }, [stats, selectedYear]);
+
+  if (insights.length === 0) {
+    return null;
+  }
+
+  const insightRows: Array<(typeof insights)[number][]> = [];
+  for (let i = 0; i < insights.length; i += 2) {
+    insightRows.push(insights.slice(i, i + 2));
+  }
+
+  return (
+    <Animated.View entering={FadeInDown.delay(240).duration(400)} className={"gap-4"}>
+      <SectionHeading title={"Deep Dive"} icon={"🔎"} accentClass={"bg-amber-300"} />
+      <View className={"gap-3"}>
+        {insightRows.map((row, rowIndex) => (
+          <View key={`insight-row-${rowIndex}`} className={"flex-row gap-3"}>
+            {row.map((item, index) => (
+              <InsightCard
+                key={item.key}
+                icon={item.icon}
+                label={item.label}
+                value={item.value}
+                subtitle={item.subtitle}
+                iconBg={item.iconBg}
+                valueClass={item.valueClass}
+                delay={280 + (rowIndex * 2 + index) * 40}
+              />
+            ))}
+            {row.length === 1 && <View className={"flex-1"} />}
+          </View>
+        ))}
       </View>
     </Animated.View>
   );
@@ -486,6 +759,48 @@ function LocationBreakdown({ locations }: { locations: WrappedStats["topLocation
             </Animated.View>
           );
         })}
+      </View>
+    </Animated.View>
+  );
+}
+
+function YearlyHighlights({ yearlyStats }: { yearlyStats: WrappedStats["yearlyStats"] }) {
+  if (yearlyStats.length === 0) {
+    return null;
+  }
+
+  return (
+    <Animated.View entering={FadeInDown.delay(380).duration(400)} className={"gap-4"}>
+      <SectionHeading title={"Yearly Highlights"} icon={"🗓️"} accentClass={"bg-blue-400"} />
+      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4 gap-3"}>
+        {yearlyStats.map((year, index) => (
+          <Animated.View
+            key={year.year}
+            entering={FadeIn.delay(420 + index * 80).duration(300)}
+            className={"flex-row items-center justify-between gap-3"}
+          >
+            <View className={"flex-1"}>
+              <ThemedText variant={"subhead"} className={"text-white font-semibold"}>
+                {year.year}
+              </ThemedText>
+              {year.topRestaurant && (
+                <ThemedText variant={"caption2"} className={"text-white/50"} numberOfLines={1}>
+                  Top spot: {year.topRestaurant.name} · {year.topRestaurant.visits}{" "}
+                  {year.topRestaurant.visits === 1 ? "visit" : "visits"}
+                </ThemedText>
+              )}
+            </View>
+            <View className={"items-end"}>
+              <ThemedText variant={"subhead"} className={"text-amber-300 font-semibold"}>
+                {year.totalVisits.toLocaleString()}
+              </ThemedText>
+              <ThemedText variant={"caption2"} className={"text-white/50"}>
+                {year.uniqueRestaurants.toLocaleString()}{" "}
+                {year.uniqueRestaurants === 1 ? "restaurant" : "restaurants"}
+              </ThemedText>
+            </View>
+          </Animated.View>
+        ))}
       </View>
     </Animated.View>
   );
@@ -846,6 +1161,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
       stats.mealTimeBreakdown.lateNight >
     0;
   const hasGreenStar = stats.michelinStats.greenStarVisits > 0;
+  const hasYearlyData = stats.yearlyStats.length > 0;
 
   // Determine the 4th stat to show - now can include photo count or countries
   const fourthStat = useMemo(() => {
@@ -902,8 +1218,17 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
       {/* Green Star Badge - highlight eco-conscious dining early */}
       {hasGreenStar && <GreenStarSection greenStarVisits={stats.michelinStats.greenStarVisits} />}
 
+      {/* Deep Dive Insights */}
+      <DeepDiveSection stats={stats} selectedYear={selectedYear} />
+
       {/* Monthly Chart */}
       {hasMonthlyData && <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />}
+
+      {/* Seasonal Rhythm */}
+      {hasMonthlyData && <SeasonalitySection monthlyVisits={stats.monthlyVisits} />}
+
+      {/* Yearly Highlights (all-time only) */}
+      {selectedYear === null && hasYearlyData && <YearlyHighlights yearlyStats={stats.yearlyStats} />}
 
       {/* Geographic Breakdown */}
       {hasLocationData && <LocationBreakdown locations={stats.topLocations} />}
@@ -963,6 +1288,28 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
             />
           )}
 
+          {stats.topCuisines[0] && (
+            <FunFactCard
+              icon={"🍜"}
+              iconBg={"bg-rose-500/30"}
+              title={"Signature Cuisine"}
+              value={stats.topCuisines[0].cuisine}
+              subtitle={`${stats.topCuisines[0].count.toLocaleString()} visits`}
+              delay={825}
+            />
+          )}
+
+          {stats.topLocations[0] && (
+            <FunFactCard
+              icon={"📍"}
+              iconBg={"bg-emerald-500/30"}
+              title={"Top Dining City"}
+              value={stats.topLocations[0].city}
+              subtitle={`${stats.topLocations[0].visits.toLocaleString()} visits`}
+              delay={850}
+            />
+          )}
+
           {stats.mostRevisitedRestaurant && (
             <FunFactCard
               icon={"💜"}
@@ -970,7 +1317,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
               title={"Your Favorite Spot"}
               value={stats.mostRevisitedRestaurant.name}
               subtitle={`${stats.mostRevisitedRestaurant.visits.toLocaleString()} visits`}
-              delay={850}
+              delay={875}
             />
           )}
 
