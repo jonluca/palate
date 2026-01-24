@@ -1,19 +1,21 @@
 import type { MichelinBadge } from "./types";
 
-export function formatDate(timestamp: number): string {
+export function formatDate(timestamp: number, timeZone?: string | null): string {
   const date = new Date(timestamp);
   return date.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
+    ...(timeZone ? { timeZone } : {}),
   });
 }
 
-export function formatTime(timestamp: number): string {
+export function formatTime(timestamp: number, timeZone?: string | null): string {
   const date = new Date(timestamp);
   return date.toLocaleTimeString(undefined, {
     hour: "numeric",
     minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
   });
 }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { View, Pressable, ActivityIndicator, Dimensions, ScrollView } from "react-native";
 import Animated, { useAnimatedStyle, interpolate, Extrapolation, type SharedValue } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
@@ -22,6 +22,11 @@ export function CalendarSelectionContent({ scrollX, index, setParentScrollEnable
 
   const selectedCalendarIds = useSelectedCalendarIds();
   const setSelectedCalendarIds = useSetSelectedCalendarIds();
+
+  const isDefaultDeselectedCalendar = useCallback((calendar: SyncableCalendar) => {
+    const haystack = `${calendar.title} ${calendar.source} ${calendar.accountName ?? ""}`.toLowerCase();
+    return /holiday|holidays/.test(haystack) || /flight|flights/.test(haystack);
+  }, []);
 
   // Initialize selected calendars - if null (first time), select all
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(selectedCalendarIds ?? []));
@@ -47,11 +52,11 @@ export function CalendarSelectionContent({ scrollX, index, setParentScrollEnable
         const cals = await getAllSyncableCalendars();
         setCalendars(cals);
 
-        // If no selection yet, select all calendars by default
+        // If no selection yet, select all calendars by default (except holidays/flights)
         if (selectedCalendarIds === null && cals.length > 0) {
-          const allIds = new Set(cals.map((c) => c.id));
-          setSelectedIds(allIds);
-          setSelectedCalendarIds(Array.from(allIds));
+          const defaultIds = new Set(cals.filter((c) => !isDefaultDeselectedCalendar(c)).map((c) => c.id));
+          setSelectedIds(defaultIds);
+          setSelectedCalendarIds(Array.from(defaultIds));
         } else if (selectedCalendarIds !== null) {
           setSelectedIds(new Set(selectedCalendarIds));
         }
@@ -61,7 +66,7 @@ export function CalendarSelectionContent({ scrollX, index, setParentScrollEnable
     }
 
     loadCalendars();
-  }, [selectedCalendarIds, setSelectedCalendarIds]);
+  }, [selectedCalendarIds, setSelectedCalendarIds, isDefaultDeselectedCalendar]);
 
   const toggleCalendar = useCallback(
     (calendarId: string) => {
@@ -95,7 +100,21 @@ export function CalendarSelectionContent({ scrollX, index, setParentScrollEnable
     setSelectedIds(new Set());
     setSelectedCalendarIds([]);
   }, [setSelectedCalendarIds]);
-
+  const sortedCalendars = useMemo(() => {
+    if (calendars.length === 0) {
+      return calendars;
+    }
+    const defaultDeselected: SyncableCalendar[] = [];
+    const rest: SyncableCalendar[] = [];
+    for (const calendar of calendars) {
+      if (isDefaultDeselectedCalendar(calendar)) {
+        defaultDeselected.push(calendar);
+      } else {
+        rest.push(calendar);
+      }
+    }
+    return rest.concat(defaultDeselected);
+  }, [calendars, isDefaultDeselectedCalendar]);
   if (!hasPermission) {
     return (
       <Animated.View style={animatedStyle} className={"mt-6 w-full px-4"}>
@@ -175,9 +194,9 @@ export function CalendarSelectionContent({ scrollX, index, setParentScrollEnable
           onMomentumScrollBegin={() => setParentScrollEnabled?.(false)}
           onMomentumScrollEnd={() => setParentScrollEnabled?.(true)}
         >
-          {calendars.map((calendar, idx) => {
+          {sortedCalendars.map((calendar, idx) => {
             const isSelected = selectedIds.has(calendar.id);
-            const isLast = idx === calendars.length - 1;
+            const isLast = idx === sortedCalendars.length - 1;
 
             return (
               <Pressable

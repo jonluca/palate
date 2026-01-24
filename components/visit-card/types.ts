@@ -77,6 +77,7 @@ export interface VisitActionsProps {
   onSkip: () => void;
   onConfirm: () => void;
   onFindRestaurant?: () => void;
+  onNotThisRestaurant?: () => void;
   hasSuggestion: boolean;
   /** Which action is currently loading (shows spinner only on that button) */
   loadingAction?: LoadingAction;

@@ -170,9 +170,9 @@ export function NearbyRestaurantsList({
     <View className={"gap-2"}>
       <ScrollView
         style={{ maxHeight }}
-        showsVerticalScrollIndicator={true}
+        showsVerticalScrollIndicator={false}
         nestedScrollEnabled={true}
-        contentContainerStyle={{ gap: 8 }}
+        contentContainerStyle={{ gap: 10 }}
       >
         {restaurants.map((restaurant, idx) => {
           const isSelected = selectedRestaurant?.id === restaurant.id;
@@ -186,10 +186,10 @@ export function NearbyRestaurantsList({
               className={cn(
                 "rounded-xl p-3 border-2",
                 isSelected
-                  ? "bg-green-500/15 border-green-500/30"
+                  ? "bg-green-500/10 border-green-500/40"
                   : isCompact && isMapKit
-                    ? "bg-blue-500/5 border-blue-500/10"
-                    : "bg-card border-transparent",
+                    ? "bg-blue-500/5 border-blue-500/15"
+                    : "bg-card/80 border-transparent",
               )}
             >
               <View className={"flex-row items-start justify-between"}>
@@ -204,8 +204,12 @@ export function NearbyRestaurantsList({
                       {restaurant.name}
                     </ThemedText>
                     {isCompact && isMapKit && (
-                      <View className={"flex-row items-center gap-1 bg-blue-500/15 px-1.5 py-0.5 rounded-full"}>
-                        <IconSymbol name={"map.fill"} size={8} color={"#3b82f6"} />
+                      <View
+                        className={
+                          "flex-row items-center gap-1 bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.5 rounded-full"
+                        }
+                      >
+                        <IconSymbol name={"map.fill"} size={8} color={"#2563eb"} />
                       </View>
                     )}
                     {isCompact && showDistance && (
@@ -227,7 +231,7 @@ export function NearbyRestaurantsList({
                   {/* MapKit label - different styling for compact vs default */}
                   {isMapKit && !badge && (
                     <View className={"flex-row items-center gap-1"}>
-                      {!isCompact && <IconSymbol name={"map"} size={10} color={"#6b7280"} />}
+                      {!isCompact && <IconSymbol name={"map.fill"} size={10} color={"#6b7280"} />}
                       <ThemedText
                         variant={"caption2"}
                         color={isCompact ? undefined : "tertiary"}

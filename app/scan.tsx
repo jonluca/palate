@@ -1,5 +1,6 @@
 import React, { useCallback } from "react";
-import { View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -7,6 +8,7 @@ import { useScan } from "@/hooks";
 import { useHasCompletedOnboarding, useSetHasCompletedInitialScan, useSetHasCompletedOnboarding } from "@/store";
 import { OnboardingFlow } from "@/components/onboarding";
 import { ScanHeader, PermissionCard, ScanCard } from "@/components/scan";
+import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText } from "@/components/ui";
 
 /**
@@ -46,39 +48,49 @@ export default function ScanScreen() {
   }
 
   return (
-    <View className={"flex-1 bg-background"} style={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}>
-      <View className={"flex-1 px-6 justify-center"}>
-        {/* Header */}
-        <ScanHeader
-          title={"Scan Your Photos"}
-          description={"We'll scan your camera roll to find photos taken at restaurants and organize them for you."}
-        />
-
-        {/* Permission Card */}
-        {hasPermission === false && (
-          <PermissionCard onRequestPermission={requestPermission} isRequestingPermission={isRequestingPermission} />
-        )}
-
-        {/* Scan Card */}
-        {!isComplete && hasPermission !== false && (
-          <ScanCard
-            cameraRollCount={cameraRollCount}
-            isScanning={isScanning}
-            isDeepScanning={isDeepScanning}
-            onScan={scan}
-            sharedValues={sharedValues}
-            scanButtonText={"Start Scanning"}
+    <View className={"flex-1 bg-background"} style={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 20 }}>
+      <LinearGradient colors={["#0B0D11", "#12171F"]} style={StyleSheet.absoluteFill} />
+      <View className={"flex-1 px-6"}>
+        <View className={"items-center gap-2 mt-6 mb-8"}>
+          <ThemedText variant={"caption1"} color={"tertiary"} className={"tracking-widest uppercase"}>
+            Setup
+          </ThemedText>
+          <ScanHeader
+            title={"Scan Your Photos"}
+            description={"We'll scan your library for restaurant moments and organize them automatically."}
+            iconName={"camera.viewfinder"}
+            iconColor={"#3B82F6"}
+            iconBackgroundColor={"bg-blue-500/15"}
           />
-        )}
+        </View>
 
-        {/* Continue Button (only show after scan completes) */}
-        {isComplete && (
-          <Animated.View entering={FadeInDown.delay(200).duration(300)}>
-            <Button onPress={handleContinue} size={"lg"}>
-              <ButtonText>Continue to Restaurants</ButtonText>
-            </Button>
-          </Animated.View>
-        )}
+        <View className={"gap-4"}>
+          {/* Permission Card */}
+          {hasPermission === false && (
+            <PermissionCard onRequestPermission={requestPermission} isRequestingPermission={isRequestingPermission} />
+          )}
+
+          {/* Scan Card */}
+          {!isComplete && hasPermission !== false && (
+            <ScanCard
+              cameraRollCount={cameraRollCount}
+              isScanning={isScanning}
+              isDeepScanning={isDeepScanning}
+              onScan={scan}
+              sharedValues={sharedValues}
+              scanButtonText={"Start Scanning"}
+            />
+          )}
+
+          {/* Continue Button (only show after scan completes) */}
+          {isComplete && (
+            <Animated.View entering={FadeInDown.delay(200).duration(300)}>
+              <Button onPress={handleContinue} size={"lg"}>
+                <ButtonText>Continue to Restaurants</ButtonText>
+              </Button>
+            </Animated.View>
+          )}
+        </View>
       </View>
     </View>
   );

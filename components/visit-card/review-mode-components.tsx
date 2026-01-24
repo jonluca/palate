@@ -9,17 +9,18 @@ interface VisitMetaHeaderProps {
   startTime: number;
   photoCount: number;
   foodProbable: boolean;
+  timeZone?: string | null;
 }
 
-export function VisitMetaHeader({ startTime, photoCount, foodProbable }: VisitMetaHeaderProps) {
+export function VisitMetaHeader({ startTime, photoCount, foodProbable, timeZone }: VisitMetaHeaderProps) {
   return (
     <View className={"flex-row items-center justify-between"}>
       <View>
         <ThemedText variant={"subhead"} className={"font-medium"}>
-          {formatDate(startTime)}
+          {formatDate(startTime, timeZone)}
         </ThemedText>
         <ThemedText variant={"footnote"} color={"tertiary"}>
-          {formatTime(startTime)} • {photoCount.toLocaleString()} photos
+          {formatTime(startTime, timeZone)} • {photoCount.toLocaleString()} photos
         </ThemedText>
       </View>
       <View className={"flex-row items-center gap-2"}>

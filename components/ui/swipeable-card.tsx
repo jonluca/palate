@@ -27,6 +27,8 @@ interface SwipeableCardProps {
   enabled?: boolean;
   /** Unique identifier for the card - resets swipe position when this changes */
   cardKey?: string;
+  onGestureStart?: () => void;
+  onGestureEnd?: () => void;
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
@@ -45,6 +47,8 @@ export function SwipeableCard({
   threshold = DEFAULT_THRESHOLD,
   enabled = true,
   cardKey,
+  onGestureStart,
+  onGestureEnd,
 }: SwipeableCardProps) {
   const translateX = useSharedValue(0);
   const contextX = useSharedValue(0);
@@ -88,6 +92,9 @@ export function SwipeableCard({
     .failOffsetY([-10, 10]) // Fail gesture if user moves 10px vertically first (allows scroll)
     .onStart(() => {
       contextX.value = translateX.value;
+      if (onGestureStart) {
+        runOnJS(onGestureStart)();
+      }
     })
     .onUpdate((event) => {
       const newX = contextX.value + event.translationX;
@@ -142,6 +149,9 @@ export function SwipeableCard({
       }
 
       runOnJS(resetHaptic)();
+      if (onGestureEnd) {
+        runOnJS(onGestureEnd)();
+      }
     });
 
   const cardStyle = useAnimatedStyle(() => ({

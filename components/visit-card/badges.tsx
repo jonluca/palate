@@ -15,6 +15,9 @@ export function FoodBadge() {
 
 export function CalendarBadge({ title, isAllDay }: { title: string; isAllDay?: boolean }) {
   const cleanedTitle = cleanCalendarEventTitle(title);
+  if (!cleanedTitle) {
+    return null;
+  }
   return (
     <View className={"flex-row items-center gap-1 bg-blue-500/10 px-2 py-0.5 rounded-full"}>
       <IconSymbol name={"calendar"} size={12} color={"#3b82f6"} />

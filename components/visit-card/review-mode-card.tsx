@@ -6,9 +6,10 @@ import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Pressable, View } from "react-native";
+import tzLookup from "tz-lookup";
 import { PhotoPreview } from "./photo-preview";
 import { VisitActions } from "./visit-actions";
-import { VisitMetaHeader, BadgesRow, ExactMatchCard, NotThisRestaurantLink } from "./review-mode-components";
+import { VisitMetaHeader, BadgesRow, ExactMatchCard } from "./review-mode-components";
 import { useUnifiedNearbyRestaurants, type NearbyRestaurant } from "@/hooks";
 import type { ReviewModeProps, SuggestedRestaurant, LoadingAction } from "./types";
 
@@ -88,6 +89,21 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
   // Find matched restaurant details from suggestions if we have a match
   // This lookup provides additional details (award, cuisine) not stored in the ExactCalendarMatch
   const matchedRestaurant = hasMatch ? displayRestaurantsUnsorted.find((r) => r.id === match?.restaurantId) : null;
+
+  const visitTimeZone = useMemo(() => {
+    const explicitTimeZone = (visit as { timeZone?: string | null }).timeZone;
+    if (explicitTimeZone) {
+      return explicitTimeZone;
+    }
+    if (Number.isFinite(visit.centerLat) && Number.isFinite(visit.centerLon)) {
+      try {
+        return tzLookup(visit.centerLat, visit.centerLon);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }, [visit]);
 
   // Display values: match takes priority, then selected restaurant, then primary suggestion
   // When we have a match, always use match.restaurantName for the name
@@ -263,7 +279,12 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
               <PhotoPreview photos={previewPhotos} onPhotoPress={handleViewVisit} />
 
               <View className={"p-4 gap-3"}>
-                <VisitMetaHeader startTime={startTime} photoCount={photoCount} foodProbable={foodProbable} />
+                <VisitMetaHeader
+                  startTime={startTime}
+                  photoCount={photoCount}
+                  foodProbable={foodProbable}
+                  timeZone={visitTimeZone}
+                />
 
                 <BadgesRow calendarEventTitle={calendarEventTitle} hasMatch={hasMatch} />
 
@@ -288,12 +309,11 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
                   onSkip={handleReject}
                   onConfirm={handleConfirmButton}
                   onFindRestaurant={() => setShowSearch(true)}
+                  onNotThisRestaurant={() => setShowSearch(true)}
                   hasSuggestion={canConfirm}
                   loadingAction={loadingAction}
                   variant={"pill"}
                 />
-
-                {canConfirm && <NotThisRestaurantLink onPress={() => setShowSearch(true)} />}
               </View>
             </Card>
           </Pressable>

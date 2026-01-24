@@ -9,6 +9,7 @@ export function VisitActions({
   onSkip,
   onConfirm,
   onFindRestaurant,
+  onNotThisRestaurant,
   hasSuggestion,
   loadingAction = null,
   variant = "pill",
@@ -33,6 +34,11 @@ export function VisitActions({
   const handleFindRestaurant = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     onFindRestaurant?.();
+  };
+
+  const handleNotThisRestaurant = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onNotThisRestaurant?.();
   };
 
   if (variant === "full") {
@@ -115,41 +121,56 @@ export function VisitActions({
 
       <View className={"flex-1"} />
 
-      {hasSuggestion ? (
-        <Pressable
-          onPress={handleConfirm}
-          disabled={isAnyLoading}
-          className={"flex-row items-center gap-2 px-4 py-2 bg-green-500/20 rounded-full"}
-        >
-          {isConfirmLoading ? (
-            <ActivityIndicator size={"small"} color={"#22c55e"} />
-          ) : (
-            <>
-              <IconSymbol name={"checkmark"} size={16} color={"#22c55e"} />
-              <ThemedText variant={"subhead"} className={"text-green-500 font-medium"}>
-                Confirm
-              </ThemedText>
-            </>
-          )}
-        </Pressable>
-      ) : (
-        <Pressable
-          onPress={handleFindRestaurant}
-          disabled={isAnyLoading}
-          className={"flex-row items-center gap-2 px-4 py-2 bg-orange-500/20 rounded-full"}
-        >
-          {isFindLoading ? (
-            <ActivityIndicator size={"small"} color={"#f97316"} />
-          ) : (
-            <>
-              <IconSymbol name={"magnifyingglass"} size={16} color={"#f97316"} />
-              <ThemedText variant={"subhead"} className={"text-orange-500 font-medium"}>
-                Find Restaurant
-              </ThemedText>
-            </>
-          )}
-        </Pressable>
-      )}
+      <View className={"flex-row items-center gap-2"}>
+        {hasSuggestion && onNotThisRestaurant && (
+          <Pressable
+            onPress={handleNotThisRestaurant}
+            disabled={isAnyLoading}
+            className={"py-2 rounded-full"}
+            hitSlop={8}
+          >
+            <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>
+              Search
+            </ThemedText>
+          </Pressable>
+        )}
+
+        {hasSuggestion ? (
+          <Pressable
+            onPress={handleConfirm}
+            disabled={isAnyLoading}
+            className={"flex-row items-center gap-2 px-4 py-2 bg-green-500/20 rounded-full"}
+          >
+            {isConfirmLoading ? (
+              <ActivityIndicator size={"small"} color={"#22c55e"} />
+            ) : (
+              <>
+                <IconSymbol name={"checkmark"} size={16} color={"#22c55e"} />
+                <ThemedText variant={"subhead"} className={"text-green-500 font-medium"}>
+                  Confirm
+                </ThemedText>
+              </>
+            )}
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={handleFindRestaurant}
+            disabled={isAnyLoading}
+            className={"flex-row items-center gap-2 px-4 py-2 bg-orange-500/20 rounded-full"}
+          >
+            {isFindLoading ? (
+              <ActivityIndicator size={"small"} color={"#f97316"} />
+            ) : (
+              <>
+                <IconSymbol name={"magnifyingglass"} size={16} color={"#f97316"} />
+                <ThemedText variant={"subhead"} className={"text-orange-500 font-medium"}>
+                  Find Restaurant
+                </ThemedText>
+              </>
+            )}
+          </Pressable>
+        )}
+      </View>
     </View>
   );
 }

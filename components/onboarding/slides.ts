@@ -61,7 +61,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
     gradient: ["#1a0f23", "#2a1a3e", "#3d1f55", "#4d0a6a"],
   },
   {
-    id: "6",
+    id: "7",
     icon: "chart.bar.fill",
     iconColor: "#eab308",
     iconBg: "bg-yellow-500/20",

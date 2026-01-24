@@ -30,6 +30,7 @@
     "@shopify/flash-list": "^2.2.0",
     "@tanstack/react-query": "^5.90.20",
     "@types/react": "~19.2.9",
+    "@types/tz-lookup": "^6.1.2",
     "babel-preset-expo": "^54.0.10",
     "burnt": "^0.13.0",
     "class-variance-authority": "0.7.1",
@@ -78,6 +79,7 @@
     "tailwind-merge": "3.4.0",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
+    "tz-lookup": "^6.1.25",
     "uniwind": "^1.2.6",
     "zeego": "^3.0.6",
     "zustand": "^5.0.10"
