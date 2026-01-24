@@ -182,7 +182,7 @@ export const queryKeys = {
   michelinRestaurants: ["static", "michelinRestaurants"] as const,
   michelinRestaurantDetail: (michelinId: string) => ["static", "michelinRestaurants", "detail", michelinId] as const,
   nearbyMichelin: (lat: number, lon: number) => ["static", "nearbyMichelin", lat, lon] as const,
-  mapKitNearby: (lat: number, lon: number) => ["mapKitNearby", lat.toFixed(4), lon.toFixed(4)] as const,
+  mapKitNearby: (lat: number, lon: number) => ["static", "mapKitNearby", lat.toFixed(4), lon.toFixed(4)] as const,
   wrapped: (year?: number | null) => {
     if (year) {
       return ["wrapped", year] as const;

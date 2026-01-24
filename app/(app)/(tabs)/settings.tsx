@@ -12,7 +12,11 @@ import type { SymbolViewProps } from "expo-symbols";
 import { nukeDatabase } from "@/utils/db";
 import {
   useAppStore,
+  useFastAnimations,
+  useHideUndoBar,
   useGoogleMapsApiKey,
+  useSetFastAnimations,
+  useSetHideUndoBar,
   useSetGoogleMapsApiKey,
   useSelectedCalendarIds,
   useSetSelectedCalendarIds,
@@ -719,6 +723,86 @@ function QuickActionsCard() {
             </View>
           </View>
           <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Undo Bar Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function UndoBarCard() {
+  const hideUndoBar = useHideUndoBar();
+  const setHideUndoBar = useSetHideUndoBar();
+
+  const handleToggle = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setHideUndoBar(!hideUndoBar);
+  }, [hideUndoBar, setHideUndoBar]);
+
+  return (
+    <Pressable onPress={handleToggle}>
+      <Card animated={false}>
+        <View className={"p-4 flex-row items-center gap-3"}>
+          <CardIcon name={"arrow.uturn.backward.circle.fill"} color={"#14b8a6"} bgColor={"bg-teal-500/15"} />
+          <View className={"flex-1"}>
+            <ThemedText variant={"subhead"} className={"font-medium"}>
+              Undo Bar
+            </ThemedText>
+            <ThemedText variant={"footnote"} color={"secondary"}>
+              Show the undo banner after review actions
+            </ThemedText>
+          </View>
+          <View className={`px-2 py-1 rounded-full ${hideUndoBar ? "bg-red-500/15" : "bg-green-500/15"}`}>
+            <ThemedText
+              variant={"caption2"}
+              className={`font-semibold ${hideUndoBar ? "text-red-400" : "text-green-400"}`}
+            >
+              {hideUndoBar ? "Hidden" : "Shown"}
+            </ThemedText>
+          </View>
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fast Animations Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function FastAnimationsCard() {
+  const fastAnimations = useFastAnimations();
+  const setFastAnimations = useSetFastAnimations();
+
+  const handleToggle = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setFastAnimations(!fastAnimations);
+  }, [fastAnimations, setFastAnimations]);
+
+  return (
+    <Pressable onPress={handleToggle}>
+      <Card animated={false}>
+        <View className={"p-4 flex-row items-center gap-3"}>
+          <CardIcon name={"bolt.fill"} color={"#f59e0b"} bgColor={"bg-amber-500/15"} />
+          <View className={"flex-1"}>
+            <ThemedText variant={"subhead"} className={"font-medium"}>
+              Fast Animations
+            </ThemedText>
+            <ThemedText variant={"footnote"} color={"secondary"}>
+              Make UI animations instant
+            </ThemedText>
+          </View>
+          <View className={`px-2 py-1 rounded-full ${fastAnimations ? "bg-green-500/15" : "bg-gray-500/15"}`}>
+            <ThemedText
+              variant={"caption2"}
+              className={`font-semibold ${fastAnimations ? "text-green-400" : "text-gray-400"}`}
+            >
+              {fastAnimations ? "On" : "Off"}
+            </ThemedText>
+          </View>
         </View>
       </Card>
     </Pressable>
@@ -1448,6 +1532,31 @@ function FoodKeywordsCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Export Visits Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ExportVisitsCard() {
+  return (
+    <Card animated={false}>
+      <View className={"p-4 flex-row items-center justify-between"}>
+        <View className={"flex-row items-center gap-3 flex-1"}>
+          <CardIcon name={"square.and.arrow.up"} color={"#0ea5e9"} bgColor={"bg-sky-500/15"} />
+          <View className={"flex-1"}>
+            <ThemedText variant={"subhead"} className={"font-medium"}>
+              Export Visits
+            </ThemedText>
+            <ThemedText variant={"footnote"} color={"secondary"}>
+              Download confirmed visits as CSV or JSON
+            </ThemedText>
+          </View>
+        </View>
+        <ExportButton label={"Export"} variant={"secondary"} size={"sm"} textVariant={"secondary"} />
+      </View>
+    </Card>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // About Card
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1565,6 +1674,15 @@ export default function SettingsScreen() {
         <QuickActionsCard />
       </Animated.View>
 
+      {/* Preferences */}
+      <Animated.View entering={FadeInDown.delay(250).duration(300)} className={"mb-6"}>
+        <SectionHeader>Preferences</SectionHeader>
+        <View className={"gap-3"}>
+          <UndoBarCard />
+          <FastAnimationsCard />
+        </View>
+      </Animated.View>
+
       <MergeDuplicatesSection />
 
       {/* Scan Section */}
@@ -1607,7 +1725,7 @@ export default function SettingsScreen() {
       {stats && stats.confirmedVisits > 0 && (
         <Animated.View entering={FadeInDown.delay(550).duration(300)} className={"mb-6"}>
           <SectionHeader>Export</SectionHeader>
-          <ExportButton />
+          <ExportVisitsCard />
         </Animated.View>
       )}
 

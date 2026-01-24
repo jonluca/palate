@@ -5,7 +5,23 @@ import { useExportData } from "@/hooks/queries";
 import { useToast } from "@/components/ui/toast";
 import { logExportStarted } from "@/services/analytics";
 
-export function ExportButton() {
+interface ExportButtonProps {
+  label?: string;
+  variant?: React.ComponentProps<typeof Button>["variant"];
+  size?: React.ComponentProps<typeof Button>["size"];
+  textVariant?: React.ComponentProps<typeof ButtonText>["variant"];
+  textSize?: React.ComponentProps<typeof ButtonText>["size"];
+  className?: string;
+}
+
+export function ExportButton({
+  label = "Export Confirmed Visits",
+  variant = "outline",
+  size = "default",
+  textVariant,
+  textSize,
+  className,
+}: ExportButtonProps) {
   const exportMutation = useExportData();
   const { showToast } = useToast();
 
@@ -40,8 +56,16 @@ export function ExportButton() {
   };
 
   return (
-    <Button onPress={handleExport} loading={exportMutation.isPending} variant={"outline"}>
-      <ButtonText variant={"outline"}>Export Confirmed Visits</ButtonText>
+    <Button
+      onPress={handleExport}
+      loading={exportMutation.isPending}
+      variant={variant}
+      size={size}
+      className={className}
+    >
+      <ButtonText variant={textVariant ?? variant} size={textSize}>
+        {label}
+      </ButtonText>
     </Button>
   );
 }

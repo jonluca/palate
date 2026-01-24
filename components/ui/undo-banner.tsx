@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/icon-symbol";
 import * as Haptics from "expo-haptics";
+import { useHideUndoBar } from "@/store";
 
 type UndoActionType = "confirm" | "reject";
 
@@ -159,11 +160,18 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
   const idCounter = useRef(0);
   const onUndoCompleteRef = useRef<((visitId: string) => void) | null>(null);
   const insets = useSafeAreaInsets();
+  const hideUndoBar = useHideUndoBar();
 
-  const showUndo = useCallback((action: Omit<UndoableAction, "id">) => {
-    const id = `undo-${++idCounter.current}`;
-    setCurrentAction({ ...action, id });
-  }, []);
+  const showUndo = useCallback(
+    (action: Omit<UndoableAction, "id">) => {
+      if (hideUndoBar) {
+        return;
+      }
+      const id = `undo-${++idCounter.current}`;
+      setCurrentAction({ ...action, id });
+    },
+    [hideUndoBar],
+  );
 
   const clearUndo = useCallback(() => {
     setCurrentAction(null);
@@ -190,10 +198,17 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentAction, isUndoing]);
 
+  useEffect(() => {
+    if (!hideUndoBar || !currentAction) {
+      return;
+    }
+    setCurrentAction(null);
+  }, [hideUndoBar, currentAction]);
+
   return (
     <UndoContext.Provider value={{ showUndo, clearUndo, currentAction, setOnUndoComplete }}>
       {children}
-      {currentAction && (
+      {currentAction && !hideUndoBar && (
         <View
           className={"absolute bottom-0 left-0 right-0 px-4 z-50"}
           style={{ paddingBottom: insets.bottom }}

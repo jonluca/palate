@@ -72,6 +72,12 @@ interface AppState {
   selectedVisitId: string | null;
   setSelectedVisitId: (id: string | null) => void;
 
+  // UI preferences
+  hideUndoBar: boolean;
+  setHideUndoBar: (hide: boolean) => void;
+  fastAnimations: boolean;
+  setFastAnimations: (enabled: boolean) => void;
+
   // Restaurant search modal
   isRestaurantSearchOpen: boolean;
   restaurantSearchVisitId: string | null;
@@ -185,6 +191,12 @@ export const useAppStore = create<AppState>()(
       selectedVisitId: null as string | null,
       setSelectedVisitId: (id: string | null) => set({ selectedVisitId: id }),
 
+      // UI preferences
+      hideUndoBar: false,
+      setHideUndoBar: (hide) => set({ hideUndoBar: hide }),
+      fastAnimations: false,
+      setFastAnimations: (enabled) => set({ fastAnimations: enabled }),
+
       // Restaurant search modal
       isRestaurantSearchOpen: false,
       restaurantSearchVisitId: null as string | null,
@@ -217,6 +229,8 @@ export const useAppStore = create<AppState>()(
           isScanning: false,
           scanProgress: initialScanProgress,
           selectedVisitId: null,
+          hideUndoBar: false,
+          fastAnimations: false,
           isRestaurantSearchOpen: false,
           restaurantSearchVisitId: null,
         }),
@@ -237,6 +251,8 @@ export const useAppStore = create<AppState>()(
         googleMapsApiKey: state.googleMapsApiKey,
         selectedCalendarIds: state.selectedCalendarIds,
         hasSeenAddPhotosAlert: state.hasSeenAddPhotosAlert,
+        hideUndoBar: state.hideUndoBar,
+        fastAnimations: state.fastAnimations,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
@@ -276,6 +292,11 @@ export const useSetSelectedCalendarIds = () => useAppStore((state) => state.setS
 
 export const useHasSeenAddPhotosAlert = () => useAppStore((state) => state.hasSeenAddPhotosAlert);
 export const useSetHasSeenAddPhotosAlert = () => useAppStore((state) => state.setHasSeenAddPhotosAlert);
+
+export const useHideUndoBar = () => useAppStore((state) => state.hideUndoBar);
+export const useSetHideUndoBar = () => useAppStore((state) => state.setHideUndoBar);
+export const useFastAnimations = () => useAppStore((state) => state.fastAnimations);
+export const useSetFastAnimations = () => useAppStore((state) => state.setFastAnimations);
 
 /** Get the Google Maps API key directly from the store (for non-React contexts) */
 export const getGoogleMapsApiKey = () => useAppStore.getState().googleMapsApiKey;

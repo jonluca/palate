@@ -13,6 +13,8 @@ import type { AppStateStatus } from "react-native";
 import { focusManager } from "@tanstack/react-query";
 import { useDrizzleStudioInspector, useAnalyticsScreenTracking } from "@/hooks";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { ReducedMotionConfig, ReduceMotion } from "react-native-reanimated";
+import { useFastAnimations } from "@/store";
 
 function onAppStateChange(status: AppStateStatus) {
   if (Platform.OS !== "web") {
@@ -42,6 +44,7 @@ export const queryClient = new QueryClient({
 export default function RootLayout() {
   useDrizzleStudioInspector();
   useAnalyticsScreenTracking();
+  const fastAnimations = useFastAnimations();
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", onAppStateChange);
@@ -88,6 +91,7 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
+      <ReducedMotionConfig mode={fastAnimations ? ReduceMotion.Always : ReduceMotion.System} />
       <QueryClientProvider client={queryClient}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <ToastProvider>

@@ -450,7 +450,10 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
 
   // Process location data - parse "City, Country" format and dedupe by city
   const parseLocationParts = (rawLocation: string) => {
-    const parts = rawLocation.split(",").map((part) => part.trim()).filter(Boolean);
+    const parts = rawLocation
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
     const city = parts[0] || rawLocation;
     const country = parts.length > 1 ? parts[parts.length - 1] : "";
     return { city, country };
