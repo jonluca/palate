@@ -1183,115 +1183,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@buoy-gg/core@npm:^2.1.1":
-  version: 2.1.1
-  resolution: "@buoy-gg/core@npm:2.1.1"
-  dependencies:
-    "@buoy-gg/floating-tools-core": "npm:2.1.1"
-    "@buoy-gg/floating-tools-react": "npm:2.1.1"
-    "@buoy-gg/license": "npm:2.1.1"
-    "@buoy-gg/shared-ui": "npm:2.1.1"
-  peerDependencies:
-    react: "*"
-    react-native: "*"
-  checksum: 10c0/1f5478895a9a9a925ea3fcc6486d07b8a660fbc0ed70c3dfc7b5972e2d0af5c63548b0f2f1b099c8fc939844b9ac3c264046b2960a593eb38a48304e8bf40541
-  languageName: node
-  linkType: hard
-
-"@buoy-gg/floating-tools-core@npm:2.1.1":
-  version: 2.1.1
-  resolution: "@buoy-gg/floating-tools-core@npm:2.1.1"
-  peerDependencies:
-    react: "*"
-    react-native: "*"
-  peerDependenciesMeta:
-    react-native:
-      optional: true
-  checksum: 10c0/dddfbb5f36af466a0bbdcf79ba4ad6ce895b14204635feaea8096da0c7ccac226aecc3832684428542aacd90240135c96e6e3b9cd190e4bd2e120d96240f2377
-  languageName: node
-  linkType: hard
-
-"@buoy-gg/floating-tools-react@npm:2.1.1":
-  version: 2.1.1
-  resolution: "@buoy-gg/floating-tools-react@npm:2.1.1"
-  dependencies:
-    "@buoy-gg/floating-tools-core": "npm:2.1.1"
-  peerDependencies:
-    react: ">=17.0.0"
-  checksum: 10c0/0a1b98814255ab90ddac6130914ad19d18123e0e96ef643b0d759f5c96fd1f9a4e1053d70815b46cd2e399ab1cddeed95f95c182803b898c2b5deedaa142fc94
-  languageName: node
-  linkType: hard
-
-"@buoy-gg/highlight-updates@npm:^2.1.1":
-  version: 2.1.1
-  resolution: "@buoy-gg/highlight-updates@npm:2.1.1"
-  dependencies:
-    "@buoy-gg/floating-tools-core": "npm:2.1.1"
-    "@buoy-gg/shared-ui": "npm:2.1.1"
-  peerDependencies:
-    "@buoy-gg/core": 2.1.1
-    "@buoy-gg/license": "*"
-    react: "*"
-    react-native: "*"
-  peerDependenciesMeta:
-    "@buoy-gg/core":
-      optional: true
-  checksum: 10c0/1a86289a797592f71cf22b973660c7789e8848f7655eb2f3b8e1666bc5afb70e9986a87e9ea8ca19df4354c30150d72ae5ed3d5097d08e16427682693cbb61e8
-  languageName: node
-  linkType: hard
-
-"@buoy-gg/license@npm:2.1.1":
-  version: 2.1.1
-  resolution: "@buoy-gg/license@npm:2.1.1"
-  peerDependencies:
-    react: "*"
-    react-native: "*"
-  checksum: 10c0/685292a77fa39b5c6e04292f2a47d069bccd5f3777bef9e598412dde6d398403c03ca94f85cc3776b1e9162a86e040a2938a8dbcee39e8e56a488e92ec59537e
-  languageName: node
-  linkType: hard
-
-"@buoy-gg/react-query@npm:^2.1.1":
-  version: 2.1.1
-  resolution: "@buoy-gg/react-query@npm:2.1.1"
-  dependencies:
-    "@buoy-gg/floating-tools-core": "npm:2.1.1"
-    "@buoy-gg/shared-ui": "npm:2.1.1"
-  peerDependencies:
-    "@tanstack/react-query": ">=5.0.0"
-    react: "*"
-    react-native: "*"
-  checksum: 10c0/be18150bfb9843a9820afbc52ffb50d8b9887fd671947291df8ad0226e96bf4efad96037d8f1f5432348104d12b9161f4abfad7d342215d5bbd36c7b1c217727
-  languageName: node
-  linkType: hard
-
-"@buoy-gg/shared-ui@npm:2.1.1":
-  version: 2.1.1
-  resolution: "@buoy-gg/shared-ui@npm:2.1.1"
-  dependencies:
-    "@buoy-gg/floating-tools-core": "npm:2.1.1"
-  peerDependencies:
-    "@buoy-gg/license": "*"
-    "@react-native-clipboard/clipboard": "*"
-    expo-clipboard: "*"
-    expo-file-system: "*"
-    react: "*"
-    react-native: "*"
-    react-native-safe-area-context: "*"
-  peerDependenciesMeta:
-    "@buoy-gg/license":
-      optional: true
-    "@react-native-clipboard/clipboard":
-      optional: true
-    expo-clipboard:
-      optional: true
-    expo-file-system:
-      optional: true
-    react-native-safe-area-context:
-      optional: true
-  checksum: 10c0/13c8cea96431695c3b309c7b6fd722745885ed12f44b39f0f5405ef9bd171d92527d7f15954da448eb4a3b7b598ed37a30f0161535ecd5dcf0c6c73e5ef82c73
-  languageName: node
-  linkType: hard
-
 "@dominicstop/ts-event-emitter@npm:^1.1.0":
   version: 1.1.0
   resolution: "@dominicstop/ts-event-emitter@npm:1.1.0"
@@ -3550,6 +3441,16 @@ __metadata:
     expo:
       optional: true
   checksum: 10c0/038367e5ae7146a1ec7f096abebd1d67f7818903331376565af45a70e65771a8e8ed1061d6cacd43fdff300c7b5d88cc58eceedc6b852ec80d2a6d1154ca997b
+  languageName: node
+  linkType: hard
+
+"@react-native-menu/menu@npm:^2.0.0":
+  version: 2.0.0
+  resolution: "@react-native-menu/menu@npm:2.0.0"
+  peerDependencies:
+    react: "*"
+    react-native: "*"
+  checksum: 10c0/1e88e1892730c70e28a654a8df6427f80f1b88880eaa62f2744072b9cebead4e834490d15ef7f0b91eadf9cb1ec9241b29f116ce7e94661685b41faf10af3fa3
   languageName: node
   linkType: hard
 
@@ -9384,15 +9285,13 @@ __metadata:
   dependencies:
     "@babel/core": "npm:^7.28.6"
     "@babel/runtime": "npm:^7.28.6"
-    "@buoy-gg/core": "npm:^2.1.1"
-    "@buoy-gg/highlight-updates": "npm:^2.1.1"
-    "@buoy-gg/react-query": "npm:^2.1.1"
     "@eslint/compat": "npm:^2.0.1"
     "@eslint/js": "npm:^9.39.2"
     "@expo/metro-runtime": "npm:6.1.2"
     "@expo/vector-icons": "npm:15.0.3"
     "@react-native-firebase/analytics": "npm:^23.8.4"
     "@react-native-firebase/app": "npm:^23.8.4"
+    "@react-native-menu/menu": "npm:^2.0.0"
     "@react-navigation/elements": "npm:2.9.5"
     "@react-navigation/native": "npm:^7.1.28"
     "@shopify/flash-list": "npm:^2.2.0"
