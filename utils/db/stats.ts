@@ -70,6 +70,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     mostRevisitedRestaurant,
     visitDates,
     // New stats queries
+    allLocationsData,
     topLocationsData,
     greenStarResult,
     mealTimeData,
@@ -211,6 +212,15 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       FROM visits 
       WHERE status = 'confirmed' ${yearFilter}
       ORDER BY date ASC`,
+    ),
+    // All distinct locations for accurate country/city counts
+    database.getAllAsync<{ location: string }>(
+      `SELECT DISTINCT TRIM(m.location) as location
+      FROM visits v
+      JOIN michelin_restaurants m ON v.restaurantId = m.id
+      WHERE v.status = 'confirmed'
+        AND TRIM(COALESCE(m.location, '')) != ''
+        ${yearFilterForV}`,
     ),
     // Top locations (cities/countries from michelin_restaurants.location)
     // Normalize locations by trimming whitespace and using case-insensitive grouping
@@ -439,12 +449,17 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
   }
 
   // Process location data - parse "City, Country" format and dedupe by city
+  const parseLocationParts = (rawLocation: string) => {
+    const parts = rawLocation.split(",").map((part) => part.trim()).filter(Boolean);
+    const city = parts[0] || rawLocation;
+    const country = parts.length > 1 ? parts[parts.length - 1] : "";
+    return { city, country };
+  };
+
   const cityVisitsMap = new Map<string, { city: string; country: string; visits: number }>();
   for (const loc of topLocationsData) {
-    const parts = loc.location.split(",").map((s) => s.trim());
     // Location format is typically "City, Region/Country" or "City, Country"
-    const city = parts[0] || loc.location;
-    const country = parts.length > 1 ? parts[parts.length - 1] : "";
+    const { city, country } = parseLocationParts(loc.location);
     // Normalize city key for deduplication (lowercase, trimmed)
     const cityKey = city.toLowerCase().trim();
 
@@ -468,8 +483,22 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     }));
 
   // Count unique countries and cities
-  const uniqueCountriesSet = new Set(topLocations.map((l) => l.country).filter(Boolean));
-  const uniqueCitiesSet = new Set(topLocations.map((l) => l.city).filter(Boolean));
+  const normalizeLocation = (value: string) => value.toLowerCase().trim();
+  const uniqueCountriesSet = new Set<string>();
+  const uniqueCitiesSet = new Set<string>();
+
+  for (const loc of allLocationsData) {
+    if (!loc.location) {
+      continue;
+    }
+    const { city, country } = parseLocationParts(loc.location);
+    if (city) {
+      uniqueCitiesSet.add(normalizeLocation(city));
+    }
+    if (country) {
+      uniqueCountriesSet.add(normalizeLocation(country));
+    }
+  }
 
   // Process meal time breakdown
   const mealTimeBreakdown = {
