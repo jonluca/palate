@@ -1,7 +1,5 @@
 export type {
-  AggregatedFoodLabel,
   CalendarEventUpdate,
-  ConfirmedVisitForCalendarFilter,
   ExportedCalendarEvent,
   FoodKeywordRecord,
   FoodLabel,
@@ -15,7 +13,6 @@ export type {
   RemovePhotosResult,
   RestaurantRecord,
   RestaurantWithVisits,
-  SuggestedRestaurantDetail,
   UpdateRestaurantData,
   VisitForCalendarExport,
   VisitRecord,
@@ -28,7 +25,6 @@ export { getDatabase, nukeDatabase, performDatabaseMaintenance } from "./db/core
 
 export {
   batchUpdatePhotosFoodDetected,
-  getAllPhotoIds,
   getPhotosByAssetIds,
   getPhotosByVisitId,
   getTotalPhotoCount,

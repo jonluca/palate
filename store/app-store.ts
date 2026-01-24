@@ -273,8 +273,6 @@ export const useReviewCalendarMatchesFilter = () => useAppStore((state) => state
 export const useSetReviewCalendarMatchesFilter = () => useAppStore((state) => state.setReviewCalendarMatchesFilter);
 export const useReviewRestaurantMatchesFilter = () => useAppStore((state) => state.reviewRestaurantMatchesFilter);
 export const useSetReviewRestaurantMatchesFilter = () => useAppStore((state) => state.setReviewRestaurantMatchesFilter);
-export const useReviewStarFilter = () => useAppStore((state) => state.reviewStarFilter);
-export const useSetReviewStarFilter = () => useAppStore((state) => state.setReviewStarFilter);
 export const useReviewFiltersCollapsed = () => useAppStore((state) => state.reviewFiltersCollapsed);
 export const useSetReviewFiltersCollapsed = () => useAppStore((state) => state.setReviewFiltersCollapsed);
 

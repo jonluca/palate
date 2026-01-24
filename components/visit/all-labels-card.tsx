@@ -5,12 +5,6 @@ import { Card } from "@/components/ui";
 import { Ionicons } from "@expo/vector-icons";
 import type { FoodLabel } from "@/utils/db";
 
-export interface AggregatedLabel {
-  label: string;
-  maxConfidence: number;
-  photoCount: number;
-}
-
 interface AllLabelsCardProps {
   photos: Array<{ allLabels?: FoodLabel[] | null; foodLabels?: FoodLabel[] | null }>;
 }

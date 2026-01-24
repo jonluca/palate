@@ -91,14 +91,6 @@ export async function getPhotosByVisitId(visitId: string): Promise<PhotoRecord[]
 }
 
 /**
- * Get all photo IDs (ordered deterministically by creationTime and id)
- */
-export async function getAllPhotoIds(): Promise<{ id: string }[]> {
-  const database = await getDatabase();
-  return database.getAllAsync<{ id: string }>(`SELECT id FROM photos ORDER BY creationTime ASC, id ASC`);
-}
-
-/**
  * Get photo IDs that haven't been analyzed for food yet (foodDetected IS NULL)
  * Ordered deterministically by creationTime and id
  */

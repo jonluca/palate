@@ -3922,7 +3922,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tanstack/query-core@npm:5.90.20":
+"@tanstack/query-core@npm:5.90.20, @tanstack/query-core@npm:^5.90.20":
   version: 5.90.20
   resolution: "@tanstack/query-core@npm:5.90.20"
   checksum: 10c0/70637dfcecd5ed9d810629aa27f1632af8a4bcd083e75cf29408d058c32f8234704a3231ec280e2c4016ea0485b16124fdf70ab97793b5a7b670f43f7659e9fe
@@ -6204,17 +6204,6 @@ __metadata:
     expo: "*"
     react-native: "*"
   checksum: 10c0/534edb4228994ddc0c58628da8615a1e37be68a3ad0f15d8b703c7d8c2903ff667a7f42e8f8e0bc18e6c6e5c7b69e1f2b2ec54a2b95dc5bf0223867207bd6112
-  languageName: node
-  linkType: hard
-
-"expo-clipboard@npm:^8.0.8":
-  version: 8.0.8
-  resolution: "expo-clipboard@npm:8.0.8"
-  peerDependencies:
-    expo: "*"
-    react: "*"
-    react-native: "*"
-  checksum: 10c0/afd16183bee237c825ed594320dd4eccd1b8cbcdf6fa993b80c946a7dc26adcdd48a847bd57e7150f176866a6e351a898efe87188793ef0982382ba1e32fb6fb
   languageName: node
   linkType: hard
 
@@ -9295,6 +9284,7 @@ __metadata:
     "@react-navigation/elements": "npm:2.9.5"
     "@react-navigation/native": "npm:^7.1.28"
     "@shopify/flash-list": "npm:^2.2.0"
+    "@tanstack/query-core": "npm:^5.90.20"
     "@tanstack/react-query": "npm:^5.90.20"
     "@types/babel__core": "npm:^7"
     "@types/lodash-es": "npm:^4"
@@ -9324,7 +9314,6 @@ __metadata:
     expo-blur: "npm:^15.0.8"
     expo-build-properties: "npm:^1.0.10"
     expo-calendar: "npm:^15.0.8"
-    expo-clipboard: "npm:^8.0.8"
     expo-constants: "npm:^18.0.13"
     expo-dev-client: "npm:6.0.20"
     expo-device: "npm:^8.0.10"

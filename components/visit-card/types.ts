@@ -47,29 +47,6 @@ export interface ReviewModeProps {
   enableAppleMapsVerification?: boolean;
 }
 
-// Legacy review mode props for backwards compatibility during migration
-export type LegacyReviewModeProps = BaseVisitCardProps & {
-  mode: "review";
-  suggestedRestaurantName?: string | null;
-  suggestedRestaurantAward?: string | null;
-  suggestedRestaurantCuisine?: string | null;
-  suggestedRestaurants?: SuggestedRestaurant[];
-  hasSuggestion?: boolean;
-  /** Which action is currently loading (shows spinner only on that button) */
-  loadingAction?: LoadingAction;
-  onConfirm?: (restaurant?: SuggestedRestaurant) => void;
-  onReject?: () => void;
-  onFindRestaurant?: () => void;
-  /** Center latitude for Apple Maps verification searches */
-  centerLat?: number;
-  /** Center longitude for Apple Maps verification searches */
-  centerLon?: number;
-
-  match?: ExactCalendarMatch;
-};
-
-export type VisitCardProps = ListModeProps;
-
 // Visit actions props
 export type LoadingAction = "skip" | "confirm" | "find" | null;
 

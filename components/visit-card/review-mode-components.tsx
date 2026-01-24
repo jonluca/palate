@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { CalendarBadge, ExactMatchBadge } from "./badges";
@@ -91,19 +91,5 @@ export function ExactMatchCard({ displayName, displayAward, displayCuisine }: Ex
         </ThemedText>
       )}
     </View>
-  );
-}
-
-interface NotThisRestaurantLinkProps {
-  onPress: () => void;
-}
-
-export function NotThisRestaurantLink({ onPress }: NotThisRestaurantLinkProps) {
-  return (
-    <Pressable onPress={onPress} className={"self-end"} hitSlop={8}>
-      <ThemedText variant={"footnote"} color={"tertiary"} className={"underline"}>
-        Not this restaurant?
-      </ThemedText>
-    </Pressable>
   );
 }

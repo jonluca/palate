@@ -1,5 +1,3 @@
-import type { MichelinRestaurantRecord } from "@/utils/db";
-
 // Calculate distance between two GPS coordinates in meters using Haversine formula
 export function calculateDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000; // Earth's radius in meters
@@ -14,25 +12,4 @@ export function calculateDistanceMeters(lat1: number, lon1: number, lat2: number
 
 function toRad(deg: number): number {
   return deg * (Math.PI / 180);
-}
-
-// Find nearby Michelin restaurants sorted by distance (returns multiple options)
-export function findNearbyMichelinRestaurants(
-  lat: number,
-  lon: number,
-  restaurants: MichelinRestaurantRecord[],
-  maxDistanceMeters: number = 500,
-  limit: number = 5,
-): Array<MichelinRestaurantRecord & { distance: number }> {
-  const nearby: Array<MichelinRestaurantRecord & { distance: number }> = [];
-
-  for (const restaurant of restaurants) {
-    const distance = calculateDistanceMeters(lat, lon, restaurant.latitude, restaurant.longitude);
-    if (distance <= maxDistanceMeters) {
-      nearby.push({ ...restaurant, distance });
-    }
-  }
-
-  // Sort by distance and limit
-  return nearby.sort((a, b) => a.distance - b.distance).slice(0, limit);
 }

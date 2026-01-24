@@ -28,17 +28,6 @@ export function CalendarBadge({ title, isAllDay }: { title: string; isAllDay?: b
   );
 }
 
-export function NearbyRestaurantsBadge({ count }: { count: number }) {
-  return (
-    <View className={"flex-row items-center gap-1 bg-amber-500/10 px-2 py-0.5 rounded-full"}>
-      <IconSymbol name={"mappin.and.ellipse"} size={12} color={"#f59e0b"} />
-      <ThemedText variant={"caption2"} className={"text-amber-600"}>
-        {count} nearby
-      </ThemedText>
-    </View>
-  );
-}
-
 export function ExactMatchBadge() {
   return (
     <View className={"flex-row items-center gap-1 bg-green-500/10 px-2 py-0.5 rounded-full"}>
