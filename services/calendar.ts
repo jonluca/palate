@@ -127,9 +127,9 @@ async function getEventsInRange(startDate: number, endDate: number): Promise<Cal
 
 const NON_RESTAURANT_TITLE_PATTERNS: RegExp[] = [
   // Travel/transport emojis
-  /[✈️✈︎🛫🛬🛩️🚆🚄🚅🚇🚈🚉🚌🚍🚎🚗🚕🚖🚘🚙🛻🚲🚴🚤⛴️🚢🚋🚝🚞🚊🛳️]/u,
+  /[✈️✈︎🛫🛬🛩️🚆🚄🚅🚇🚈🚉🚌🚍🚎🚗🚕🚖🚘🚙🛻🚲🚴🚤⛴️🚢🚋🚝🚞🚊🛳️✈]/u,
   // Lodging/travel keywords
-  /\b(flight|airport|boarding|gate|airline|itinerary|train|amtrak|bus|station|uber|lyft|taxi|rideshare|hotel|airbnb|check[-\s]?in|check[-\s]?out)\b/i,
+  /\b(airbnb|check[-\s]?in|check[-\s]?out)\b/i,
 ];
 
 function isLikelyNonReservationTitle(title: string): boolean {
@@ -269,6 +269,19 @@ export async function batchFindEventsForVisits(
   }
 
   return results;
+}
+
+/**
+ * Get all calendar events that overlap a visit time range.
+ */
+export async function getEventsOverlappingRange(
+  startTime: number,
+  endTime: number,
+  bufferMinutes: number = 30,
+): Promise<CalendarEventInfo[]> {
+  const bufferMs = bufferMinutes * 60 * 1000;
+  const events = await getEventsInRange(startTime - bufferMs, endTime + bufferMs);
+  return events.filter((event) => isTimeOverlapping(startTime, endTime, event.startDate, event.endDate, bufferMs));
 }
 
 /** Check if a string looks like a URL */

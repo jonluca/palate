@@ -10,7 +10,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
     version: VERSION,
     orientation: "portrait",
     icon: "./assets/images/icon.jpeg",
-    scheme: "photorestaurantmatcher",
+    scheme: "palate",
     userInterfaceStyle: "automatic",
     newArchEnabled: true,
     ios: {

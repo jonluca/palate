@@ -526,6 +526,28 @@ export default function VisitDetailScreen() {
   // Check if any photos haven't been scanned for food yet
   const unscannedPhotosCount = photos.filter((p) => p.foodDetected === null).length;
   const showFoodScanCard = unscannedPhotosCount > 0;
+  const shouldShowAllCalendarEvents = visit.status !== "confirmed";
+  const calendarEventsToDisplay = shouldShowAllCalendarEvents
+    ? data.calendarEvents.length > 0
+      ? data.calendarEvents
+      : visit.calendarEventTitle
+        ? [
+            {
+              id: visit.calendarEventId ?? `visit-${visit.id}-calendar`,
+              title: visit.calendarEventTitle,
+              location: visit.calendarEventLocation,
+            },
+          ]
+        : []
+    : visit.calendarEventTitle
+      ? [
+          {
+            id: visit.calendarEventId ?? `visit-${visit.id}-calendar`,
+            title: visit.calendarEventTitle,
+            location: visit.calendarEventLocation,
+          },
+        ]
+      : [];
 
   return (
     <>
@@ -539,9 +561,9 @@ export default function VisitDetailScreen() {
           award={suggestedRestaurant?.award}
         />
 
-        {visit.calendarEventTitle && (
-          <CalendarEventCard title={visit.calendarEventTitle} location={visit.calendarEventLocation} />
-        )}
+        {calendarEventsToDisplay.map((event) => (
+          <CalendarEventCard key={event.id} title={event.title} location={event.location} />
+        ))}
 
         {showNoMatch && <NoMatchCard onSearchPress={() => setShowSearch(true)} />}
 

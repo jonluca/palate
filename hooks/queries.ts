@@ -64,9 +64,11 @@ import {
   requestCalendarPermission,
   getWritableCalendars,
   getAllSyncableCalendars,
+  getEventsOverlappingRange,
   batchCreateCalendarEvents,
   batchDeleteCalendarEvents,
   type WritableCalendar,
+  type CalendarEventInfo,
 } from "@/services/calendar";
 
 // ============================================================================
@@ -288,6 +290,8 @@ export interface VisitDetail {
   suggestedRestaurant: MichelinRestaurantRecord | null;
   /** All nearby suggested restaurants from the pre-computed database (same as review page) */
   suggestedRestaurants: SuggestedRestaurantDetail[];
+  /** All calendar events overlapping the visit time range (pending only) */
+  calendarEvents: CalendarEventInfo[];
   photos: PhotoRecord[];
 }
 
@@ -339,7 +343,10 @@ export function useVisitDetail(id: string | undefined) {
       // Get suggested restaurants from pre-computed data (same source as review page)
       const suggestedRestaurants = suggestedRestaurantsMap.get(id) ?? [];
 
-      return { visit, restaurant, suggestedRestaurant, suggestedRestaurants, photos };
+      const calendarEvents =
+        visit.status !== "confirmed" ? await getEventsOverlappingRange(visit.startTime, visit.endTime) : [];
+
+      return { visit, restaurant, suggestedRestaurant, suggestedRestaurants, calendarEvents, photos };
     },
     enabled: !!id,
   });

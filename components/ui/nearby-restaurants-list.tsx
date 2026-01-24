@@ -93,28 +93,6 @@ export function NearbyRestaurantsList({
     return null;
   }
 
-  const michelinCount = restaurants.filter((r) => r.source === "michelin").length;
-  const mapKitCount = restaurants.filter((r) => r.source === "mapkit").length;
-
-  // Generate header text based on sources if not provided
-  const displayHeaderText =
-    headerText ??
-    (variant === "compact"
-      ? `${restaurants.length.toLocaleString()} Nearby${
-          michelinCount > 0 && mapKitCount > 0
-            ? ` (${michelinCount} Michelin, ${mapKitCount} Apple Maps)`
-            : michelinCount > 0
-              ? " Michelin"
-              : " Maps"
-        }`
-      : variant === "calendar"
-        ? `${restaurants.length} Matching Restaurants`
-        : michelinCount > 0 && mapKitCount > 0
-          ? `${restaurants.length} Nearby Restaurants`
-          : michelinCount > 0
-            ? `${michelinCount} Nearby Michelin Restaurants`
-            : `${mapKitCount} Nearby Restaurants`);
-
   const isCompact = variant === "compact";
   const isCalendar = variant === "calendar";
   const showDistance = !isCalendar; // Hide distance for calendar variant
@@ -122,17 +100,6 @@ export function NearbyRestaurantsList({
 
   return (
     <View className={"gap-2"}>
-      {showHeader && (
-        <View className={"flex-row items-center gap-2"}>
-          <View className={"w-6 h-6 rounded-full bg-amber-500/20 items-center justify-center"}>
-            <IconSymbol name={"list.bullet"} size={14} color={"#f59e0b"} />
-          </View>
-          <ThemedText variant={"footnote"} color={"secondary"}>
-            {displayHeaderText}
-          </ThemedText>
-        </View>
-      )}
-
       <ScrollView
         style={{ maxHeight }}
         showsVerticalScrollIndicator={true}

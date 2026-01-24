@@ -7,11 +7,7 @@ import { Button, ButtonText, Card } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
-import {
-  usePendingReview,
-  useBatchUpdateVisitStatus,
-  useBatchConfirmVisits,
-} from "@/hooks/queries";
+import { usePendingReview, useBatchUpdateVisitStatus, useBatchConfirmVisits } from "@/hooks/queries";
 
 const PHOTO_THRESHOLD_OPTIONS = [3, 5, 10, 20, 50];
 

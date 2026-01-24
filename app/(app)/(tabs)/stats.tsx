@@ -35,7 +35,9 @@ function YearTab({
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onPress();
         }}
-        className={`px-4 py-2 rounded-full mr-2 ${isActive ? "bg-amber-500" : "bg-white/10"}`}
+        className={`px-4 py-2 rounded-full mr-2 border ${
+          isActive ? "bg-amber-400/90 border-amber-300/60" : "bg-white/5 border-white/10"
+        }`}
       >
         <ThemedText variant={"subhead"} className={`font-semibold ${isActive ? "text-gray-900" : "text-white/70"}`}>
           {label}
@@ -90,10 +92,8 @@ function MonthlyVisitsChart({
 
   return (
     <Animated.View entering={FadeInDown.delay(300).duration(400)} className={"gap-4"}>
-      <ThemedText variant={"title2"} className={"text-white font-bold"}>
-        📈 Monthly Visits
-      </ThemedText>
-      <View className={"bg-white/5 rounded-2xl p-4"}>
+      <SectionHeading title={"Monthly Visits"} icon={"📈"} accentClass={"bg-amber-400"} />
+      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4"}>
         {/* Value labels row */}
         <View className={"flex-row justify-between gap-1 mb-1"}>
           {chartData.map((data, index) => (
@@ -205,7 +205,9 @@ function StatCard({
         }}
       />
       <View className={"flex-1 items-center justify-center p-4 gap-1"}>
-        <ThemedText style={{ fontSize: 22 }}>{icon}</ThemedText>
+        <View className={"w-10 h-10 rounded-full bg-white/10 items-center justify-center border border-white/10"}>
+          <ThemedText style={{ fontSize: 20 }}>{icon}</ThemedText>
+        </View>
         <ThemedText variant={"title1"} className={`font-bold ${accent.text}`}>
           {typeof value === "number" ? value.toLocaleString() : value}
         </ThemedText>
@@ -259,35 +261,37 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
 
   return (
     <Animated.View entering={FadeInDown.delay(200).duration(400)} className={"gap-4"}>
-      <ThemedText variant={"title2"} className={"text-white font-bold"}>
-        ⭐ Michelin Experiences
-      </ThemedText>
+      <SectionHeading title={"Michelin Experiences"} icon={"⭐"} accentClass={"bg-amber-400"} />
 
       {/* Star Summary */}
       {hasStars && (
-        <Animated.View
-          entering={FadeIn.delay(250).duration(400)}
-          className={
-            "bg-gradient-to-r from-amber-500/20 to-yellow-500/20 bg-amber-500/15 rounded-2xl p-5 flex-row items-center justify-around"
-          }
-        >
-          <View className={"items-center"}>
-            <ThemedText variant={"largeTitle"} className={"text-amber-400 font-bold"}>
-              {stats.totalAccumulatedStars.toLocaleString()}
-            </ThemedText>
-            <ThemedText variant={"footnote"} className={"text-white/60"}>
-              Total Stars
-            </ThemedText>
-          </View>
-          <View className={"w-px h-12 bg-white/20"} />
-          <View className={"items-center"}>
-            <ThemedText variant={"largeTitle"} className={"text-amber-400 font-bold"}>
-              {stats.distinctStars.toLocaleString()}
-            </ThemedText>
-            <ThemedText variant={"footnote"} className={"text-white/60"}>
-              Distinct Stars
-            </ThemedText>
-          </View>
+        <Animated.View entering={FadeIn.delay(250).duration(400)} className={"rounded-2xl overflow-hidden"}>
+          <LinearGradient
+            colors={["rgba(251, 191, 36, 0.28)", "rgba(250, 204, 21, 0.12)", "rgba(0,0,0,0)"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{ padding: 20 }}
+          >
+            <View className={"flex-row items-center justify-around"}>
+              <View className={"items-center"}>
+                <ThemedText variant={"largeTitle"} className={"text-amber-400 font-bold"}>
+                  {stats.totalAccumulatedStars.toLocaleString()}
+                </ThemedText>
+                <ThemedText variant={"footnote"} className={"text-white/60"}>
+                  Total Stars
+                </ThemedText>
+              </View>
+              <View className={"w-px h-12 bg-white/20"} />
+              <View className={"items-center"}>
+                <ThemedText variant={"largeTitle"} className={"text-amber-400 font-bold"}>
+                  {stats.distinctStars.toLocaleString()}
+                </ThemedText>
+                <ThemedText variant={"footnote"} className={"text-white/60"}>
+                  Distinct Stars
+                </ThemedText>
+              </View>
+            </View>
+          </LinearGradient>
         </Animated.View>
       )}
 
@@ -297,7 +301,7 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
           <Animated.View
             key={item.label}
             entering={FadeIn.delay(300 + index * 100).duration(300)}
-            className={"bg-white/10 rounded-xl px-4 py-3 flex-row items-center justify-between"}
+            className={"bg-white/10 border border-white/10 rounded-xl px-4 py-3 flex-row items-center justify-between"}
           >
             <View className={"flex-row items-center gap-3"}>
               <ThemedText variant={"title3"}>{item.emoji}</ThemedText>
@@ -340,9 +344,7 @@ function CuisineCloud({ cuisines }: { cuisines: WrappedStats["topCuisines"] }) {
 
   return (
     <Animated.View entering={FadeInDown.delay(500).duration(400)} className={"gap-4"}>
-      <ThemedText variant={"title2"} className={"text-white font-bold"}>
-        🍜 Favorite Cuisines
-      </ThemedText>
+      <SectionHeading title={"Favorite Cuisines"} icon={"🍜"} accentClass={"bg-rose-400"} />
       <View className={"flex-row flex-wrap gap-3"}>
         {cuisines.map((cuisine, index) => {
           const intensity = cuisine.count / maxCount;
@@ -351,7 +353,7 @@ function CuisineCloud({ cuisines }: { cuisines: WrappedStats["topCuisines"] }) {
             <Animated.View
               key={cuisine.cuisine}
               entering={FadeIn.delay(600 + index * 80).duration(300)}
-              className={"rounded-full px-4 py-2"}
+              className={"rounded-full px-4 py-2 border border-white/10"}
               style={{ backgroundColor: `rgba(255, 255, 255, ${bgOpacity})` }}
             >
               <ThemedText
@@ -391,7 +393,7 @@ function FunFactCard({
   return (
     <Animated.View
       entering={FadeInDown.delay(delay).duration(400)}
-      className={"bg-white/10 rounded-2xl p-4 flex-row items-center gap-4"}
+      className={"bg-white/10 border border-white/10 rounded-2xl p-4 flex-row items-center gap-4"}
     >
       <View className={`w-12 h-12 rounded-full items-center justify-center ${iconBg}`}>
         <ThemedText variant={"title2"}>{icon}</ThemedText>
@@ -434,9 +436,7 @@ function LocationBreakdown({ locations }: { locations: WrappedStats["topLocation
 
   return (
     <Animated.View entering={FadeInDown.delay(400).duration(400)} className={"gap-4"}>
-      <ThemedText variant={"title2"} className={"text-white font-bold"}>
-        🌍 Your Dining World
-      </ThemedText>
+      <SectionHeading title={"Your Dining World"} icon={"🌍"} accentClass={"bg-emerald-400"} />
 
       {/* Country summary row */}
       {topCountries.length > 0 && (
@@ -463,7 +463,7 @@ function LocationBreakdown({ locations }: { locations: WrappedStats["topLocation
       )}
 
       {/* Top cities list */}
-      <View className={"bg-white/5 rounded-2xl p-4 gap-3"}>
+      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4 gap-3"}>
         {locations.slice(0, 5).map((loc, index) => {
           const widthPercent = (loc.visits / maxVisits) * 100;
           return (
@@ -510,11 +510,9 @@ function DiningTimeChart({ mealTimes }: { mealTimes: WrappedStats["mealTimeBreak
 
   return (
     <Animated.View entering={FadeInDown.delay(600).duration(400)} className={"gap-4"}>
-      <ThemedText variant={"title2"} className={"text-white font-bold"}>
-        🕐 When You Dine
-      </ThemedText>
+      <SectionHeading title={"When You Dine"} icon={"🕐"} accentClass={"bg-indigo-400"} />
 
-      <View className={"bg-white/5 rounded-2xl p-4 gap-4"}>
+      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4 gap-4"}>
         {/* Horizontal bar showing distribution */}
         <View className={"flex-row h-4 rounded-full overflow-hidden"}>
           {segments.map((segment, index) => {
@@ -539,7 +537,7 @@ function DiningTimeChart({ mealTimes }: { mealTimes: WrappedStats["mealTimeBreak
               <Animated.View
                 key={segment.label}
                 entering={FadeIn.delay(700 + index * 80).duration(300)}
-                className={`flex-row items-center gap-2 px-3 py-2 rounded-xl ${isDominant ? "bg-white/15" : "bg-white/5"}`}
+                className={`flex-row items-center gap-2 px-3 py-2 rounded-xl ${isDominant ? "bg-white/20" : "bg-white/5"}`}
               >
                 <ThemedText variant={"body"}>{segment.emoji}</ThemedText>
                 <View>
@@ -574,11 +572,9 @@ function WeekendWeekdayChart({ weekendVsWeekday }: { weekendVsWeekday: WrappedSt
 
   return (
     <Animated.View entering={FadeInDown.delay(700).duration(400)} className={"gap-4"}>
-      <ThemedText variant={"title2"} className={"text-white font-bold"}>
-        📅 Weekend vs Weekday
-      </ThemedText>
+      <SectionHeading title={"Weekend vs Weekday"} icon={"📅"} accentClass={"bg-sky-400"} />
 
-      <View className={"bg-white/5 rounded-2xl p-4"}>
+      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4"}>
         <View className={"flex-row items-center gap-4"}>
           {/* Weekday */}
           <View className={"flex-1 items-center gap-2"}>
@@ -634,13 +630,11 @@ function PhotoStatsSection({ photoStats }: { photoStats: WrappedStats["photoStat
 
   return (
     <Animated.View entering={FadeInDown.delay(800).duration(400)} className={"gap-4"}>
-      <ThemedText variant={"title2"} className={"text-white font-bold"}>
-        📸 Your Food Photography
-      </ThemedText>
+      <SectionHeading title={"Your Food Photography"} icon={"📸"} accentClass={"bg-cyan-400"} />
 
       <View className={"flex-row gap-3"}>
         {/* Total Photos */}
-        <View className={"flex-1 bg-white/5 rounded-2xl p-4 items-center gap-1"}>
+        <View className={"flex-1 bg-white/5 border border-white/10 rounded-2xl p-4 items-center gap-1"}>
           <ThemedText variant={"largeTitle"} className={"text-cyan-400 font-bold"}>
             {photoStats.totalPhotos.toLocaleString()}
           </ThemedText>
@@ -650,7 +644,7 @@ function PhotoStatsSection({ photoStats }: { photoStats: WrappedStats["photoStat
         </View>
 
         {/* Average Per Visit */}
-        <View className={"flex-1 bg-white/5 rounded-2xl p-4 items-center gap-1"}>
+        <View className={"flex-1 bg-white/5 border border-white/10 rounded-2xl p-4 items-center gap-1"}>
           <ThemedText variant={"largeTitle"} className={"text-pink-400 font-bold"}>
             {photoStats.averagePerVisit}
           </ThemedText>
@@ -664,7 +658,7 @@ function PhotoStatsSection({ photoStats }: { photoStats: WrappedStats["photoStat
       {photoStats.mostPhotographedVisit && (
         <Animated.View
           entering={FadeIn.delay(900).duration(300)}
-          className={"bg-white/10 rounded-2xl p-4 flex-row items-center gap-3"}
+          className={"bg-white/10 border border-white/10 rounded-2xl p-4 flex-row items-center gap-3"}
         >
           <View className={"w-10 h-10 rounded-full bg-cyan-500/30 items-center justify-center"}>
             <ThemedText variant={"body"}>🏆</ThemedText>
@@ -718,11 +712,9 @@ function DiningStyleCard({
 
   return (
     <Animated.View entering={FadeInDown.delay(900).duration(400)} className={"gap-4"}>
-      <ThemedText variant={"title2"} className={"text-white font-bold"}>
-        🎯 Your Dining Style
-      </ThemedText>
+      <SectionHeading title={"Your Dining Style"} icon={"🎯"} accentClass={"bg-violet-400"} />
 
-      <View className={"bg-white/5 rounded-2xl p-5 gap-4"}>
+      <View className={"bg-white/5 border border-white/10 rounded-2xl p-5 gap-4"}>
         {/* Title and emoji */}
         <View className={"flex-row items-center gap-3"}>
           <View className={"w-14 h-14 rounded-full bg-violet-500/30 items-center justify-center"}>
@@ -825,6 +817,22 @@ const HOUR_LABELS = [
   "11 PM",
 ];
 
+function SectionHeading({ title, icon, accentClass }: { title: string; icon: string; accentClass: string }) {
+  return (
+    <View className={"flex-row items-center gap-3"}>
+      <View className={`w-1.5 h-5 rounded-full ${accentClass}`} />
+      <View className={"flex-row items-center gap-2"}>
+        <View className={"w-7 h-7 rounded-full bg-white/10 border border-white/10 items-center justify-center"}>
+          <ThemedText variant={"footnote"}>{icon}</ThemedText>
+        </View>
+        <ThemedText variant={"title2"} className={"text-white font-bold"}>
+          {title}
+        </ThemedText>
+      </View>
+    </View>
+  );
+}
+
 function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selectedYear: number | null }) {
   const hasMichelinData = stats.michelinStats.totalStarredVisits > 0;
   const hasCuisineData = stats.topCuisines.length > 0;
@@ -920,9 +928,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
 
       {/* Fun Facts */}
       <View className={"gap-4"}>
-        <ThemedText variant={"title2"} className={"text-white font-bold"}>
-          ✨ Fun Facts
-        </ThemedText>
+        <SectionHeading title={"Fun Facts"} icon={"✨"} accentClass={"bg-amber-300"} />
         <View className={"gap-3"}>
           {stats.peakDiningHour && (
             <FunFactCard
@@ -1001,7 +1007,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
 function EmptyState() {
   return (
     <View className={"flex-1 items-center justify-center gap-6 px-8"}>
-      <View className={"w-24 h-24 rounded-full bg-white/10 items-center justify-center"}>
+      <View className={"w-24 h-24 rounded-full bg-white/10 border border-white/10 items-center justify-center"}>
         <ThemedText variant={"largeTitle"}>🍽️</ThemedText>
       </View>
       <View className={"gap-2 items-center"}>
@@ -1017,7 +1023,7 @@ function EmptyState() {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           router.push("/");
         }}
-        className={"bg-white/20 rounded-full px-6 py-3 mt-4"}
+        className={"rounded-full px-6 py-3 mt-4 overflow-hidden border border-white/20 bg-white/20"}
       >
         <ThemedText variant={"body"} className={"text-white font-semibold"}>
           Go to Restaurants
@@ -1063,26 +1069,30 @@ export default function StatsScreen() {
 
   return (
     <ScrollView
-      className={"flex-1 bg-background"}
+      className={"flex-1"}
       contentContainerStyle={{
-        paddingTop: 16,
+        paddingTop: 0,
         paddingBottom: insets.bottom,
         paddingHorizontal: 16,
       }}
     >
       {/* Header */}
-      <Animated.View entering={FadeInDown.duration(500)} className={"gap-2 mb-4"}>
-        <ThemedText variant={"largeTitle"} className={"text-white font-bold"}>
-          Stats
-        </ThemedText>
-        <ThemedText variant={"body"} className={"text-white/60"}>
-          {headerSubtitle}
-        </ThemedText>
+      <Animated.View entering={FadeInDown.duration(500)} className={"gap-3 mb-5"}>
+        <View className={"flex-row items-start justify-between gap-3"}>
+          <View className={"flex-1 gap-2"}>
+            <ThemedText variant={"largeTitle"} className={"text-white font-bold"}>
+              Stats
+            </ThemedText>
+            <ThemedText variant={"body"} className={"text-white/60"}>
+              {headerSubtitle}
+            </ThemedText>
+          </View>
+        </View>
       </Animated.View>
       {/* Year Tabs */}
       {availableYears.length > 0 && (
         <Animated.View entering={FadeIn.delay(200).duration(400)} className={"mb-6"}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 8 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 6 }}>
             <YearTab
               label={"All Time"}
               isActive={selectedYear === null}
