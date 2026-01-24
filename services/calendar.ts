@@ -127,7 +127,7 @@ async function getEventsInRange(startDate: number, endDate: number): Promise<Cal
 
 const NON_RESTAURANT_TITLE_PATTERNS: RegExp[] = [
   // Travel/transport emojis
-  /[✈️✈︎🛫🛬🛩️🚆🚄🚅🚇🚈🚉🚌🚍🚎🚗🚕🚖🚘🚙🛻🚲🚴🚤⛴️🚢🚋🚝🚞🚊🛳️✈]/u,
+  /[✈️✈︎🛫🛬🛩️🚆🚄🚅🚇🚈🚉🚌🚍🚎🚗🚕🚖🚘🚙🛻🚲🚴🚤⛴️🚢🚋🚝🚞🚊🛳️]/u,
   // Lodging/travel keywords
   /\b(airbnb|check[-\s]?in|check[-\s]?out)\b/i,
 ];

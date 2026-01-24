@@ -19,7 +19,7 @@ export function VisitMetaHeader({ startTime, photoCount, foodProbable }: VisitMe
           {formatDate(startTime)}
         </ThemedText>
         <ThemedText variant={"footnote"} color={"tertiary"}>
-          at {formatTime(startTime)} • {photoCount.toLocaleString()} photos
+          {formatTime(startTime)} • {photoCount.toLocaleString()} photos
         </ThemedText>
       </View>
       <View className={"flex-row items-center gap-2"}>
