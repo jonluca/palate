@@ -44,7 +44,7 @@ import type { FoodLabel } from "@/utils/db";
 import { cleanCalendarEventTitle } from "@/services/calendar";
 import { logVisitViewed } from "@/services/analytics";
 import { createAlbumWithPhotos } from "@/services/scanner";
-import { ActivityIndicator, View, Alert, Pressable } from "react-native";
+import { ActivityIndicator, View, Alert, Pressable, ScrollView } from "react-native";
 import { useToast } from "@/components/ui/toast";
 import { useHasSeenAddPhotosAlert, useSetHasSeenAddPhotosAlert } from "@/store";
 
@@ -79,6 +79,23 @@ function useAggregatedFoodLabels(
       .sort((a, b) => b.maxConfidence - a.maxConfidence)
       .slice(0, 8);
   }, [photos]);
+}
+
+function dedupeCalendarEventsByTitle<T extends { title?: string | null }>(events: T[]): T[] {
+  const seenTitles = new Set<string>();
+
+  return events.filter((event) => {
+    const rawTitle = event.title ?? "";
+    const cleanedTitle = cleanCalendarEventTitle(rawTitle).trim().toLowerCase();
+    const dedupeKey = cleanedTitle.length > 0 ? cleanedTitle : rawTitle.trim().toLowerCase();
+
+    if (seenTitles.has(dedupeKey)) {
+      return false;
+    }
+
+    seenTitles.add(dedupeKey);
+    return true;
+  });
 }
 
 // Common shape for restaurants that can be confirmed
@@ -548,6 +565,7 @@ export default function VisitDetailScreen() {
           },
         ]
       : [];
+  const dedupedCalendarEvents = dedupeCalendarEventsByTitle(calendarEventsToDisplay);
 
   return (
     <>
@@ -561,9 +579,19 @@ export default function VisitDetailScreen() {
           award={suggestedRestaurant?.award}
         />
 
-        {calendarEventsToDisplay.map((event) => (
-          <CalendarEventCard key={event.id} title={event.title} location={event.location} />
-        ))}
+        {dedupedCalendarEvents.length > 0 && (
+          <Card>
+            <ScrollView
+              className={"gap-2 max-h-[240px] overflow-y-auto"}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+            >
+              {dedupedCalendarEvents.map((event) => (
+                <CalendarEventCard key={event.id} title={event.title} location={event.location} />
+              ))}
+            </ScrollView>
+          </Card>
+        )}
 
         {showNoMatch && <NoMatchCard onSearchPress={() => setShowSearch(true)} />}
 

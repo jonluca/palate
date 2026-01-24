@@ -173,15 +173,15 @@ export const queryKeys = {
   permissions: ["permissions"] as const,
   calendarPermissions: ["calendarPermissions"] as const,
   photoCount: ["photoCount"] as const,
-  placesConfigured: ["placesConfigured"] as const,
+  placesConfigured: ["static", "placesConfigured"] as const,
   // Restaurant-centric keys
   confirmedRestaurants: ["confirmedRestaurants"] as const,
   restaurantVisits: (restaurantId: string) => ["visits", "restaurantVisits", restaurantId] as const,
   restaurantDetail: (restaurantId: string) => ["restaurants", "detail", restaurantId] as const,
   pendingReview: ["visits", "pendingReview"] as const,
-  michelinRestaurants: ["michelinRestaurants"] as const,
-  michelinRestaurantDetail: (michelinId: string) => ["michelinRestaurants", "detail", michelinId] as const,
-  nearbyMichelin: (lat: number, lon: number) => ["nearbyMichelin", lat, lon] as const,
+  michelinRestaurants: ["static", "michelinRestaurants"] as const,
+  michelinRestaurantDetail: (michelinId: string) => ["static", "michelinRestaurants", "detail", michelinId] as const,
+  nearbyMichelin: (lat: number, lon: number) => ["static", "nearbyMichelin", lat, lon] as const,
   mapKitNearby: (lat: number, lon: number) => ["mapKitNearby", lat.toFixed(4), lon.toFixed(4)] as const,
   wrapped: (year?: number | null) => {
     if (year) {

@@ -11,6 +11,7 @@ const textVariants = cva("text-foreground", {
       title1: "text-2xl font-sans",
       title2: "text-[22px] leading-7 font-sans",
       title3: "text-xl font-sans",
+      title4: "text-lg font-sans",
       heading: "text-[17px] leading-6 font-medium font-sans",
       body: "text-[17px] leading-6 font-sans",
       callout: "text-base font-sans",
