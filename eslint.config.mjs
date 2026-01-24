@@ -54,6 +54,7 @@ const rules = {
   "no-empty": "error",
   "no-bitwise": "off",
   "no-case-declarations": "off",
+  "no-misleading-character-class": "off",
   "no-constant-binary-expression": "error",
   "no-constant-condition": "error",
   "@typescript-eslint/no-unused-expressions": "error",

@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { View, Pressable, ScrollView } from "react-native";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
@@ -6,6 +6,11 @@ import { cn } from "@/utils/cn";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import type { NearbyRestaurant } from "@/hooks/queries";
+import {
+  cleanCalendarEventTitle,
+  compareRestaurantAndCalendarTitle,
+  isFuzzyRestaurantMatch,
+} from "@/services/calendar";
 
 // Inline getMichelinBadge to avoid circular dependencies
 function getMichelinBadge(award: string): { emoji: string; label: string } | null {
@@ -42,6 +47,8 @@ export interface NearbyRestaurantsListProps {
   restaurants: NearbyRestaurant[];
   selectedRestaurant: NearbyRestaurant | null;
   onSelectRestaurant: (restaurant: NearbyRestaurant) => void;
+  /** Optional callback for automatic selection (avoids user-tap side effects) */
+  onAutoSelectRestaurant?: (restaurant: NearbyRestaurant) => void;
   /**
    * Variant affects styling:
    * - "default": Shows distance on the side, address only when no cuisine
@@ -49,10 +56,10 @@ export interface NearbyRestaurantsListProps {
    * - "calendar": Shows address, hides distance (for calendar import where distance isn't relevant)
    */
   variant?: "default" | "compact" | "calendar";
-  /** Whether to show the header with icon and count */
-  showHeader?: boolean;
-  /** Custom header text - if not provided, will generate based on restaurant counts */
-  headerText?: string;
+  /** Calendar event title used to auto-select a better MapKit match */
+  calendarEventTitle?: string;
+  /** Whether to auto-select when Apple MapKit results load */
+  autoSelectOnAppleLoad?: boolean;
   /**
    * Callback fired when user taps on an already-selected restaurant.
    * Use this to deep link to the restaurant detail page if it exists in the database.
@@ -64,9 +71,10 @@ export function NearbyRestaurantsList({
   restaurants,
   selectedRestaurant,
   onSelectRestaurant,
+  onAutoSelectRestaurant,
   variant = "default",
-  showHeader = true,
-  headerText,
+  calendarEventTitle,
+  autoSelectOnAppleLoad = false,
   onDeepLink,
 }: NearbyRestaurantsListProps) {
   // Default deep link navigates to restaurant detail page
@@ -75,6 +83,66 @@ export function NearbyRestaurantsList({
   }, []);
 
   const deepLinkHandler = onDeepLink ?? defaultDeepLink;
+  const autoSelectHandler = onAutoSelectRestaurant ?? onSelectRestaurant;
+
+  const mapKitRestaurants = useMemo(
+    () => restaurants.filter((restaurant) => restaurant.source === "mapkit"),
+    [restaurants],
+  );
+  const prevMapKitCountRef = useRef(0);
+
+  useEffect(() => {
+    const mapKitCount = mapKitRestaurants.length;
+    const prevMapKitCount = prevMapKitCountRef.current;
+    prevMapKitCountRef.current = mapKitCount;
+
+    if (!autoSelectOnAppleLoad || !calendarEventTitle || mapKitCount === 0) {
+      return;
+    }
+
+    const hasNewMapKit = mapKitCount > prevMapKitCount;
+    if (!hasNewMapKit && prevMapKitCount !== 0) {
+      return;
+    }
+
+    const cleanedTitle = cleanCalendarEventTitle(calendarEventTitle);
+    if (!cleanedTitle) {
+      return;
+    }
+
+    const scoreFor = (restaurant: NearbyRestaurant) => {
+      if (compareRestaurantAndCalendarTitle(calendarEventTitle, restaurant.name)) {
+        return 3;
+      }
+      if (isFuzzyRestaurantMatch(restaurant.name, cleanedTitle)) {
+        return 2;
+      }
+      return 0;
+    };
+
+    let bestMapKit: NearbyRestaurant | null = null;
+    let bestScore = 0;
+    for (const restaurant of mapKitRestaurants) {
+      const score = scoreFor(restaurant);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMapKit = restaurant;
+      } else if (score === bestScore && score > 0 && bestMapKit && restaurant.distance < bestMapKit.distance) {
+        bestMapKit = restaurant;
+      }
+    }
+
+    if (!bestMapKit || bestScore === 0) {
+      return;
+    }
+
+    const currentScore = selectedRestaurant ? scoreFor(selectedRestaurant) : 0;
+    if (bestScore <= currentScore || selectedRestaurant?.id === bestMapKit.id) {
+      return;
+    }
+
+    autoSelectHandler(bestMapKit);
+  }, [autoSelectHandler, autoSelectOnAppleLoad, calendarEventTitle, mapKitRestaurants, selectedRestaurant]);
 
   const handleSelect = (restaurant: NearbyRestaurant) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

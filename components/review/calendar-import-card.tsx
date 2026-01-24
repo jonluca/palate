@@ -107,7 +107,6 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
             selectedRestaurant={currentSelectedRestaurant}
             onSelectRestaurant={handleSelectRestaurant}
             variant={"calendar"}
-            showHeader={false}
           />
         </View>
       ) : (

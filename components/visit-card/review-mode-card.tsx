@@ -278,6 +278,9 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
                     restaurants={displayRestaurants}
                     selectedRestaurant={currentSelectedRestaurant}
                     onSelectRestaurant={handleSelectRestaurantFromList}
+                    onAutoSelectRestaurant={setSelectedRestaurant}
+                    calendarEventTitle={calendarEventTitle ?? undefined}
+                    autoSelectOnAppleLoad={selectedRestaurant === null}
                     variant={"compact"}
                   />
                 )}

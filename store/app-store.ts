@@ -5,7 +5,8 @@ import type { FilterType } from "@/hooks/queries";
 
 // Review filter types
 type ReviewFoodFilter = "on" | "off";
-type ReviewMatchesFilter = "on" | "off";
+type ReviewCalendarMatchesFilter = "on" | "off";
+type ReviewRestaurantMatchesFilter = "on" | "off";
 type ReviewStarFilter = "any" | "1plus" | "2plus" | "3";
 
 // Scan progress state
@@ -29,8 +30,10 @@ interface AppState {
   // Review filters
   reviewFoodFilter: ReviewFoodFilter;
   setReviewFoodFilter: (filter: ReviewFoodFilter) => void;
-  reviewMatchesFilter: ReviewMatchesFilter;
-  setReviewMatchesFilter: (filter: ReviewMatchesFilter) => void;
+  reviewCalendarMatchesFilter: ReviewCalendarMatchesFilter;
+  setReviewCalendarMatchesFilter: (filter: ReviewCalendarMatchesFilter) => void;
+  reviewRestaurantMatchesFilter: ReviewRestaurantMatchesFilter;
+  setReviewRestaurantMatchesFilter: (filter: ReviewRestaurantMatchesFilter) => void;
   reviewStarFilter: ReviewStarFilter;
   setReviewStarFilter: (filter: ReviewStarFilter) => void;
   reviewFiltersCollapsed: boolean;
@@ -100,8 +103,10 @@ export const useAppStore = create<AppState>()(
       // Review filters
       reviewFoodFilter: "on",
       setReviewFoodFilter: (filter) => set({ reviewFoodFilter: filter }),
-      reviewMatchesFilter: "on",
-      setReviewMatchesFilter: (filter) => set({ reviewMatchesFilter: filter }),
+      reviewCalendarMatchesFilter: "on",
+      setReviewCalendarMatchesFilter: (filter) => set({ reviewCalendarMatchesFilter: filter }),
+      reviewRestaurantMatchesFilter: "on",
+      setReviewRestaurantMatchesFilter: (filter) => set({ reviewRestaurantMatchesFilter: filter }),
       reviewStarFilter: "any",
       setReviewStarFilter: (filter) => set({ reviewStarFilter: filter }),
       reviewFiltersCollapsed: true,
@@ -201,7 +206,8 @@ export const useAppStore = create<AppState>()(
         set({
           visitsFilter: "all",
           reviewFoodFilter: "on",
-          reviewMatchesFilter: "on",
+          reviewCalendarMatchesFilter: "on",
+          reviewRestaurantMatchesFilter: "on",
           reviewStarFilter: "any",
           reviewFiltersCollapsed: true,
           hasCompletedOnboarding: false,
@@ -222,7 +228,8 @@ export const useAppStore = create<AppState>()(
       partialize: (state): Partial<AppState> => ({
         visitsFilter: state.visitsFilter,
         reviewFoodFilter: state.reviewFoodFilter,
-        reviewMatchesFilter: state.reviewMatchesFilter,
+        reviewCalendarMatchesFilter: state.reviewCalendarMatchesFilter,
+        reviewRestaurantMatchesFilter: state.reviewRestaurantMatchesFilter,
         reviewStarFilter: state.reviewStarFilter,
         reviewFiltersCollapsed: state.reviewFiltersCollapsed,
         hasCompletedOnboarding: state.hasCompletedOnboarding,
@@ -246,8 +253,10 @@ export const useSetVisitsFilter = () => useAppStore((state) => state.setVisitsFi
 
 export const useReviewFoodFilter = () => useAppStore((state) => state.reviewFoodFilter);
 export const useSetReviewFoodFilter = () => useAppStore((state) => state.setReviewFoodFilter);
-export const useReviewMatchesFilter = () => useAppStore((state) => state.reviewMatchesFilter);
-export const useSetReviewMatchesFilter = () => useAppStore((state) => state.setReviewMatchesFilter);
+export const useReviewCalendarMatchesFilter = () => useAppStore((state) => state.reviewCalendarMatchesFilter);
+export const useSetReviewCalendarMatchesFilter = () => useAppStore((state) => state.setReviewCalendarMatchesFilter);
+export const useReviewRestaurantMatchesFilter = () => useAppStore((state) => state.reviewRestaurantMatchesFilter);
+export const useSetReviewRestaurantMatchesFilter = () => useAppStore((state) => state.setReviewRestaurantMatchesFilter);
 export const useReviewStarFilter = () => useAppStore((state) => state.reviewStarFilter);
 export const useSetReviewStarFilter = () => useAppStore((state) => state.setReviewStarFilter);
 export const useReviewFiltersCollapsed = () => useAppStore((state) => state.reviewFiltersCollapsed);

@@ -21,8 +21,10 @@ import { router } from "expo-router";
 import {
   useReviewFoodFilter,
   useSetReviewFoodFilter,
-  useReviewMatchesFilter,
-  useSetReviewMatchesFilter,
+  useReviewCalendarMatchesFilter,
+  useSetReviewCalendarMatchesFilter,
+  useReviewRestaurantMatchesFilter,
+  useSetReviewRestaurantMatchesFilter,
   useReviewFiltersCollapsed,
   useSetReviewFiltersCollapsed,
 } from "@/store";
@@ -92,8 +94,10 @@ export default function ReviewScreen() {
   // Review filters from store
   const foodFilter = useReviewFoodFilter();
   const setFoodFilter = useSetReviewFoodFilter();
-  const matchesFilter = useReviewMatchesFilter();
-  const setMatchesFilter = useSetReviewMatchesFilter();
+  const calendarMatchesFilter = useReviewCalendarMatchesFilter();
+  const setCalendarMatchesFilter = useSetReviewCalendarMatchesFilter();
+  const restaurantMatchesFilter = useReviewRestaurantMatchesFilter();
+  const setRestaurantMatchesFilter = useSetReviewRestaurantMatchesFilter();
   const filtersCollapsed = useReviewFiltersCollapsed();
   const setFiltersCollapsed = useSetReviewFiltersCollapsed();
 
@@ -157,20 +161,29 @@ export default function ReviewScreen() {
         return false;
       }
 
-      // Matches toggle: ON => must have matches, OFF => must have no matches.
-      // Treat "no matches" as both [] and missing/null (defensive).
-      const matchCount = v.suggestedRestaurants?.length ?? 0;
-      const hasMatches = matchCount > 0;
-      if (matchesFilter === "on" && !hasMatches) {
+      // Calendar matches toggle: ON => must have a calendar event, OFF => must have none.
+      const hasCalendarMatch = Boolean(v.calendarEventTitle);
+      if (calendarMatchesFilter === "on" && !hasCalendarMatch) {
         return false;
       }
-      if (matchesFilter === "off" && hasMatches) {
+      if (calendarMatchesFilter === "off" && hasCalendarMatch) {
+        return false;
+      }
+
+      // Restaurant matches toggle: ON => must have matches, OFF => must have no matches.
+      // Treat "no matches" as both [] and missing/null (defensive).
+      const matchCount = v.suggestedRestaurants?.length ?? 0;
+      const hasRestaurantMatches = matchCount > 0;
+      if (restaurantMatchesFilter === "on" && !hasRestaurantMatches) {
+        return false;
+      }
+      if (restaurantMatchesFilter === "off" && hasRestaurantMatches) {
         return false;
       }
 
       return true;
     });
-  }, [reviewableVisits, foodFilter, matchesFilter]);
+  }, [reviewableVisits, foodFilter, calendarMatchesFilter, restaurantMatchesFilter]);
 
   // UI state
   const hasExactMatches = exactMatches.length > 0;
@@ -314,14 +327,19 @@ export default function ReviewScreen() {
               <Animated.View layout={LinearTransition.duration(200)} className={"gap-2.5 pt-2.5"}>
                 <View className={"flex-row gap-2 flex-wrap"}>
                   <ToggleChip
-                    label={"Has Food"}
+                    label={"Food"}
                     value={foodFilter === "on"}
                     onToggle={() => setFoodFilter(foodFilter === "on" ? "off" : "on")}
                   />
                   <ToggleChip
-                    label={"Has Calendar Matches"}
-                    value={matchesFilter === "on"}
-                    onToggle={() => setMatchesFilter(matchesFilter === "on" ? "off" : "on")}
+                    label={"Calendar Match"}
+                    value={calendarMatchesFilter === "on"}
+                    onToggle={() => setCalendarMatchesFilter(calendarMatchesFilter === "on" ? "off" : "on")}
+                  />
+                  <ToggleChip
+                    label={"Restaurant Match"}
+                    value={restaurantMatchesFilter === "on"}
+                    onToggle={() => setRestaurantMatchesFilter(restaurantMatchesFilter === "on" ? "off" : "on")}
                   />
                 </View>
               </Animated.View>
@@ -337,8 +355,10 @@ export default function ReviewScreen() {
       setFiltersCollapsed,
       foodFilter,
       setFoodFilter,
-      matchesFilter,
-      setMatchesFilter,
+      calendarMatchesFilter,
+      setCalendarMatchesFilter,
+      restaurantMatchesFilter,
+      setRestaurantMatchesFilter,
       ToggleChip,
     ],
   );

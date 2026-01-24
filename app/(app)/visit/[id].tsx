@@ -583,6 +583,7 @@ export default function VisitDetailScreen() {
             restaurants={nearbyRestaurantsForCard}
             selectedRestaurant={selectedRestaurant}
             onSelectRestaurant={setSelectedRestaurant}
+            calendarEventTitle={data?.visit?.calendarEventTitle ?? undefined}
             onSearchPress={() => setShowSearch(true)}
           />
         )}
