@@ -135,8 +135,9 @@ export function SwipeableCard({
         // Snap back with spring
         translateX.value = withSpring(0, {
           velocity: event.velocityX,
-          damping: 20,
-          stiffness: 400,
+          damping: 32,
+          stiffness: 320,
+          overshootClamping: true,
         });
       }
 
