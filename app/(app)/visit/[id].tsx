@@ -48,6 +48,7 @@ import { createAlbumWithPhotos } from "@/services/scanner";
 import { ActivityIndicator, View, Alert, Pressable } from "react-native";
 import { useToast } from "@/components/ui/toast";
 import { useHasSeenAddPhotosAlert, useSetHasSeenAddPhotosAlert } from "@/store";
+import tzLookup from "tz-lookup";
 
 // Hook to aggregate food labels from photos
 function useAggregatedFoodLabels(
@@ -116,6 +117,32 @@ export default function VisitDetailScreen() {
   const scanForFood = useScanVisitForFood(id, setFoodScanProgress);
   const addPhotosToVisit = useAddPhotosToVisit(id);
   const removePhotosFromVisit = useRemovePhotosFromVisit(id);
+  const visitTimeZone = useMemo(() => {
+    if (!data?.visit) {
+      return null;
+    }
+
+    const visit = data.visit;
+    const explicitTimeZone = (visit as { timeZone?: string | null }).timeZone;
+    if (explicitTimeZone) {
+      return explicitTimeZone;
+    }
+
+    const photos = data.photos ?? [];
+    const photoWithCoords = photos.find((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude));
+    const lat = photoWithCoords?.latitude ?? visit.centerLat;
+    const lon = photoWithCoords?.longitude ?? visit.centerLon;
+
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      try {
+        return tzLookup(lat, lon);
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }, [data]);
 
   // Get mergeable visits when modal is open
   const {
@@ -537,6 +564,7 @@ export default function VisitDetailScreen() {
           endTime={visit.endTime}
           foodProbable={Boolean(visit.foodProbable)}
           award={suggestedRestaurant?.award}
+          timeZone={visitTimeZone}
         />
 
         {visit.status === "pending" && <CalendarEventCard visit={{ ...visit, calendarEvents: data.calendarEvents }} />}

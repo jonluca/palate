@@ -213,7 +213,7 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
           }
         };
 
-        const swipeRestaurant = hasMatch ? undefined : currentSelectedRestaurant ?? undefined;
+        const swipeRestaurant = hasMatch ? undefined : (currentSelectedRestaurant ?? undefined);
 
         const handleSelectRestaurantFromList = (restaurant: NearbyRestaurant) => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

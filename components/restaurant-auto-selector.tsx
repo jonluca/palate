@@ -6,12 +6,12 @@ import {
   isFuzzyRestaurantMatch,
 } from "@/services/calendar";
 
-type AutoRestaurantSelectorRenderArgs = {
+interface AutoRestaurantSelectorRenderArgs {
   displayRestaurants: NearbyRestaurant[];
   onSelectRestaurant: (restaurant: NearbyRestaurant) => void;
-};
+}
 
-type AutoRestaurantSelectorProps = {
+interface AutoRestaurantSelectorProps {
   restaurants: NearbyRestaurant[];
   calendarEventTitle?: string | null;
   selectedRestaurant: NearbyRestaurant | null;
@@ -19,7 +19,7 @@ type AutoRestaurantSelectorProps = {
   hasExactMatch?: boolean;
   selectionResetKey?: string | number;
   children: (args: AutoRestaurantSelectorRenderArgs) => React.ReactNode;
-};
+}
 
 export function AutoRestaurantSelector({
   restaurants,
@@ -77,9 +77,7 @@ export function AutoRestaurantSelector({
       return null;
     }
     return (
-      restaurants.find((restaurant) =>
-        compareRestaurantAndCalendarTitle(calendarEventTitle, restaurant.name),
-      ) ?? null
+      restaurants.find((restaurant) => compareRestaurantAndCalendarTitle(calendarEventTitle, restaurant.name)) ?? null
     );
   }, [calendarEventTitle, restaurants]);
 
@@ -129,14 +127,7 @@ export function AutoRestaurantSelector({
     if (!selectedRestaurant && fuzzyAutoMatch) {
       onSelectedRestaurantChange(fuzzyAutoMatch);
     }
-  }, [
-    hasExactMatch,
-    restaurants,
-    exactAutoMatch,
-    fuzzyAutoMatch,
-    selectedRestaurant,
-    onSelectedRestaurantChange,
-  ]);
+  }, [hasExactMatch, restaurants, exactAutoMatch, fuzzyAutoMatch, selectedRestaurant, onSelectedRestaurantChange]);
 
   const handleSelectRestaurant = (restaurant: NearbyRestaurant) => {
     manualSelectionRef.current = true;

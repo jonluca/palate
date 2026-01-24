@@ -655,6 +655,7 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
   confidenceThreshold: number,
   onBatchComplete?: (processed: number, foodFound: number) => void,
   foodKeywords?: string[],
+  onBatchResults?: (batchResults: FoodBatchResult[]) => void | Promise<void>,
 ): Promise<{ results: FoodBatchResult[]; foodFoundCount: number }> {
   const results: FoodBatchResult[] = [];
   let foodFoundCount = 0;
@@ -672,19 +673,30 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
         { confidenceThreshold, foodKeywords: keywords },
       );
 
+      const batchResults: FoodBatchResult[] = [];
       for (const result of detectionResults) {
         if (!itemMap.has(result.assetId)) {
           continue;
         }
-        results.push({
+        const record: FoodBatchResult = {
           photoId: result.assetId,
           foodDetected: result.containsFood,
           foodLabels: result.foodLabels as FoodLabel[],
           foodConfidence: result.foodConfidence,
           allLabels: result.labels as FoodLabel[], // Store all labels from classifier
-        });
+        };
+        results.push(record);
+        batchResults.push(record);
         if (result.containsFood) {
           foodFoundCount++;
+        }
+      }
+
+      if (batchResults.length > 0) {
+        try {
+          void onBatchResults?.(batchResults);
+        } catch (error) {
+          console.warn("Food detection batch save failed:", error);
         }
       }
     } catch (error) {
@@ -1296,6 +1308,7 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
 
   const tracker = createProgressTracker();
 
+  const promises: Promise<void>[] = [];
   const { results, foodFoundCount } = await processFoodDetectionBatches(
     allPhotos,
     confidenceThreshold,
@@ -1309,8 +1322,13 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
       // Spread to create new object reference so React detects the change
       onProgress?.({ ...progress });
     },
+    undefined,
+    (batchResults) => {
+      promises.push(batchUpdatePhotosFoodDetected(batchResults));
+    },
   );
 
+  await Promise.all(promises);
   // Batch update all results
   await batchUpdatePhotosFoodDetected(results);
   await syncAllVisitsFoodProbable();

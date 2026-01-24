@@ -13,9 +13,18 @@ interface VisitHeaderProps {
   endTime: number;
   foodProbable: boolean;
   award?: string | null;
+  timeZone?: string | null;
 }
 
-export function VisitHeader({ displayName, status, startTime, endTime, foodProbable, award }: VisitHeaderProps) {
+export function VisitHeader({
+  displayName,
+  status,
+  startTime,
+  endTime,
+  foodProbable,
+  award,
+  timeZone,
+}: VisitHeaderProps) {
   const badge = award ? getMichelinBadge(award) : null;
 
   return (
@@ -46,7 +55,7 @@ export function VisitHeader({ displayName, status, startTime, endTime, foodProba
       )}
 
       <ThemedText variant={"body"} color={"secondary"}>
-        {formatDate(startTime)} · {formatTime(startTime)} – {formatTime(endTime)}
+        {formatDate(startTime, timeZone)} · {formatTime(startTime, timeZone)} – {formatTime(endTime, timeZone)}
       </ThemedText>
     </View>
   );
