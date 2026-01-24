@@ -14,23 +14,25 @@ export async function batchUpdateVisitsCalendarEvents(updates: CalendarEventUpda
   const database = await getDatabase();
 
   // Update each visit individually since each has different calendar data
-  for (const update of updates) {
-    await database.runAsync(
-      `UPDATE visits SET 
-        calendarEventId = ?, 
-        calendarEventTitle = ?, 
-        calendarEventLocation = ?, 
-        calendarEventIsAllDay = ? 
-      WHERE id = ?`,
-      [
-        update.calendarEventId,
-        update.calendarEventTitle,
-        update.calendarEventLocation,
-        update.calendarEventIsAllDay ? 1 : 0,
-        update.visitId,
-      ],
-    );
-  }
+  await database.withExclusiveTransactionAsync(async (tx) => {
+    for (const update of updates) {
+      await tx.runAsync(
+        `UPDATE visits SET 
+          calendarEventId = ?, 
+          calendarEventTitle = ?, 
+          calendarEventLocation = ?, 
+          calendarEventIsAllDay = ? 
+        WHERE id = ?`,
+        [
+          update.calendarEventId,
+          update.calendarEventTitle,
+          update.calendarEventLocation,
+          update.calendarEventIsAllDay ? 1 : 0,
+          update.visitId,
+        ],
+      );
+    }
+  });
 }
 
 /**

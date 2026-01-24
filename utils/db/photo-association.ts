@@ -1,6 +1,21 @@
 import { getDatabase } from "./core";
-import { syncAllVisitsFoodProbable } from "./visits";
 import type { MovePhotosResult, RemovePhotosResult } from "./types";
+
+async function updateVisitsFoodProbable(database: Awaited<ReturnType<typeof getDatabase>>, visitIds: string[]) {
+  const uniqueVisitIds = Array.from(new Set(visitIds));
+  if (uniqueVisitIds.length === 0) {
+    return;
+  }
+
+  const placeholders = uniqueVisitIds.map(() => "?").join(", ");
+  await database.runAsync(
+    `UPDATE visits SET foodProbable = COALESCE(
+      (SELECT MAX(foodDetected) FROM photos WHERE photos.visitId = visits.id),
+      0
+    ) WHERE id IN (${placeholders})`,
+    uniqueVisitIds,
+  );
+}
 
 export async function batchUpdatePhotoVisits(updates: { photoIds: string[]; visitId: string }[]): Promise<void> {
   if (updates.length === 0) {
@@ -88,8 +103,8 @@ export async function movePhotosToVisit(photoIds: string[], targetVisitId: strin
     [targetVisitId, targetVisitId, targetVisitId],
   );
 
-  // Sync food probable status for affected visits
-  await syncAllVisitsFoodProbable();
+  // Sync food probable status for affected visits only
+  await updateVisitsFoodProbable(database, allAffectedVisitIds);
 
   return {
     movedCount: existingPhotos.length,
@@ -151,8 +166,8 @@ export async function removePhotosFromVisit(photoIds: string[], visitId: string)
     );
   }
 
-  // Sync food probable status for the visit
-  await syncAllVisitsFoodProbable();
+  // Sync food probable status for the visit only
+  await updateVisitsFoodProbable(database, [visitId]);
 
   return {
     removedCount: matchingPhotos.length,

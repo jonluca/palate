@@ -121,16 +121,17 @@ export async function getVisitablePhotoCounts(): Promise<{
   unvisited: number;
 }> {
   const database = await getDatabase();
-  const total = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) as count FROM photos WHERE latitude IS NOT NULL AND longitude IS NOT NULL`,
-  );
-  const visited = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) as count FROM photos WHERE visitId IS NOT NULL AND latitude IS NOT NULL AND longitude IS NOT NULL`,
+  const counts = await database.getFirstAsync<{ total: number; visited: number }>(
+    `SELECT 
+      COUNT(*) as total,
+      SUM(CASE WHEN visitId IS NOT NULL THEN 1 ELSE 0 END) as visited
+     FROM photos 
+     WHERE latitude IS NOT NULL AND longitude IS NOT NULL`,
   );
   return {
-    total: total?.count ?? 0,
-    visited: visited?.count ?? 0,
-    unvisited: (total?.count ?? 0) - (visited?.count ?? 0),
+    total: counts?.total ?? 0,
+    visited: counts?.visited ?? 0,
+    unvisited: (counts?.total ?? 0) - (counts?.visited ?? 0),
   };
 }
 

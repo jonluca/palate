@@ -11,28 +11,35 @@ export async function getStats(): Promise<{
   foodProbableVisits: number;
 }> {
   const database = await getDatabase();
-  const totalPhotos = await database.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM photos`);
-  const photosWithLocation = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) as count FROM photos WHERE latitude IS NOT NULL AND longitude IS NOT NULL`,
-  );
-  const totalVisits = await database.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM visits`);
-  const pendingVisits = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) as count FROM visits WHERE status = 'pending'`,
-  );
-  const confirmedVisits = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) as count FROM visits WHERE status = 'confirmed'`,
-  );
-  const foodProbableVisits = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) as count FROM visits WHERE foodProbable = 1`,
-  );
+  const [photoCounts, visitCounts] = await Promise.all([
+    database.getFirstAsync<{ totalPhotos: number; photosWithLocation: number }>(`
+      SELECT 
+        COUNT(*) as totalPhotos,
+        SUM(CASE WHEN latitude IS NOT NULL AND longitude IS NOT NULL THEN 1 ELSE 0 END) as photosWithLocation
+      FROM photos
+    `),
+    database.getFirstAsync<{
+      totalVisits: number;
+      pendingVisits: number;
+      confirmedVisits: number;
+      foodProbableVisits: number;
+    }>(`
+      SELECT 
+        COUNT(*) as totalVisits,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pendingVisits,
+        SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmedVisits,
+        SUM(CASE WHEN foodProbable = 1 THEN 1 ELSE 0 END) as foodProbableVisits
+      FROM visits
+    `),
+  ]);
 
   return {
-    totalPhotos: totalPhotos?.count ?? 0,
-    photosWithLocation: photosWithLocation?.count ?? 0,
-    totalVisits: totalVisits?.count ?? 0,
-    pendingVisits: pendingVisits?.count ?? 0,
-    confirmedVisits: confirmedVisits?.count ?? 0,
-    foodProbableVisits: foodProbableVisits?.count ?? 0,
+    totalPhotos: photoCounts?.totalPhotos ?? 0,
+    photosWithLocation: photoCounts?.photosWithLocation ?? 0,
+    totalVisits: visitCounts?.totalVisits ?? 0,
+    pendingVisits: visitCounts?.pendingVisits ?? 0,
+    confirmedVisits: visitCounts?.confirmedVisits ?? 0,
+    foodProbableVisits: visitCounts?.foodProbableVisits ?? 0,
   };
 }
 
@@ -427,8 +434,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
   if (firstVisit && totalConfirmedVisits) {
     const firstDate = new Date(firstVisit.startTime);
     const now = new Date();
-    const monthsDiff =
-      (now.getFullYear() - firstDate.getFullYear()) * 12 + (now.getMonth() - firstDate.getMonth()) + 1;
+    const monthsDiff = (now.getFullYear() - firstDate.getFullYear()) * 12 + (now.getMonth() - firstDate.getMonth()) + 1;
     averageVisitsPerMonth = monthsDiff > 0 ? totalConfirmedVisits.count / monthsDiff : totalConfirmedVisits.count;
   }
 

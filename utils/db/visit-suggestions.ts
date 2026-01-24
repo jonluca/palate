@@ -95,7 +95,9 @@ export async function batchUpdateVisitSuggestedRestaurants(
  * Optimized to use kdbush/geokdbush spatial index for O(log n) lookups
  * instead of O(n) database queries per visit.
  */
-async function recomputeSuggestedRestaurantsInternal(database: Awaited<ReturnType<typeof getDatabase>>): Promise<number> {
+async function recomputeSuggestedRestaurantsInternal(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+): Promise<number> {
   const start = DEBUG_TIMING ? performance.now() : 0;
 
   // Build spatial index if needed (loads all restaurants into memory once)

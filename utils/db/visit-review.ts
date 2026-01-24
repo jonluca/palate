@@ -1,11 +1,6 @@
 import { cleanCalendarEventTitle, isFuzzyRestaurantMatch } from "@/services/calendar";
 import { DEBUG_TIMING, getDatabase } from "./core";
-import type {
-  AggregatedFoodLabel,
-  FoodLabel,
-  PendingVisitForReview,
-  SuggestedRestaurantDetail,
-} from "./types";
+import type { AggregatedFoodLabel, FoodLabel, PendingVisitForReview, SuggestedRestaurantDetail } from "./types";
 
 // Get pending visits that need review (with suggestions)
 export async function getPendingVisitsForReview(): Promise<PendingVisitForReview[]> {

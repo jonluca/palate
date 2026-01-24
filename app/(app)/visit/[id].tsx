@@ -2,6 +2,7 @@ import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { RestaurantSearchModal } from "@/components/restaurant-search-modal";
+import { AutoRestaurantSelector } from "@/components/restaurant-auto-selector";
 import { Ionicons } from "@expo/vector-icons";
 import {
   VisitHeader,
@@ -44,7 +45,7 @@ import type { FoodLabel } from "@/utils/db";
 import { cleanCalendarEventTitle } from "@/services/calendar";
 import { logVisitViewed } from "@/services/analytics";
 import { createAlbumWithPhotos } from "@/services/scanner";
-import { ActivityIndicator, View, Alert, Pressable, ScrollView } from "react-native";
+import { ActivityIndicator, View, Alert, Pressable } from "react-native";
 import { useToast } from "@/components/ui/toast";
 import { useHasSeenAddPhotosAlert, useSetHasSeenAddPhotosAlert } from "@/store";
 
@@ -79,23 +80,6 @@ function useAggregatedFoodLabels(
       .sort((a, b) => b.maxConfidence - a.maxConfidence)
       .slice(0, 8);
   }, [photos]);
-}
-
-function dedupeCalendarEventsByTitle<T extends { title?: string | null }>(events: T[]): T[] {
-  const seenTitles = new Set<string>();
-
-  return events.filter((event) => {
-    const rawTitle = event.title ?? "";
-    const cleanedTitle = cleanCalendarEventTitle(rawTitle).trim().toLowerCase();
-    const dedupeKey = cleanedTitle.length > 0 ? cleanedTitle : rawTitle.trim().toLowerCase();
-
-    if (seenTitles.has(dedupeKey)) {
-      return false;
-    }
-
-    seenTitles.add(dedupeKey);
-    return true;
-  });
 }
 
 // Common shape for restaurants that can be confirmed
@@ -543,30 +527,6 @@ export default function VisitDetailScreen() {
   // Check if any photos haven't been scanned for food yet
   const unscannedPhotosCount = photos.filter((p) => p.foodDetected === null).length;
   const showFoodScanCard = unscannedPhotosCount > 0;
-  const shouldShowAllCalendarEvents = visit.status !== "confirmed";
-  const calendarEventsToDisplay = shouldShowAllCalendarEvents
-    ? data.calendarEvents.length > 0
-      ? data.calendarEvents
-      : visit.calendarEventTitle
-        ? [
-            {
-              id: visit.calendarEventId ?? `visit-${visit.id}-calendar`,
-              title: visit.calendarEventTitle,
-              location: visit.calendarEventLocation,
-            },
-          ]
-        : []
-    : visit.calendarEventTitle
-      ? [
-          {
-            id: visit.calendarEventId ?? `visit-${visit.id}-calendar`,
-            title: visit.calendarEventTitle,
-            location: visit.calendarEventLocation,
-          },
-        ]
-      : [];
-  const dedupedCalendarEvents = dedupeCalendarEventsByTitle(calendarEventsToDisplay);
-
   return (
     <>
       <ScreenLayout>
@@ -579,19 +539,7 @@ export default function VisitDetailScreen() {
           award={suggestedRestaurant?.award}
         />
 
-        {dedupedCalendarEvents.length > 0 && (
-          <Card>
-            <ScrollView
-              className={"gap-2 max-h-[240px] overflow-y-auto"}
-              showsVerticalScrollIndicator={false}
-              nestedScrollEnabled
-            >
-              {dedupedCalendarEvents.map((event) => (
-                <CalendarEventCard key={event.id} title={event.title} location={event.location} />
-              ))}
-            </ScrollView>
-          </Card>
-        )}
+        {visit.status === "pending" && <CalendarEventCard visit={{ ...visit, calendarEvents: data.calendarEvents }} />}
 
         {showNoMatch && <NoMatchCard onSearchPress={() => setShowSearch(true)} />}
 
@@ -606,14 +554,24 @@ export default function VisitDetailScreen() {
         )}
 
         {visit.status === "pending" && (
-          <NearbyRestaurantsCard
-            isShowingSuggestedRestaurant={Boolean(showSuggestedRestaurant)}
+          <AutoRestaurantSelector
             restaurants={nearbyRestaurantsForCard}
-            selectedRestaurant={selectedRestaurant}
-            onSelectRestaurant={setSelectedRestaurant}
             calendarEventTitle={data?.visit?.calendarEventTitle ?? undefined}
-            onSearchPress={() => setShowSearch(true)}
-          />
+            selectedRestaurant={selectedRestaurant}
+            onSelectedRestaurantChange={setSelectedRestaurant}
+            hasExactMatch={Boolean(restaurant)}
+            selectionResetKey={visit.id}
+          >
+            {({ displayRestaurants, onSelectRestaurant }) => (
+              <NearbyRestaurantsCard
+                isShowingSuggestedRestaurant={Boolean(showSuggestedRestaurant)}
+                restaurants={displayRestaurants}
+                selectedRestaurant={selectedRestaurant}
+                onSelectRestaurant={onSelectRestaurant}
+                onSearchPress={() => setShowSearch(true)}
+              />
+            )}
+          </AutoRestaurantSelector>
         )}
 
         <VisitActionButtons

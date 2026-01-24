@@ -793,7 +793,7 @@ function MergeDuplicatesSection() {
                 Merge Duplicate Visits
               </ThemedText>
               <ThemedText variant={"footnote"} color={"secondary"}>
-                Combine visits to the same restaurant clustered in time
+                Combine visits that occurred at the same time
               </ThemedText>
             </View>
           </View>

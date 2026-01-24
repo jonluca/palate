@@ -153,31 +153,22 @@ export default function ReviewScreen() {
 
   const filteredReviewableVisits = useMemo(() => {
     return reviewableVisits.filter((v) => {
-      // Food toggle: ON => must have food, OFF => must not have food (covers 0/false/null/undefined)
+      // Food toggle: ON => must have food
       if (foodFilter === "on" && !v.foodProbable) {
         return false;
       }
-      if (foodFilter === "off" && !!v.foodProbable) {
-        return false;
-      }
 
-      // Calendar matches toggle: ON => must have a calendar event, OFF => must have none.
+      // Calendar matches toggle: ON => must have a calendar event
       const hasCalendarMatch = Boolean(v.calendarEventTitle);
       if (calendarMatchesFilter === "on" && !hasCalendarMatch) {
         return false;
       }
-      if (calendarMatchesFilter === "off" && hasCalendarMatch) {
-        return false;
-      }
 
-      // Restaurant matches toggle: ON => must have matches, OFF => must have no matches.
+      // Restaurant matches toggle: ON => must have matches
       // Treat "no matches" as both [] and missing/null (defensive).
       const matchCount = v.suggestedRestaurants?.length ?? 0;
       const hasRestaurantMatches = matchCount > 0;
       if (restaurantMatchesFilter === "on" && !hasRestaurantMatches) {
-        return false;
-      }
-      if (restaurantMatchesFilter === "off" && hasRestaurantMatches) {
         return false;
       }
 

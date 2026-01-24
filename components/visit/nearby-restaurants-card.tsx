@@ -11,8 +11,6 @@ interface NearbyRestaurantsCardProps {
   selectedRestaurant: NearbyRestaurant | null;
   /** Called when user selects a restaurant from the list */
   onSelectRestaurant: (restaurant: NearbyRestaurant) => void;
-  /** Calendar event title used to auto-select a better MapKit match */
-  calendarEventTitle?: string;
   onSearchPress: () => void;
 }
 
@@ -20,7 +18,6 @@ export function NearbyRestaurantsCard({
   restaurants,
   selectedRestaurant,
   onSelectRestaurant,
-  calendarEventTitle,
   onSearchPress,
   isShowingSuggestedRestaurant,
 }: NearbyRestaurantsCardProps) {
@@ -38,8 +35,6 @@ export function NearbyRestaurantsCard({
             restaurants={restaurants}
             selectedRestaurant={currentSelectedRestaurant}
             onSelectRestaurant={onSelectRestaurant}
-            calendarEventTitle={calendarEventTitle}
-            autoSelectOnAppleLoad={selectedRestaurant === null}
             variant={"default"}
           />
         )}
