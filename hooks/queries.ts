@@ -137,7 +137,7 @@ import {
   type ImportableCalendarEvent,
 } from "@/services/visit";
 import { hasMediaLibraryPermission, requestMediaLibraryPermission, getPhotoCount } from "@/services/scanner";
-import { exportToJSON, exportToCSV, shareExport } from "@/services/export";
+import { exportToJSON, exportToCSV, shareExport, type ExportFormat, type ExportShareResult } from "@/services/export";
 import {
   isMapKitSearchAvailable,
   searchNearbyRestaurants as mapKitSearchNearbyRestaurants,
@@ -956,20 +956,19 @@ export function useDismissCalendarEvents() {
   });
 }
 
-export type ExportFormat = "json" | "csv";
+export type { ExportFormat };
 
 /**
  * Export data to file
  */
 export function useExportData() {
-  return useMutation({
+  return useMutation<ExportShareResult, Error, ExportFormat>({
     mutationFn: async (format: ExportFormat) => {
       const data =
         format === "json"
           ? await exportToJSON({ statusFilter: "confirmed" })
           : await exportToCSV({ statusFilter: "confirmed" });
-      await shareExport(data);
-      return data;
+      return shareExport(data, format);
     },
   });
 }

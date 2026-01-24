@@ -1,3 +1,5 @@
+import { Directory, File, Paths } from "expo-file-system";
+import * as Sharing from "expo-sharing";
 import {
   getVisits,
   getPhotosByVisitId,
@@ -18,25 +20,55 @@ interface ExportData {
   visits: Array<{
     visitId: string;
     status: string;
+    suggestedRestaurantId: string | null;
     restaurant: {
       id: string;
       name: string;
       latitude: number;
       longitude: number;
+      address: string | null;
+      phone: string | null;
+      website: string | null;
+      googlePlaceId: string | null;
+      cuisine: string | null;
+      priceLevel: number | null;
+      rating: number | null;
+      notes: string | null;
     } | null;
     visitDate: string;
     startTime: string;
     endTime: string;
     duration: string;
+    startTimestamp: number;
+    endTimestamp: number;
     location: {
       latitude: number;
       longitude: number;
     };
     photoCount: number;
+    foodProbable: boolean;
+    awardAtVisit: string | null;
+    notes: string | null;
+    calendarEvent: {
+      id: string | null;
+      title: string | null;
+      location: string | null;
+      isAllDay: boolean | null;
+    };
+    exportedToCalendarId: string | null;
+    updatedAt: string | null;
     photos: Array<{
       id: string;
       uri: string;
       createdAt: string;
+      latitude: number | null;
+      longitude: number | null;
+      mediaType: "photo" | "video";
+      duration: number | null;
+      foodDetected: boolean | null;
+      foodConfidence: number | null | undefined;
+      foodLabels: PhotoRecord["foodLabels"] | null | undefined;
+      allLabels: PhotoRecord["allLabels"] | null | undefined;
     }>;
   }>;
   restaurants: Array<{
@@ -45,7 +77,24 @@ interface ExportData {
     latitude: number;
     longitude: number;
     visitCount: number;
+    address: string | null;
+    phone: string | null;
+    website: string | null;
+    googlePlaceId: string | null;
+    cuisine: string | null;
+    priceLevel: number | null;
+    rating: number | null;
+    notes: string | null;
   }>;
+}
+
+export type ExportFormat = "json" | "csv";
+
+export interface ExportShareResult {
+  fileUri: string | null;
+  fileName: string | null;
+  savedToFile: boolean;
+  shared: boolean;
 }
 
 function formatDate(timestamp: number): string {
@@ -68,6 +117,16 @@ function formatDuration(start: number, end: number): string {
   const hours = Math.floor(diffMins / 60);
   const mins = diffMins % 60;
   return mins > 0 ? `${hours}h ${mins}m` : `${hours} hours`;
+}
+
+function formatTimestampForFilename(date: Date): string {
+  return date.toISOString().replace(/[:.]/g, "-").replace("T", "_").replace("Z", "");
+}
+
+function ensureExportDirectory(baseDir: Directory): Directory {
+  const exportDir = new Directory(baseDir, "exports");
+  exportDir.create({ intermediates: true, idempotent: true });
+  return exportDir;
 }
 
 async function generateExportData(
@@ -110,21 +169,51 @@ async function generateExportData(
               name: restaurant.name,
               latitude: restaurant.latitude,
               longitude: restaurant.longitude,
+              address: restaurant.address,
+              phone: restaurant.phone,
+              website: restaurant.website,
+              googlePlaceId: restaurant.googlePlaceId,
+              cuisine: restaurant.cuisine,
+              priceLevel: restaurant.priceLevel,
+              rating: restaurant.rating,
+              notes: restaurant.notes,
             }
           : null,
+        suggestedRestaurantId: visit.suggestedRestaurantId,
         visitDate: formatDate(visit.startTime),
         startTime: formatTime(visit.startTime),
         endTime: formatTime(visit.endTime),
         duration: formatDuration(visit.startTime, visit.endTime),
+        startTimestamp: visit.startTime,
+        endTimestamp: visit.endTime,
         location: {
           latitude: visit.centerLat,
           longitude: visit.centerLon,
         },
         photoCount: visit.photoCount,
+        foodProbable: visit.foodProbable,
+        awardAtVisit: visit.awardAtVisit,
+        notes: visit.notes,
+        calendarEvent: {
+          id: visit.calendarEventId,
+          title: visit.calendarEventTitle,
+          location: visit.calendarEventLocation,
+          isAllDay: visit.calendarEventIsAllDay,
+        },
+        exportedToCalendarId: visit.exportedToCalendarId,
+        updatedAt: visit.updatedAt ? new Date(visit.updatedAt).toISOString() : null,
         photos: photos.map((p) => ({
           id: p.id,
           uri: p.uri,
           createdAt: new Date(p.creationTime).toISOString(),
+          latitude: p.latitude,
+          longitude: p.longitude,
+          mediaType: p.mediaType,
+          duration: p.duration,
+          foodDetected: p.foodDetected,
+          foodConfidence: p.foodConfidence,
+          foodLabels: p.foodLabels,
+          allLabels: p.allLabels,
         })),
       };
     }),
@@ -140,6 +229,14 @@ async function generateExportData(
       latitude: r.latitude,
       longitude: r.longitude,
       visitCount: restaurantVisitCounts.get(r.id) || 0,
+      address: r.address,
+      phone: r.phone,
+      website: r.website,
+      googlePlaceId: r.googlePlaceId,
+      cuisine: r.cuisine,
+      priceLevel: r.priceLevel,
+      rating: r.rating,
+      notes: r.notes,
     }))
     .sort((a, b) => b.visitCount - a.visitCount);
 
@@ -207,8 +304,6 @@ async function generateCSVString(
   return [headers.join(","), ...rows.map((r) => r.map((cell) => `"${cell}"`).join(","))].join("\n");
 }
 
-// For now, we just return the data as a string
-// In a full implementation, you'd write to a temp file and share it
 export async function exportToJSON(
   options: {
     includePhotos?: boolean;
@@ -226,8 +321,30 @@ export async function exportToCSV(
   return generateCSVString(options);
 }
 
-// Placeholder - in production you'd write to a file and share
-export async function shareExport(data: string): Promise<void> {
-  console.log("Export data:", data.substring(0, 500) + "...");
-  // TODO: Implement proper file sharing when expo-file-system is available
+export async function shareExport(data: string, format: ExportFormat): Promise<ExportShareResult> {
+  const baseDir = Paths.document ?? Paths.cache;
+  const exportDir = ensureExportDirectory(baseDir);
+  const timestamp = formatTimestampForFilename(new Date());
+  const fileName = `palate-export-${timestamp}.${format}`;
+  const file = new File(exportDir, fileName);
+  file.write(data, { encoding: "utf8" });
+  const canShare = await Sharing.isAvailableAsync();
+  let shared = false;
+  if (canShare) {
+    const mimeType = format === "json" ? "application/json" : "text/csv";
+    await Sharing.shareAsync(file.uri, {
+      mimeType,
+      dialogTitle: "Share export",
+    });
+    shared = true;
+  } else {
+    console.warn("Sharing not available on this device.");
+  }
+
+  return {
+    fileUri: file.uri,
+    fileName,
+    savedToFile: true,
+    shared,
+  };
 }

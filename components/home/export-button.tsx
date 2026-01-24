@@ -32,8 +32,11 @@ export function ExportButton({
         onPress: async () => {
           try {
             logExportStarted("json");
-            await exportMutation.mutateAsync("json");
-            showToast({ type: "success", message: "Export data generated! Check console for preview." });
+            const result = await exportMutation.mutateAsync("json");
+            showToast({
+              type: "success",
+              message: result.shared ? "Export saved. Share sheet opened." : "Export saved. Sharing unavailable.",
+            });
           } catch {
             showToast({ type: "error", message: "Failed to export data" });
           }
@@ -44,8 +47,11 @@ export function ExportButton({
         onPress: async () => {
           try {
             logExportStarted("csv");
-            await exportMutation.mutateAsync("csv");
-            showToast({ type: "success", message: "Export data generated! Check console for preview." });
+            const result = await exportMutation.mutateAsync("csv");
+            showToast({
+              type: "success",
+              message: result.shared ? "Export saved. Share sheet opened." : "Export saved. Sharing unavailable.",
+            });
           } catch {
             showToast({ type: "error", message: "Failed to export data" });
           }
