@@ -21,7 +21,7 @@ export type {
   WrappedStats,
 } from "./db/types";
 
-export { getDatabase, nukeDatabase, performDatabaseMaintenance } from "./db/core";
+export { getDatabase, nukeDatabase, performDatabaseMaintenance, performFullMaintenance } from "./db/core";
 
 export {
   batchUpdatePhotosFoodDetected,

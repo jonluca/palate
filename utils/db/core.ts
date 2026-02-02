@@ -100,7 +100,6 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
     PRAGMA temp_store = MEMORY;
     PRAGMA cache_size = -128000;
     PRAGMA mmap_size = 268435456;
-    PRAGMA locking_mode = EXCLUSIVE;
     PRAGMA auto_vacuum = NONE;
     PRAGMA secure_delete = OFF;
     PRAGMA wal_autocheckpoint = 10000;
@@ -393,9 +392,14 @@ export async function nukeDatabase(): Promise<void> {
  * Should be called after large batch operations like scanning.
  *
  * Operations:
- * - WAL checkpoint: Forces WAL file to be written to main database
- * - VACUUM: Rebuilds database file, reclaiming unused space and defragmenting
+ * - WAL checkpoint: Forces WAL file to be written to main database (using PASSIVE mode to avoid locks)
  * - ANALYZE: Updates query planner statistics for better query optimization
+ *
+ * Note: VACUUM is intentionally excluded from regular maintenance because:
+ * - It requires exclusive database access and fails if any statements are active
+ * - It's a heavy operation that rebuilds the entire database file
+ * - In WAL mode with EXCLUSIVE locking, it can cause "database is locked" errors
+ * - Call performFullMaintenance() separately when the app is idle for VACUUM
  */
 export async function performDatabaseMaintenance(): Promise<{
   walCheckpoint: boolean;
@@ -408,24 +412,12 @@ export async function performDatabaseMaintenance(): Promise<{
   const start = DEBUG_TIMING ? performance.now() : 0;
 
   try {
-    // Force WAL checkpoint to merge WAL file into main database
-    // TRUNCATE mode: checkpoint and truncate WAL file to zero bytes
-    await database.execAsync(`PRAGMA wal_checkpoint(TRUNCATE);`);
+    // Use PASSIVE checkpoint mode - it won't block and won't fail if there are active readers
+    // This checkpoints as much as possible without waiting for locks
+    await database.execAsync(`PRAGMA wal_checkpoint(PASSIVE);`);
     results.walCheckpoint = true;
   } catch (error) {
     console.warn("[DB] WAL checkpoint failed:", error);
-  }
-
-  try {
-    // VACUUM rebuilds the database file:
-    // - Reclaims space from deleted records
-    // - Defragments the database for faster reads
-    // - Reduces file size
-    // Note: This can be slow for large databases, but is worth it after bulk operations
-    await database.execAsync(`VACUUM;`);
-    results.vacuum = true;
-  } catch (error) {
-    console.warn("[DB] VACUUM failed:", error);
   }
 
   try {
@@ -439,6 +431,58 @@ export async function performDatabaseMaintenance(): Promise<{
 
   if (DEBUG_TIMING) {
     console.log(`[DB] performDatabaseMaintenance: ${(performance.now() - start).toFixed(2)}ms`);
+  }
+
+  return results;
+}
+
+/**
+ * Perform full database maintenance including VACUUM.
+ * This is a heavier operation that should only be called when the app is idle
+ * and no other database operations are in progress.
+ *
+ * VACUUM rebuilds the database file:
+ * - Reclaims space from deleted records
+ * - Defragments the database for faster reads
+ * - Reduces file size
+ *
+ * Note: This can fail with "database is locked" if called while other operations
+ * are in progress. Best called on app background or after extended idle time.
+ */
+export async function performFullMaintenance(): Promise<{
+  walCheckpoint: boolean;
+  vacuum: boolean;
+  analyze: boolean;
+}> {
+  const database = await getDatabase();
+  const results = { walCheckpoint: false, vacuum: false, analyze: false };
+
+  const start = DEBUG_TIMING ? performance.now() : 0;
+
+  try {
+    // Force WAL checkpoint with TRUNCATE mode before VACUUM
+    await database.execAsync(`PRAGMA wal_checkpoint(TRUNCATE);`);
+    results.walCheckpoint = true;
+  } catch (error) {
+    console.warn("[DB] WAL checkpoint failed:", error);
+  }
+
+  try {
+    await database.execAsync(`VACUUM;`);
+    results.vacuum = true;
+  } catch (error) {
+    console.warn("[DB] VACUUM failed (this is expected if database is busy):", error);
+  }
+
+  try {
+    await database.execAsync(`ANALYZE;`);
+    results.analyze = true;
+  } catch (error) {
+    console.warn("[DB] ANALYZE failed:", error);
+  }
+
+  if (DEBUG_TIMING) {
+    console.log(`[DB] performFullMaintenance: ${(performance.now() - start).toFixed(2)}ms`);
   }
 
   return results;
