@@ -129,6 +129,11 @@ export default function ReviewScreen() {
     [pendingVisits, exactMatchVisitIds],
   );
 
+  const hasAnyCalendarMatches = useMemo(
+    () => reviewableVisits.some((v) => Boolean(v.calendarEventTitle)),
+    [reviewableVisits],
+  );
+
   const ToggleChip = useCallback(
     ({ label, value, onToggle }: { label: string; value: boolean; onToggle: () => void }) => {
       return (
@@ -175,6 +180,13 @@ export default function ReviewScreen() {
       return true;
     });
   }, [reviewableVisits, foodFilter, calendarMatchesFilter, restaurantMatchesFilter]);
+
+  // Reset calendar filter when no visits have calendar matches (only after data loads)
+  useEffect(() => {
+    if (!isLoading && !hasAnyCalendarMatches && calendarMatchesFilter === "on") {
+      setCalendarMatchesFilter("off");
+    }
+  }, [isLoading, hasAnyCalendarMatches, calendarMatchesFilter, setCalendarMatchesFilter]);
 
   // UI state
   const hasExactMatches = exactMatches.length > 0;
@@ -322,11 +334,13 @@ export default function ReviewScreen() {
                     value={foodFilter === "on"}
                     onToggle={() => setFoodFilter(foodFilter === "on" ? "off" : "on")}
                   />
-                  <ToggleChip
-                    label={"Calendar Match"}
-                    value={calendarMatchesFilter === "on"}
-                    onToggle={() => setCalendarMatchesFilter(calendarMatchesFilter === "on" ? "off" : "on")}
-                  />
+                  {(isLoading || hasAnyCalendarMatches) && (
+                    <ToggleChip
+                      label={"Calendar Match"}
+                      value={calendarMatchesFilter === "on"}
+                      onToggle={() => setCalendarMatchesFilter(calendarMatchesFilter === "on" ? "off" : "on")}
+                    />
+                  )}
                   <ToggleChip
                     label={"Restaurant Match"}
                     value={restaurantMatchesFilter === "on"}
@@ -342,10 +356,12 @@ export default function ReviewScreen() {
     [
       filteredReviewableVisits.length,
       reviewableVisits.length,
+      isLoading,
       filtersCollapsed,
       setFiltersCollapsed,
       foodFilter,
       setFoodFilter,
+      hasAnyCalendarMatches,
       calendarMatchesFilter,
       setCalendarMatchesFilter,
       restaurantMatchesFilter,
