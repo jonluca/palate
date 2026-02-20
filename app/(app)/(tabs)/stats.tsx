@@ -257,24 +257,52 @@ function StatCard({
 }) {
   const accentStyles = {
     amber: {
-      border: "border-amber-500/30",
-      text: "text-amber-400",
-      gradientColors: ["rgba(251, 191, 36, 0.35)", "rgba(251, 191, 36, 0.08)", "transparent"] as const,
+      cardBorder: "rgba(251, 191, 36, 0.14)",
+      topTint: "rgba(251, 191, 36, 0.08)",
+      halo: "rgba(251, 191, 36, 0.14)",
+      iconBg: "rgba(251, 191, 36, 0.12)",
+      iconBorder: "rgba(251, 191, 36, 0.2)",
+      chipBg: "rgba(251, 191, 36, 0.1)",
+      chipBorder: "rgba(251, 191, 36, 0.16)",
+      accentText: "rgb(245, 158, 11)",
+      dot: "rgb(245, 158, 11)",
+      iconShadow: "rgba(245, 158, 11, 0.12)",
     },
     emerald: {
-      border: "border-emerald-500/30",
-      text: "text-emerald-400",
-      gradientColors: ["rgba(52, 211, 153, 0.35)", "rgba(52, 211, 153, 0.08)", "transparent"] as const,
+      cardBorder: "rgba(52, 211, 153, 0.14)",
+      topTint: "rgba(52, 211, 153, 0.08)",
+      halo: "rgba(52, 211, 153, 0.14)",
+      iconBg: "rgba(52, 211, 153, 0.12)",
+      iconBorder: "rgba(52, 211, 153, 0.2)",
+      chipBg: "rgba(52, 211, 153, 0.1)",
+      chipBorder: "rgba(52, 211, 153, 0.16)",
+      accentText: "rgb(16, 185, 129)",
+      dot: "rgb(16, 185, 129)",
+      iconShadow: "rgba(16, 185, 129, 0.12)",
     },
     violet: {
-      border: "border-violet-500/30",
-      text: "text-violet-400",
-      gradientColors: ["rgba(167, 139, 250, 0.35)", "rgba(167, 139, 250, 0.08)", "transparent"] as const,
+      cardBorder: "rgba(167, 139, 250, 0.14)",
+      topTint: "rgba(167, 139, 250, 0.08)",
+      halo: "rgba(167, 139, 250, 0.14)",
+      iconBg: "rgba(167, 139, 250, 0.12)",
+      iconBorder: "rgba(167, 139, 250, 0.2)",
+      chipBg: "rgba(167, 139, 250, 0.1)",
+      chipBorder: "rgba(167, 139, 250, 0.16)",
+      accentText: "rgb(139, 92, 246)",
+      dot: "rgb(139, 92, 246)",
+      iconShadow: "rgba(139, 92, 246, 0.12)",
     },
     rose: {
-      border: "border-rose-500/30",
-      text: "text-rose-400",
-      gradientColors: ["rgba(251, 113, 133, 0.35)", "rgba(251, 113, 133, 0.08)", "transparent"] as const,
+      cardBorder: "rgba(251, 113, 133, 0.14)",
+      topTint: "rgba(251, 113, 133, 0.08)",
+      halo: "rgba(251, 113, 133, 0.14)",
+      iconBg: "rgba(251, 113, 133, 0.12)",
+      iconBorder: "rgba(251, 113, 133, 0.2)",
+      chipBg: "rgba(251, 113, 133, 0.1)",
+      chipBorder: "rgba(251, 113, 133, 0.16)",
+      accentText: "rgb(244, 63, 94)",
+      dot: "rgb(244, 63, 94)",
+      iconShadow: "rgba(244, 63, 94, 0.12)",
     },
   };
   const accent = accentStyles[accentColor];
@@ -282,33 +310,54 @@ function StatCard({
   return (
     <Animated.View
       entering={FadeInUp.delay(delay).duration(400)}
-      className={`flex-1 rounded-2xl border ${accent.border} overflow-hidden bg-card`}
-      style={{ minHeight: 120 }}
+      className={"flex-1 rounded-2xl border overflow-hidden bg-card"}
+      style={{
+        minHeight: 118,
+        borderCurve: "continuous",
+        borderColor: accent.cardBorder,
+      }}
     >
-      {/* Radial glow effect */}
-      <LinearGradient
-        colors={accent.gradientColors}
-        locations={[0, 0.5, 1]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={{
-          position: "absolute",
-          top: -20,
-          left: -20,
-          right: -20,
-          height: 100,
-          borderRadius: 60,
-        }}
-      />
-      <View className={"flex-1 items-center justify-center p-4 gap-1"}>
-        <View className={"w-10 h-10 rounded-full bg-secondary/70 items-center justify-center border border-border"}>
-          <ThemedText style={{ fontSize: 20 }}>{icon}</ThemedText>
+      <View className={"flex-1 justify-between p-4"}>
+        <View className={"flex-row items-center justify-between gap-2"}>
+          <View
+            className={"w-10 h-10 items-center justify-center border"}
+            style={{
+              borderRadius: 14,
+              borderCurve: "continuous",
+              backgroundColor: accent.iconBg,
+              borderColor: accent.iconBorder,
+            }}
+          >
+            <ThemedText style={{ fontSize: 18 }}>{icon}</ThemedText>
+          </View>
+          <View
+            className={"flex-row items-center gap-1.5 px-2.5 py-1 border"}
+            style={{
+              maxWidth: "74%",
+              borderRadius: 999,
+              borderCurve: "continuous",
+              backgroundColor: accent.chipBg,
+              borderColor: accent.chipBorder,
+            }}
+          >
+            <View className={"w-1.5 h-1.5 rounded-full"} style={{ backgroundColor: accent.dot }} />
+            <ThemedText
+              variant={"caption2"}
+              className={"font-semibold"}
+              numberOfLines={1}
+              style={{ color: accent.accentText }}
+            >
+              {label}
+            </ThemedText>
+          </View>
         </View>
-        <ThemedText variant={"title1"} className={`font-bold ${accent.text}`}>
+        <ThemedText
+          variant={"title1"}
+          className={"font-semibold text-foreground"}
+          numberOfLines={1}
+          style={{ fontVariant: ["tabular-nums"], letterSpacing: -0.3 }}
+        >
           {typeof value === "number" ? value.toLocaleString() : value}
-        </ThemedText>
-        <ThemedText variant={"caption1"} className={"text-muted-foreground/80 text-center"}>
-          {label}
         </ThemedText>
       </View>
     </Animated.View>
@@ -367,7 +416,7 @@ function DeepDiveSection({ stats, selectedYear }: { stats: WrappedStats; selecte
     const topSpotShare =
       stats.mostRevisitedRestaurant && totalVisits > 0 ? stats.mostRevisitedRestaurant.visits / totalVisits : 0;
 
-    return [
+    const visibleInsights = [
       {
         key: "avg-visits",
         icon: "🍽️",
@@ -459,6 +508,23 @@ function DeepDiveSection({ stats, selectedYear }: { stats: WrappedStats; selecte
         isVisible: stats.uniqueCities > 0 && uniqueRestaurants > 0,
       },
     ].filter((item) => item.isVisible);
+
+    if (visibleInsights.length % 2 === 1) {
+      visibleInsights.push({
+        key: "visits-per-active-month",
+        icon: "🗓️",
+        label: "Visits per active month",
+        value: formatNumber(activeMonths > 0 ? totalVisits / activeMonths : 0, 1),
+        subtitle: selectedYear
+          ? `${activeMonths.toLocaleString()} active months in ${selectedYear}`
+          : `${activeMonths.toLocaleString()} active months`,
+        iconBg: "bg-sky-500/30",
+        valueClass: "text-sky-300",
+        isVisible: true,
+      });
+    }
+
+    return visibleInsights;
   }, [stats, selectedYear]);
 
   if (insights.length === 0) {

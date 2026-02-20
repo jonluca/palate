@@ -38,7 +38,7 @@ export default function RescanScreen() {
   const isInProgress = isScanning || isDeepScanning;
 
   return (
-    <View className={"flex-1 bg-background"} style={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}>
+    <View className={"flex-1"} style={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}>
       <View className={"flex-1 px-6 justify-center"}>
         {/* Header */}
         <ScanHeader

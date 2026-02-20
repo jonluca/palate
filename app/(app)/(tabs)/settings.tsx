@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
-import { ExportButton, StatsCard } from "@/components/home";
+import { ExportButton } from "@/components/home";
 import { IconSymbol } from "@/components/icon-symbol";
 import type { SymbolViewProps } from "expo-symbols";
 import { nukeDatabase } from "@/utils/db";
@@ -23,9 +23,6 @@ import {
 } from "@/store";
 
 import {
-  useStats,
-  useIgnoredLocations,
-  useRemoveIgnoredLocation,
   useWritableCalendars,
   useSyncableCalendars,
   useVisitsWithoutCalendarEvents,
@@ -82,7 +79,7 @@ function CardIcon({ name, color, bgColor }: { name: SymbolViewProps["name"]; col
 // Google Maps API Key Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function GoogleMapsApiKeyCard() {
+export function GoogleMapsApiKeyCard() {
   const { showToast } = useToast();
   const googleMapsApiKey = useGoogleMapsApiKey();
   const setGoogleMapsApiKey = useSetGoogleMapsApiKey();
@@ -109,7 +106,7 @@ function GoogleMapsApiKeyCard() {
               Google Maps API Key
             </ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              Required for restaurant search and nearby places
+              Optional: use your own key for place suggestions
             </ThemedText>
           </View>
           {googleMapsApiKey && (
@@ -156,7 +153,7 @@ function GoogleMapsApiKeyCard() {
         >
           <IconSymbol name={"questionmark.circle"} size={14} color={"#3b82f6"} />
           <ThemedText variant={"caption1"} className={"text-blue-500"}>
-            Get an API key from Google Cloud Console
+            Create or manage a key in Google Cloud
           </ThemedText>
         </Pressable>
       </View>
@@ -688,10 +685,10 @@ function AllVisitsCard() {
             <CardIcon name={"photo.stack"} color={"#8b5cf6"} bgColor={"bg-violet-500/15"} />
             <View className={"flex-1"}>
               <ThemedText variant={"subhead"} className={"font-medium"}>
-                All Visits
+                Visit History
               </ThemedText>
               <ThemedText variant={"footnote"} color={"secondary"}>
-                Browse and filter all your restaurant visits
+                Browse and filter every saved restaurant visit
               </ThemedText>
             </View>
           </View>
@@ -715,10 +712,10 @@ function QuickActionsCard() {
             <CardIcon name={"bolt.fill"} color={"#f59e0b"} bgColor={"bg-amber-500/15"} />
             <View className={"flex-1"}>
               <ThemedText variant={"subhead"} className={"font-medium"}>
-                Bulk Review Actions
+                Review Shortcuts
               </ThemedText>
               <ThemedText variant={"footnote"} color={"secondary"}>
-                Skip visits by photo count, food detection, and matches
+                Speed up review with batch actions and filters
               </ThemedText>
             </View>
           </View>
@@ -733,7 +730,7 @@ function QuickActionsCard() {
 // Undo Bar Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function UndoBarCard() {
+export function UndoBarCard() {
   const hideUndoBar = useHideUndoBar();
   const setHideUndoBar = useSetHideUndoBar();
 
@@ -749,10 +746,10 @@ function UndoBarCard() {
           <CardIcon name={"arrow.uturn.backward.circle.fill"} color={"#14b8a6"} bgColor={"bg-teal-500/15"} />
           <View className={"flex-1"}>
             <ThemedText variant={"subhead"} className={"font-medium"}>
-              Undo Bar
+              Show Undo Banner
             </ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              Show the undo banner after review actions
+              Let you undo review actions after each change
             </ThemedText>
           </View>
           <View className={`px-2 py-1 rounded-full ${hideUndoBar ? "bg-red-500/15" : "bg-green-500/15"}`}>
@@ -773,7 +770,7 @@ function UndoBarCard() {
 // Fast Animations Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function FastAnimationsCard() {
+export function FastAnimationsCard() {
   const fastAnimations = useFastAnimations();
   const setFastAnimations = useSetFastAnimations();
 
@@ -792,7 +789,7 @@ function FastAnimationsCard() {
               Fast Animations
             </ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              Make UI animations instant
+              Speeds up animations for testing and power use
             </ThemedText>
           </View>
           <View className={`px-2 py-1 rounded-full ${fastAnimations ? "bg-green-500/15" : "bg-gray-500/15"}`}>
@@ -813,7 +810,7 @@ function FastAnimationsCard() {
 // Merge Duplicates Section
 // ─────────────────────────────────────────────────────────────────────────────
 
-function MergeDuplicatesSection() {
+export function MergeDuplicatesSection() {
   const { showToast } = useToast();
   const { data: mergeableGroups = [] } = useMergeableSameRestaurantVisits();
   const batchMergeMutation = useBatchMergeSameRestaurantVisits();
@@ -933,42 +930,10 @@ function MergeDuplicatesSection() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Rescan Card
-// ─────────────────────────────────────────────────────────────────────────────
-
-function RescanCard() {
-  const handleRescan = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push("/rescan");
-  }, []);
-
-  return (
-    <Card animated={false}>
-      <View className={"p-4 flex-row items-center justify-between"}>
-        <View className={"flex-row items-center gap-3 flex-1"}>
-          <CardIcon name={"camera.viewfinder"} color={"#f97316"} bgColor={"bg-orange-500/15"} />
-          <View className={"flex-1"}>
-            <ThemedText variant={"subhead"} className={"font-medium"}>
-              Rescan Photos
-            </ThemedText>
-            <ThemedText variant={"footnote"} color={"secondary"}>
-              Find new restaurant visits
-            </ThemedText>
-          </View>
-        </View>
-        <Button variant={"secondary"} size={"sm"} onPress={handleRescan}>
-          <ButtonText variant={"secondary"}>Scan</ButtonText>
-        </Button>
-      </View>
-    </Card>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Deep Scan Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DeepScanCard() {
+export function DeepScanCard() {
   const { showToast } = useToast();
   const [progress, setProgress] = useState<DeepScanProgress | null>(null);
   const deepScanMutation = useDeepScan((p) => setProgress(p));
@@ -1023,10 +988,10 @@ function DeepScanCard() {
           <CardIcon name={"eye.fill"} color={"#ec4899"} bgColor={"bg-pink-500/15"} />
           <View className={"flex-1"}>
             <ThemedText variant={"subhead"} className={"font-medium"}>
-              Deep Scan for Food
+              Deep Scan Photos
             </ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              Analyze all photos with ML food detection
+              Slower full-library scan to find missed food photos
             </ThemedText>
           </View>
         </View>
@@ -1065,7 +1030,7 @@ function DeepScanCard() {
 // Recompute Suggestions Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function RecomputeSuggestionsCard() {
+export function RecomputeSuggestionsCard() {
   const { showToast } = useToast();
   const recomputeMutation = useRecomputeSuggestedRestaurants();
 
@@ -1104,10 +1069,10 @@ function RecomputeSuggestionsCard() {
           <CardIcon name={"arrow.triangle.2.circlepath"} color={"#8b5cf6"} bgColor={"bg-violet-500/15"} />
           <View className={"flex-1"}>
             <ThemedText variant={"subhead"} className={"font-medium"}>
-              Recompute Suggestions
+              Refresh Suggestions
             </ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              Recalculate nearby restaurants for pending visits
+              Rebuild nearby restaurant matches for pending visits
             </ThemedText>
           </View>
         </View>
@@ -1137,7 +1102,7 @@ function RecomputeSuggestionsCard() {
 // Ignored Locations Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function IgnoredLocationsCard({
+export function IgnoredLocationsCard({
   locations,
   onRemove,
 }: {
@@ -1184,7 +1149,7 @@ function IgnoredLocationsCard({
 // Danger Zone Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DangerZoneCard() {
+export function DangerZoneCard() {
   const queryClient = useQueryClient();
   const resetAllState = useAppStore((state) => state.resetAllState);
   const [isResetting, setIsResetting] = useState(false);
@@ -1225,10 +1190,10 @@ function DangerZoneCard() {
           <CardIcon name={"trash"} color={"#ef4444"} bgColor={"bg-red-500/15"} />
           <View className={"flex-1"}>
             <ThemedText variant={"subhead"} className={"font-medium"}>
-              Reset All Data
+              Reset App Data
             </ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              Delete all photos, visits, and restaurants
+              Delete scans, visits, and restaurant matches
             </ThemedText>
           </View>
         </View>
@@ -1244,7 +1209,7 @@ function DangerZoneCard() {
 // Food Keywords Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function FoodKeywordsCard() {
+export function FoodKeywordsCard() {
   const { showToast } = useToast();
   const { data: keywords = [], isLoading } = useFoodKeywords();
   const { data: photosWithLabelsCount = 0 } = usePhotosWithLabelsCount();
@@ -1535,7 +1500,7 @@ function FoodKeywordsCard() {
 // Export Visits Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ExportVisitsCard() {
+export function ExportVisitsCard() {
   return (
     <Card animated={false}>
       <View className={"p-4 flex-row items-center justify-between"}>
@@ -1553,6 +1518,31 @@ function ExportVisitsCard() {
         <ExportButton label={"Export"} variant={"secondary"} size={"sm"} textVariant={"secondary"} />
       </View>
     </Card>
+  );
+}
+
+function AdvancedSettingsCard() {
+  return (
+    <Pressable onPress={() => router.push("/settings-advanced")}>
+      <Card animated={false}>
+        <View className={"p-4 gap-3"}>
+          <View className={"flex-row items-center justify-between gap-3"}>
+            <View className={"flex-row items-center gap-3 flex-1"}>
+              <CardIcon name={"slider.horizontal.3"} color={"#a855f7"} bgColor={"bg-purple-500/15"} />
+              <View className={"flex-1"}>
+                <ThemedText variant={"subhead"} className={"font-medium"}>
+                  Advanced Settings
+                </ThemedText>
+                <ThemedText variant={"footnote"} color={"secondary"}>
+                  Power-user tools, cleanup, and reset controls
+                </ThemedText>
+              </View>
+            </View>
+            <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
+          </View>
+        </View>
+      </Card>
+    </Pressable>
   );
 }
 
@@ -1598,33 +1588,6 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
-  const { showToast } = useToast();
-  const { data: stats } = useStats();
-  const { data: ignoredLocations = [] } = useIgnoredLocations();
-  const removeIgnoredLocationMutation = useRemoveIgnoredLocation();
-
-  const handleRemoveIgnoredLocation = useCallback(
-    (location: IgnoredLocationRecord) => {
-      Alert.alert(
-        "Remove Ignored Location",
-        `Stop ignoring ${location.name ?? "this location"}? Existing rejected visits won't be restored automatically.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Remove",
-            onPress: () => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              removeIgnoredLocationMutation.mutate(location.id, {
-                onSuccess: () => showToast({ type: "success", message: "Location removed from ignored list" }),
-                onError: () => showToast({ type: "error", message: "Failed to remove location" }),
-              });
-            },
-          },
-        ],
-      );
-    },
-    [removeIgnoredLocationMutation, showToast],
-  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -1632,14 +1595,13 @@ export default function SettingsScreen() {
     setRefreshing(false);
   }, [queryClient]);
 
-  const hasIgnoredLocations = ignoredLocations.length > 0;
-
   return (
     <ScrollView
       className={"flex-1 bg-background"}
+      contentInsetAdjustmentBehavior={"automatic"}
       contentContainerStyle={{
-        paddingTop: 0,
-        paddingBottom: insets.bottom + 32,
+        paddingTop: 12,
+        paddingBottom: insets.bottom + 24,
         paddingHorizontal: 16,
       }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -1654,89 +1616,30 @@ export default function SettingsScreen() {
         </ThemedText>
       </View>
 
-      {/* Stats Section */}
-      {stats && (
-        <Animated.View entering={FadeInDown.delay(100).duration(300)} className={"mb-6"}>
-          <SectionHeader>Statistics</SectionHeader>
-          <StatsCard stats={stats} />
-        </Animated.View>
-      )}
-
-      {/* Browse Section */}
+      {/* Daily Use */}
       <Animated.View entering={FadeInDown.delay(150).duration(300)} className={"mb-6"}>
-        <SectionHeader>Browse</SectionHeader>
-        <AllVisitsCard />
-      </Animated.View>
-
-      {/* Review Actions */}
-      <Animated.View entering={FadeInDown.delay(200).duration(300)} className={"mb-6"}>
-        <SectionHeader>Review</SectionHeader>
-        <QuickActionsCard />
-      </Animated.View>
-
-      {/* Preferences */}
-      <Animated.View entering={FadeInDown.delay(250).duration(300)} className={"mb-6"}>
-        <SectionHeader>Preferences</SectionHeader>
+        <SectionHeader>Daily Use</SectionHeader>
         <View className={"gap-3"}>
-          <UndoBarCard />
-          <FastAnimationsCard />
-        </View>
-      </Animated.View>
-
-      <MergeDuplicatesSection />
-
-      {/* Scan Section */}
-      <Animated.View entering={FadeInDown.delay(300).duration(300)} className={"mb-6"}>
-        <SectionHeader>Scanning</SectionHeader>
-        <View className={"gap-3"}>
-          <RescanCard />
+          <AllVisitsCard />
+          <QuickActionsCard />
           <DeepScanCard />
-          <RecomputeSuggestionsCard />
         </View>
-      </Animated.View>
-
-      {/* Food Detection Section */}
-      <Animated.View entering={FadeInDown.delay(350).duration(300)} className={"mb-6"}>
-        <SectionHeader>Food Detection</SectionHeader>
-        <FoodKeywordsCard />
       </Animated.View>
 
       {/* Calendar Section */}
-      <Animated.View entering={FadeInDown.delay(400).duration(300)} className={"mb-6"}>
+      <Animated.View entering={FadeInDown.delay(200).duration(300)} className={"mb-6"}>
         <SectionHeader>Calendar</SectionHeader>
         <CalendarSection />
       </Animated.View>
 
-      {/* Google Maps API Key Section */}
-      <Animated.View entering={FadeInDown.delay(450).duration(300)} className={"mb-6"}>
-        <SectionHeader>Integrations</SectionHeader>
-        <GoogleMapsApiKeyCard />
-      </Animated.View>
-
-      {/* Ignored Locations */}
-      {hasIgnoredLocations && (
-        <Animated.View entering={FadeInDown.delay(500).duration(300)} className={"mb-6"}>
-          <SectionHeader>Locations</SectionHeader>
-          <IgnoredLocationsCard locations={ignoredLocations} onRemove={handleRemoveIgnoredLocation} />
-        </Animated.View>
-      )}
-
-      {/* Export Section */}
-      {stats && stats.confirmedVisits > 0 && (
-        <Animated.View entering={FadeInDown.delay(550).duration(300)} className={"mb-6"}>
-          <SectionHeader>Export</SectionHeader>
-          <ExportVisitsCard />
-        </Animated.View>
-      )}
-
-      {/* Danger Zone */}
-      <Animated.View entering={FadeInDown.delay(hasIgnoredLocations ? 650 : 600).duration(300)} className={"mb-6"}>
-        <SectionHeader>Danger Zone</SectionHeader>
-        <DangerZoneCard />
+      {/* Advanced */}
+      <Animated.View entering={FadeInDown.delay(250).duration(300)} className={"mb-6"}>
+        <SectionHeader>Advanced</SectionHeader>
+        <AdvancedSettingsCard />
       </Animated.View>
 
       {/* About Section */}
-      <Animated.View entering={FadeInDown.delay(hasIgnoredLocations ? 750 : 650).duration(300)}>
+      <Animated.View entering={FadeInDown.delay(300).duration(300)}>
         <SectionHeader>About</SectionHeader>
         <AboutCard />
       </Animated.View>

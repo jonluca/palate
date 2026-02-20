@@ -1,7 +1,7 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
-import { AnimatedListItem, TabButton, type ReviewTab } from "@/components/review";
-import { AllCaughtUpEmpty, SkeletonVisitCard, Button, ButtonText, Card, useUndo } from "@/components/ui";
+import { AnimatedListItem } from "@/components/review";
+import { SkeletonVisitCard, Button, ButtonText, Card, useUndo } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import {
   usePendingReview,
@@ -21,14 +21,28 @@ import { router } from "expo-router";
 import {
   useReviewFoodFilter,
   useSetReviewFoodFilter,
-  useReviewCalendarMatchesFilter,
-  useSetReviewCalendarMatchesFilter,
   useReviewRestaurantMatchesFilter,
   useSetReviewRestaurantMatchesFilter,
   useReviewFiltersCollapsed,
   useSetReviewFiltersCollapsed,
 } from "@/store";
 import { ReviewModeCard } from "@/components/visit-card/review-mode-card";
+
+type ReviewListItem =
+  | {
+      type: "exact";
+      key: string;
+      visitId: string;
+      match: ExactCalendarMatch;
+      exactIndex: number;
+    }
+  | {
+      type: "manual";
+      key: string;
+      visitId: string;
+      visit: PendingVisitForReview;
+      manualIndex: number;
+    };
 
 function LoadingState() {
   return (
@@ -65,41 +79,15 @@ function ReviewCaughtUpCard() {
   );
 }
 
-function NoManualReviewLeftCard({ onGoToExact }: { onGoToExact: () => void }) {
-  return (
-    <Card>
-      <View className={"p-5 gap-3"}>
-        <View className={"flex-row items-center gap-3"}>
-          <View className={"w-10 h-10 rounded-2xl bg-primary/10 border border-primary/15 items-center justify-center"}>
-            <IconSymbol name={"sparkles"} size={18} color={"#0A84FF"} />
-          </View>
-          <View className={"flex-1"}>
-            <ThemedText className={"font-semibold"}>Nothing to manually review</ThemedText>
-            <ThemedText variant={"footnote"} color={"secondary"}>
-              You only have Exact Matches left.
-            </ThemedText>
-          </View>
-        </View>
-        <Button onPress={onGoToExact}>
-          <ButtonText>Go to Exact Matches</ButtonText>
-        </Button>
-      </View>
-    </Card>
-  );
-}
-
 export default function ReviewScreen() {
   "use no memo";
 
   const [refreshing, setRefreshing] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
-  const [activeTab, setActiveTab] = useState<ReviewTab>("all");
 
   // Review filters from store
   const foodFilter = useReviewFoodFilter();
   const setFoodFilter = useSetReviewFoodFilter();
-  const calendarMatchesFilter = useReviewCalendarMatchesFilter();
-  const setCalendarMatchesFilter = useSetReviewCalendarMatchesFilter();
   const restaurantMatchesFilter = useReviewRestaurantMatchesFilter();
   const setRestaurantMatchesFilter = useSetReviewRestaurantMatchesFilter();
   const filtersCollapsed = useReviewFiltersCollapsed();
@@ -112,10 +100,7 @@ export default function ReviewScreen() {
 
   // FlashList refs for scrolling back after undo
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const regularListRef = useRef<any>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const exactMatchListRef = useRef<any>(null);
-  const hasSetInitialTab = useRef(false);
+  const reviewListRef = useRef<any>(null);
 
   // Data queries
   const { data, isLoading } = usePendingReview();
@@ -131,11 +116,6 @@ export default function ReviewScreen() {
   const reviewableVisits = useMemo(
     () => pendingVisits.filter((v) => !exactMatchVisitIds.has(v.id)),
     [pendingVisits, exactMatchVisitIds],
-  );
-
-  const hasAnyCalendarMatches = useMemo(
-    () => reviewableVisits.some((v) => Boolean(v.calendarEventTitle)),
-    [reviewableVisits],
   );
 
   const ToggleChip = useCallback(
@@ -163,15 +143,9 @@ export default function ReviewScreen() {
   );
 
   const filteredReviewableVisits = useMemo(() => {
-    return reviewableVisits.filter((v) => {
+    const filtered = reviewableVisits.filter((v) => {
       // Food toggle: ON => must have food
       if (foodFilter === "on" && !v.foodProbable) {
-        return false;
-      }
-
-      // Calendar matches toggle: ON => must have a calendar event
-      const hasCalendarMatch = Boolean(v.calendarEventTitle);
-      if (calendarMatchesFilter === "on" && !hasCalendarMatch) {
         return false;
       }
 
@@ -185,57 +159,67 @@ export default function ReviewScreen() {
 
       return true;
     });
-  }, [reviewableVisits, foodFilter, calendarMatchesFilter, restaurantMatchesFilter]);
 
-  // Reset calendar filter when no visits have calendar matches (only after data loads)
-  useEffect(() => {
-    if (!isLoading && !hasAnyCalendarMatches && calendarMatchesFilter === "on") {
-      setCalendarMatchesFilter("off");
-    }
-  }, [isLoading, hasAnyCalendarMatches, calendarMatchesFilter, setCalendarMatchesFilter]);
+    return filtered
+      .map((visit, index) => ({ visit, index }))
+      .sort((a, b) => {
+        const aHasCalendarMatch = Boolean(a.visit.calendarEventTitle);
+        const bHasCalendarMatch = Boolean(b.visit.calendarEventTitle);
+
+        if (aHasCalendarMatch !== bHasCalendarMatch) {
+          return aHasCalendarMatch ? -1 : 1;
+        }
+
+        // Preserve backend order for ties.
+        return a.index - b.index;
+      })
+      .map(({ visit }) => visit);
+  }, [reviewableVisits, foodFilter, restaurantMatchesFilter]);
+
+  const mergedReviewItems = useMemo<ReviewListItem[]>(
+    () => [
+      ...exactMatches.map(
+        (match, exactIndex) =>
+          ({
+            type: "exact",
+            key: `exact-${match.visitId}`,
+            visitId: match.visitId,
+            match,
+            exactIndex,
+          }) satisfies ReviewListItem,
+      ),
+      ...filteredReviewableVisits.map(
+        (visit, manualIndex) =>
+          ({
+            type: "manual",
+            key: `manual-${visit.id}`,
+            visitId: visit.id,
+            visit,
+            manualIndex,
+          }) satisfies ReviewListItem,
+      ),
+    ],
+    [exactMatches, filteredReviewableVisits],
+  );
 
   // UI state
   const hasExactMatches = exactMatches.length > 0;
-  const hasTabs = hasExactMatches;
   const isAllCaughtUp = !isLoading && pendingVisits.length === 0;
-
-  // Set initial tab to "exact" if there are exact matches on first load
-  useEffect(() => {
-    if (!isLoading && !hasSetInitialTab.current && hasExactMatches) {
-      hasSetInitialTab.current = true;
-      setActiveTab("exact");
-    }
-  }, [isLoading, hasExactMatches]);
-
-  // Switch back to "all" tab if current tab becomes empty
-  useEffect(() => {
-    if (activeTab === "exact" && !hasExactMatches) {
-      setActiveTab("all");
-    }
-  }, [activeTab, hasExactMatches]);
 
   // Register undo complete callback to scroll back to restored item
   useEffect(() => {
     setOnUndoComplete((visitId: string) => {
       // Wait a bit for the query to refetch and the item to appear in the list
       setTimeout(() => {
-        // Try to find the item in the current list and scroll to it
-        if (activeTab === "all") {
-          const index = filteredReviewableVisits.findIndex((v) => v.id === visitId);
-          if (index !== -1) {
-            regularListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 });
-          }
-        } else if (activeTab === "exact") {
-          const index = exactMatches.findIndex((m) => m.visitId === visitId);
-          if (index !== -1) {
-            exactMatchListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 });
-          }
+        const index = mergedReviewItems.findIndex((item) => item.visitId === visitId);
+        if (index !== -1) {
+          reviewListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.3 });
         }
       }, 300); // Small delay for data to refetch
     });
 
     return () => setOnUndoComplete(null);
-  }, [setOnUndoComplete, activeTab, filteredReviewableVisits, exactMatches]);
+  }, [setOnUndoComplete, mergedReviewItems]);
 
   // Handlers
   const onRefresh = useCallback(async () => {
@@ -267,9 +251,6 @@ export default function ReviewScreen() {
                 type: "success",
                 message: `Confirmed ${exactMatches.length.toLocaleString()} visit${exactMatches.length === 1 ? "" : "s"}.`,
               });
-              if (exactMatches.length === exactMatches.length) {
-                setActiveTab("all");
-              }
             } catch (error) {
               console.error("Error confirming visits:", error);
               showToast({ type: "error", message: "Failed to confirm visits. Please try again." });
@@ -283,35 +264,61 @@ export default function ReviewScreen() {
   }, [exactMatches, batchConfirmMutation, showToast]);
 
   // Render functions
-  const renderRegularItem = useCallback(
-    ({ item, index }: { item: PendingVisitForReview; index: number }) => (
-      <AnimatedListItem itemKey={item.id}>
-        <ReviewModeCard visit={item} enableAppleMapsVerification={index < 8} />
-      </AnimatedListItem>
-    ),
-    [],
-  );
+  const renderReviewItem = useCallback(({ item }: { item: ReviewListItem; index: number }) => {
+    if (item.type === "exact") {
+      return (
+        <AnimatedListItem itemKey={item.match.visitId}>
+          <ReviewModeCard
+            visit={item.match.visit}
+            match={item.match}
+            enableAppleMapsVerification={item.exactIndex < 3}
+          />
+        </AnimatedListItem>
+      );
+    }
 
-  const renderExactMatchItem = useCallback(
-    ({ item, index }: { item: ExactCalendarMatch; index: number }) => (
-      <AnimatedListItem itemKey={item.visitId}>
-        <ReviewModeCard visit={item.visit} match={item} enableAppleMapsVerification={index < 3} />
+    return (
+      <AnimatedListItem itemKey={item.visit.id}>
+        <ReviewModeCard visit={item.visit} enableAppleMapsVerification={item.manualIndex < 8} />
       </AnimatedListItem>
-    ),
-    [],
-  );
+    );
+  }, []);
 
   // List headers
-  const RegularListHeader = useCallback(
+  const ReviewListHeader = useCallback(
     () => (
-      <View className={"gap-1"}>
-        <ThemedText variant={"largeTitle"} className={"font-bold p-0 m-0"}>
-          Review Visits
-        </ThemedText>
-        <ThemedText variant={"footnote"} color={"secondary"}>
-          {filteredReviewableVisits.length.toLocaleString()}{" "}
-          {filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"} manual review
-        </ThemedText>
+      <View className={"gap-3"}>
+        <View className={"gap-1"}>
+          <ThemedText variant={"largeTitle"} className={"font-bold p-0 m-0"}>
+            Review Visits
+          </ThemedText>
+          <ThemedText variant={"footnote"} color={"secondary"}>
+            {hasExactMatches
+              ? `${exactMatches.length.toLocaleString()} exact match${exactMatches.length === 1 ? "" : "es"} shown first${
+                  filteredReviewableVisits.length > 0
+                    ? `, ${filteredReviewableVisits.length.toLocaleString()} ${filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"} manual review`
+                    : ""
+                }`
+              : `${filteredReviewableVisits.length.toLocaleString()} ${
+                  filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"
+                } manual review`}
+          </ThemedText>
+        </View>
+
+        {exactMatches.length > 1 && (
+          <Button
+            variant={"success"}
+            onPress={handleApproveAllExactMatches}
+            loading={isApproving}
+            disabled={isApproving}
+            className={"w-full"}
+          >
+            <IconSymbol name={"checkmark.circle.fill"} size={18} color={"#fff"} />
+            <ButtonText variant={"success"} className={"ml-2"}>
+              Approve All Exact Matches ({exactMatches.length.toLocaleString()})
+            </ButtonText>
+          </Button>
+        )}
 
         {/* Filters */}
         {reviewableVisits.length > 0 && (
@@ -340,13 +347,6 @@ export default function ReviewScreen() {
                     value={foodFilter === "on"}
                     onToggle={() => setFoodFilter(foodFilter === "on" ? "off" : "on")}
                   />
-                  {(isLoading || hasAnyCalendarMatches) && (
-                    <ToggleChip
-                      label={"Calendar Match"}
-                      value={calendarMatchesFilter === "on"}
-                      onToggle={() => setCalendarMatchesFilter(calendarMatchesFilter === "on" ? "off" : "on")}
-                    />
-                  )}
                   <ToggleChip
                     label={"Restaurant Match"}
                     value={restaurantMatchesFilter === "on"}
@@ -361,48 +361,19 @@ export default function ReviewScreen() {
     ),
     [
       filteredReviewableVisits.length,
+      hasExactMatches,
+      exactMatches.length,
+      handleApproveAllExactMatches,
+      isApproving,
       reviewableVisits.length,
-      isLoading,
       filtersCollapsed,
       setFiltersCollapsed,
       foodFilter,
       setFoodFilter,
-      hasAnyCalendarMatches,
-      calendarMatchesFilter,
-      setCalendarMatchesFilter,
       restaurantMatchesFilter,
       setRestaurantMatchesFilter,
       ToggleChip,
     ],
-  );
-
-  const ExactMatchListHeader = useCallback(
-    () => (
-      <View className={"gap-4"}>
-        <View className={"gap-2"}>
-          <ThemedText variant={"largeTitle"} className={"font-bold"}>
-            Exact Matches
-          </ThemedText>
-          <ThemedText variant={"body"} color={"secondary"}>
-            {exactMatches.length.toLocaleString()} calendar event{exactMatches.length === 1 ? "" : "s"} match restaurant
-            names
-          </ThemedText>
-        </View>
-        <Button
-          variant={"success"}
-          onPress={handleApproveAllExactMatches}
-          loading={isApproving}
-          disabled={isApproving}
-          className={"w-full"}
-        >
-          <IconSymbol name={"checkmark.circle.fill"} size={18} color={"#fff"} />
-          <ButtonText variant={"success"} className={"ml-2"}>
-            Approve All ({exactMatches.length.toLocaleString()})
-          </ButtonText>
-        </Button>
-      </View>
-    ),
-    [exactMatches.length, handleApproveAllExactMatches, isApproving],
   );
 
   const listContentStyle = useMemo(
@@ -422,80 +393,38 @@ export default function ReviewScreen() {
   return (
     <ScreenLayout scrollable={false} className={"p-0"} style={{ paddingTop: 0, paddingBottom: 0 }}>
       <View style={{ flex: 1, paddingTop: insets.top }}>
-        {/* Tab Bar */}
-        {hasTabs && (
-          <View className={"px-4 pt-4 pb-2"}>
-            <View className={"flex-row gap-1 bg-secondary/60 border border-border p-1 rounded-2xl"}>
-              <TabButton
-                label={"All"}
-                count={filteredReviewableVisits.length}
-                isSelected={activeTab === "all"}
-                onPress={() => setActiveTab("all")}
-              />
-              {hasExactMatches && (
-                <TabButton
-                  label={"Exact"}
-                  count={exactMatches.length}
-                  isSelected={activeTab === "exact"}
-                  onPress={() => setActiveTab("exact")}
-                />
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* Tab Content */}
-        {activeTab === "all" && (
-          <FlashList
-            ref={regularListRef}
-            data={filteredReviewableVisits}
-            renderItem={renderRegularItem}
-            keyExtractor={(item) => item.id}
-            refreshControl={refreshControl}
-            refreshing={refreshing}
-            contentContainerStyle={listContentStyle}
-            ListHeaderComponent={RegularListHeader}
-            ListHeaderComponentStyle={{ marginTop: 0, paddingTop: 0, marginBottom: 12 }}
-            ListEmptyComponent={
-              isLoading ? (
-                <LoadingState />
-              ) : isAllCaughtUp ? (
-                <ReviewCaughtUpCard />
-              ) : reviewableVisits.length === 0 && hasExactMatches ? (
-                <NoManualReviewLeftCard onGoToExact={() => setActiveTab("exact")} />
-              ) : (
-                <View className={"gap-3"}>
-                  <ThemedText variant={"title3"} className={"font-semibold"}>
-                    No visits match these filters
-                  </ThemedText>
+        <FlashList
+          ref={reviewListRef}
+          data={mergedReviewItems}
+          renderItem={renderReviewItem}
+          keyExtractor={(item) => item.key}
+          refreshControl={refreshControl}
+          refreshing={refreshing}
+          contentContainerStyle={listContentStyle}
+          ListHeaderComponent={ReviewListHeader}
+          ListHeaderComponentStyle={{ marginTop: 0, paddingTop: 0, marginBottom: 12 }}
+          ListEmptyComponent={
+            isLoading ? (
+              <LoadingState />
+            ) : isAllCaughtUp ? (
+              <ReviewCaughtUpCard />
+            ) : (
+              <View className={"gap-3"}>
+                <ThemedText variant={"title3"} className={"font-semibold"}>
+                  No visits match these filters
+                </ThemedText>
+                <ThemedText variant={"body"} color={"secondary"}>
+                  Try changing the filters above.
+                </ThemedText>
+                {foodFilter === "on" && (
                   <ThemedText variant={"body"} color={"secondary"}>
-                    Try changing the filters above.
+                    Pro tip - if you're not seeing any results with food, try deep scanning in settings.
                   </ThemedText>
-                  {foodFilter === "on" && (
-                    <ThemedText variant={"body"} color={"secondary"}>
-                      Pro tip - if you're not seeing any results with food, try deep scanning in settings.
-                    </ThemedText>
-                  )}
-                </View>
-              )
-            }
-          />
-        )}
-
-        {activeTab === "exact" && hasExactMatches && (
-          <FlashList
-            ref={exactMatchListRef}
-            data={exactMatches}
-            renderItem={renderExactMatchItem}
-            keyExtractor={(item) => item.visitId}
-            refreshing={refreshing}
-            refreshControl={refreshControl}
-            contentContainerStyle={listContentStyle}
-            ListHeaderComponent={ExactMatchListHeader}
-            ListHeaderComponentStyle={{ marginBottom: 24 }}
-            ListEmptyComponent={isLoading ? <LoadingState /> : <AllCaughtUpEmpty />}
-          />
-        )}
+                )}
+              </View>
+            )
+          }
+        />
       </View>
     </ScreenLayout>
   );
