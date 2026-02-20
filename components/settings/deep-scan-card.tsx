@@ -7,6 +7,7 @@ import { IconSymbol } from "@/components/icon-symbol";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
 import { useDeepScan, useUnanalyzedPhotoCount, type DeepScanProgress } from "@/hooks/queries";
+import { formatEta } from "@/services/scanner";
 
 function CardIcon({ name, color, bgColor }: { name: SymbolViewProps["name"]; color: string; bgColor: string }) {
   return (
@@ -99,6 +100,9 @@ export function DeepScanCard() {
                 </ThemedText>
               )}
             </View>
+            <ThemedText variant={"caption1"} color={"tertiary"}>
+              ETA {formatEta(progress.etaMs)}
+            </ThemedText>
           </View>
         )}
 
