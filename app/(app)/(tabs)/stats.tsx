@@ -829,30 +829,29 @@ function DiningMapSection({
   points: WrappedStats["mapPoints"];
   selectedYear: number | null;
 }) {
-  const topPoints = useMemo(() => points.slice(0, 24), [points]);
-  const cameraPosition = useMemo(() => getMapCameraPosition(topPoints), [topPoints]);
+  const cameraPosition = useMemo(() => getMapCameraPosition(points), [points]);
 
   const appleMarkers = useMemo<AppleMaps.Marker[]>(
     () =>
-      topPoints.map((point) => ({
+      points.map((point) => ({
         id: point.id,
         coordinates: { latitude: point.latitude, longitude: point.longitude },
         title: point.name,
         tintColor: point.visits > 2 ? "#34d399" : "#f59e0b",
         systemImage: point.visits > 2 ? "fork.knife.circle.fill" : "fork.knife",
       })),
-    [topPoints],
+    [points],
   );
 
   const googleMarkers = useMemo<GoogleMaps.Marker[]>(
     () =>
-      topPoints.map((point) => ({
+      points.map((point) => ({
         id: point.id,
         coordinates: { latitude: point.latitude, longitude: point.longitude },
         title: point.name,
         snippet: `${point.visits.toLocaleString()} ${point.visits === 1 ? "visit" : "visits"}`,
       })),
-    [topPoints],
+    [points],
   );
 
   if (points.length === 0) {
@@ -874,7 +873,7 @@ function DiningMapSection({
           </View>
           <View className={"rounded-full px-2.5 py-1 bg-emerald-500/15 border border-emerald-500/25"}>
             <ThemedText variant={"caption2"} className={"text-emerald-300 font-semibold"}>
-              {topPoints.length} pins
+              {points.length} pins
             </ThemedText>
           </View>
         </View>

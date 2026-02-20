@@ -254,8 +254,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
         AND r.longitude IS NOT NULL
         ${yearFilterForV}
       GROUP BY r.id
-      ORDER BY visits DESC, r.name ASC
-      LIMIT 50`,
+      ORDER BY visits DESC, r.name ASC`,
     ),
     // Green star visits count
     database.getFirstAsync<{ count: number }>(
