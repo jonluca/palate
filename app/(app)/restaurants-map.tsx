@@ -1,7 +1,9 @@
+import { MichelinRestaurantCard } from "@/components/restaurants/michelin-restaurant-card";
 import { ThemedText } from "@/components/themed-text";
 import { FilterPills } from "@/components/ui";
 import { useConfirmedRestaurants, useMichelinRestaurants } from "@/hooks/queries";
 import type { MichelinRestaurantRecord } from "@/utils/db";
+import { FlashList } from "@shopify/flash-list";
 import { AppleMaps, GoogleMaps, type CameraPosition } from "expo-maps";
 import { Stack, router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -24,6 +26,7 @@ interface CameraSnapshot {
 
 type VisitStatusFilter = "visited" | "unvisited" | "all";
 type QuickAwardFilter = "all" | "1star" | "2star" | "3star" | "bib" | "selected" | "green";
+type ViewMode = "map" | "list";
 
 interface ViewportBounds {
   minLatitude: number;
@@ -239,6 +242,8 @@ export default function RestaurantsMapScreen() {
   const insets = useSafeAreaInsets();
   const { data: michelinRestaurants = [], isLoading: michelinLoading } = useMichelinRestaurants();
   const { data: confirmedRestaurants = [] } = useConfirmedRestaurants();
+  const [viewMode, setViewMode] = useState<ViewMode>("map");
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [visitStatusFilter, setVisitStatusFilter] = useState<VisitStatusFilter>("visited");
   const [quickAwardFilter, setQuickAwardFilter] = useState<QuickAwardFilter>("all");
   const [camera, setCamera] = useState<CameraSnapshot>({
@@ -269,6 +274,13 @@ export default function RestaurantsMapScreen() {
       { value: "visited" as const, label: "Visited" },
       { value: "unvisited" as const, label: "Not Visited" },
       { value: "all" as const, label: "All" },
+    ];
+  }, []);
+
+  const viewModeOptions = useMemo(() => {
+    return [
+      { value: "map" as const, label: "Map" },
+      { value: "list" as const, label: "List" },
     ];
   }, []);
 
@@ -394,13 +406,20 @@ export default function RestaurantsMapScreen() {
     [camera, flushCameraUpdate],
   );
 
-  const handleMarkerPress = useCallback((event: { id?: string }) => {
-    if (!event.id) {
-      return;
-    }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/restaurant/${event.id}`);
+  const openRestaurant = useCallback((restaurantId: string) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/restaurant/${restaurantId}`);
   }, []);
+
+  const handleMarkerPress = useCallback(
+    (event: { id?: string }) => {
+      if (!event.id) {
+        return;
+      }
+      openRestaurant(event.id);
+    },
+    [openRestaurant],
+  );
 
   const appleMarkers = useMemo<AppleMaps.Marker[]>(() => {
     return restaurantsInView.map((restaurant) => ({
@@ -458,9 +477,24 @@ export default function RestaurantsMapScreen() {
 
   const isUnsupportedPlatform = Platform.OS !== "ios" && Platform.OS !== "android";
   const isMapLoading = michelinLoading;
+  const handleToggleFilters = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setFiltersExpanded((previous) => !previous);
+  }, []);
+
+  const handleViewModeChange = useCallback((value: ViewMode) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setViewMode(value);
+  }, []);
+
+  const renderInViewRestaurant = useCallback(({ item, index }: { item: MapRestaurantPoint; index: number }) => {
+    return <MichelinRestaurantCard restaurant={item} visited={item.visited} index={index < 8 ? index : undefined} />;
+  }, []);
+
+  const inViewSeparator = useCallback(() => <View style={{ height: 12 }} />, []);
 
   return (
-    <View className={"flex-1 bg-background"} onLayout={handleMapLayout}>
+    <View className={"flex-1 bg-background"}>
       <Stack.Screen
         options={{
           title: "Michelin Map",
@@ -469,121 +503,124 @@ export default function RestaurantsMapScreen() {
         }}
       />
 
-      {isUnsupportedPlatform ? (
-        <View className={"flex-1 items-center justify-center px-6"}>
-          <ThemedText variant={"title3"} className={"font-semibold text-center"}>
-            Map is unavailable on this platform
-          </ThemedText>
-          <ThemedText variant={"footnote"} color={"tertiary"} className={"text-center mt-2"}>
-            Open this screen on iOS or Android to browse Michelin restaurants on the map.
-          </ThemedText>
-        </View>
-      ) : Platform.OS === "ios" ? (
-        <AppleMaps.View
-          style={{ flex: 1 }}
-          cameraPosition={DEFAULT_CAMERA}
-          markers={appleMarkers}
-          circles={appleCircles}
-          uiSettings={{
-            compassEnabled: true,
-            myLocationButtonEnabled: false,
-            scaleBarEnabled: true,
-          }}
-          properties={{
-            selectionEnabled: false,
-          }}
-          onCameraMove={handleCameraMove}
-          onMarkerClick={handleMarkerPress}
-        />
-      ) : (
-        <GoogleMaps.View
-          style={{ flex: 1 }}
-          cameraPosition={DEFAULT_CAMERA}
-          markers={googleMarkers}
-          circles={googleCircles}
-          uiSettings={{
-            compassEnabled: true,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-            mapToolbarEnabled: false,
-          }}
-          properties={{
-            selectionEnabled: false,
-          }}
-          onCameraMove={handleCameraMove}
-          onMarkerClick={handleMarkerPress}
-        />
-      )}
-
-      <View
-        pointerEvents={"box-none"}
-        style={{
-          position: "absolute",
-          top: 12,
-          left: 12,
-          right: 12,
-        }}
-      >
+      <View className={"flex-1 px-3 pt-3 gap-3"} style={{ paddingBottom: insets.bottom + 12 }}>
         <View
           className={"rounded-2xl border border-border bg-background/90 overflow-hidden"}
           style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.28)" }}
         >
-          <View className={"px-4 pt-3 pb-2 gap-2"}>
+          <View className={"px-3 py-2 gap-2"}>
             <View className={"flex-row items-center justify-between gap-3"}>
               <View className={"flex-1"}>
-                <ThemedText variant={"subhead"} className={"font-semibold"}>
-                  Top {MAX_RESTAURANTS_IN_VIEW.toLocaleString()} in view
-                </ThemedText>
-                <ThemedText variant={"caption1"} color={"tertiary"}>
-                  {totalInView.toLocaleString()} matching restaurants in viewport
+                <ThemedText variant={"footnote"} className={"font-semibold"} numberOfLines={1}>
+                  {totalInView > restaurantsInView.length
+                    ? `Showing ${restaurantsInView.length.toLocaleString()} of ${totalInView.toLocaleString()} restaurants on the map`
+                    : `${restaurantsInView.length.toLocaleString()} restaurants on the map`}
                 </ThemedText>
               </View>
-              {isMapLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
+              <View className={"flex-row items-center gap-2"}>
+                {isMapLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
+                <Pressable
+                  onPress={handleToggleFilters}
+                  className={"h-8 px-2.5 rounded-full border border-border bg-secondary/70 items-center justify-center"}
+                >
+                  <ThemedText variant={"caption1"} className={"font-semibold"}>
+                    {filtersExpanded ? "Hide" : "Filters"}
+                  </ThemedText>
+                </Pressable>
+              </View>
             </View>
+
+            <FilterPills options={viewModeOptions} value={viewMode} onChange={handleViewModeChange} />
           </View>
 
-          <View className={"gap-2 pb-3 px-3"}>
-            <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
-              Visited
-            </ThemedText>
-            <FilterPills options={visitFilterOptions} value={visitStatusFilter} onChange={setVisitStatusFilter} />
+          {filtersExpanded ? (
+            <View className={"gap-2 pb-3 px-3 border-t border-border pt-2.5"}>
+              <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
+                Visited
+              </ThemedText>
+              <FilterPills options={visitFilterOptions} value={visitStatusFilter} onChange={setVisitStatusFilter} />
 
-            <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
-              Quick Award Filter
-            </ThemedText>
-            <FilterPills options={quickAwardFilterOptions} value={quickAwardFilter} onChange={setQuickAwardFilter} />
-          </View>
+              <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
+                Awards
+              </ThemedText>
+              <FilterPills options={quickAwardFilterOptions} value={quickAwardFilter} onChange={setQuickAwardFilter} />
+            </View>
+          ) : null}
         </View>
-      </View>
 
-      <View
-        pointerEvents={"box-none"}
-        style={{
-          position: "absolute",
-          left: 12,
-          right: 12,
-          bottom: insets.bottom + 12,
-        }}
-      >
         <View
-          className={
-            "rounded-2xl border border-border bg-background/90 px-4 py-3 flex-row items-center justify-between gap-3"
-          }
-          style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.28)" }}
+          className={"flex-1 rounded-2xl border border-border bg-background/90 overflow-hidden"}
+          style={{
+            boxShadow: "0 8px 24px rgba(0,0,0,0.28)",
+          }}
         >
-          <View className={"flex-1"}>
-            <ThemedText variant={"footnote"} color={"tertiary"}>
-              Tap a pin to open the restaurant page
-            </ThemedText>
-          </View>
-          <Pressable
-            onPress={() => router.back()}
-            className={"h-9 px-3 rounded-full border border-border bg-secondary/70 items-center justify-center"}
-          >
-            <ThemedText variant={"footnote"} className={"font-semibold"}>
-              Close
-            </ThemedText>
-          </Pressable>
+          {viewMode === "list" ? (
+            <FlashList
+              data={restaurantsInView}
+              renderItem={renderInViewRestaurant}
+              keyExtractor={(item) => item.id}
+              ItemSeparatorComponent={inViewSeparator}
+              contentContainerStyle={{
+                padding: 12,
+                paddingBottom: 20,
+              }}
+              ListEmptyComponent={
+                <View className={"flex-1 items-center justify-center px-6 py-10"}>
+                  <ThemedText variant={"footnote"} color={"tertiary"} className={"text-center"}>
+                    Move the map or change filters to see restaurants here.
+                  </ThemedText>
+                </View>
+              }
+            />
+          ) : (
+            <View className={"flex-1"} onLayout={handleMapLayout}>
+              {isUnsupportedPlatform ? (
+                <View className={"flex-1 items-center justify-center px-6"}>
+                  <ThemedText variant={"title3"} className={"font-semibold text-center"}>
+                    Map is unavailable on this platform
+                  </ThemedText>
+                  <ThemedText variant={"footnote"} color={"tertiary"} className={"text-center mt-2"}>
+                    Switch to List to browse restaurants.
+                  </ThemedText>
+                </View>
+              ) : Platform.OS === "ios" ? (
+                <AppleMaps.View
+                  style={{ flex: 1 }}
+                  cameraPosition={DEFAULT_CAMERA}
+                  markers={appleMarkers}
+                  circles={appleCircles}
+                  uiSettings={{
+                    compassEnabled: true,
+                    myLocationButtonEnabled: false,
+                    scaleBarEnabled: true,
+                  }}
+                  properties={{
+                    selectionEnabled: false,
+                  }}
+                  onCameraMove={handleCameraMove}
+                  onMarkerClick={handleMarkerPress}
+                />
+              ) : (
+                <GoogleMaps.View
+                  style={{ flex: 1 }}
+                  cameraPosition={DEFAULT_CAMERA}
+                  markers={googleMarkers}
+                  circles={googleCircles}
+                  uiSettings={{
+                    compassEnabled: true,
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: false,
+                    mapToolbarEnabled: false,
+                  }}
+                  properties={{
+                    selectionEnabled: false,
+                  }}
+                  onCameraMove={handleCameraMove}
+                  onMarkerClick={handleMarkerPress}
+                />
+              )}
+            </View>
+          )}
         </View>
       </View>
     </View>

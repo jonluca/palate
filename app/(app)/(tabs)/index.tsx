@@ -2,6 +2,7 @@ import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { Card, SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills } from "@/components/ui";
 import { HomeHeader, NewPhotosCard } from "@/components/home";
+import { MichelinRestaurantCard } from "@/components/restaurants/michelin-restaurant-card";
 import { useConfirmedRestaurants, useMichelinRestaurants, type RestaurantWithVisits } from "@/hooks/queries";
 import type { MichelinRestaurantRecord } from "@/utils/db";
 import { FlashList } from "@shopify/flash-list";
@@ -162,60 +163,6 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
                     </ThemedText>
                   </View>
                 ) : null}
-                <View className={"w-7 h-7 rounded-full bg-secondary/70 items-center justify-center"}>
-                  <IconSymbol name={"chevron.right"} size={12} color={"#8E8E93"} weight={"semibold"} />
-                </View>
-              </View>
-            </View>
-          </View>
-        </Card>
-      </Pressable>
-    </Animated.View>
-  );
-}
-
-function MichelinRestaurantCard({ restaurant, index }: { restaurant: MichelinRestaurantRecord; index: number }) {
-  const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(`/restaurant/${restaurant.id}`);
-  };
-
-  const awardDisplay = formatAward(restaurant.award);
-
-  return (
-    <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>
-      <Pressable onPress={handlePress} className={"rounded-2xl"}>
-        <Card animated={false}>
-          <View className={"p-4 gap-2"}>
-            <View className={"flex-row items-start justify-between"}>
-              <View className={"flex-1 gap-1"}>
-                <View className={"flex-row items-center gap-2"}>
-                  <ThemedText variant={"heading"} className={"font-semibold flex-shrink"} numberOfLines={1}>
-                    {restaurant.name}
-                  </ThemedText>
-                  {awardDisplay && (
-                    <ThemedText variant={"subhead"} className={"text-amber-300"}>
-                      {awardDisplay}
-                    </ThemedText>
-                  )}
-                </View>
-                <View className={"flex-row items-center gap-2 flex-wrap"}>
-                  {restaurant.cuisine ? (
-                    <ThemedText variant={"footnote"} color={"tertiary"}>
-                      {restaurant.cuisine}
-                    </ThemedText>
-                  ) : null}
-                </View>
-                {restaurant.location ? (
-                  <ThemedText variant={"footnote"} color={"tertiary"} numberOfLines={1}>
-                    {restaurant.location}
-                  </ThemedText>
-                ) : null}
-              </View>
-              <View className={"flex-row items-center gap-2 ml-3"}>
-                <ThemedText variant={"caption1"} color={"tertiary"}>
-                  Not visited
-                </ThemedText>
                 <View className={"w-7 h-7 rounded-full bg-secondary/70 items-center justify-center"}>
                   <IconSymbol name={"chevron.right"} size={12} color={"#8E8E93"} weight={"semibold"} />
                 </View>
