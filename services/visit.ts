@@ -1513,8 +1513,8 @@ export async function processPhotos(
       const matchedEvents = p.visitsWithEvents.toLocaleString();
 
       const detail =
-        p.processedVisits === 0 || !matchedEvents
-          ? `Matching calendar events for ${totalVisits} visits`
+        p.processedVisits === 0 || p.visitsWithEvents === 0
+          ? `Matching calendar events for visits`
           : `Matched ${matchedEvents} events of ${totalVisits} visits`;
 
       scanProgress?.({
