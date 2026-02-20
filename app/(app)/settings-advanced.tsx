@@ -1,6 +1,6 @@
 import React, { useCallback } from "react";
-import { Alert, View } from "react-native";
-import { Stack } from "expo-router";
+import { Alert, Pressable, View } from "react-native";
+import { router, Stack } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { ThemedText } from "@/components/themed-text";
 import { Card } from "@/components/ui";
@@ -65,6 +65,33 @@ function AdvancedIntroCard() {
   );
 }
 
+function RescanPhotosCard() {
+  return (
+    <Pressable onPress={() => router.push("/rescan")}>
+      <Card animated={false}>
+        <View className={"p-4 gap-3"}>
+          <View className={"flex-row items-center justify-between gap-3"}>
+            <View className={"flex-row items-center gap-3 flex-1"}>
+              <View className={"w-10 h-10 rounded-full items-center justify-center bg-blue-500/15"}>
+                <IconSymbol name={"arrow.triangle.2.circlepath"} size={20} color={"#3b82f6"} />
+              </View>
+              <View className={"flex-1"}>
+                <ThemedText variant={"subhead"} className={"font-medium"}>
+                  Rescan Photos
+                </ThemedText>
+                <ThemedText variant={"footnote"} color={"secondary"}>
+                  Run a quick rescan or deep scan to find new restaurant photos
+                </ThemedText>
+              </View>
+            </View>
+            <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
+          </View>
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
+
 export default function AdvancedSettingsScreen() {
   const { showToast } = useToast();
   const { data: stats } = useStats();
@@ -109,6 +136,11 @@ export default function AdvancedSettingsScreen() {
         <View className={"gap-3"}>
           <UndoBarCard />
           <FastAnimationsCard />
+        </View>
+
+        <SectionHeader>Scanning</SectionHeader>
+        <View className={"gap-3"}>
+          <RescanPhotosCard />
         </View>
 
         <SectionHeader>Matching</SectionHeader>

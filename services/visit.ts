@@ -22,7 +22,6 @@ import {
   getDismissedCalendarEventIds,
   insertCalendarOnlyVisits,
   performDatabaseMaintenance,
-  getDatabase,
   getConfirmedVisitsWithMichelinIds,
   getEnabledFoodKeywords,
   type PhotoRecord,
@@ -169,7 +168,6 @@ interface AnalyzingVisitsOptions {
 const DEFAULT_TIME_GAP_MS = 3 * 60 * 60 * 1000; // 3 hours
 const DEFAULT_DISTANCE_THRESHOLD = 100; // 200 meters
 const DEFAULT_RESTAURANT_MATCH_THRESHOLD = 250; // within 250 meters of the visit centroid1
-
 /**
  * Initialize Michelin restaurant reference data in the database
  * This is separate from user's confirmed restaurants
@@ -178,25 +176,6 @@ export async function initializeMichelinData(
   onProgress?: (message: string) => void,
 ): Promise<{ loaded: number; skipped: boolean }> {
   const existingCount = await getMichelinRestaurantCount();
-  const database = await getDatabase();
-
-  let hasBackfilledLatestAwardYear = false;
-  if (existingCount > 100) {
-    try {
-      const populatedLatestAwardYears = await database.getFirstAsync<{ count: number }>(
-        `SELECT COUNT(*) as count FROM michelin_restaurants WHERE latestAwardYear IS NOT NULL`,
-      );
-      hasBackfilledLatestAwardYear = (populatedLatestAwardYears?.count ?? 0) > 100;
-    } catch {
-      // If the column isn't available yet for any reason, force a refresh after schema init.
-      hasBackfilledLatestAwardYear = false;
-    }
-  }
-
-  // Skip if we already have Michelin data loaded
-  if (existingCount > 100 && hasBackfilledLatestAwardYear) {
-    return { loaded: existingCount, skipped: true };
-  }
 
   onProgress?.(
     existingCount > 100

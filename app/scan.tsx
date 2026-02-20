@@ -1,10 +1,15 @@
 import React, { useCallback } from "react";
 import { View } from "react-native";
-import { router } from "expo-router";
+import { Redirect, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { useScan } from "@/hooks";
-import { useHasCompletedOnboarding, useSetHasCompletedInitialScan, useSetHasCompletedOnboarding } from "@/store";
+import {
+  useHasCompletedInitialScan,
+  useHasCompletedOnboarding,
+  useSetHasCompletedInitialScan,
+  useSetHasCompletedOnboarding,
+} from "@/store";
 import { OnboardingFlow } from "@/components/onboarding";
 import { ScanHeader, PermissionCard, ScanCard } from "@/components/scan";
 import { Button, ButtonText } from "@/components/ui";
@@ -15,6 +20,7 @@ import { Button, ButtonText } from "@/components/ui";
  */
 export default function ScanScreen() {
   const insets = useSafeAreaInsets();
+  const hasCompletedInitialScan = useHasCompletedInitialScan();
   const setHasCompletedInitialScan = useSetHasCompletedInitialScan();
   const setHasCompletedOnboarding = useSetHasCompletedOnboarding();
   const hasCompletedOnboarding = useHasCompletedOnboarding();
@@ -43,6 +49,10 @@ export default function ScanScreen() {
   // Show onboarding flow if not completed
   if (!hasCompletedOnboarding) {
     return <OnboardingFlow onComplete={handleOnboardingComplete} />;
+  }
+
+  if (hasCompletedInitialScan && !isComplete && !isScanning && !isDeepScanning) {
+    return <Redirect href={"/rescan"} />;
   }
 
   return (
