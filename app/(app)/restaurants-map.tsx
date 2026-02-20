@@ -21,7 +21,8 @@ interface CameraSnapshot {
   zoom: number;
 }
 
-type AwardFilterValue = string;
+type VisitStatusFilter = "visited" | "unvisited" | "all";
+type QuickAwardFilter = "all" | "1star" | "2star" | "3star" | "bib" | "selected" | "green";
 
 interface ViewportBounds {
   minLatitude: number;
@@ -142,32 +143,49 @@ function getCenterDistanceScore(restaurant: MichelinRestaurantRecord, camera: Ca
   return deltaX * deltaX + deltaY * deltaY;
 }
 
-function normalizeAwardValue(award: string | null | undefined) {
-  return (award ?? "").trim();
-}
-
-function awardIncludesStars(award: string) {
-  return /\b(?:1\s*star|2\s*stars?|3\s*stars?)\b/i.test(award);
-}
-
 function awardIncludesBib(award: string) {
   return award.toLowerCase().includes("bib gourmand");
 }
 
-function awardMatchesFilter(award: string, filter: AwardFilterValue) {
+function awardIncludesGreenStar(award: string) {
+  return award.toLowerCase().includes("green star");
+}
+
+function getAwardStarCount(award: string) {
+  const lower = award.toLowerCase();
+  if (lower.includes("3 stars") || lower.includes("3 star")) {
+    return 3;
+  }
+  if (lower.includes("2 stars") || lower.includes("2 star")) {
+    return 2;
+  }
+  if (lower.includes("1 star")) {
+    return 1;
+  }
+  return 0;
+}
+
+function awardMatchesQuickFilter(award: string, filter: QuickAwardFilter) {
   if (filter === "all") {
     return true;
   }
-  if (filter === "stars") {
-    return awardIncludesStars(award);
+
+  switch (filter) {
+    case "1star":
+      return getAwardStarCount(award) === 1;
+    case "2star":
+      return getAwardStarCount(award) === 2;
+    case "3star":
+      return getAwardStarCount(award) === 3;
+    case "bib":
+      return awardIncludesBib(award);
+    case "selected":
+      return award.toLowerCase().includes("selected");
+    case "green":
+      return awardIncludesGreenStar(award);
+    default:
+      return true;
   }
-  if (filter === "bib") {
-    return awardIncludesBib(award);
-  }
-  if (filter.startsWith("award:")) {
-    return normalizeAwardValue(award) === filter.slice("award:".length);
-  }
-  return true;
 }
 
 function getAwardPriority(award: string) {
@@ -193,10 +211,6 @@ function getAwardPriority(award: string) {
   return score;
 }
 
-function formatAwardFilterLabel(award: string) {
-  return award.replace("Selected Restaurants", "Selected").replace(", Green Star", " + Green");
-}
-
 function normalizeCameraEvent(
   event: { coordinates?: { latitude?: number; longitude?: number }; zoom?: number },
   fallback: CameraSnapshot,
@@ -216,7 +230,8 @@ export default function RestaurantsMapScreen() {
   const insets = useSafeAreaInsets();
   const { data: michelinRestaurants = [], isLoading: michelinLoading } = useMichelinRestaurants();
   const { data: confirmedRestaurants = [] } = useConfirmedRestaurants();
-  const [awardFilter, setAwardFilter] = useState<AwardFilterValue>("all");
+  const [visitStatusFilter, setVisitStatusFilter] = useState<VisitStatusFilter>("visited");
+  const [quickAwardFilter, setQuickAwardFilter] = useState<QuickAwardFilter>("all");
   const [camera, setCamera] = useState<CameraSnapshot>({
     latitude: DEFAULT_CAMERA.coordinates?.latitude ?? 20,
     longitude: DEFAULT_CAMERA.coordinates?.longitude ?? 0,
@@ -239,57 +254,50 @@ export default function RestaurantsMapScreen() {
     return new Set(confirmedRestaurants.map((restaurant) => restaurant.id));
   }, [confirmedRestaurants]);
 
-  const awardFilterOptions = useMemo(() => {
-    const awardCounts = new Map<string, number>();
-    let starredCount = 0;
-    let bibCount = 0;
-
-    for (const restaurant of michelinRestaurants) {
-      const award = normalizeAwardValue(restaurant.award);
-      if (!award) {
-        continue;
-      }
-      awardCounts.set(award, (awardCounts.get(award) ?? 0) + 1);
-
-      if (awardIncludesStars(award)) {
-        starredCount += 1;
-      }
-      if (awardIncludesBib(award)) {
-        bibCount += 1;
-      }
-    }
-
-    const exactAwardOptions = [...awardCounts.entries()]
-      .sort((a, b) => {
-        const priorityDiff = getAwardPriority(b[0]) - getAwardPriority(a[0]);
-        if (priorityDiff !== 0) {
-          return priorityDiff;
-        }
-        return a[0].localeCompare(b[0]);
-      })
-      .map(([award, count]) => ({
-        value: `award:${award}`,
-        label: formatAwardFilterLabel(award),
-        count,
-      }));
-
+  const visitFilterOptions = useMemo(() => {
     return [
-      { value: "all", label: "All", count: michelinRestaurants.length },
-      { value: "stars", label: "Stars", count: starredCount },
-      { value: "bib", label: "Bib Gourmand", count: bibCount },
-      ...exactAwardOptions,
+      { value: "visited" as const, label: "Visited" },
+      { value: "unvisited" as const, label: "Not Visited" },
+      { value: "all" as const, label: "All" },
     ];
-  }, [michelinRestaurants]);
+  }, []);
 
-  const awardFilteredRestaurants = useMemo(() => {
-    return michelinRestaurants.filter((restaurant) => awardMatchesFilter(restaurant.award, awardFilter));
-  }, [michelinRestaurants, awardFilter]);
+  const quickAwardFilterOptions = useMemo(() => {
+    return [
+      { value: "all" as const, label: "All Awards" },
+      { value: "1star" as const, label: "⭐" },
+      { value: "2star" as const, label: "⭐⭐" },
+      { value: "3star" as const, label: "⭐⭐⭐" },
+      { value: "bib" as const, label: "Bib" },
+      { value: "selected" as const, label: "Selected" },
+      { value: "green" as const, label: "Green" },
+    ];
+  }, []);
+
+  const filteredRestaurants = useMemo(() => {
+    return michelinRestaurants.filter((restaurant) => {
+      const isVisited = visitedRestaurantIds.has(restaurant.id);
+
+      if (visitStatusFilter === "visited" && !isVisited) {
+        return false;
+      }
+      if (visitStatusFilter === "unvisited" && isVisited) {
+        return false;
+      }
+
+      if (!awardMatchesQuickFilter(restaurant.award, quickAwardFilter)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [michelinRestaurants, quickAwardFilter, visitStatusFilter, visitedRestaurantIds]);
 
   const viewportBounds = useMemo(() => {
     return getViewportBounds(camera, mapSize.width, mapSize.height);
   }, [camera, mapSize.height, mapSize.width]);
 
-  const { restaurantsInView, totalInView, visibleVisitedCount } = useMemo(() => {
+  const { restaurantsInView, totalInView } = useMemo(() => {
     if (!viewportBounds) {
       return {
         restaurantsInView: [] as MapRestaurantPoint[],
@@ -299,7 +307,7 @@ export default function RestaurantsMapScreen() {
     }
 
     const candidates: Array<{ restaurant: MichelinRestaurantRecord; centerDistanceScore: number }> = [];
-    for (const restaurant of awardFilteredRestaurants) {
+    for (const restaurant of filteredRestaurants) {
       if (isRestaurantInBounds(restaurant, viewportBounds)) {
         candidates.push({
           restaurant,
@@ -319,7 +327,8 @@ export default function RestaurantsMapScreen() {
         return awardPriorityDiff;
       }
 
-      const visitedDiff = Number(visitedRestaurantIds.has(b.restaurant.id)) - Number(visitedRestaurantIds.has(a.restaurant.id));
+      const visitedDiff =
+        Number(visitedRestaurantIds.has(b.restaurant.id)) - Number(visitedRestaurantIds.has(a.restaurant.id));
       if (visitedDiff !== 0) {
         return visitedDiff;
       }
@@ -339,9 +348,7 @@ export default function RestaurantsMapScreen() {
       totalInView: candidates.length,
       visibleVisitedCount: visibleVisited,
     };
-  }, [awardFilteredRestaurants, camera, viewportBounds, visitedRestaurantIds]);
-
-  const visibleUnvisitedCount = restaurantsInView.length - visibleVisitedCount;
+  }, [camera, filteredRestaurants, viewportBounds, visitedRestaurantIds]);
 
   const handleMapLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -522,24 +529,19 @@ export default function RestaurantsMapScreen() {
               </View>
               {michelinLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
             </View>
-
-            <View className={"flex-row items-center gap-3"}>
-              <View className={"flex-row items-center gap-1.5"}>
-                <View className={"w-2.5 h-2.5 rounded-full bg-green-500"} />
-                <ThemedText variant={"caption1"} color={"secondary"}>
-                  Visited {visibleVisitedCount.toLocaleString()}
-                </ThemedText>
-              </View>
-              <View className={"flex-row items-center gap-1.5"}>
-                <View className={"w-2.5 h-2.5 rounded-full bg-amber-400"} />
-                <ThemedText variant={"caption1"} color={"secondary"}>
-                  Not visited {visibleUnvisitedCount.toLocaleString()}
-                </ThemedText>
-              </View>
-            </View>
           </View>
 
-          <FilterPills options={awardFilterOptions} value={awardFilter} onChange={setAwardFilter} />
+          <View className={"gap-2 pb-3 px-3"}>
+            <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
+              Visited
+            </ThemedText>
+            <FilterPills options={visitFilterOptions} value={visitStatusFilter} onChange={setVisitStatusFilter} />
+
+            <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
+              Quick Award Filter
+            </ThemedText>
+            <FilterPills options={quickAwardFilterOptions} value={quickAwardFilter} onChange={setQuickAwardFilter} />
+          </View>
         </View>
       </View>
 
