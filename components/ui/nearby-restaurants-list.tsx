@@ -110,12 +110,12 @@ export function NearbyRestaurantsList({
               key={`${restaurant.id}-${idx}`}
               onPress={() => handleSelect(restaurant)}
               className={cn(
-                "rounded-xl p-3 border-2",
+                "rounded-xl p-3",
                 isSelected
-                  ? "bg-green-500/10 border-green-500/40"
+                  ? "bg-green-500/10 border-green-500/40 border-1"
                   : isCompact && isMapKit
-                    ? "bg-blue-500/5 border-blue-500/15"
-                    : "bg-card/80 border-transparent",
+                    ? "bg-blue-500/5"
+                    : "bg-card/80",
               )}
             >
               <View className={"flex-row items-start justify-between"}>
@@ -163,7 +163,7 @@ export function NearbyRestaurantsList({
                         color={isCompact ? undefined : "tertiary"}
                         className={isCompact ? "text-blue-500" : undefined}
                       >
-                        {isCompact ? "Apple" : "Apple Maps"}
+                        Apple Maps
                       </ThemedText>
                     </View>
                   )}

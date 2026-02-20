@@ -1513,11 +1513,9 @@ export async function processPhotos(
       const matchedEvents = p.visitsWithEvents.toLocaleString();
 
       const detail =
-        p.processedVisits === 0
+        p.processedVisits === 0 || !matchedEvents
           ? `Matching calendar events for ${totalVisits} visits`
-          : p.processedVisits >= p.totalVisits
-            ? `Matched ${matchedEvents} events of ${totalVisits} visits`
-            : `Matched ${matchedEvents} events of ${totalVisits} visits`;
+          : `Matched ${matchedEvents} events of ${totalVisits} visits`;
 
       scanProgress?.({
         phase: "calendar-events",
