@@ -20,7 +20,7 @@ import {
   MergeDuplicatesSection,
   RecomputeSuggestionsCard,
   UndoBarCard,
-} from "./(tabs)/settings";
+} from "@/components/settings";
 
 function SectionHeader({ children }: { children: string }) {
   return (

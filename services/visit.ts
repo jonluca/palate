@@ -387,9 +387,7 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
     // OPTIMIZATION: Short-circuit evaluation - only compute distance if time check passes
     // This avoids expensive distance calculations for photos already separated by time
     if (timeDiff > timeGapThreshold || !arePhotosNearby(prevPhoto, currentPhoto, distanceThreshold)) {
-      if (currentGroup.length >= 2) {
-        photoGroups.push(currentGroup);
-      }
+      photoGroups.push(currentGroup);
       currentGroup = [currentPhoto];
     } else {
       currentGroup.push(currentPhoto);
@@ -401,9 +399,7 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
     }
   }
 
-  if (currentGroup.length >= 2) {
-    photoGroups.push(currentGroup);
-  }
+  photoGroups.push(currentGroup);
 
   if (photoGroups.length === 0) {
     progress.isComplete = true;

@@ -147,21 +147,25 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
                 </View>
               </View>
               <View className={"items-end gap-2 ml-3"}>
-                <View
-                  className={"px-2 py-1 rounded-full bg-secondary/80 border border-border flex-row items-center gap-1"}
-                >
-                  <ThemedText
-                    variant={"caption1"}
-                    color={"secondary"}
-                    className={"font-semibold"}
-                    style={{ fontVariant: ["tabular-nums"] }}
+                {restaurant.visitCount > 1 ? (
+                  <View
+                    className={
+                      "px-2 py-1 rounded-full bg-secondary/80 border border-border flex-row items-center gap-1"
+                    }
                   >
-                    {restaurant.visitCount.toLocaleString()}
-                  </ThemedText>
-                  <ThemedText variant={"caption2"} color={"tertiary"}>
-                    {restaurant.visitCount === 1 ? "visit" : "visits"}
-                  </ThemedText>
-                </View>
+                    <ThemedText
+                      variant={"caption1"}
+                      color={"secondary"}
+                      className={"font-semibold"}
+                      style={{ fontVariant: ["tabular-nums"] }}
+                    >
+                      {restaurant.visitCount.toLocaleString()}
+                    </ThemedText>
+                    <ThemedText variant={"caption2"} color={"tertiary"}>
+                      {"visits"}
+                    </ThemedText>
+                  </View>
+                ) : null}
                 <View className={"w-7 h-7 rounded-full bg-secondary/70 items-center justify-center"}>
                   <IconSymbol name={"chevron.right"} size={12} color={"#8E8E93"} weight={"semibold"} />
                 </View>

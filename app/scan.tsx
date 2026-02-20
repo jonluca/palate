@@ -8,7 +8,6 @@ import { useScan } from "@/hooks";
 import { useHasCompletedOnboarding, useSetHasCompletedInitialScan, useSetHasCompletedOnboarding } from "@/store";
 import { OnboardingFlow } from "@/components/onboarding";
 import { ScanHeader, PermissionCard, ScanCard } from "@/components/scan";
-import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText } from "@/components/ui";
 
 /**
@@ -52,9 +51,6 @@ export default function ScanScreen() {
       <LinearGradient colors={["#0B0D11", "#12171F"]} style={StyleSheet.absoluteFill} />
       <View className={"flex-1 px-6"}>
         <View className={"items-center gap-2 mt-6 mb-8"}>
-          <ThemedText variant={"caption1"} color={"tertiary"} className={"tracking-widest uppercase"}>
-            Setup
-          </ThemedText>
           <ScanHeader
             title={"Scan Your Photos"}
             description={"We'll scan your library for restaurant moments and organize them automatically."}

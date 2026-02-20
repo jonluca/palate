@@ -1,6 +1,7 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { AnimatedListItem } from "@/components/review";
+import { DeepScanCard } from "@/components/settings/deep-scan-card";
 import { SkeletonVisitCard, Button, ButtonText, Card, useUndo } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import {
@@ -205,6 +206,8 @@ export default function ReviewScreen() {
   // UI state
   const hasExactMatches = exactMatches.length > 0;
   const isAllCaughtUp = !isLoading && pendingVisits.length === 0;
+  const shouldShowDeepScanEmptyCard =
+    foodFilter === "on" && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable);
 
   // Register undo complete callback to scroll back to restored item
   useEffect(() => {
@@ -416,11 +419,7 @@ export default function ReviewScreen() {
                 <ThemedText variant={"body"} color={"secondary"}>
                   Try changing the filters above.
                 </ThemedText>
-                {foodFilter === "on" && (
-                  <ThemedText variant={"body"} color={"secondary"}>
-                    Pro tip - if you're not seeing any results with food, try deep scanning in settings.
-                  </ThemedText>
-                )}
+                {shouldShowDeepScanEmptyCard && <DeepScanCard />}
               </View>
             )
           }

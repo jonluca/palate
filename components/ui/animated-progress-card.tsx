@@ -15,7 +15,6 @@ import Animated, {
   type SharedValue,
 } from "react-native-reanimated";
 import { ThemedText } from "../themed-text";
-import { Card } from "./card";
 import { IconSymbol } from "../icon-symbol";
 import type { ProgressSharedValues } from "@/hooks/use-progress";
 
@@ -218,7 +217,7 @@ export function AnimatedProgressCard({ sharedValues }: AnimatedProgressCardProps
 
   return (
     <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)} layout={LinearTransition}>
-      <Card className={isComplete ? "bg-green-500/10 p-4" : "bg-muted/30 p-4"}>
+      <View className={isComplete ? "bg-green-500/10 p-4" : "border-none p-4"}>
         <View className={"gap-3"}>
           {/* Status Row */}
           <View className={"flex-row items-center gap-3"}>
@@ -242,7 +241,7 @@ export function AnimatedProgressCard({ sharedValues }: AnimatedProgressCardProps
             </Animated.View>
           )}
         </View>
-      </Card>
+      </View>
     </Animated.View>
   );
 }
