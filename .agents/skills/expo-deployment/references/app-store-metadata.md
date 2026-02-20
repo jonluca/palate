@@ -127,9 +127,7 @@ Hidden from users but crucial for discoverability. Use comma-separated keywords 
 
 ```json
 {
-  "keywords": [
-    "finance,budget,expense,money,tracker,savings,bills,income,spending,wallet,personal,weekly,monthly"
-  ]
+  "keywords": ["finance,budget,expense,money,tracker,savings,bills,income,spending,wallet,personal,weekly,monthly"]
 }
 ```
 
@@ -269,9 +267,7 @@ module.exports = async () => {
   const baseConfig = require("./store.config.json");
 
   // Fetch translations from CMS/localization service
-  const translations = await fetch(
-    "https://api.example.com/app-store-copy"
-  ).then((r) => r.json());
+  const translations = await fetch("https://api.example.com/app-store-copy").then((r) => r.json());
 
   return {
     ...baseConfig,
@@ -298,9 +294,7 @@ module.exports = {
     info: {
       "en-US": {
         ...baseConfig.apple.info["en-US"],
-        promoText: isProduction
-          ? "Download now and get started!"
-          : "[BETA] Help us test new features!",
+        promoText: isProduction ? "Download now and get started!" : "[BETA] Help us test new features!",
       },
     },
   },

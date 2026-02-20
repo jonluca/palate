@@ -7,12 +7,7 @@ Always prefer NativeTabs from 'expo-router/unstable-native-tabs' for the best iO
 ## Basic Usage
 
 ```tsx
-import {
-  NativeTabs,
-  Icon,
-  Label,
-  Badge,
-} from "expo-router/unstable-native-tabs";
+import { NativeTabs, Icon, Label, Badge } from "expo-router/unstable-native-tabs";
 
 export default function TabLayout() {
   return (
@@ -206,10 +201,7 @@ import Stack from "expo-router/stack";
 export default function HomeStack() {
   return (
     <Stack>
-      <Stack.Screen
-        name="index"
-        options={{ title: "Home", headerLargeTitle: true }}
-      />
+      <Stack.Screen name="index" options={{ title: "Home", headerLargeTitle: true }} />
       <Stack.Screen name="details" options={{ title: "Details" }} />
     </Stack>
   );
@@ -230,9 +222,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color }) => (
-            <IconSymbol name="house.fill" color={color} />
-          ),
+          tabBarIcon: ({ color }) => <IconSymbol name="house.fill" color={color} />,
         }}
       />
       <Tabs.Screen
@@ -287,12 +277,7 @@ export default function TabLayout() {
    import { Tabs } from "expo-router";
 
    // Add
-   import {
-     NativeTabs,
-     Icon,
-     Label,
-     Badge,
-   } from "expo-router/unstable-native-tabs";
+   import { NativeTabs, Icon, Label, Badge } from "expo-router/unstable-native-tabs";
    ```
 
 2. **Replace Tabs with NativeTabs**
