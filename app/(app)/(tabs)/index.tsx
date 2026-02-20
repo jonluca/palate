@@ -449,6 +449,11 @@ export default function RestaurantsScreen() {
     setFiltersExpanded((prev) => !prev);
   }, []);
 
+  const handleOpenMap = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push("/restaurants-map");
+  }, []);
+
   const renderItem = useCallback(({ item, index }: { item: ListItem; index: number }) => {
     if (item.type === "section-header") {
       return (
@@ -523,7 +528,7 @@ export default function RestaurantsScreen() {
       {restaurants.length > 0 && (
         <View style={{ paddingTop: insets.top + 16, paddingHorizontal: 16 }} className={"gap-3 bg-background"}>
           {/* Header */}
-          {!searchQuery && <HomeHeader />}
+          {!searchQuery && <HomeHeader onMapPress={handleOpenMap} />}
 
           {/* New Photos Card */}
           <NewPhotosCard />

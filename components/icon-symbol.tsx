@@ -18,6 +18,7 @@ const MAPPING = {
   "paperplane.fill": "send",
   "chevron.left.forwardslash.chevron.right": "code",
   "chevron.right": "chevron-right",
+  map: "map",
   "moon.fill": "dark-mode",
   "sun.max.fill": "light-mode",
   "camera.filters": "palette",
