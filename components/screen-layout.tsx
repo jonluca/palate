@@ -32,15 +32,19 @@ export function ScreenLayout({
       android: 16,
     }),
     paddingBottom: insets.bottom + 32,
+    gap: 12,
   };
 
   if (scrollable) {
     return (
       <ScrollView
         className={cn("flex-1 bg-background", className)}
-        contentContainerClassName={cn("p-4 gap-4", contentClassName)}
+        contentContainerClassName={cn("p-4", contentClassName)}
         contentContainerStyle={contentStyle}
         showsVerticalScrollIndicator={false}
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        keyboardShouldPersistTaps={"handled"}
+        contentInsetAdjustmentBehavior={"never"}
         refreshControl={
           onRefresh ? <RefreshControl refreshing={refreshing ?? false} onRefresh={onRefresh} /> : undefined
         }

@@ -3,12 +3,9 @@ import { View } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withRepeat,
-  withSequence,
   withTiming,
   withDelay,
   Easing,
-  FadeIn,
   FadeInUp,
 } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
@@ -28,84 +25,43 @@ interface EmptyStateProps {
   variant?: "default" | "success" | "info";
 }
 
-// Animated floating icon with bounce
 function AnimatedIcon({ icon, color, variant }: { icon: string; color: string; variant: string }) {
-  const translateY = useSharedValue(0);
-  const scale = useSharedValue(0.8);
-  const rotate = useSharedValue(0);
+  "use no memo";
+
+  const scale = useSharedValue(0.92);
+  const opacity = useSharedValue(0);
 
   useEffect(() => {
-    // Bounce animation
-    translateY.value = withRepeat(
-      withSequence(
-        withTiming(-8, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
-      ),
-      -1,
-      true,
-    );
-
-    // Scale in
-    scale.value = withDelay(100, withTiming(1, { duration: 500, easing: Easing.out(Easing.back(1.5)) }));
-
-    // Subtle rotation
-    rotate.value = withRepeat(
-      withSequence(
-        withTiming(-5, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
-        withTiming(5, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
-      ),
-      -1,
-      true,
-    );
-  }, [translateY, scale, rotate]);
+    scale.value = withDelay(60, withTiming(1, { duration: 280, easing: Easing.out(Easing.cubic) }));
+    opacity.value = withTiming(1, { duration: 220 });
+  }, [opacity, scale]);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }, { scale: scale.value }, { rotate: `${rotate.value}deg` }],
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
   }));
 
   const bgColor =
-    variant === "success" ? "bg-green-500/15" : variant === "info" ? "bg-blue-500/15" : "bg-orange-500/15";
+    variant === "success"
+      ? "bg-green-500/15 border border-green-500/20"
+      : variant === "info"
+        ? "bg-blue-500/15 border border-blue-500/20"
+        : "bg-primary/10 border border-primary/20";
 
   return (
-    <Animated.View style={animatedStyle} className={`w-24 h-24 rounded-3xl ${bgColor} items-center justify-center`}>
-      <IconSymbol name={icon as never} size={48} color={color} />
+    <Animated.View style={animatedStyle} className={`w-20 h-20 rounded-3xl ${bgColor} items-center justify-center`}>
+      <IconSymbol name={icon as never} size={40} color={color} />
     </Animated.View>
-  );
-}
-
-// Decorative dots
-function DecorativeDots() {
-  return (
-    <View className={"absolute inset-0"} pointerEvents={"none"}>
-      <Animated.View
-        entering={FadeIn.delay(500).duration(800)}
-        className={"absolute top-4 left-8 w-2 h-2 rounded-full bg-orange-500/20"}
-      />
-      <Animated.View
-        entering={FadeIn.delay(600).duration(800)}
-        className={"absolute top-12 right-10 w-3 h-3 rounded-full bg-blue-500/20"}
-      />
-      <Animated.View
-        entering={FadeIn.delay(700).duration(800)}
-        className={"absolute bottom-8 left-16 w-2 h-2 rounded-full bg-green-500/20"}
-      />
-      <Animated.View
-        entering={FadeIn.delay(800).duration(800)}
-        className={"absolute bottom-4 right-8 w-2 h-2 rounded-full bg-amber-500/20"}
-      />
-    </View>
   );
 }
 
 function EmptyState({ icon, iconColor = "#f97316", title, description, action, variant = "default" }: EmptyStateProps) {
   return (
-    <View className={"py-12 px-6 items-center gap-6 relative"}>
-      <DecorativeDots />
-
+    <View className={"py-10 px-4 items-center gap-5"}>
       <AnimatedIcon icon={icon} color={iconColor} variant={variant} />
 
       <Animated.View entering={FadeInUp.delay(200).duration(500)} className={"gap-2 items-center"}>
-        <ThemedText variant={"title2"} className={"font-bold text-center"}>
+        <ThemedText variant={"title2"} className={"font-semibold text-center"}>
           {title}
         </ThemedText>
         <ThemedText variant={"body"} color={"secondary"} className={"text-center max-w-xs leading-relaxed"}>

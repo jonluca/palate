@@ -2,27 +2,27 @@ import { cn } from "@/utils/cn";
 import { cva, type VariantProps } from "class-variance-authority";
 import * as Haptics from "expo-haptics";
 import React from "react";
-import { ActivityIndicator, type GestureResponderEvent, Pressable, type PressableProps } from "react-native";
+import { ActivityIndicator, Platform, type GestureResponderEvent, Pressable, type PressableProps } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-const buttonVariants = cva("flex-row items-center justify-center rounded-full", {
+const buttonVariants = cva("flex-row items-center justify-center gap-2 rounded-2xl", {
   variants: {
     variant: {
       default: "bg-primary",
-      secondary: "bg-secondary",
-      destructive: "bg-red-500/10",
-      success: "bg-green-500/25",
+      secondary: "bg-secondary border border-border",
+      destructive: "bg-red-500/15 border border-red-500/25",
+      success: "bg-green-600/90",
       outline: "border border-border bg-transparent",
       ghost: "bg-transparent",
-      muted: "bg-muted",
+      muted: "bg-card border border-border",
     },
     size: {
-      default: "py-4 px-6",
-      sm: "py-2 px-4",
-      lg: "py-5 px-8",
-      icon: "p-3",
+      default: "h-11 px-5",
+      sm: "h-9 px-4",
+      lg: "h-12 px-6",
+      icon: "h-10 w-10",
     },
   },
   defaultVariants: {
@@ -36,17 +36,17 @@ const textVariants = cva("font-semibold", {
     variant: {
       default: "text-primary-foreground",
       secondary: "text-secondary-foreground",
-      destructive: "text-red-500",
+      destructive: "text-red-400",
       success: "text-white",
-      outline: "text-foreground",
-      ghost: "text-foreground",
-      muted: "text-muted-foreground",
+      outline: "text-primary",
+      ghost: "text-primary",
+      muted: "text-foreground",
     },
     size: {
-      default: "text-base",
-      sm: "text-sm",
-      lg: "text-lg",
-      icon: "text-base",
+      default: "text-[16px]",
+      sm: "text-[15px]",
+      lg: "text-[17px]",
+      icon: "text-[16px]",
     },
   },
   defaultVariants: {
@@ -71,8 +71,12 @@ export function Button({
   onPress,
   children,
   className,
+  style,
   ...props
 }: ButtonProps) {
+  "use no memo";
+
+  const resolvedVariant = variant ?? "default";
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -88,11 +92,18 @@ export function Button({
   };
 
   const handlePress = (e: GestureResponderEvent) => {
-    if (haptic) {
+    if (haptic && Platform.OS === "ios") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     onPress?.(e);
   };
+
+  const shadowStyle =
+    resolvedVariant === "default"
+      ? { boxShadow: "0 8px 18px rgba(10, 132, 255, 0.28)" }
+      : resolvedVariant === "success"
+        ? { boxShadow: "0 8px 18px rgba(22, 163, 74, 0.22)" }
+        : undefined;
 
   return (
     <AnimatedPressable
@@ -100,12 +111,20 @@ export function Button({
       onPressOut={handlePressOut}
       onPress={handlePress}
       disabled={disabled || loading}
-      style={animatedStyle}
-      className={cn(buttonVariants({ variant, size }), disabled && "opacity-50", className)}
+      style={[shadowStyle, animatedStyle, style]}
+      className={cn(buttonVariants({ variant: resolvedVariant, size }), disabled && "opacity-50", className)}
       {...props}
     >
       {loading ? (
-        <ActivityIndicator color={variant === "success" || variant === "default" ? "white" : undefined} />
+        <ActivityIndicator
+          color={
+            resolvedVariant === "success" || resolvedVariant === "default"
+              ? "#FFFFFF"
+              : resolvedVariant === "destructive"
+                ? "#FF453A"
+                : undefined
+          }
+        />
       ) : (
         children
       )}

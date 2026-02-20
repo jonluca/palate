@@ -13,47 +13,47 @@
 @layer theme {
   :root {
     @variant light {
-      --color-background: oklch(1 0 0);
-      --color-foreground: oklch(0.145 0 0);
-      --color-card: oklch(0.97 0 0 / 1);
-      --color-card-foreground: oklch(0.145 0 0);
-      --color-popover: oklch(1 0 0);
-      --color-popover-foreground: oklch(0.145 0 0);
-      --color-primary: oklch(0.205 0 0);
-      --color-primary-foreground: oklch(0.985 0 0);
-      --color-secondary: oklch(0.97 0 0);
-      --color-secondary-foreground: oklch(0.205 0 0);
-      --color-muted: oklch(0.97 0 0);
-      --color-muted-foreground: oklch(0.556 0 0);
-      --color-accent: oklch(0.97 0 0);
-      --color-accent-foreground: oklch(0.205 0 0);
-      --color-destructive: oklch(0.577 0.245 27.325);
-      --color-destructive-foreground: oklch(1 0 0);
-      --color-border: oklch(0.922 0 0);
-      --color-input: oklch(0.922 0 0);
-      --color-ring: oklch(0.708 0 0);
+      --color-background: #f2f2f7;
+      --color-foreground: #000000;
+      --color-card: #ffffff;
+      --color-card-foreground: #000000;
+      --color-popover: #ffffff;
+      --color-popover-foreground: #000000;
+      --color-primary: #007aff;
+      --color-primary-foreground: #ffffff;
+      --color-secondary: #f2f2f7;
+      --color-secondary-foreground: #1c1c1e;
+      --color-muted: #f2f2f7;
+      --color-muted-foreground: #8e8e93;
+      --color-accent: #e9e9ee;
+      --color-accent-foreground: #1c1c1e;
+      --color-destructive: #ff3b30;
+      --color-destructive-foreground: #ffffff;
+      --color-border: #d1d1d6;
+      --color-input: #d1d1d6;
+      --color-ring: #007aff;
     }
 
     @variant dark {
-      --color-background: oklch(0.145 0 0);
-      --color-foreground: oklch(0.985 0 0);
-      --color-card: oklch(0.205 0 0);
-      --color-card-foreground: oklch(0.985 0 0);
-      --color-popover: oklch(0.269 0 0);
-      --color-popover-foreground: oklch(0.985 0 0);
-      --color-primary: oklch(0.922 0 0);
-      --color-primary-foreground: oklch(0.205 0 0);
-      --color-secondary: oklch(0.269 0 0);
-      --color-secondary-foreground: oklch(0.985 0 0);
-      --color-muted: oklch(0.269 0 0);
-      --color-muted-foreground: oklch(0.708 0 0);
-      --color-accent: oklch(0.371 0 0);
-      --color-accent-foreground: oklch(0.985 0 0);
-      --color-destructive: oklch(0.704 0.191 22.216);
-      --color-destructive-foreground: oklch(0.985 0 0);
-      --color-border: oklch(0.275 0 0);
-      --color-input: oklch(0.325 0 0);
-      --color-ring: oklch(0.556 0 0);
+      --color-background: #000000;
+      --color-foreground: #ffffff;
+      --color-card: #1c1c1e;
+      --color-card-foreground: #ffffff;
+      --color-popover: #1c1c1e;
+      --color-popover-foreground: #ffffff;
+      --color-primary: #0a84ff;
+      --color-primary-foreground: #ffffff;
+      --color-secondary: #2c2c2e;
+      --color-secondary-foreground: #f2f2f7;
+      --color-muted: #2c2c2e;
+      --color-muted-foreground: #8e8e93;
+      --color-accent: #2c2c2e;
+      --color-accent-foreground: #ffffff;
+      --color-destructive: #ff453a;
+      --color-destructive-foreground: #ffffff;
+      --color-border: #3a3a3c;
+      --color-input: #3a3a3c;
+      --color-ring: #0a84ff;
     }
 
     @variant sepia {

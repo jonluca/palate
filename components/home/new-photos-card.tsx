@@ -44,6 +44,8 @@ function useNewPhotosCount() {
 }
 
 export function NewPhotosCard() {
+  "use no memo";
+
   const { newPhotosCount, hasPermission, isLoading } = useNewPhotosCount();
   const cardScale = useSharedValue(1);
   const pulseOpacity = useSharedValue(1);
@@ -86,42 +88,44 @@ export function NewPhotosCard() {
   }
 
   return (
-    <Animated.View
-      entering={FadeIn.duration(400)}
-      className={"rounded-2xl overflow-hidden bg-card"}
-      style={[cardStyle, { borderCurve: "continuous" }]}
-    >
+    <Animated.View entering={FadeIn.duration(400)} className={"rounded-2xl"} style={[cardStyle]}>
       <Pressable onPress={handlePress} onPressIn={handlePressIn} onPressOut={handlePressOut}>
-        <View className={"p-4 flex-row items-center gap-3"}>
-          {/* Icon with green background */}
-          <View className={"w-11 h-11 rounded-xl bg-green-500 items-center justify-center"}>
-            <IconSymbol name={"photo.badge.plus"} size={22} color={"white"} />
+        <View className={"p-4 flex-row items-center gap-3 bg-card border border-emerald-500/20 rounded-2xl"}>
+          <View
+            className={
+              "w-11 h-11 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 items-center justify-center"
+            }
+          >
+            <IconSymbol name={"photo.badge.plus"} size={20} color={"#34d399"} />
           </View>
 
-          {/* Content */}
           <View className={"flex-1 gap-0.5"}>
             <View className={"flex-row items-center gap-2"}>
               <ThemedText variant={"heading"} className={"font-semibold"}>
                 New Photos
               </ThemedText>
-              {/* iOS-style count badge */}
               <Animated.View
                 style={pulseStyle}
-                className={"bg-green-500 px-2 py-0.5 rounded-full min-w-[24px] items-center"}
+                className={
+                  "bg-emerald-500/15 border border-emerald-500/20 px-2 py-0.5 rounded-full min-w-[24px] items-center"
+                }
               >
-                <ThemedText variant={"caption1"} className={"text-white font-bold"}>
+                <ThemedText
+                  variant={"caption1"}
+                  className={"text-emerald-300 font-semibold"}
+                  style={{ fontVariant: ["tabular-nums"] }}
+                >
                   {newPhotosCount > 999 ? "999+" : newPhotosCount}
                 </ThemedText>
               </Animated.View>
             </View>
-            <ThemedText variant={"footnote"} color={"tertiary"}>
+            <ThemedText variant={"footnote"} color={"secondary"}>
               Tap to scan for restaurant visits
             </ThemedText>
           </View>
 
-          {/* Chevron */}
-          <View className={"w-7 h-7 items-center justify-center"}>
-            <IconSymbol name={"chevron.right"} size={14} color={"#C7C7CC"} weight={"semibold"} />
+          <View className={"w-8 h-8 rounded-full bg-secondary/80 items-center justify-center"}>
+            <IconSymbol name={"chevron.right"} size={13} color={"#8E8E93"} weight={"semibold"} />
           </View>
         </View>
       </Pressable>

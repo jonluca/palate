@@ -168,7 +168,7 @@ export async function reclassifyPhotosWithCurrentKeywords(
   for (let i = 0; i < photosToProcess.length; i++) {
     const photo = photosToProcess[i];
 
-    let allLabels: FoodLabel[] = [];
+    let allLabels: FoodLabel[];
     try {
       allLabels = JSON.parse(photo.allLabels) as FoodLabel[];
     } catch {

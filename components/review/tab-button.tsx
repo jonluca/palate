@@ -1,7 +1,7 @@
 import { ThemedText } from "@/components/themed-text";
 import { cn } from "@/utils/cn";
 import * as Haptics from "expo-haptics";
-import { Pressable } from "react-native";
+import { Platform, Pressable, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -14,6 +14,8 @@ interface TabButtonProps {
 }
 
 export function TabButton({ label, count, isSelected, onPress }: TabButtonProps) {
+  "use no memo";
+
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -29,7 +31,9 @@ export function TabButton({ label, count, isSelected, onPress }: TabButtonProps)
   };
 
   const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (Platform.OS === "ios") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
     onPress();
   };
 
@@ -39,11 +43,28 @@ export function TabButton({ label, count, isSelected, onPress }: TabButtonProps)
       onPressOut={handlePressOut}
       onPress={handlePress}
       style={animatedStyle}
-      className={cn("flex-1 py-2.5 rounded-xl items-center justify-center", isSelected ? "bg-primary" : "bg-card")}
+      className={cn(
+        "flex-1 h-9 rounded-xl items-center justify-center border",
+        isSelected ? "bg-card border-border" : "bg-transparent border-transparent",
+      )}
     >
-      <ThemedText className={cn("text-sm font-semibold", isSelected ? "text-primary-foreground" : "text-foreground")}>
-        {label} ({count.toLocaleString()})
-      </ThemedText>
+      <View className={"flex-row items-center gap-1.5"}>
+        <ThemedText
+          variant={"footnote"}
+          className={cn("font-semibold", isSelected ? "text-foreground" : "text-secondary-foreground")}
+        >
+          {label}
+        </ThemedText>
+        <View className={cn("px-1.5 py-0.5 rounded-full", isSelected ? "bg-primary/15" : "bg-secondary/80")}>
+          <ThemedText
+            variant={"caption2"}
+            className={cn("font-semibold", isSelected ? "text-primary" : "text-muted-foreground")}
+            style={{ fontVariant: ["tabular-nums"] }}
+          >
+            {count.toLocaleString()}
+          </ThemedText>
+        </View>
+      </View>
     </AnimatedPressable>
   );
 }

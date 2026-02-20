@@ -56,11 +56,15 @@ function YearTab({
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onPress();
         }}
-        className={`px-4 py-2 rounded-full mr-2 border ${
-          isActive ? "bg-amber-400/90 border-amber-300/60" : "bg-white/5 border-white/10"
+        className={`h-9 px-3.5 rounded-full mr-2 border items-center justify-center ${
+          isActive ? "bg-primary/15 border-primary/25" : "bg-secondary/70 border-border"
         }`}
+        style={isActive ? { boxShadow: "0 6px 14px rgba(10, 132, 255, 0.16)" } : undefined}
       >
-        <ThemedText variant={"subhead"} className={`font-semibold ${isActive ? "text-gray-900" : "text-white/70"}`}>
+        <ThemedText
+          variant={"footnote"}
+          className={`font-semibold ${isActive ? "text-primary" : "text-secondary-foreground/80"}`}
+        >
           {label}
         </ThemedText>
       </Pressable>
@@ -114,12 +118,12 @@ function MonthlyVisitsChart({
   return (
     <Animated.View entering={FadeInDown.delay(300).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Monthly Visits"} icon={"📈"} accentClass={"bg-amber-400"} />
-      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4"}>
+      <View className={"bg-card border border-border rounded-2xl p-4"}>
         {/* Value labels row */}
         <View className={"flex-row justify-between gap-1 mb-1"}>
-          {chartData.map((data, index) => (
-            <View key={`label-${data.month}-${index}`} className={"flex-1 items-center"}>
-              <ThemedText variant={"caption2"} className={"text-white/60 text-center"} style={{ fontSize: 9 }}>
+          {chartData.map((data) => (
+            <View key={`label-${data.month}`} className={"flex-1 items-center"}>
+              <ThemedText variant={"caption2"} className={"text-muted-foreground text-center"} style={{ fontSize: 9 }}>
                 {data.visits > 0 ? data.visits : ""}
               </ThemedText>
             </View>
@@ -133,7 +137,7 @@ function MonthlyVisitsChart({
 
             return (
               <Animated.View
-                key={`bar-${data.month}-${index}`}
+                key={`bar-${data.month}`}
                 entering={FadeInUp.delay(400 + index * 30).duration(300)}
                 className={"flex-1 items-center justify-end h-full"}
               >
@@ -154,9 +158,13 @@ function MonthlyVisitsChart({
         </View>
         {/* Month labels row */}
         <View className={"flex-row justify-between gap-1 mt-1"}>
-          {chartData.map((data, index) => (
-            <View key={`month-${data.month}-${index}`} className={"flex-1 items-center"}>
-              <ThemedText variant={"caption2"} className={"text-white/40 text-center"} style={{ fontSize: 9 }}>
+          {chartData.map((data) => (
+            <View key={`month-${data.month}`} className={"flex-1 items-center"}>
+              <ThemedText
+                variant={"caption2"}
+                className={"text-muted-foreground/60 text-center"}
+                style={{ fontSize: 9 }}
+              >
                 {data.month}
               </ThemedText>
             </View>
@@ -190,9 +198,9 @@ function SeasonalitySection({ monthlyVisits }: { monthlyVisits: WrappedStats["mo
   return (
     <Animated.View entering={FadeInDown.delay(360).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Seasonal Rhythm"} icon={"🍂"} accentClass={"bg-orange-400"} />
-      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4 gap-4"}>
+      <View className={"bg-card border border-border rounded-2xl p-4 gap-4"}>
         <View className={"flex-row items-center justify-between"}>
-          <ThemedText variant={"footnote"} className={"text-white/60"}>
+          <ThemedText variant={"footnote"} className={"text-muted-foreground"}>
             Peak season
           </ThemedText>
           <ThemedText variant={"subhead"} className={`font-semibold ${topSeason.text}`}>
@@ -214,7 +222,7 @@ function SeasonalitySection({ monthlyVisits }: { monthlyVisits: WrappedStats["mo
                     <View className={`w-8 h-8 rounded-full items-center justify-center ${season.color}/20`}>
                       <ThemedText variant={"footnote"}>{season.emoji}</ThemedText>
                     </View>
-                    <ThemedText variant={"subhead"} className={"text-white font-medium"}>
+                    <ThemedText variant={"subhead"} className={"text-foreground font-medium"}>
                       {season.key}
                     </ThemedText>
                   </View>
@@ -222,7 +230,7 @@ function SeasonalitySection({ monthlyVisits }: { monthlyVisits: WrappedStats["mo
                     {percent}% · {season.visits.toLocaleString()}
                   </ThemedText>
                 </View>
-                <View className={"h-2 bg-white/10 rounded-full overflow-hidden"}>
+                <View className={"h-2 bg-secondary/70 rounded-full overflow-hidden"}>
                   <View className={`h-full ${season.color}`} style={{ width: `${widthPercent}%` }} />
                 </View>
               </Animated.View>
@@ -274,7 +282,7 @@ function StatCard({
   return (
     <Animated.View
       entering={FadeInUp.delay(delay).duration(400)}
-      className={`flex-1 rounded-2xl border ${accent.border} overflow-hidden bg-white/5`}
+      className={`flex-1 rounded-2xl border ${accent.border} overflow-hidden bg-card`}
       style={{ minHeight: 120 }}
     >
       {/* Radial glow effect */}
@@ -293,13 +301,13 @@ function StatCard({
         }}
       />
       <View className={"flex-1 items-center justify-center p-4 gap-1"}>
-        <View className={"w-10 h-10 rounded-full bg-white/10 items-center justify-center border border-white/10"}>
+        <View className={"w-10 h-10 rounded-full bg-secondary/70 items-center justify-center border border-border"}>
           <ThemedText style={{ fontSize: 20 }}>{icon}</ThemedText>
         </View>
         <ThemedText variant={"title1"} className={`font-bold ${accent.text}`}>
           {typeof value === "number" ? value.toLocaleString() : value}
         </ThemedText>
-        <ThemedText variant={"caption1"} className={"text-white/50 text-center"}>
+        <ThemedText variant={"caption1"} className={"text-muted-foreground/80 text-center"}>
           {label}
         </ThemedText>
       </View>
@@ -327,21 +335,21 @@ function InsightCard({
   return (
     <Animated.View
       entering={FadeInUp.delay(delay).duration(300)}
-      className={"flex-1 bg-white/5 border border-white/10 rounded-2xl p-3 gap-2"}
+      className={"flex-1 bg-card border border-border rounded-2xl p-3 gap-2"}
     >
       <View className={"flex-row items-center gap-2"}>
         <View className={`w-8 h-8 rounded-full items-center justify-center ${iconBg}`}>
           <ThemedText variant={"footnote"}>{icon}</ThemedText>
         </View>
-        <ThemedText variant={"caption2"} className={"text-white/60 flex-1"} numberOfLines={1}>
+        <ThemedText variant={"caption2"} className={"text-muted-foreground flex-1"} numberOfLines={1}>
           {label}
         </ThemedText>
       </View>
-      <ThemedText variant={"title3"} className={`font-semibold ${valueClass ?? "text-white"}`} numberOfLines={1}>
+      <ThemedText variant={"title3"} className={`font-semibold ${valueClass ?? "text-foreground"}`} numberOfLines={1}>
         {value}
       </ThemedText>
       {subtitle && (
-        <ThemedText variant={"caption2"} className={"text-white/50"} numberOfLines={1}>
+        <ThemedText variant={"caption2"} className={"text-muted-foreground/80"} numberOfLines={1}>
           {subtitle}
         </ThemedText>
       )}
@@ -546,16 +554,16 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
                 <ThemedText variant={"largeTitle"} className={"text-amber-400 font-bold"}>
                   {stats.totalAccumulatedStars.toLocaleString()}
                 </ThemedText>
-                <ThemedText variant={"footnote"} className={"text-white/60"}>
+                <ThemedText variant={"footnote"} className={"text-muted-foreground"}>
                   Total Stars
                 </ThemedText>
               </View>
-              <View className={"w-px h-12 bg-white/20"} />
+              <View className={"w-px h-12 bg-secondary"} />
               <View className={"items-center"}>
                 <ThemedText variant={"largeTitle"} className={"text-amber-400 font-bold"}>
                   {stats.distinctStars.toLocaleString()}
                 </ThemedText>
-                <ThemedText variant={"footnote"} className={"text-white/60"}>
+                <ThemedText variant={"footnote"} className={"text-muted-foreground"}>
                   Distinct Stars
                 </ThemedText>
               </View>
@@ -570,11 +578,13 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
           <Animated.View
             key={item.label}
             entering={FadeIn.delay(300 + index * 100).duration(300)}
-            className={"bg-white/10 border border-white/10 rounded-xl px-4 py-3 flex-row items-center justify-between"}
+            className={
+              "bg-secondary/70 border border-border rounded-xl px-4 py-3 flex-row items-center justify-between"
+            }
           >
             <View className={"flex-row items-center gap-3"}>
               <ThemedText variant={"title3"}>{item.emoji}</ThemedText>
-              <ThemedText variant={"subhead"} className={"text-white font-medium"}>
+              <ThemedText variant={"subhead"} className={"text-foreground font-medium"}>
                 {item.label}
               </ThemedText>
             </View>
@@ -583,16 +593,16 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
                 <ThemedText variant={"subhead"} className={"text-amber-400 font-semibold"}>
                   {item.unique.toLocaleString()}
                 </ThemedText>
-                <ThemedText variant={"caption2"} className={"text-white/50"}>
+                <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
                   {item.unique === 1 ? "restaurant" : "restaurants"}
                 </ThemedText>
               </View>
-              <View className={"w-px h-8 bg-white/20"} />
+              <View className={"w-px h-8 bg-secondary"} />
               <View className={"items-end"}>
-                <ThemedText variant={"subhead"} className={"text-white font-semibold"}>
+                <ThemedText variant={"subhead"} className={"text-foreground font-semibold"}>
                   {item.visits.toLocaleString()}
                 </ThemedText>
-                <ThemedText variant={"caption2"} className={"text-white/50"}>
+                <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
                   {item.visits === 1 ? "visit" : "visits"}
                 </ThemedText>
               </View>
@@ -622,16 +632,16 @@ function CuisineCloud({ cuisines }: { cuisines: WrappedStats["topCuisines"] }) {
             <Animated.View
               key={cuisine.cuisine}
               entering={FadeIn.delay(600 + index * 80).duration(300)}
-              className={"rounded-full px-4 py-2 border border-white/10"}
+              className={"rounded-full px-4 py-2 border border-border"}
               style={{ backgroundColor: `rgba(255, 255, 255, ${bgOpacity})` }}
             >
               <ThemedText
                 variant={intensity > 0.7 ? "body" : "subhead"}
-                className={"text-white"}
+                className={"text-foreground"}
                 style={{ fontWeight: intensity > 0.5 ? "600" : "400" }}
               >
                 {cuisine.cuisine}
-                <ThemedText variant={"footnote"} className={"text-white/50"}>
+                <ThemedText variant={"footnote"} className={"text-muted-foreground/80"}>
                   {" "}
                   {cuisine.count.toLocaleString()}
                 </ThemedText>
@@ -662,16 +672,16 @@ function FunFactCard({
   return (
     <Animated.View
       entering={FadeInDown.delay(delay).duration(400)}
-      className={"bg-white/10 border border-white/10 rounded-2xl p-4 flex-row items-center gap-4"}
+      className={"bg-secondary/70 border border-border rounded-2xl p-4 flex-row items-center gap-4"}
     >
       <View className={`w-12 h-12 rounded-full items-center justify-center ${iconBg}`}>
         <ThemedText variant={"title2"}>{icon}</ThemedText>
       </View>
       <View className={"flex-1"}>
-        <ThemedText variant={"footnote"} className={"text-white/60"}>
+        <ThemedText variant={"footnote"} className={"text-muted-foreground"}>
           {title}
         </ThemedText>
-        <ThemedText variant={"body"} className={"text-white font-semibold"} numberOfLines={1}>
+        <ThemedText variant={"body"} className={"text-foreground font-semibold"} numberOfLines={1}>
           {value}
         </ThemedText>
         {subtitle && (
@@ -732,7 +742,7 @@ function LocationBreakdown({ locations }: { locations: WrappedStats["topLocation
       )}
 
       {/* Top cities list */}
-      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4 gap-3"}>
+      <View className={"bg-card border border-border rounded-2xl p-4 gap-3"}>
         {locations.slice(0, 5).map((loc, index) => {
           const widthPercent = (loc.visits / maxVisits) * 100;
           return (
@@ -742,14 +752,14 @@ function LocationBreakdown({ locations }: { locations: WrappedStats["topLocation
               className={"gap-1"}
             >
               <View className={"flex-row justify-between items-center"}>
-                <ThemedText variant={"subhead"} className={"text-white font-medium"} numberOfLines={1}>
+                <ThemedText variant={"subhead"} className={"text-foreground font-medium"} numberOfLines={1}>
                   {loc.city}
                 </ThemedText>
-                <ThemedText variant={"footnote"} className={"text-white/60"}>
+                <ThemedText variant={"footnote"} className={"text-muted-foreground"}>
                   {loc.visits} {loc.visits === 1 ? "visit" : "visits"}
                 </ThemedText>
               </View>
-              <View className={"h-2 bg-white/10 rounded-full overflow-hidden"}>
+              <View className={"h-2 bg-secondary/70 rounded-full overflow-hidden"}>
                 <View className={"h-full bg-emerald-400/70 rounded-full"} style={{ width: `${widthPercent}%` }} />
               </View>
             </Animated.View>
@@ -768,7 +778,7 @@ function YearlyHighlights({ yearlyStats }: { yearlyStats: WrappedStats["yearlySt
   return (
     <Animated.View entering={FadeInDown.delay(380).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Yearly Highlights"} icon={"🗓️"} accentClass={"bg-blue-400"} />
-      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4 gap-3"}>
+      <View className={"bg-card border border-border rounded-2xl p-4 gap-3"}>
         {yearlyStats.map((year, index) => (
           <Animated.View
             key={year.year}
@@ -776,11 +786,11 @@ function YearlyHighlights({ yearlyStats }: { yearlyStats: WrappedStats["yearlySt
             className={"flex-row items-center justify-between gap-3"}
           >
             <View className={"flex-1"}>
-              <ThemedText variant={"subhead"} className={"text-white font-semibold"}>
+              <ThemedText variant={"subhead"} className={"text-foreground font-semibold"}>
                 {year.year}
               </ThemedText>
               {year.topRestaurant && (
-                <ThemedText variant={"caption2"} className={"text-white/50"} numberOfLines={1}>
+                <ThemedText variant={"caption2"} className={"text-muted-foreground/80"} numberOfLines={1}>
                   Top spot: {year.topRestaurant.name} · {year.topRestaurant.visits}{" "}
                   {year.topRestaurant.visits === 1 ? "visit" : "visits"}
                 </ThemedText>
@@ -790,7 +800,7 @@ function YearlyHighlights({ yearlyStats }: { yearlyStats: WrappedStats["yearlySt
               <ThemedText variant={"subhead"} className={"text-amber-300 font-semibold"}>
                 {year.totalVisits.toLocaleString()}
               </ThemedText>
-              <ThemedText variant={"caption2"} className={"text-white/50"}>
+              <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
                 {year.uniqueRestaurants.toLocaleString()} {year.uniqueRestaurants === 1 ? "restaurant" : "restaurants"}
               </ThemedText>
             </View>
@@ -822,7 +832,7 @@ function DiningTimeChart({ mealTimes }: { mealTimes: WrappedStats["mealTimeBreak
     <Animated.View entering={FadeInDown.delay(600).duration(400)} className={"gap-4"}>
       <SectionHeading title={"When You Dine"} icon={"🕐"} accentClass={"bg-indigo-400"} />
 
-      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4 gap-4"}>
+      <View className={"bg-card border border-border rounded-2xl p-4 gap-4"}>
         {/* Horizontal bar showing distribution */}
         <View className={"flex-row h-4 rounded-full overflow-hidden"}>
           {segments.map((segment, index) => {
@@ -847,17 +857,17 @@ function DiningTimeChart({ mealTimes }: { mealTimes: WrappedStats["mealTimeBreak
               <Animated.View
                 key={segment.label}
                 entering={FadeIn.delay(700 + index * 80).duration(300)}
-                className={`flex-row items-center gap-2 px-3 py-2 rounded-xl ${isDominant ? "bg-white/20" : "bg-white/5"}`}
+                className={`flex-row items-center gap-2 px-3 py-2 rounded-xl ${isDominant ? "bg-secondary" : "bg-card"}`}
               >
                 <ThemedText variant={"body"}>{segment.emoji}</ThemedText>
                 <View>
                   <ThemedText
                     variant={"footnote"}
-                    className={isDominant ? "text-white font-semibold" : "text-white/70"}
+                    className={isDominant ? "text-foreground font-semibold" : "text-secondary-foreground/80"}
                   >
                     {segment.label}
                   </ThemedText>
-                  <ThemedText variant={"caption2"} className={"text-white/50"}>
+                  <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
                     {percent}% ({segment.count})
                   </ThemedText>
                 </View>
@@ -884,7 +894,7 @@ function WeekendWeekdayChart({ weekendVsWeekday }: { weekendVsWeekday: WrappedSt
     <Animated.View entering={FadeInDown.delay(700).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Weekend vs Weekday"} icon={"📅"} accentClass={"bg-sky-400"} />
 
-      <View className={"bg-white/5 border border-white/10 rounded-2xl p-4"}>
+      <View className={"bg-card border border-border rounded-2xl p-4"}>
         <View className={"flex-row items-center gap-4"}>
           {/* Weekday */}
           <View className={"flex-1 items-center gap-2"}>
@@ -897,16 +907,16 @@ function WeekendWeekdayChart({ weekendVsWeekday }: { weekendVsWeekday: WrappedSt
                 {weekdayPercent}%
               </ThemedText>
             </View>
-            <ThemedText variant={"footnote"} className={"text-white/70"}>
+            <ThemedText variant={"footnote"} className={"text-secondary-foreground/80"}>
               Weekday
             </ThemedText>
-            <ThemedText variant={"caption2"} className={"text-white/50"}>
+            <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
               {weekendVsWeekday.weekday} visits
             </ThemedText>
           </View>
 
           {/* Divider */}
-          <View className={"h-16 w-px bg-white/20"} />
+          <View className={"h-16 w-px bg-secondary"} />
 
           {/* Weekend */}
           <View className={"flex-1 items-center gap-2"}>
@@ -919,10 +929,10 @@ function WeekendWeekdayChart({ weekendVsWeekday }: { weekendVsWeekday: WrappedSt
                 {weekendPercent}%
               </ThemedText>
             </View>
-            <ThemedText variant={"footnote"} className={"text-white/70"}>
+            <ThemedText variant={"footnote"} className={"text-secondary-foreground/80"}>
               Weekend
             </ThemedText>
-            <ThemedText variant={"caption2"} className={"text-white/50"}>
+            <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
               {weekendVsWeekday.weekend} visits
             </ThemedText>
           </View>
@@ -944,21 +954,21 @@ function PhotoStatsSection({ photoStats }: { photoStats: WrappedStats["photoStat
 
       <View className={"flex-row gap-3"}>
         {/* Total Photos */}
-        <View className={"flex-1 bg-white/5 border border-white/10 rounded-2xl p-4 items-center gap-1"}>
+        <View className={"flex-1 bg-card border border-border rounded-2xl p-4 items-center gap-1"}>
           <ThemedText variant={"largeTitle"} className={"text-cyan-400 font-bold"}>
             {photoStats.totalPhotos.toLocaleString()}
           </ThemedText>
-          <ThemedText variant={"footnote"} className={"text-white/60 text-center"}>
+          <ThemedText variant={"footnote"} className={"text-muted-foreground text-center"}>
             Total Photos
           </ThemedText>
         </View>
 
         {/* Average Per Visit */}
-        <View className={"flex-1 bg-white/5 border border-white/10 rounded-2xl p-4 items-center gap-1"}>
+        <View className={"flex-1 bg-card border border-border rounded-2xl p-4 items-center gap-1"}>
           <ThemedText variant={"largeTitle"} className={"text-pink-400 font-bold"}>
             {photoStats.averagePerVisit}
           </ThemedText>
-          <ThemedText variant={"footnote"} className={"text-white/60 text-center"}>
+          <ThemedText variant={"footnote"} className={"text-muted-foreground text-center"}>
             Avg Per Visit
           </ThemedText>
         </View>
@@ -968,16 +978,16 @@ function PhotoStatsSection({ photoStats }: { photoStats: WrappedStats["photoStat
       {photoStats.mostPhotographedVisit && (
         <Animated.View
           entering={FadeIn.delay(900).duration(300)}
-          className={"bg-white/10 border border-white/10 rounded-2xl p-4 flex-row items-center gap-3"}
+          className={"bg-secondary/70 border border-border rounded-2xl p-4 flex-row items-center gap-3"}
         >
           <View className={"w-10 h-10 rounded-full bg-cyan-500/30 items-center justify-center"}>
             <ThemedText variant={"body"}>🏆</ThemedText>
           </View>
           <View className={"flex-1"}>
-            <ThemedText variant={"footnote"} className={"text-white/60"}>
+            <ThemedText variant={"footnote"} className={"text-muted-foreground"}>
               Most Photographed
             </ThemedText>
-            <ThemedText variant={"body"} className={"text-white font-semibold"} numberOfLines={1}>
+            <ThemedText variant={"body"} className={"text-foreground font-semibold"} numberOfLines={1}>
               {photoStats.mostPhotographedVisit.restaurantName}
             </ThemedText>
             <ThemedText variant={"caption2"} className={"text-cyan-300"}>
@@ -1024,7 +1034,7 @@ function DiningStyleCard({
     <Animated.View entering={FadeInDown.delay(900).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Your Dining Style"} icon={"🎯"} accentClass={"bg-violet-400"} />
 
-      <View className={"bg-white/5 border border-white/10 rounded-2xl p-5 gap-4"}>
+      <View className={"bg-card border border-border rounded-2xl p-5 gap-4"}>
         {/* Title and emoji */}
         <View className={"flex-row items-center gap-3"}>
           <View className={"w-14 h-14 rounded-full bg-violet-500/30 items-center justify-center"}>
@@ -1034,7 +1044,7 @@ function DiningStyleCard({
             <ThemedText variant={"title3"} className={"text-violet-300 font-bold"}>
               {title}
             </ThemedText>
-            <ThemedText variant={"footnote"} className={"text-white/60"}>
+            <ThemedText variant={"footnote"} className={"text-muted-foreground"}>
               {description}
             </ThemedText>
           </View>
@@ -1043,14 +1053,14 @@ function DiningStyleCard({
         {/* Explorer bar */}
         <View className={"gap-2"}>
           <View className={"flex-row justify-between"}>
-            <ThemedText variant={"caption1"} className={"text-white/70"}>
+            <ThemedText variant={"caption1"} className={"text-secondary-foreground/80"}>
               New Places
             </ThemedText>
-            <ThemedText variant={"caption1"} className={"text-white/70"}>
+            <ThemedText variant={"caption1"} className={"text-secondary-foreground/80"}>
               Return Visits
             </ThemedText>
           </View>
-          <View className={"h-3 bg-white/10 rounded-full overflow-hidden flex-row"}>
+          <View className={"h-3 bg-secondary/70 rounded-full overflow-hidden flex-row"}>
             <View className={"h-full bg-violet-400"} style={{ width: `${explorerPercent}%` }} />
             <View className={"h-full bg-rose-400"} style={{ width: `${100 - explorerPercent}%` }} />
           </View>
@@ -1084,14 +1094,14 @@ function GreenStarSection({ greenStarVisits }: { greenStarVisits: number }) {
           <ThemedText variant={"subhead"} className={"text-green-300 font-bold"}>
             Eco-Conscious Diner
           </ThemedText>
-          <ThemedText variant={"footnote"} className={"text-white/70"}>
+          <ThemedText variant={"footnote"} className={"text-secondary-foreground/80"}>
             You visited{" "}
             <ThemedText variant={"footnote"} className={"text-green-400 font-semibold"}>
               {greenStarVisits} Michelin Green Star
             </ThemedText>{" "}
             {greenStarVisits === 1 ? "restaurant" : "restaurants"}
           </ThemedText>
-          <ThemedText variant={"caption2"} className={"text-white/50 mt-1"}>
+          <ThemedText variant={"caption2"} className={"text-muted-foreground/80 mt-1"}>
             Supporting sustainable gastronomy
           </ThemedText>
         </View>
@@ -1132,10 +1142,10 @@ function SectionHeading({ title, icon, accentClass }: { title: string; icon: str
     <View className={"flex-row items-center gap-3"}>
       <View className={`w-1.5 h-5 rounded-full ${accentClass}`} />
       <View className={"flex-row items-center gap-2"}>
-        <View className={"w-7 h-7 rounded-full bg-white/10 border border-white/10 items-center justify-center"}>
+        <View className={"w-7 h-7 rounded-full bg-secondary/70 border border-border items-center justify-center"}>
           <ThemedText variant={"footnote"}>{icon}</ThemedText>
         </View>
-        <ThemedText variant={"title2"} className={"text-white font-bold"}>
+        <ThemedText variant={"title2"} className={"text-foreground font-semibold"}>
           {title}
         </ThemedText>
       </View>
@@ -1349,14 +1359,14 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
 function EmptyState() {
   return (
     <View className={"flex-1 items-center justify-center gap-6 px-8"}>
-      <View className={"w-24 h-24 rounded-full bg-white/10 border border-white/10 items-center justify-center"}>
+      <View className={"w-24 h-24 rounded-full bg-secondary/70 border border-border items-center justify-center"}>
         <ThemedText variant={"largeTitle"}>🍽️</ThemedText>
       </View>
       <View className={"gap-2 items-center"}>
-        <ThemedText variant={"title2"} className={"text-white font-bold text-center"}>
+        <ThemedText variant={"title2"} className={"text-foreground font-semibold text-center"}>
           No Dining Data Yet
         </ThemedText>
-        <ThemedText variant={"body"} className={"text-white/60 text-center"}>
+        <ThemedText variant={"body"} className={"text-muted-foreground text-center"}>
           Start confirming restaurant visits to see your personalized dining stats!
         </ThemedText>
       </View>
@@ -1365,9 +1375,11 @@ function EmptyState() {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           router.push("/");
         }}
-        className={"rounded-full px-6 py-3 mt-4 overflow-hidden border border-white/20 bg-white/20"}
+        className={
+          "h-11 rounded-2xl px-5 mt-4 overflow-hidden border border-primary/20 bg-primary/15 items-center justify-center"
+        }
       >
-        <ThemedText variant={"body"} className={"text-white font-semibold"}>
+        <ThemedText variant={"subhead"} className={"text-primary font-semibold"}>
           Go to Restaurants
         </ThemedText>
       </Pressable>
@@ -1411,10 +1423,13 @@ export default function StatsScreen() {
 
   return (
     <ScrollView
-      className={"flex-1"}
+      className={"flex-1 bg-background"}
+      contentInsetAdjustmentBehavior={"automatic"}
+      keyboardDismissMode={"interactive"}
+      showsVerticalScrollIndicator={false}
       contentContainerStyle={{
         paddingTop: 0,
-        paddingBottom: insets.bottom,
+        paddingBottom: insets.bottom + 24,
         paddingHorizontal: 16,
       }}
     >
@@ -1422,10 +1437,10 @@ export default function StatsScreen() {
       <Animated.View entering={FadeInDown.duration(500)} className={"gap-3 mb-5"}>
         <View className={"flex-row items-start justify-between gap-3"}>
           <View className={"flex-1 gap-2"}>
-            <ThemedText variant={"largeTitle"} className={"text-white font-bold"}>
+            <ThemedText variant={"largeTitle"} className={"font-bold"}>
               Stats
             </ThemedText>
-            <ThemedText variant={"body"} className={"text-white/60"}>
+            <ThemedText variant={"body"} className={"text-muted-foreground"}>
               {headerSubtitle}
             </ThemedText>
           </View>
@@ -1434,7 +1449,12 @@ export default function StatsScreen() {
       {/* Year Tabs */}
       {availableYears.length > 0 && (
         <Animated.View entering={FadeIn.delay(200).duration(400)} className={"mb-6"}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 6 }}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentInsetAdjustmentBehavior={"never"}
+            contentContainerStyle={{ paddingVertical: 2 }}
+          >
             <YearTab
               label={"All Time"}
               isActive={selectedYear === null}
@@ -1456,7 +1476,7 @@ export default function StatsScreen() {
       {/* Content */}
       {isLoading ? (
         <View className={"flex-1 items-center justify-center"}>
-          <ThemedText variant={"body"} className={"text-white/60"}>
+          <ThemedText variant={"body"} className={"text-muted-foreground"}>
             Loading your stats...
           </ThemedText>
         </View>

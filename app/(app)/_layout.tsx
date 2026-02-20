@@ -6,7 +6,17 @@ import { useHasCompletedInitialScan, useHasHydrated } from "@/store";
 import { DarkTheme } from "@react-navigation/native";
 
 export default function RootLayoutNav() {
-  const navigationTheme = DarkTheme;
+  const navigationTheme = {
+    ...DarkTheme,
+    colors: {
+      ...DarkTheme.colors,
+      primary: "#0A84FF",
+      background: "#000000",
+      card: "#000000",
+      text: "#FFFFFF",
+      border: "#3A3A3C",
+    },
+  };
   const hasHydrated = useHasHydrated();
   const hasCompletedInitialScan = useHasCompletedInitialScan();
 
@@ -14,7 +24,7 @@ export default function RootLayoutNav() {
   if (!hasHydrated) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" }}>
-        <ActivityIndicator size={"large"} color={"#f97316"} />
+        <ActivityIndicator size={"large"} color={"#0A84FF"} />
       </View>
     );
   }
@@ -28,17 +38,19 @@ export default function RootLayoutNav() {
       initialRouteName={hasCompletedInitialScan ? "(tabs)" : "scan"}
       screenOptions={{
         headerBackButtonDisplayMode: "minimal",
+        headerShadowVisible: false,
         headerTransparent: Platform.select({
           ios: true,
           android: false,
         }),
+        headerBlurEffect: Platform.OS === "ios" ? "systemUltraThinMaterialDark" : undefined,
         headerStyle: {
           backgroundColor: Platform.select({
             ios: "rgba(0, 0, 0, 0.85)",
             android: navigationTheme.colors.background,
           }),
         },
-        headerTintColor: navigationTheme.colors.text,
+        headerTintColor: navigationTheme.colors.primary,
         headerTitleStyle: {
           color: navigationTheme.colors.text,
           fontWeight: "600",
@@ -46,13 +58,12 @@ export default function RootLayoutNav() {
         headerLargeTitleStyle: {
           fontWeight: "700",
         },
-        headerTitle: "",
         animation: "slide_from_right",
         animationDuration: 250,
         gestureEnabled: true,
         fullScreenGestureEnabled: true,
         contentStyle: {
-          backgroundColor: "transparent",
+          backgroundColor: navigationTheme.colors.background,
         },
       }}
     >
@@ -61,7 +72,7 @@ export default function RootLayoutNav() {
         options={{
           headerShown: false,
           contentStyle: {
-            backgroundColor: "transparent",
+            backgroundColor: navigationTheme.colors.background,
           },
         }}
       />

@@ -24,6 +24,7 @@ const globalToUse = {
 };
 
 const ignores = [
+  ".agents/**/*",
   ".claude/**/*",
   ".cursor/**/*",
   ".expo/**/*",

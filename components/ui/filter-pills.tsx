@@ -1,7 +1,7 @@
 import { cn } from "@/utils/cn";
 import * as Haptics from "expo-haptics";
 import React from "react";
-import { Pressable, ScrollView } from "react-native";
+import { Platform, Pressable, ScrollView } from "react-native";
 import Animated, { LinearTransition, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { ThemedText } from "../themed-text";
 
@@ -28,6 +28,8 @@ function FilterPill<T extends string>({
   isSelected: boolean;
   onPress: () => void;
 }) {
+  "use no memo";
+
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -43,7 +45,9 @@ function FilterPill<T extends string>({
   };
 
   const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (Platform.OS === "ios") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
     onPress();
   };
 
@@ -56,9 +60,15 @@ function FilterPill<T extends string>({
       onPress={handlePress}
       layout={LinearTransition.duration(200)}
       style={animatedStyle}
-      className={cn("px-4 py-2 rounded-full", isSelected ? "bg-primary" : "bg-card")}
+      className={cn(
+        "h-9 px-3.5 rounded-full border items-center justify-center",
+        isSelected ? "bg-primary/15 border-primary/30" : "bg-secondary/70 border-border",
+      )}
     >
-      <ThemedText className={cn("text-sm font-medium", isSelected ? "text-primary-foreground" : "text-foreground")}>
+      <ThemedText
+        variant={"footnote"}
+        className={cn(isSelected ? "text-primary font-semibold" : "text-secondary-foreground")}
+      >
         {label}
       </ThemedText>
     </AnimatedPressable>
@@ -70,7 +80,7 @@ export function FilterPills<T extends string>({ options, value, onChange }: Filt
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerClassName={"gap-2 px-4"}
+      contentContainerClassName={"gap-2 px-4 py-0.5"}
       className={"-mx-4"}
     >
       {options.map((option) => (

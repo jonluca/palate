@@ -45,7 +45,9 @@ function ReviewCaughtUpCard() {
     <Card className={"border border-green-500/20 bg-green-500/10"}>
       <View className={"p-5 gap-3"}>
         <View className={"flex-row items-center gap-3"}>
-          <View className={"w-10 h-10 rounded-2xl bg-green-500/20 items-center justify-center"}>
+          <View
+            className={"w-10 h-10 rounded-2xl bg-green-500/15 border border-green-500/20 items-center justify-center"}
+          >
             <IconSymbol name={"checkmark.circle.fill"} size={20} color={"#22c55e"} />
           </View>
           <View className={"flex-1"}>
@@ -65,11 +67,11 @@ function ReviewCaughtUpCard() {
 
 function NoManualReviewLeftCard({ onGoToExact }: { onGoToExact: () => void }) {
   return (
-    <Card className={"border border-border bg-card"}>
+    <Card>
       <View className={"p-5 gap-3"}>
         <View className={"flex-row items-center gap-3"}>
-          <View className={"w-10 h-10 rounded-2xl bg-primary/10 items-center justify-center"}>
-            <IconSymbol name={"sparkles"} size={18} color={"#999"} />
+          <View className={"w-10 h-10 rounded-2xl bg-primary/10 border border-primary/15 items-center justify-center"}>
+            <IconSymbol name={"sparkles"} size={18} color={"#0A84FF"} />
           </View>
           <View className={"flex-1"}>
             <ThemedText className={"font-semibold"}>Nothing to manually review</ThemedText>
@@ -87,6 +89,8 @@ function NoManualReviewLeftCard({ onGoToExact }: { onGoToExact: () => void }) {
 }
 
 export default function ReviewScreen() {
+  "use no memo";
+
   const [refreshing, setRefreshing] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
   const [activeTab, setActiveTab] = useState<ReviewTab>("all");
@@ -142,11 +146,13 @@ export default function ReviewScreen() {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             onToggle();
           }}
-          className={`px-3 py-1.5 rounded-full ${value ? "bg-primary" : "bg-secondary/30"}`}
+          className={`h-8 px-3 rounded-full border items-center justify-center ${
+            value ? "bg-primary/15 border-primary/25" : "bg-secondary/70 border-border"
+          }`}
         >
           <ThemedText
             variant={"footnote"}
-            className={`font-medium ${value ? "text-primary-foreground" : "text-foreground"}`}
+            className={`font-semibold ${value ? "text-primary" : "text-secondary-foreground"}`}
           >
             {label}
           </ThemedText>
@@ -310,7 +316,7 @@ export default function ReviewScreen() {
         {/* Filters */}
         {reviewableVisits.length > 0 && (
           <Pressable
-            className={`bg-card rounded-xl px-3 py-2`}
+            className={"bg-card rounded-2xl border border-border px-3 py-2.5"}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setFiltersCollapsed(!filtersCollapsed);
@@ -318,12 +324,12 @@ export default function ReviewScreen() {
           >
             <View className={"flex-row items-center justify-between gap-2"}>
               <View className={"flex-row items-center gap-2 flex-1"}>
-                <IconSymbol name={"line.3.horizontal.decrease"} size={14} color={"#999"} />
+                <IconSymbol name={"line.3.horizontal.decrease"} size={14} color={"#8E8E93"} />
                 <ThemedText variant={"footnote"} color={"secondary"} numberOfLines={1} className={"flex-1"}>
                   Filters
                 </ThemedText>
               </View>
-              <IconSymbol name={filtersCollapsed ? "chevron.down" : "chevron.up"} size={14} color={"#999"} />
+              <IconSymbol name={filtersCollapsed ? "chevron.down" : "chevron.up"} size={14} color={"#8E8E93"} />
             </View>
 
             {!filtersCollapsed && (
@@ -409,7 +415,7 @@ export default function ReviewScreen() {
   );
 
   const refreshControl = useMemo(
-    () => <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={"#999"} colors={["#999"]} />,
+    () => <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={"#8E8E93"} colors={["#8E8E93"]} />,
     [refreshing, onRefresh],
   );
 
@@ -419,7 +425,7 @@ export default function ReviewScreen() {
         {/* Tab Bar */}
         {hasTabs && (
           <View className={"px-4 pt-4 pb-2"}>
-            <View className={"flex-row gap-2 bg-background/50 p-1 rounded-2xl"}>
+            <View className={"flex-row gap-1 bg-secondary/60 border border-border p-1 rounded-2xl"}>
               <TabButton
                 label={"All"}
                 count={filteredReviewableVisits.length}

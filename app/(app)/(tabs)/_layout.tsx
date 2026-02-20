@@ -8,6 +8,7 @@ import { queryClient } from "@/app/_layout";
 export default function TabLayout() {
   const pathname = usePathname();
   const isInitialMount = useRef(true);
+  const tabTintColor = "#0A84FF";
 
   useEffect(() => {
     // Skip the initial mount to avoid unnecessary refetch on app start
@@ -21,11 +22,11 @@ export default function TabLayout() {
   }, [pathname]);
 
   return (
-    <NativeTabs minimizeBehavior={"onScrollDown"} tintColor={"#f97316"} backgroundColor={"transparent"}>
+    <NativeTabs minimizeBehavior={"onScrollDown"} tintColor={tabTintColor} backgroundColor={"transparent"}>
       <NativeTabs.Trigger name={"index"}>
         <Label>Restaurants</Label>
         {Platform.select({
-          ios: <Icon sf={"fork.knife"} />,
+          ios: <Icon sf={{ default: "fork.knife", selected: "fork.knife" }} />,
           android: <Icon src={<VectorIcon family={MaterialIcons} name={"restaurant"} />} />,
         })}
       </NativeTabs.Trigger>
@@ -33,7 +34,7 @@ export default function TabLayout() {
       <NativeTabs.Trigger name={"review"}>
         <Label>Review</Label>
         {Platform.select({
-          ios: <Icon sf={"checkmark.circle"} />,
+          ios: <Icon sf={{ default: "checkmark.circle", selected: "checkmark.circle.fill" }} />,
           android: <Icon src={<VectorIcon family={MaterialIcons} name={"check-circle"} />} />,
         })}
       </NativeTabs.Trigger>
@@ -41,7 +42,7 @@ export default function TabLayout() {
       <NativeTabs.Trigger name={"stats"}>
         <Label>Stats</Label>
         {Platform.select({
-          ios: <Icon sf={"chart.bar.fill"} />,
+          ios: <Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />,
           android: <Icon src={<VectorIcon family={MaterialIcons} name={"bar-chart"} />} />,
         })}
       </NativeTabs.Trigger>
@@ -49,7 +50,7 @@ export default function TabLayout() {
       <NativeTabs.Trigger name={"settings"}>
         <Label>Settings</Label>
         {Platform.select({
-          ios: <Icon sf={"gearshape"} />,
+          ios: <Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />,
           android: <Icon src={<VectorIcon family={MaterialIcons} name={"settings"} />} />,
         })}
       </NativeTabs.Trigger>

@@ -15,10 +15,14 @@ interface StatRowProps {
 export function StatRow({ label, value, valueColor, delay = 0, animated = true }: StatRowProps) {
   const content = (
     <>
-      <ThemedText variant={"subhead"} color={"secondary"}>
+      <ThemedText variant={"subhead"} color={"tertiary"}>
         {label}
       </ThemedText>
-      <ThemedText variant={"subhead"} className={cn("font-semibold", valueColor)}>
+      <ThemedText
+        variant={"subhead"}
+        className={cn("font-semibold", valueColor)}
+        style={{ fontVariant: ["tabular-nums"] }}
+      >
         {typeof value === "number" ? value.toLocaleString() : value}
       </ThemedText>
     </>
@@ -29,20 +33,20 @@ export function StatRow({ label, value, valueColor, delay = 0, animated = true }
       <Animated.View
         entering={FadeIn.delay(delay).duration(300)}
         layout={LinearTransition}
-        className={"flex-row justify-between py-1"}
+        className={"flex-row justify-between items-center py-2"}
       >
         {content}
       </Animated.View>
     );
   }
 
-  return <View className={"flex-row justify-between py-1"}>{content}</View>;
+  return <View className={"flex-row justify-between items-center py-2"}>{content}</View>;
 }
 
 export function StatDivider({ delay = 0, animated = true }: { delay?: number; animated?: boolean }) {
   if (animated) {
-    return <Animated.View entering={FadeIn.delay(delay).duration(200)} className={"h-px bg-border my-2"} />;
+    return <Animated.View entering={FadeIn.delay(delay).duration(200)} className={"h-px bg-border my-3"} />;
   }
 
-  return <View className={"h-px bg-border my-2"} />;
+  return <View className={"h-px bg-border my-3"} />;
 }

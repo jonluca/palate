@@ -21,6 +21,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { IconSymbol } from "@/components/icon-symbol";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
+import { cn } from "@/utils/cn";
 
 type SortOption = "recent" | "confirmed" | "name" | "visits";
 type StarFilter = "all" | "1star" | "2star" | "3star" | "lost" | "gained";
@@ -96,9 +97,9 @@ function PhotoPreview({ photos }: { photos: string[] }) {
   }
 
   return (
-    <View className={"flex-row h-32 overflow-hidden"}>
-      {photos.slice(0, 3).map((uri, i) => (
-        <View key={i} className={"flex-1"}>
+    <View className={"flex-row h-32 overflow-hidden border-b border-border"}>
+      {photos.slice(0, 3).map((uri) => (
+        <View key={uri} className={"flex-1"}>
           <Image recyclingKey={uri} source={{ uri }} style={{ width: "100%", height: 128 }} contentFit={"cover"} />
         </View>
       ))}
@@ -118,17 +119,21 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
 
   return (
     <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>
-      <Pressable onPress={handlePress}>
+      <Pressable onPress={handlePress} className={"rounded-2xl"}>
         <Card animated={false}>
           <PhotoPreview photos={restaurant.previewPhotos} />
-          <View className={hasPhotos ? "p-3 gap-1" : "p-4 gap-2"}>
+          <View className={hasPhotos ? "p-3.5 gap-1.5" : "p-4 gap-2"}>
             <View className={"flex-row items-start justify-between"}>
               <View className={"flex-1 gap-0.5"}>
                 <View className={"flex-row items-center gap-2"}>
                   <ThemedText variant={"heading"} className={"font-semibold flex-shrink"} numberOfLines={1}>
                     {restaurant.name}
                   </ThemedText>
-                  {currentAwardDisplay && <ThemedText variant={"subhead"}>{currentAwardDisplay}</ThemedText>}
+                  {currentAwardDisplay && (
+                    <ThemedText variant={"subhead"} className={"text-amber-300"}>
+                      {currentAwardDisplay}
+                    </ThemedText>
+                  )}
                 </View>
                 <View className={"flex-row items-center gap-1"}>
                   <ThemedText variant={"footnote"} color={"tertiary"}>
@@ -141,14 +146,25 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
                   )}
                 </View>
               </View>
-              <View className={"flex-row items-center gap-1 ml-3"}>
-                <ThemedText variant={"subhead"} color={"secondary"} className={"font-medium"}>
-                  {restaurant.visitCount.toLocaleString()}
-                </ThemedText>
-                <ThemedText variant={"footnote"} color={"tertiary"}>
-                  {restaurant.visitCount === 1 ? "visit" : "visits"}
-                </ThemedText>
-                <IconSymbol name={"chevron.right"} size={14} color={"gray"} />
+              <View className={"items-end gap-2 ml-3"}>
+                <View
+                  className={"px-2 py-1 rounded-full bg-secondary/80 border border-border flex-row items-center gap-1"}
+                >
+                  <ThemedText
+                    variant={"caption1"}
+                    color={"secondary"}
+                    className={"font-semibold"}
+                    style={{ fontVariant: ["tabular-nums"] }}
+                  >
+                    {restaurant.visitCount.toLocaleString()}
+                  </ThemedText>
+                  <ThemedText variant={"caption2"} color={"tertiary"}>
+                    {restaurant.visitCount === 1 ? "visit" : "visits"}
+                  </ThemedText>
+                </View>
+                <View className={"w-7 h-7 rounded-full bg-secondary/70 items-center justify-center"}>
+                  <IconSymbol name={"chevron.right"} size={12} color={"#8E8E93"} weight={"semibold"} />
+                </View>
               </View>
             </View>
           </View>
@@ -168,7 +184,7 @@ function MichelinRestaurantCard({ restaurant, index }: { restaurant: MichelinRes
 
   return (
     <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>
-      <Pressable onPress={handlePress}>
+      <Pressable onPress={handlePress} className={"rounded-2xl"}>
         <Card animated={false}>
           <View className={"p-4 gap-2"}>
             <View className={"flex-row items-start justify-between"}>
@@ -177,7 +193,11 @@ function MichelinRestaurantCard({ restaurant, index }: { restaurant: MichelinRes
                   <ThemedText variant={"heading"} className={"font-semibold flex-shrink"} numberOfLines={1}>
                     {restaurant.name}
                   </ThemedText>
-                  {awardDisplay && <ThemedText variant={"subhead"}>{awardDisplay}</ThemedText>}
+                  {awardDisplay && (
+                    <ThemedText variant={"subhead"} className={"text-amber-300"}>
+                      {awardDisplay}
+                    </ThemedText>
+                  )}
                 </View>
                 <View className={"flex-row items-center gap-2 flex-wrap"}>
                   {restaurant.cuisine ? (
@@ -192,11 +212,13 @@ function MichelinRestaurantCard({ restaurant, index }: { restaurant: MichelinRes
                   </ThemedText>
                 ) : null}
               </View>
-              <View className={"flex-row items-center gap-1 ml-3"}>
-                <ThemedText variant={"footnote"} color={"tertiary"}>
+              <View className={"flex-row items-center gap-2 ml-3"}>
+                <ThemedText variant={"caption1"} color={"tertiary"}>
                   Not visited
                 </ThemedText>
-                <IconSymbol name={"chevron.right"} size={14} color={"gray"} />
+                <View className={"w-7 h-7 rounded-full bg-secondary/70 items-center justify-center"}>
+                  <IconSymbol name={"chevron.right"} size={12} color={"#8E8E93"} weight={"semibold"} />
+                </View>
               </View>
             </View>
           </View>
@@ -229,6 +251,8 @@ function SearchBar({
   filtersExpanded: boolean;
   onToggleFilters: () => void;
 }) {
+  "use no memo";
+
   const rotation = useSharedValue(0);
 
   React.useEffect(() => {
@@ -241,15 +265,15 @@ function SearchBar({
 
   return (
     <View className={"flex-row items-center gap-2"}>
-      <View className={"flex-1 flex-row items-center bg-card rounded-xl px-3 py-2 gap-2"}>
-        <IconSymbol name={"magnifyingglass"} size={18} color={"gray"} />
+      <View className={"flex-1 h-11 flex-row items-center bg-secondary/70 border border-border rounded-2xl px-3 gap-2"}>
+        <IconSymbol name={"magnifyingglass"} size={16} color={"#8E8E93"} />
         <TextInput
           value={value}
           onChangeText={onChangeText}
           placeholder={"Search restaurants..."}
-          placeholderTextColor={"#888"}
-          className={"flex-1 text-foreground text-base"}
-          style={{ height: 24 }}
+          placeholderTextColor={"#8E8E93"}
+          className={"flex-1 text-foreground"}
+          style={{ height: 22, fontSize: 16 }}
           autoCapitalize={"none"}
           autoCorrect={false}
           clearButtonMode={"never"}
@@ -262,8 +286,9 @@ function SearchBar({
                 onClear();
               }}
               hitSlop={8}
+              className={"w-6 h-6 rounded-full items-center justify-center"}
             >
-              <IconSymbol name={"xmark.circle.fill"} size={18} color={"gray"} />
+              <IconSymbol name={"xmark.circle.fill"} size={18} color={"#8E8E93"} />
             </Pressable>
           </Animated.View>
         )}
@@ -274,10 +299,13 @@ function SearchBar({
           onToggleFilters();
         }}
         hitSlop={8}
-        className={"p-2"}
+        className={cn(
+          "w-11 h-11 rounded-2xl border items-center justify-center",
+          filtersExpanded ? "bg-primary/15 border-primary/25" : "bg-secondary/70 border-border",
+        )}
       >
         <Animated.View style={arrowStyle}>
-          <IconSymbol name={"chevron.down"} size={18} color={"gray"} />
+          <IconSymbol name={"chevron.down"} size={16} color={filtersExpanded ? "#0A84FF" : "#8E8E93"} />
         </Animated.View>
       </Pressable>
     </View>
@@ -519,7 +547,7 @@ export default function RestaurantsScreen() {
             <ThemedText
               variant={"footnote"}
               color={"tertiary"}
-              className={"uppercase font-semibold tracking-wide px-1"}
+              className={"uppercase font-semibold tracking-wide px-1 pt-1"}
             >
               My Restaurants ({filteredAndSortedRestaurants.length})
             </ThemedText>
@@ -545,7 +573,7 @@ export default function RestaurantsScreen() {
           }}
           getItemType={(item) => item.type}
           drawDistance={250}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={"#8E8E93"} />}
           contentContainerStyle={{
             paddingTop: restaurants.length > 0 ? 0 : insets.top + 16,
             paddingBottom: insets.bottom + 32,
