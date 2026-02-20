@@ -227,6 +227,13 @@ export interface WrappedStats {
   averageVisitsPerMonth: number;
   // Geographic stats - parsed from michelin_restaurants.location
   topLocations: Array<{ location: string; country: string; city: string; visits: number }>;
+  mapPoints: Array<{
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    visits: number;
+  }>;
   uniqueCountries: number;
   uniqueCities: number;
   // Dining time patterns

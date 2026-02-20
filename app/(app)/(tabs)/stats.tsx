@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { View, ScrollView, Pressable } from "react-native";
+import { View, ScrollView, Pressable, Platform } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { AppleMaps, GoogleMaps } from "expo-maps";
 import Animated, { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
 import { useWrappedStats, type WrappedStats } from "@/hooks/queries";
@@ -35,6 +36,71 @@ function formatPercent(value: number, decimals = 0): string {
     return "—";
   }
   return `${(value * 100).toFixed(decimals)}%`;
+}
+
+function getMapZoomForSpan(span: number): number {
+  if (span > 100) {
+    return 1.5;
+  }
+  if (span > 60) {
+    return 2.2;
+  }
+  if (span > 30) {
+    return 3;
+  }
+  if (span > 15) {
+    return 4;
+  }
+  if (span > 8) {
+    return 5;
+  }
+  if (span > 4) {
+    return 6;
+  }
+  if (span > 2) {
+    return 7;
+  }
+  if (span > 1) {
+    return 8;
+  }
+  if (span > 0.5) {
+    return 9;
+  }
+  if (span > 0.2) {
+    return 10;
+  }
+  return 11.5;
+}
+
+function getMapCameraPosition(points: WrappedStats["mapPoints"]) {
+  if (points.length === 0) {
+    return undefined;
+  }
+
+  const totalWeight = points.reduce((sum, point) => sum + Math.max(point.visits, 1), 0);
+  const centerLat =
+    totalWeight > 0
+      ? points.reduce((sum, point) => sum + point.latitude * Math.max(point.visits, 1), 0) / totalWeight
+      : points.reduce((sum, point) => sum + point.latitude, 0) / points.length;
+  const centerLon =
+    totalWeight > 0
+      ? points.reduce((sum, point) => sum + point.longitude * Math.max(point.visits, 1), 0) / totalWeight
+      : points.reduce((sum, point) => sum + point.longitude, 0) / points.length;
+
+  const latitudes = points.map((point) => point.latitude);
+  const longitudes = points.map((point) => point.longitude);
+  const latSpan = Math.max(...latitudes) - Math.min(...latitudes);
+  const lonSpan = Math.max(...longitudes) - Math.min(...longitudes);
+  const span = Math.max(latSpan, lonSpan);
+  const zoom = points.length === 1 ? 12 : getMapZoomForSpan(span);
+
+  return {
+    coordinates: {
+      latitude: centerLat,
+      longitude: centerLon,
+    },
+    zoom,
+  };
 }
 
 // Year Tab Component
@@ -756,6 +822,109 @@ function FunFactCard({
 }
 
 // Location Breakdown Component - shows top cities/countries visited
+function DiningMapSection({
+  points,
+  selectedYear,
+}: {
+  points: WrappedStats["mapPoints"];
+  selectedYear: number | null;
+}) {
+  const topPoints = useMemo(() => points.slice(0, 24), [points]);
+  const cameraPosition = useMemo(() => getMapCameraPosition(topPoints), [topPoints]);
+
+  const appleMarkers = useMemo<AppleMaps.Marker[]>(
+    () =>
+      topPoints.map((point) => ({
+        id: point.id,
+        coordinates: { latitude: point.latitude, longitude: point.longitude },
+        title: point.name,
+        tintColor: point.visits > 2 ? "#34d399" : "#f59e0b",
+        systemImage: point.visits > 2 ? "fork.knife.circle.fill" : "fork.knife",
+      })),
+    [topPoints],
+  );
+
+  const googleMarkers = useMemo<GoogleMaps.Marker[]>(
+    () =>
+      topPoints.map((point) => ({
+        id: point.id,
+        coordinates: { latitude: point.latitude, longitude: point.longitude },
+        title: point.name,
+        snippet: `${point.visits.toLocaleString()} ${point.visits === 1 ? "visit" : "visits"}`,
+      })),
+    [topPoints],
+  );
+
+  if (points.length === 0) {
+    return null;
+  }
+
+  return (
+    <Animated.View entering={FadeInDown.delay(420).duration(400)} className={"gap-4"}>
+      <SectionHeading title={"Dining Map"} icon={"🗺️"} accentClass={"bg-emerald-300"} />
+
+      <View className={"bg-card rounded-2xl p-3 gap-3"}>
+        <View className={"flex-row items-center justify-between gap-3 px-1"}>
+          <View className={"flex-1"}>
+            <ThemedText variant={"footnote"} className={"text-muted-foreground"} numberOfLines={2}>
+              {selectedYear
+                ? `Top visited restaurants in ${selectedYear}`
+                : "Top visited restaurants across your confirmed visits"}
+            </ThemedText>
+          </View>
+          <View className={"rounded-full px-2.5 py-1 bg-emerald-500/15 border border-emerald-500/25"}>
+            <ThemedText variant={"caption2"} className={"text-emerald-300 font-semibold"}>
+              {topPoints.length} pins
+            </ThemedText>
+          </View>
+        </View>
+
+        <View
+          className={"rounded-2xl overflow-hidden border bg-secondary/40"}
+          style={{
+            height: 220,
+            borderCurve: "continuous",
+            borderColor: "rgba(52, 211, 153, 0.18)",
+          }}
+        >
+          {cameraPosition && Platform.OS === "ios" ? (
+            <AppleMaps.View
+              style={{ flex: 1 }}
+              cameraPosition={cameraPosition}
+              markers={appleMarkers}
+              uiSettings={{
+                compassEnabled: false,
+                myLocationButtonEnabled: false,
+                scaleBarEnabled: false,
+                togglePitchEnabled: false,
+              }}
+            />
+          ) : cameraPosition && Platform.OS === "android" ? (
+            <GoogleMaps.View
+              style={{ flex: 1 }}
+              cameraPosition={cameraPosition}
+              markers={googleMarkers}
+              uiSettings={{
+                compassEnabled: false,
+                mapToolbarEnabled: false,
+                myLocationButtonEnabled: false,
+                scaleBarEnabled: false,
+                zoomControlsEnabled: false,
+              }}
+            />
+          ) : (
+            <View className={"flex-1 items-center justify-center px-6"}>
+              <ThemedText variant={"footnote"} className={"text-muted-foreground text-center"}>
+                Map preview is available on iOS and Android builds.
+              </ThemedText>
+            </View>
+          )}
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
 function LocationBreakdown({ locations }: { locations: WrappedStats["topLocations"] }) {
   if (locations.length === 0) {
     return null;
@@ -1219,6 +1388,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
   const hasCuisineData = stats.topCuisines.length > 0;
   const hasMonthlyData = stats.monthlyVisits.length > 0;
   const hasLocationData = stats.topLocations.length > 0;
+  const hasMapData = stats.mapPoints.length > 0;
   const hasPhotoData = stats.photoStats.totalPhotos > 0;
   const hasMealTimeData =
     stats.mealTimeBreakdown.breakfast +
@@ -1289,6 +1459,9 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
 
       {/* Michelin Stars */}
       {hasMichelinData && <StarBreakdown stats={stats.michelinStats} />}
+
+      {/* Geographic Breakdown */}
+      {hasMapData && <DiningMapSection points={stats.mapPoints} selectedYear={selectedYear} />}
 
       {/* Geographic Breakdown */}
       {hasLocationData && <LocationBreakdown locations={stats.topLocations} />}

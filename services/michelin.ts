@@ -222,70 +222,110 @@ export interface MichelinRestaurantDetails {
 /**
  * Get the award for a restaurant at a specific date.
  * Uses the award from the year of the visit, or the closest previous year if not available.
+ * Accepts either a single Michelin ID or multiple IDs for the same date.
  * @param michelinId - The michelin ID in format "michelin-{dbId}"
  * @param timestamp - Unix timestamp in milliseconds of the visit date
- * @returns The award string at that time, or null if not found
+ * @returns The award string at that time, or null if not found.
+ * For array input, returns a map of Michelin ID -> award string/null.
  */
-export async function getAwardForDate(michelinId: string, timestamp: number): Promise<string | null> {
+export async function getAwardForDate(michelinId: string, timestamp: number): Promise<string | null>;
+export async function getAwardForDate(michelinIds: string[], timestamp: number): Promise<Record<string, string | null>>;
+export async function getAwardForDate(
+  michelinIdOrIds: string | string[],
+  timestamp: number,
+): Promise<string | null | Record<string, string | null>> {
   try {
-    // Extract the numeric ID from "michelin-123" format
-    const match = michelinId.match(/^michelin-(\d+)$/);
-    if (!match) {
-      return null;
+    const isBatch = Array.isArray(michelinIdOrIds);
+    const michelinIds = isBatch ? michelinIdOrIds : [michelinIdOrIds];
+    const result: Record<string, string | null> = Object.fromEntries(michelinIds.map((id) => [id, null]));
+
+    const parsedIds: Array<{ michelinId: string; dbId: number }> = [];
+    for (const michelinId of michelinIds) {
+      const match = michelinId.match(/^michelin-(\d+)$/);
+      if (!match) {
+        continue;
+      }
+      parsedIds.push({ michelinId, dbId: parseInt(match[1], 10) });
     }
-    const dbId = parseInt(match[1], 10);
+
+    if (parsedIds.length === 0) {
+      return isBatch ? result : null;
+    }
 
     const db = await getMichelinDatabase();
     const visitYear = new Date(timestamp).getFullYear();
+    const uniqueDbIds = [...new Set(parsedIds.map((p) => p.dbId))];
+    const placeholders = uniqueDbIds.map(() => "?").join(", ");
 
-    // Get the award for the visit year, or the closest previous year
-    // This handles cases where a restaurant got new stars after the visit
-    const award = await db.getFirstAsync<{
+    // Load all award history rows for the requested restaurants in one query.
+    // We then select the latest award <= visitYear in JS, with earliest-year fallback.
+    const awardRows = await db.getAllAsync<{
+      restaurant_id: number;
       year: number;
-      distinction: string;
+      distinction: string | null;
       green_star: number | null;
     }>(
-      `SELECT year, distinction, green_star 
-       FROM restaurant_awards 
-       WHERE restaurant_id = ? AND year <= ?
-       ORDER BY year DESC
-       LIMIT 1`,
-      [dbId, visitYear],
+      `SELECT restaurant_id, year, distinction, green_star
+       FROM restaurant_awards
+       WHERE restaurant_id IN (${placeholders})
+       ORDER BY restaurant_id ASC, year ASC`,
+      uniqueDbIds,
     );
 
-    if (!award) {
-      // No historical record found for this year or before
-      // Fall back to getting any award (for restaurants that might have been added later)
-      const anyAward = await db.getFirstAsync<{
-        distinction: string;
+    const awardsByRestaurantId = new Map<
+      number,
+      Array<{
+        year: number;
+        distinction: string | null;
         green_star: number | null;
-      }>(
-        `SELECT distinction, green_star 
-         FROM restaurant_awards 
-         WHERE restaurant_id = ?
-         ORDER BY year ASC
-         LIMIT 1`,
-        [dbId],
-      );
-
-      if (!anyAward) {
-        return null;
+      }>
+    >();
+    for (const row of awardRows) {
+      const rows = awardsByRestaurantId.get(row.restaurant_id);
+      if (rows) {
+        rows.push({ year: row.year, distinction: row.distinction, green_star: row.green_star });
+      } else {
+        awardsByRestaurantId.set(row.restaurant_id, [
+          { year: row.year, distinction: row.distinction, green_star: row.green_star },
+        ]);
       }
+    }
 
-      let awardStr = anyAward.distinction ?? "";
-      if (anyAward.green_star === 1) {
+    const formatAward = (award: { distinction: string | null; green_star: number | null }) => {
+      let awardStr = award.distinction ?? "";
+      if (award.green_star === 1) {
         awardStr = awardStr ? `${awardStr}, Green Star` : "Green Star";
       }
       return awardStr || null;
+    };
+
+    for (const { michelinId, dbId } of parsedIds) {
+      const awards = awardsByRestaurantId.get(dbId);
+      if (!awards || awards.length === 0) {
+        result[michelinId] = null;
+        continue;
+      }
+
+      let selectedAward = awards[0];
+      let foundHistoricalMatch = false;
+      for (const award of awards) {
+        if (award.year > visitYear) {
+          break;
+        }
+        selectedAward = award;
+        foundHistoricalMatch = true;
+      }
+
+      // If nothing exists at or before the visit year, keep earliest award as fallback.
+      result[michelinId] = formatAward(foundHistoricalMatch ? selectedAward : awards[0]);
     }
 
-    let awardStr = award.distinction ?? "";
-    if (award.green_star === 1) {
-      awardStr = awardStr ? `${awardStr}, Green Star` : "Green Star";
-    }
-    return awardStr || null;
+    return isBatch ? result : (result[michelinIds[0]] ?? null);
   } catch (error) {
     console.error("Error getting award for date:", error);
+    if (Array.isArray(michelinIdOrIds)) {
+      return Object.fromEntries(michelinIdOrIds.map((id) => [id, null]));
+    }
     return null;
   }
 }

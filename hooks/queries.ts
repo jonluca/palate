@@ -775,19 +775,40 @@ export function useBatchConfirmVisits() {
         startTime: number;
       }>,
     ) => {
-      const confirmationsWithAwards = await Promise.all(
-        confirmations.map(async (c) => {
-          // Look up the historical award for this restaurant at the time of visit
-          let awardAtVisit: string | null = null;
-          if (c.restaurantId.startsWith("michelin-")) {
-            awardAtVisit = await getAwardForDate(c.restaurantId, c.startTime);
+      const awardAtVisitByIndex = new Map<number, string | null>();
+      const michelinConfirmationsByYear = new Map<
+        number,
+        Array<{ index: number; restaurantId: string; startTime: number }>
+      >();
+
+      for (const [index, c] of confirmations.entries()) {
+        if (!c.restaurantId.startsWith("michelin-")) {
+          continue;
+        }
+        const visitYear = new Date(c.startTime).getFullYear();
+        const yearGroup = michelinConfirmationsByYear.get(visitYear);
+        const entry = { index, restaurantId: c.restaurantId, startTime: c.startTime };
+        if (yearGroup) {
+          yearGroup.push(entry);
+        } else {
+          michelinConfirmationsByYear.set(visitYear, [entry]);
+        }
+      }
+
+      await Promise.all(
+        Array.from(michelinConfirmationsByYear.values()).map(async (yearGroup) => {
+          const restaurantIds = [...new Set(yearGroup.map((c) => c.restaurantId))];
+          const awardsByRestaurantId = await getAwardForDate(restaurantIds, yearGroup[0].startTime);
+          for (const c of yearGroup) {
+            awardAtVisitByIndex.set(c.index, awardsByRestaurantId[c.restaurantId] ?? null);
           }
-          return {
-            ...c,
-            awardAtVisit,
-          };
         }),
       );
+
+      const confirmationsWithAwards = confirmations.map((c, index) => ({
+        ...c,
+        awardAtVisit: awardAtVisitByIndex.get(index) ?? null,
+      }));
       await batchConfirmVisits(confirmationsWithAwards);
 
       let mergeCount = 0;

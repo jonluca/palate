@@ -100,6 +100,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
       ],
       "@react-native-firebase/app",
       "expo-router",
+      "expo-maps",
       [
         "expo-splash-screen",
         {

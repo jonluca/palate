@@ -72,6 +72,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     // New stats queries
     allLocationsData,
     topLocationsData,
+    topMapPointsData,
     greenStarResult,
     mealTimeData,
     weekendWeekdayData,
@@ -236,6 +237,25 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       GROUP BY LOWER(TRIM(m.location))
       ORDER BY visits DESC
       LIMIT 10`,
+    ),
+    // Top restaurant coordinates for map markers
+    database.getAllAsync<{ id: string; name: string; latitude: number; longitude: number; visits: number }>(
+      `SELECT
+        r.id as id,
+        r.name as name,
+        r.latitude as latitude,
+        r.longitude as longitude,
+        COUNT(DISTINCT v.id) as visits
+      FROM visits v
+      JOIN restaurants r ON v.restaurantId = r.id
+      WHERE v.status = 'confirmed'
+        AND v.restaurantId IS NOT NULL
+        AND r.latitude IS NOT NULL
+        AND r.longitude IS NOT NULL
+        ${yearFilterForV}
+      GROUP BY r.id
+      ORDER BY visits DESC, r.name ASC
+      LIMIT 50`,
     ),
     // Green star visits count
     database.getFirstAsync<{ count: number }>(
@@ -485,6 +505,24 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       visits: item.visits,
     }));
 
+  const mapPoints = topMapPointsData
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      latitude: Number(row.latitude),
+      longitude: Number(row.longitude),
+      visits: Number(row.visits),
+    }))
+    .filter(
+      (row) =>
+        row.id &&
+        row.name &&
+        Number.isFinite(row.latitude) &&
+        Number.isFinite(row.longitude) &&
+        Number.isFinite(row.visits) &&
+        row.visits > 0,
+    );
+
   // Count unique countries and cities
   const normalizeLocation = (value: string) => value.toLowerCase().trim();
   const uniqueCountriesSet = new Set<string>();
@@ -573,6 +611,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     averageVisitsPerMonth: Math.round(averageVisitsPerMonth * 10) / 10,
     // New stats
     topLocations,
+    mapPoints,
     uniqueCountries: uniqueCountriesSet.size,
     uniqueCities: uniqueCitiesSet.size,
     mealTimeBreakdown,
