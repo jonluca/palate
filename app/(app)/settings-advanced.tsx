@@ -1,8 +1,6 @@
-import React, { useCallback, useState } from "react";
-import { Alert, RefreshControl, ScrollView, View } from "react-native";
+import React, { useCallback } from "react";
+import { Alert, View } from "react-native";
 import { Stack } from "expo-router";
-import { useQueryClient } from "@tanstack/react-query";
-import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { ThemedText } from "@/components/themed-text";
 import { Card } from "@/components/ui";
@@ -20,6 +18,7 @@ import {
   RecomputeSuggestionsCard,
   UndoBarCard,
 } from "@/components/settings";
+import { ScreenLayout } from "@/components/screen-layout";
 
 function SectionHeader({ children }: { children: string }) {
   return (
@@ -67,8 +66,6 @@ function AdvancedIntroCard() {
 }
 
 export default function AdvancedSettingsScreen() {
-  const queryClient = useQueryClient();
-  const [refreshing, setRefreshing] = useState(false);
   const { showToast } = useToast();
   const { data: stats } = useStats();
   const { data: ignoredLocations = [] } = useIgnoredLocations();
@@ -97,12 +94,6 @@ export default function AdvancedSettingsScreen() {
     [removeIgnoredLocationMutation, showToast],
   );
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await queryClient.invalidateQueries();
-    setRefreshing(false);
-  }, [queryClient]);
-
   return (
     <>
       <Stack.Screen
@@ -111,62 +102,49 @@ export default function AdvancedSettingsScreen() {
           headerLargeTitle: true,
         }}
       />
-      <ScrollView
-        className={"flex-1 bg-background"}
-        contentInsetAdjustmentBehavior={"automatic"}
-        contentContainerStyle={{
-          paddingHorizontal: 16,
-        }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      >
-        <Animated.View entering={FadeInDown.delay(80).duration(300)} className={"mb-6"}>
-          <AdvancedIntroCard />
-        </Animated.View>
+      <ScreenLayout>
+        <AdvancedIntroCard />
 
-        <Animated.View entering={FadeInDown.delay(130).duration(300)} className={"mb-6"}>
-          <SectionHeader>Interface</SectionHeader>
-          <View className={"gap-3"}>
-            <UndoBarCard />
-            <FastAnimationsCard />
-          </View>
-        </Animated.View>
+        <SectionHeader>Interface</SectionHeader>
+        <View className={"gap-3"}>
+          <UndoBarCard />
+          <FastAnimationsCard />
+        </View>
 
-        <Animated.View entering={FadeInDown.delay(160).duration(300)} className={"mb-6"}>
-          <SectionHeader>Matching</SectionHeader>
-          <View className={"gap-3"}>
-            <RecomputeSuggestionsCard />
-          </View>
-        </Animated.View>
+        <SectionHeader>Matching</SectionHeader>
+        <View className={"gap-3"}>
+          <RecomputeSuggestionsCard />
+        </View>
 
         <MergeDuplicatesSection />
 
-        <Animated.View entering={FadeInDown.delay(210).duration(300)} className={"mb-6"}>
+        <View className={"mb-6"}>
           <SectionHeader>Detection & Matching</SectionHeader>
           <View className={"gap-3"}>
             <FoodKeywordsCard />
             <GoogleMapsApiKeyCard />
           </View>
-        </Animated.View>
+        </View>
 
         {ignoredLocations.length > 0 && (
-          <Animated.View entering={FadeInDown.delay(260).duration(300)} className={"mb-6"}>
+          <View className={"mb-6"}>
             <SectionHeader>Ignored Locations</SectionHeader>
             <IgnoredLocationsCard locations={ignoredLocations} onRemove={handleRemoveIgnoredLocation} />
-          </Animated.View>
+          </View>
         )}
 
         {stats && stats.confirmedVisits > 0 && (
-          <Animated.View entering={FadeInDown.delay(310).duration(300)} className={"mb-6"}>
+          <View className={"mb-6"}>
             <SectionHeader>Backup</SectionHeader>
             <ExportVisitsCard />
-          </Animated.View>
+          </View>
         )}
 
-        <Animated.View entering={FadeInDown.delay(360).duration(300)}>
+        <View>
           <SectionHeader>Danger Zone</SectionHeader>
           <DangerZoneCard />
-        </Animated.View>
-      </ScrollView>
+        </View>
+      </ScreenLayout>
     </>
   );
 }

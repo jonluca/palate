@@ -1510,7 +1510,6 @@ export async function processPhotos(
         return;
       }
       const totalVisits = p.totalVisits.toLocaleString();
-      const processedVisits = p.processedVisits.toLocaleString();
       const matchedEvents = p.visitsWithEvents.toLocaleString();
 
       const detail =
@@ -1518,7 +1517,7 @@ export async function processPhotos(
           ? `Matching calendar events for ${totalVisits} visits`
           : p.processedVisits >= p.totalVisits
             ? `Matched ${matchedEvents} events of ${totalVisits} visits`
-            : `Matched ${matchedEvents} events while checking ${processedVisits} of ${totalVisits} visits`;
+            : `Matched ${matchedEvents} events of ${totalVisits} visits`;
 
       scanProgress?.({
         phase: "calendar-events",

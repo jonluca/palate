@@ -662,26 +662,14 @@ export default function VisitDetailScreen() {
 
         {hasNittyGrittyContent && (
           <>
-            <Card delay={90}>
-              <Pressable onPress={handleToggleNittyGritty} className={"p-4"}>
-                <View className={"flex-row items-center justify-between gap-3"}>
-                  <View className={"flex-row items-center gap-2 flex-1"}>
-                    <View className={"w-7 h-7 rounded-full bg-zinc-500/15 items-center justify-center"}>
-                      <Ionicons name={"options-outline"} size={16} color={"#71717a"} />
-                    </View>
-                    <View className={"flex-1"}>
-                      <ThemedText variant={"footnote"} color={"secondary"}>
-                        {"nitty gritty"}
-                      </ThemedText>
-                      <ThemedText variant={"caption1"} color={"tertiary"} numberOfLines={1}>
-                        {"Food detection labels and scan options"}
-                      </ThemedText>
-                    </View>
-                  </View>
-                  <Ionicons name={isNittyGrittyExpanded ? "chevron-up" : "chevron-down"} size={18} color={"#9ca3af"} />
-                </View>
-              </Pressable>
-            </Card>
+            <Pressable onPress={handleToggleNittyGritty} className={"px-1 py-2"}>
+              <View className={"flex-row items-center justify-center gap-3"}>
+                <ThemedText variant={"footnote"} color={"secondary"}>
+                  {"Advanced"}
+                </ThemedText>
+                <Ionicons name={isNittyGrittyExpanded ? "chevron-up" : "chevron-down"} size={18} color={"#9ca3af"} />
+              </View>
+            </Pressable>
 
             {isNittyGrittyExpanded && (
               <>
