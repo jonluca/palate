@@ -10,6 +10,7 @@ import { ActivityIndicator, Platform, Pressable, View, type LayoutChangeEvent } 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const MAX_RESTAURANTS_IN_VIEW = 500;
+const CURRENT_AWARD_LOOKBACK_YEARS = 2;
 const DEFAULT_CAMERA: CameraPosition = {
   coordinates: { latitude: 20, longitude: 0 },
   zoom: 2.5,
@@ -211,6 +212,14 @@ function getAwardPriority(award: string) {
   return score;
 }
 
+function getMinimumCurrentAwardYear(referenceDate: Date = new Date()) {
+  return referenceDate.getFullYear() - (CURRENT_AWARD_LOOKBACK_YEARS - 1);
+}
+
+function hasRecentAwardYear(awardYear: number | null, minimumYear: number) {
+  return typeof awardYear === "number" && awardYear >= minimumYear;
+}
+
 function normalizeCameraEvent(
   event: { coordinates?: { latitude?: number; longitude?: number }; zoom?: number },
   fallback: CameraSnapshot,
@@ -241,6 +250,7 @@ export default function RestaurantsMapScreen() {
 
   const pendingCameraRef = useRef<CameraSnapshot | null>(null);
   const cameraDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const minimumCurrentAwardYear = useMemo(() => getMinimumCurrentAwardYear(), []);
 
   useEffect(() => {
     return () => {
@@ -285,13 +295,17 @@ export default function RestaurantsMapScreen() {
         return false;
       }
 
+      if (!hasRecentAwardYear(restaurant.latestAwardYear, minimumCurrentAwardYear)) {
+        return false;
+      }
+
       if (!awardMatchesQuickFilter(restaurant.award, quickAwardFilter)) {
         return false;
       }
 
       return true;
     });
-  }, [michelinRestaurants, quickAwardFilter, visitStatusFilter, visitedRestaurantIds]);
+  }, [michelinRestaurants, minimumCurrentAwardYear, quickAwardFilter, visitStatusFilter, visitedRestaurantIds]);
 
   const viewportBounds = useMemo(() => {
     return getViewportBounds(camera, mapSize.width, mapSize.height);
@@ -302,7 +316,6 @@ export default function RestaurantsMapScreen() {
       return {
         restaurantsInView: [] as MapRestaurantPoint[],
         totalInView: 0,
-        visibleVisitedCount: 0,
       };
     }
 
@@ -341,12 +354,9 @@ export default function RestaurantsMapScreen() {
       visited: visitedRestaurantIds.has(restaurant.id),
     }));
 
-    const visibleVisited = visible.reduce((count, restaurant) => count + (restaurant.visited ? 1 : 0), 0);
-
     return {
       restaurantsInView: visible,
       totalInView: candidates.length,
-      visibleVisitedCount: visibleVisited,
     };
   }, [camera, filteredRestaurants, viewportBounds, visitedRestaurantIds]);
 
@@ -447,6 +457,7 @@ export default function RestaurantsMapScreen() {
   }, [restaurantsInView]);
 
   const isUnsupportedPlatform = Platform.OS !== "ios" && Platform.OS !== "android";
+  const isMapLoading = michelinLoading;
 
   return (
     <View className={"flex-1 bg-background"} onLayout={handleMapLayout}>
@@ -527,7 +538,7 @@ export default function RestaurantsMapScreen() {
                   {totalInView.toLocaleString()} matching restaurants in viewport
                 </ThemedText>
               </View>
-              {michelinLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
+              {isMapLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
             </View>
           </View>
 

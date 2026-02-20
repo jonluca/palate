@@ -22,6 +22,7 @@ import {
   getDismissedCalendarEventIds,
   insertCalendarOnlyVisits,
   performDatabaseMaintenance,
+  getDatabase,
   getConfirmedVisitsWithMichelinIds,
   getEnabledFoodKeywords,
   type PhotoRecord,
@@ -43,7 +44,7 @@ import {
   type CalendarEventInfo,
   stripComparisonAffixes,
 } from "./calendar";
-import { loadMichelinRestaurants, toMichelinRecords } from "./michelin";
+import { loadMichelinRestaurants } from "./michelin";
 import { searchNearbyRestaurants, isGoogleMapsConfigured, type PlaceResult } from "./places";
 import { isBatchAssetInfoAvailable, detectFoodInImageBatch } from "@/modules/batch-asset-info";
 import { scanCameraRoll, formatEta } from "./scanner";
@@ -173,17 +174,35 @@ const DEFAULT_RESTAURANT_MATCH_THRESHOLD = 250; // within 250 meters of the visi
  * Initialize Michelin restaurant reference data in the database
  * This is separate from user's confirmed restaurants
  */
-async function initializeMichelinData(
+export async function initializeMichelinData(
   onProgress?: (message: string) => void,
 ): Promise<{ loaded: number; skipped: boolean }> {
   const existingCount = await getMichelinRestaurantCount();
+  const database = await getDatabase();
+
+  let hasBackfilledLatestAwardYear = false;
+  if (existingCount > 100) {
+    try {
+      const populatedLatestAwardYears = await database.getFirstAsync<{ count: number }>(
+        `SELECT COUNT(*) as count FROM michelin_restaurants WHERE latestAwardYear IS NOT NULL`,
+      );
+      hasBackfilledLatestAwardYear = (populatedLatestAwardYears?.count ?? 0) > 100;
+    } catch {
+      // If the column isn't available yet for any reason, force a refresh after schema init.
+      hasBackfilledLatestAwardYear = false;
+    }
+  }
 
   // Skip if we already have Michelin data loaded
-  if (existingCount > 100) {
+  if (existingCount > 100 && hasBackfilledLatestAwardYear) {
     return { loaded: existingCount, skipped: true };
   }
 
-  onProgress?.("Loading Michelin restaurant data...");
+  onProgress?.(
+    existingCount > 100
+      ? "Refreshing Michelin restaurant data with latest award years..."
+      : "Loading Michelin restaurant data...",
+  );
 
   const michelinData = await loadMichelinRestaurants((loaded, total) => {
     onProgress?.(`Parsing restaurants: ${loaded.toLocaleString()} / ${total.toLocaleString()}`);
@@ -194,14 +213,15 @@ async function initializeMichelinData(
     return { loaded: 0, skipped: false };
   }
 
-  onProgress?.(`Saving ${michelinData.length.toLocaleString()} Michelin restaurants to database...`);
+  onProgress?.(
+    `${existingCount > 100 ? "Refreshing" : "Saving"} ${michelinData.length.toLocaleString()} Michelin restaurants to database...`,
+  );
 
   // Convert to MichelinRestaurantRecords and insert
-  const records = toMichelinRecords(michelinData);
-  await insertMichelinRestaurants(records);
+  await insertMichelinRestaurants(michelinData);
 
-  console.log(`Initialized ${records.length} Michelin restaurants`);
-  return { loaded: records.length, skipped: false };
+  console.log(`Initialized ${michelinData.length} Michelin restaurants`);
+  return { loaded: michelinData.length, skipped: false };
 }
 
 /**

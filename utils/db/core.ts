@@ -116,6 +116,7 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
       address TEXT NOT NULL DEFAULT '',
       location TEXT NOT NULL DEFAULT '',
       cuisine TEXT NOT NULL DEFAULT '',
+      latestAwardYear INTEGER,
       award TEXT NOT NULL DEFAULT ''
     );
     
@@ -281,6 +282,13 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
   // Migration: Add duration column for video assets
   try {
     await database.execAsync(`ALTER TABLE photos ADD COLUMN duration REAL`);
+  } catch {
+    // Column already exists, ignore
+  }
+
+  // Migration: Add latestAwardYear to Michelin reference rows so "current" award recency can be filtered locally
+  try {
+    await database.execAsync(`ALTER TABLE michelin_restaurants ADD COLUMN latestAwardYear INTEGER`);
   } catch {
     // Column already exists, ignore
   }

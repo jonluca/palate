@@ -7,8 +7,9 @@ import michelinDb from "@/assets/michelin.db";
 // Re-export the type for convenience
 export type MichelinRestaurant = MichelinRestaurantRecord;
 
-// Cache the database connection
+// Cache the database connection and in-flight initialization
 let michelinDatabase: SQLite.SQLiteDatabase | null = null;
+let michelinDatabaseInitPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 // Types matching the michelin.db schema
 interface MichelinDbRestaurant {
@@ -37,43 +38,52 @@ async function getMichelinDatabase(): Promise<SQLite.SQLiteDatabase> {
     return michelinDatabase;
   }
 
-  // Load the asset and get its local URI
-  const asset = Asset.fromModule(michelinDb);
-  await asset.downloadAsync();
-
-  if (!asset.localUri) {
-    throw new Error("Could not load Michelin database asset");
+  if (michelinDatabaseInitPromise) {
+    return michelinDatabaseInitPromise;
   }
 
-  // Create destination file in document directory
-  const destFile = new File(Paths.document, "michelin_reference.db");
+  michelinDatabaseInitPromise = (async () => {
+    // Load the asset and get its local URI
+    const asset = Asset.fromModule(michelinDb);
+    await asset.downloadAsync();
 
-  // Check if we need to copy
-  if (!destFile.exists) {
-    console.log("Copying Michelin database to document directory...");
-    // Create a source file reference from the asset URI
-    const sourceFile = new File(asset.localUri);
-    sourceFile.copy(destFile);
-  }
+    if (!asset.localUri) {
+      throw new Error("Could not load Michelin database asset");
+    }
 
-  // Open the database read-only
-  michelinDatabase = await SQLite.openDatabaseAsync(
-    "michelin_reference.db",
-    {
-      enableChangeListener: false,
-    },
-    Paths.document.uri,
-  );
+    // Create destination file in document directory
+    const destFile = new File(Paths.document, "michelin_reference.db");
 
-  // Set read-only pragmas for performance
-  await michelinDatabase.execAsync(`
-    PRAGMA query_only = ON;
-    PRAGMA temp_store = MEMORY;
-    PRAGMA cache_size = -64000;
-    PRAGMA mmap_size = 134217728;
-  `);
+    // Check if we need to copy
+    if (!destFile.exists) {
+      console.log("Copying Michelin database to document directory...");
+      // Create a source file reference from the asset URI
+      const sourceFile = new File(asset.localUri);
+      sourceFile.copy(destFile);
+    }
 
-  return michelinDatabase;
+    // Open the database read-only
+    const database = await SQLite.openDatabaseAsync(
+      "michelin_reference.db",
+      {
+        enableChangeListener: false,
+      },
+      Paths.document.uri,
+    );
+
+    // Set read-only pragmas for performance
+    await database.execAsync(`
+      PRAGMA query_only = ON;
+      PRAGMA temp_store = MEMORY;
+      PRAGMA cache_size = -64000;
+      PRAGMA mmap_size = 134217728;
+    `);
+
+    michelinDatabase = database;
+    return database;
+  })();
+
+  return michelinDatabaseInitPromise;
 }
 
 /**
@@ -153,6 +163,7 @@ export async function loadMichelinRestaurants(
         address: row.address,
         location: row.location,
         cuisine: row.cuisine,
+        latestAwardYear: row.latest_year,
         award,
       });
 
@@ -172,22 +183,6 @@ export async function loadMichelinRestaurants(
     console.error("Error loading Michelin data:", error);
     return [];
   }
-}
-
-/**
- * Convert to MichelinRestaurantRecords for database storage
- */
-export function toMichelinRecords(michelin: MichelinRestaurant[]): MichelinRestaurantRecord[] {
-  return michelin.map(({ id, name, latitude, longitude, address, location, cuisine, award }) => ({
-    id,
-    name,
-    latitude,
-    longitude,
-    address,
-    location,
-    cuisine,
-    award,
-  }));
 }
 
 // ============================================================================

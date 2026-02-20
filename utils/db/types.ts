@@ -55,6 +55,7 @@ export interface MichelinRestaurantRecord {
   address: string;
   location: string;
   cuisine: string;
+  latestAwardYear: number | null;
   award: string;
 }
 

@@ -135,6 +135,7 @@ import {
   getImportableCalendarEvents,
   importCalendarEvents,
   dismissCalendarEvents,
+  initializeMichelinData,
   type DeepScanProgress,
   type VisitFoodScanProgress,
   type ImportableCalendarEvent,
@@ -403,7 +404,18 @@ export function usePendingReview() {
 export function useMichelinRestaurants() {
   return useQuery({
     queryKey: queryKeys.michelinRestaurants,
-    queryFn: getAllMichelinRestaurants,
+    queryFn: async () => {
+      const restaurants = await getAllMichelinRestaurants();
+      const hasAnyLatestAwardYear = restaurants.some((restaurant) => typeof restaurant.latestAwardYear === "number");
+
+      if (restaurants.length > 0 && hasAnyLatestAwardYear) {
+        return restaurants;
+      }
+
+      // Self-heal older local DBs (or empty Michelin DB) by re-running Michelin initialization/backfill.
+      await initializeMichelinData();
+      return getAllMichelinRestaurants();
+    },
     staleTime: Infinity, // This data doesn't change
   });
 }

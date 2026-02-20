@@ -13,7 +13,7 @@ export async function insertMichelinRestaurants(restaurants: MichelinRestaurantR
 
   for (let i = 0; i < restaurants.length; i += batchSize) {
     const batch = restaurants.slice(i, i + batchSize);
-    const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+    const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
     const values = batch.flatMap((r) => [
       r.id,
       r.name,
@@ -22,11 +22,22 @@ export async function insertMichelinRestaurants(restaurants: MichelinRestaurantR
       r.address,
       r.location,
       r.cuisine,
+      r.latestAwardYear,
       r.award,
     ]);
 
     await database.runAsync(
-      `INSERT OR IGNORE INTO michelin_restaurants (id, name, latitude, longitude, address, location, cuisine, award) VALUES ${placeholders}`,
+      `INSERT INTO michelin_restaurants (id, name, latitude, longitude, address, location, cuisine, latestAwardYear, award)
+       VALUES ${placeholders}
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         latitude = excluded.latitude,
+         longitude = excluded.longitude,
+         address = excluded.address,
+         location = excluded.location,
+         cuisine = excluded.cuisine,
+         latestAwardYear = excluded.latestAwardYear,
+         award = excluded.award`,
       values,
     );
   }
