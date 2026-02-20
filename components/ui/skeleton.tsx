@@ -60,7 +60,7 @@ function Skeleton({
 
 export function SkeletonVisitCard({ className }: { className?: string }) {
   return (
-    <View className={cn("bg-card border border-border rounded-2xl overflow-hidden", className)}>
+    <View className={cn("bg-card  rounded-2xl overflow-hidden", className)}>
       {/* Photo preview */}
       <View className={"flex-row h-28"}>
         <Skeleton height={112} width={"33.33%"} borderRadius={0} />
@@ -92,7 +92,7 @@ export function SkeletonVisitCard({ className }: { className?: string }) {
 
 export function SkeletonRestaurantCard({ className }: { className?: string }) {
   return (
-    <View className={cn("bg-card border border-border rounded-2xl p-4 gap-2", className)}>
+    <View className={cn("bg-card  rounded-2xl p-4 gap-2", className)}>
       <View className={"flex-row items-start justify-between"}>
         <View className={"flex-1 gap-2"}>
           <Skeleton height={18} width={"70%"} />

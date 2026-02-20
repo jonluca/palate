@@ -11,12 +11,12 @@ const buttonVariants = cva("flex-row items-center justify-center gap-2 rounded-2
   variants: {
     variant: {
       default: "bg-primary",
-      secondary: "bg-secondary border border-border",
+      secondary: "bg-secondary ",
       destructive: "bg-red-500/15 border border-red-500/25",
       success: "bg-green-600/90",
-      outline: "border border-border bg-transparent",
+      outline: " bg-transparent",
       ghost: "bg-transparent",
-      muted: "bg-card border border-border",
+      muted: "bg-card ",
     },
     size: {
       default: "h-11 px-5",

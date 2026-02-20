@@ -83,7 +83,7 @@ export function MergeVisitsModal({ visible, isLoading, visits, onMerge, onClose 
                 <Pressable
                   key={mergeVisit.id}
                   onPress={() => handleMerge(mergeVisit)}
-                  className={"bg-background rounded-xl p-3 border border-border active:bg-border/50"}
+                  className={"bg-background rounded-xl p-3  active:bg-border/50"}
                 >
                   <View className={"flex-row gap-3"}>
                     {/* Preview Photos */}

@@ -120,10 +120,7 @@ function UndoBanner({
   return (
     <GestureDetector gesture={panGesture}>
       <Animated.View entering={SlideInDown.duration(200)} exiting={SlideOutDown.duration(200)} style={animatedStyle}>
-        <View
-          className={"bg-card border border-border rounded-2xl overflow-hidden shadow-lg"}
-          style={{ borderCurve: "continuous" }}
-        >
+        <View className={"bg-card  rounded-2xl overflow-hidden shadow-lg"} style={{ borderCurve: "continuous" }}>
           {/* Progress bar */}
           <Animated.View className={"h-1 bg-primary/30"} style={progressStyle} />
 

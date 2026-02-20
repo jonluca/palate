@@ -41,7 +41,7 @@ function dedupeCalendarEventsByTitle(events: CalendarEventEntry[]): CalendarEven
 
 function CalendarEventItem({ title, location }: Pick<CalendarEventEntry, "title" | "location">) {
   return (
-    <View className={"gap-2 bg-card/80 border border-border/20 rounded-lg p-2 mb-1"}>
+    <View className={"gap-2 bg-card/80 /20 rounded-lg p-2 mb-1"}>
       <View className={"flex-row items-center gap-2"}>
         <ThemedText variant={"title4"} className={"font-semibold text-blue-600"}>
           {cleanCalendarEventTitle(title)}

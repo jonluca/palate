@@ -14,7 +14,7 @@ export default function RootLayoutNav() {
       background: "#000000",
       card: "#000000",
       text: "#FFFFFF",
-      border: "#3A3A3C",
+      border: "transparent",
     },
   };
   const hasHydrated = useHasHydrated();

@@ -148,11 +148,7 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
               </View>
               <View className={"items-end gap-2 ml-3"}>
                 {restaurant.visitCount > 1 ? (
-                  <View
-                    className={
-                      "px-2 py-1 rounded-full bg-secondary/80 border border-border flex-row items-center gap-1"
-                    }
-                  >
+                  <View className={"px-2 py-1 rounded-full bg-secondary/80  flex-row items-center gap-1"}>
                     <ThemedText
                       variant={"caption1"}
                       color={"secondary"}
@@ -269,7 +265,7 @@ function SearchBar({
 
   return (
     <View className={"flex-row items-center gap-2"}>
-      <View className={"flex-1 h-11 flex-row items-center bg-secondary/70 border border-border rounded-2xl px-3 gap-2"}>
+      <View className={"flex-1 h-11 flex-row items-center bg-secondary/70  rounded-2xl px-3 gap-2"}>
         <IconSymbol name={"magnifyingglass"} size={16} color={"#8E8E93"} />
         <TextInput
           value={value}

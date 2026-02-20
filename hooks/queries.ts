@@ -789,7 +789,19 @@ export function useBatchConfirmVisits() {
         }),
       );
       await batchConfirmVisits(confirmationsWithAwards);
-      return { count: confirmations.length };
+
+      let mergeCount = 0;
+      try {
+        const mergeableGroups = await getMergeableSameRestaurantVisitGroups();
+        if (mergeableGroups.length > 0) {
+          mergeCount = await batchMergeSameRestaurantVisits(mergeableGroups);
+        }
+      } catch (error) {
+        // Batch confirmation already succeeded. Treat duplicate merging as best-effort.
+        console.error("Error auto-merging duplicate visits after batch confirm:", error);
+      }
+
+      return { count: confirmations.length, mergeCount };
     },
     onMutate: async (confirmations) => {
       await Promise.all([
@@ -816,8 +828,12 @@ export function useBatchConfirmVisits() {
       }
     },
     onSuccess: () => {
-      // Only invalidate confirmed restaurants list, not pending reviews (handled optimistically)
+      // Merging duplicates may affect confirmed visits, stats, and cleanup queries.
+      invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
+      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
     },
   });
 }

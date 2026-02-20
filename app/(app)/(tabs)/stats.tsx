@@ -118,7 +118,7 @@ function MonthlyVisitsChart({
   return (
     <Animated.View entering={FadeInDown.delay(300).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Monthly Visits"} icon={"📈"} accentClass={"bg-amber-400"} />
-      <View className={"bg-card border border-border rounded-2xl p-4"}>
+      <View className={"bg-card  rounded-2xl p-4"}>
         {/* Value labels row */}
         <View className={"flex-row justify-between gap-1 mb-1"}>
           {chartData.map((data) => (
@@ -198,7 +198,7 @@ function SeasonalitySection({ monthlyVisits }: { monthlyVisits: WrappedStats["mo
   return (
     <Animated.View entering={FadeInDown.delay(360).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Seasonal Rhythm"} icon={"🍂"} accentClass={"bg-orange-400"} />
-      <View className={"bg-card border border-border rounded-2xl p-4 gap-4"}>
+      <View className={"bg-card  rounded-2xl p-4 gap-4"}>
         <View className={"flex-row items-center justify-between"}>
           <ThemedText variant={"footnote"} className={"text-muted-foreground"}>
             Peak season
@@ -382,10 +382,7 @@ function InsightCard({
   delay?: number;
 }) {
   return (
-    <Animated.View
-      entering={FadeInUp.delay(delay).duration(300)}
-      className={"flex-1 bg-card border border-border rounded-2xl p-3 gap-2"}
-    >
+    <Animated.View entering={FadeInUp.delay(delay).duration(300)} className={"flex-1 bg-card  rounded-2xl p-3 gap-2"}>
       <View className={"flex-row items-center gap-2"}>
         <View className={`w-8 h-8 rounded-full items-center justify-center ${iconBg}`}>
           <ThemedText variant={"footnote"}>{icon}</ThemedText>
@@ -644,9 +641,7 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
           <Animated.View
             key={item.label}
             entering={FadeIn.delay(300 + index * 100).duration(300)}
-            className={
-              "bg-secondary/70 border border-border rounded-xl px-4 py-3 flex-row items-center justify-between"
-            }
+            className={"bg-secondary/70  rounded-xl px-4 py-3 flex-row items-center justify-between"}
           >
             <View className={"flex-row items-center gap-3"}>
               <ThemedText variant={"title3"}>{item.emoji}</ThemedText>
@@ -698,7 +693,7 @@ function CuisineCloud({ cuisines }: { cuisines: WrappedStats["topCuisines"] }) {
             <Animated.View
               key={cuisine.cuisine}
               entering={FadeIn.delay(600 + index * 80).duration(300)}
-              className={"rounded-full px-4 py-2 border border-border"}
+              className={"rounded-full px-4 py-2 "}
               style={{ backgroundColor: `rgba(255, 255, 255, ${bgOpacity})` }}
             >
               <ThemedText
@@ -738,7 +733,7 @@ function FunFactCard({
   return (
     <Animated.View
       entering={FadeInDown.delay(delay).duration(400)}
-      className={"bg-secondary/70 border border-border rounded-2xl p-4 flex-row items-center gap-4"}
+      className={"bg-secondary/70  rounded-2xl p-4 flex-row items-center gap-4"}
     >
       <View className={`w-12 h-12 rounded-full items-center justify-center ${iconBg}`}>
         <ThemedText variant={"title2"}>{icon}</ThemedText>
@@ -808,7 +803,7 @@ function LocationBreakdown({ locations }: { locations: WrappedStats["topLocation
       )}
 
       {/* Top cities list */}
-      <View className={"bg-card border border-border rounded-2xl p-4 gap-3"}>
+      <View className={"bg-card  rounded-2xl p-4 gap-3"}>
         {locations.slice(0, 5).map((loc, index) => {
           const widthPercent = (loc.visits / maxVisits) * 100;
           return (
@@ -844,7 +839,7 @@ function YearlyHighlights({ yearlyStats }: { yearlyStats: WrappedStats["yearlySt
   return (
     <Animated.View entering={FadeInDown.delay(380).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Yearly Highlights"} icon={"🗓️"} accentClass={"bg-blue-400"} />
-      <View className={"bg-card border border-border rounded-2xl p-4 gap-3"}>
+      <View className={"bg-card  rounded-2xl p-4 gap-3"}>
         {yearlyStats.map((year, index) => (
           <Animated.View
             key={year.year}
@@ -898,7 +893,7 @@ function DiningTimeChart({ mealTimes }: { mealTimes: WrappedStats["mealTimeBreak
     <Animated.View entering={FadeInDown.delay(600).duration(400)} className={"gap-4"}>
       <SectionHeading title={"When You Dine"} icon={"🕐"} accentClass={"bg-indigo-400"} />
 
-      <View className={"bg-card border border-border rounded-2xl p-4 gap-4"}>
+      <View className={"bg-card  rounded-2xl p-4 gap-4"}>
         {/* Horizontal bar showing distribution */}
         <View className={"flex-row h-4 rounded-full overflow-hidden"}>
           {segments.map((segment, index) => {
@@ -960,7 +955,7 @@ function WeekendWeekdayChart({ weekendVsWeekday }: { weekendVsWeekday: WrappedSt
     <Animated.View entering={FadeInDown.delay(700).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Weekend vs Weekday"} icon={"📅"} accentClass={"bg-sky-400"} />
 
-      <View className={"bg-card border border-border rounded-2xl p-4"}>
+      <View className={"bg-card  rounded-2xl p-4"}>
         <View className={"flex-row items-center gap-4"}>
           {/* Weekday */}
           <View className={"flex-1 items-center gap-2"}>
@@ -1020,7 +1015,7 @@ function PhotoStatsSection({ photoStats }: { photoStats: WrappedStats["photoStat
 
       <View className={"flex-row gap-3"}>
         {/* Total Photos */}
-        <View className={"flex-1 bg-card border border-border rounded-2xl p-4 items-center gap-1"}>
+        <View className={"flex-1 bg-card  rounded-2xl p-4 items-center gap-1"}>
           <ThemedText variant={"largeTitle"} className={"text-cyan-400 font-bold"}>
             {photoStats.totalPhotos.toLocaleString()}
           </ThemedText>
@@ -1030,7 +1025,7 @@ function PhotoStatsSection({ photoStats }: { photoStats: WrappedStats["photoStat
         </View>
 
         {/* Average Per Visit */}
-        <View className={"flex-1 bg-card border border-border rounded-2xl p-4 items-center gap-1"}>
+        <View className={"flex-1 bg-card  rounded-2xl p-4 items-center gap-1"}>
           <ThemedText variant={"largeTitle"} className={"text-pink-400 font-bold"}>
             {photoStats.averagePerVisit}
           </ThemedText>
@@ -1044,7 +1039,7 @@ function PhotoStatsSection({ photoStats }: { photoStats: WrappedStats["photoStat
       {photoStats.mostPhotographedVisit && (
         <Animated.View
           entering={FadeIn.delay(900).duration(300)}
-          className={"bg-secondary/70 border border-border rounded-2xl p-4 flex-row items-center gap-3"}
+          className={"bg-secondary/70  rounded-2xl p-4 flex-row items-center gap-3"}
         >
           <View className={"w-10 h-10 rounded-full bg-cyan-500/30 items-center justify-center"}>
             <ThemedText variant={"body"}>🏆</ThemedText>
@@ -1100,7 +1095,7 @@ function DiningStyleCard({
     <Animated.View entering={FadeInDown.delay(900).duration(400)} className={"gap-4"}>
       <SectionHeading title={"Your Dining Style"} icon={"🎯"} accentClass={"bg-violet-400"} />
 
-      <View className={"bg-card border border-border rounded-2xl p-5 gap-4"}>
+      <View className={"bg-card  rounded-2xl p-5 gap-4"}>
         {/* Title and emoji */}
         <View className={"flex-row items-center gap-3"}>
           <View className={"w-14 h-14 rounded-full bg-violet-500/30 items-center justify-center"}>
@@ -1208,7 +1203,7 @@ function SectionHeading({ title, icon, accentClass }: { title: string; icon: str
     <View className={"flex-row items-center gap-3"}>
       <View className={`w-1.5 h-5 rounded-full ${accentClass}`} />
       <View className={"flex-row items-center gap-2"}>
-        <View className={"w-7 h-7 rounded-full bg-secondary/70 border border-border items-center justify-center"}>
+        <View className={"w-7 h-7 rounded-full bg-secondary/70  items-center justify-center"}>
           <ThemedText variant={"footnote"}>{icon}</ThemedText>
         </View>
         <ThemedText variant={"title2"} className={"text-foreground font-semibold"}>
@@ -1425,7 +1420,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
 function EmptyState() {
   return (
     <View className={"flex-1 items-center justify-center gap-6 px-8"}>
-      <View className={"w-24 h-24 rounded-full bg-secondary/70 border border-border items-center justify-center"}>
+      <View className={"w-24 h-24 rounded-full bg-secondary/70  items-center justify-center"}>
         <ThemedText variant={"largeTitle"}>🍽️</ThemedText>
       </View>
       <View className={"gap-2 items-center"}>

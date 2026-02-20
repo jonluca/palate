@@ -326,7 +326,7 @@ export default function ReviewScreen() {
         {/* Filters */}
         {reviewableVisits.length > 0 && (
           <Pressable
-            className={"bg-card rounded-2xl border border-border px-3 py-2.5"}
+            className={"bg-card rounded-2xl px-3 py-2.5"}
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               setFiltersCollapsed(!filtersCollapsed);

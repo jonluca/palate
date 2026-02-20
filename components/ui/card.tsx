@@ -20,7 +20,7 @@ export function Card({ children, className, animated = true, delay = 0, ...props
       <Animated.View
         entering={FadeIn.delay(delay).duration(300)}
         exiting={FadeOut.duration(200)}
-        className={cn("rounded-2xl border border-border bg-card overflow-hidden", className)}
+        className={cn("rounded-2xl bg-card overflow-hidden", className)}
         style={[cardStyle, style]}
         {...rest}
       >
@@ -30,11 +30,7 @@ export function Card({ children, className, animated = true, delay = 0, ...props
   }
 
   return (
-    <View
-      className={cn("rounded-2xl border border-border bg-card overflow-hidden", className)}
-      style={[cardStyle, style]}
-      {...rest}
-    >
+    <View className={cn("rounded-2xl bg-card overflow-hidden", className)} style={[cardStyle, style]} {...rest}>
       {children}
     </View>
   );
