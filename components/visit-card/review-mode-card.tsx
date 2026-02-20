@@ -31,6 +31,7 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
 
   // Extract visit properties for easier access
   const { id, startTime, photoCount, previewPhotos = [], foodProbable = false, calendarEventTitle } = visit;
+  const shouldRequireDeepScanBeforeSkip = !foodProbable && visit.hasUnanalyzedPhotos;
 
   // When we have an exact match, use that directly - no need for suggestions
   const hasMatch = Boolean(match);
@@ -191,6 +192,7 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
 
         const canConfirm = hasMatch || Boolean(displayRestaurants.length);
         const canSwipeConfirm = canConfirm;
+        const canSkip = !shouldRequireDeepScanBeforeSkip;
 
         const handleConfirmButton = () => {
           if (hasMatch) {
@@ -224,7 +226,7 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
           <>
             <SwipeableCard
               cardKey={id}
-              onSwipeLeft={handleReject}
+              onSwipeLeft={canSkip ? handleReject : undefined}
               onSwipeRight={canSwipeConfirm ? () => handleConfirmSuggestion(swipeRestaurant) : undefined}
               leftLabel={"Skip"}
               rightLabel={"Confirm"}
@@ -265,6 +267,7 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
                         onFindRestaurant={() => setShowSearch(true)}
                         onNotThisRestaurant={() => setShowSearch(true)}
                         hasSuggestion={canConfirm}
+                        skipDisabled={!canSkip}
                         loadingAction={loadingAction}
                         variant={"pill"}
                       />

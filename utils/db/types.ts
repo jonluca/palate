@@ -178,6 +178,8 @@ export type PendingVisitForReview = VisitWithDetails & {
   suggestedRestaurants: SuggestedRestaurantDetail[];
   // Aggregated food labels from photos in this visit
   foodLabels: AggregatedFoodLabel[];
+  // True when this visit still has photos that haven't been analyzed for food
+  hasUnanalyzedPhotos: boolean;
 };
 
 export interface WrappedStats {

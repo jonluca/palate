@@ -19,23 +19,18 @@ export function SlideItem({ currentIndex, slide, index, scrollX, setParentScroll
   const inputRange = [(index - 1) * SCREEN_WIDTH, index * SCREEN_WIDTH, (index + 1) * SCREEN_WIDTH];
 
   const animatedIconStyle = useAnimatedStyle(() => {
-    const scale = interpolate(scrollX.value, inputRange, [0.5, 1, 0.5], Extrapolation.CLAMP);
     const opacity = interpolate(scrollX.value, inputRange, [0, 1, 0], Extrapolation.CLAMP);
-    const translateY = interpolate(scrollX.value, inputRange, [50, 0, 50], Extrapolation.CLAMP);
 
     return {
-      transform: [{ scale }, { translateY }],
       opacity,
     };
   });
 
   const animatedTextStyle = useAnimatedStyle(() => {
     const opacity = interpolate(scrollX.value, inputRange, [0, 1, 0], Extrapolation.CLAMP);
-    const translateY = interpolate(scrollX.value, inputRange, [30, 0, 30], Extrapolation.CLAMP);
 
     return {
       opacity,
-      transform: [{ translateY }],
     };
   });
 
@@ -55,7 +50,7 @@ export function SlideItem({ currentIndex, slide, index, scrollX, setParentScroll
       </Animated.View>
 
       {/* Text Content */}
-      <Animated.View style={animatedTextStyle} className={"items-center gap-3"}>
+      <Animated.View style={animatedTextStyle} className={"items-center gap-2"}>
         <ThemedText
           variant={hasCustomContent ? "title1" : "largeTitle"}
           className={"text-white font-bold text-center"}
@@ -70,21 +65,23 @@ export function SlideItem({ currentIndex, slide, index, scrollX, setParentScroll
           </ThemedText>
         </View>
 
-        <ThemedText
-          variant={hasCustomContent ? "footnote" : "body"}
-          className={"text-white/60 text-center max-w-xs mt-1"}
-          style={{ lineHeight: hasCustomContent ? 20 : 24 }}
-        >
-          {slide.description}
-        </ThemedText>
+        {slide.description && (
+          <ThemedText
+            variant={hasCustomContent ? "footnote" : "body"}
+            className={"text-white/60 text-center max-w-xs mt-1"}
+            style={{ lineHeight: hasCustomContent ? 20 : 24 }}
+          >
+            {slide.description}
+          </ThemedText>
+        )}
       </Animated.View>
 
       {/* Custom Content */}
       {slide.CustomContent && (
         <slide.CustomContent
-          key={currentIndex}
           scrollX={scrollX}
           index={index}
+          currentIndex={currentIndex}
           setParentScrollEnabled={setParentScrollEnabled}
         />
       )}

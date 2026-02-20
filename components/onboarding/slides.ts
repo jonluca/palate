@@ -44,7 +44,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
     iconBg: "bg-cyan-500/20",
     title: "Choose Your\nCalendars",
     subtitle: "Select which to sync",
-    description: "Pick which calendars to use for matching restaurant reservations with your visits.",
+    description: "",
     gradient: ["#0f1a23", "#0f2a3e", "#0a3d4d", "#064d5a"],
     CustomContent: CalendarSelectionContent,
     buttonText: "Continue",

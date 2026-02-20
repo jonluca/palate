@@ -1,5 +1,6 @@
 import React, { useRef, useCallback } from "react";
-import { View, FlatList, type ViewToken } from "react-native";
+import { View, FlatList, Pressable, type ViewToken } from "react-native";
+import { BlurView } from "expo-blur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { FadeIn, FadeInUp, useSharedValue } from "react-native-reanimated";
@@ -42,7 +43,6 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
 
   const isLastSlide = currentIndex === ONBOARDING_SLIDES.length - 1;
   const currentSlide = ONBOARDING_SLIDES[currentIndex];
-
   const goToNextSlide = useCallback(() => {
     if (isLastSlide) {
       onComplete();
@@ -82,33 +82,49 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Animated Background Gradient */}
+      {/* iOS-like layered background */}
       <LinearGradient
-        colors={currentSlide.gradient}
+        colors={["#06080d", "#0a0e15", "#101723"]}
         start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+        end={{ x: 0.85, y: 1 }}
         style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
       />
-
-      {/* Decorative Elements */}
-      <View className={"absolute inset-0 overflow-hidden"} pointerEvents={"none"}>
-        <View className={"absolute top-[10%] -right-20 w-64 h-64 rounded-full bg-white/[0.02]"} />
-        <View className={"absolute top-[30%] -left-32 w-80 h-80 rounded-full bg-white/[0.02]"} />
-        <View className={"absolute bottom-[20%] -right-40 w-96 h-96 rounded-full bg-white/[0.02]"} />
-      </View>
-
       {/* Skip Button */}
       {__DEV__ && !isLastSlide && (
         <Animated.View
           entering={FadeIn.delay(300).duration(400)}
-          className={"absolute right-6 z-10"}
-          style={{ top: insets.top + 12 }}
+          style={{
+            position: "absolute",
+            right: 16,
+            zIndex: 10,
+            top: insets.top + 10,
+          }}
         >
-          <Button variant={"ghost"} onPress={handleSkip} size={"sm"}>
-            <ThemedText variant={"subhead"} className={"text-white/60"}>
-              Skip
-            </ThemedText>
-          </Button>
+          <BlurView
+            intensity={24}
+            tint={"dark"}
+            style={{
+              borderRadius: 999,
+              overflow: "hidden",
+              borderCurve: "continuous",
+              boxShadow: "0 10px 24px rgba(0,0,0,0.20)",
+            }}
+          >
+            <Pressable
+              onPress={handleSkip}
+              style={{
+                paddingHorizontal: 14,
+                paddingVertical: 9,
+                backgroundColor: "rgba(18, 22, 30, 0.34)",
+                borderWidth: 1,
+                borderColor: "rgba(255,255,255,0.10)",
+              }}
+            >
+              <ThemedText variant={"subhead"} style={{ color: "rgba(255,255,255,0.82)", fontWeight: "600" }}>
+                Skip
+              </ThemedText>
+            </Pressable>
+          </BlurView>
         </Animated.View>
       )}
 
@@ -140,28 +156,94 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
         )}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{
-          paddingTop: insets.top + 80,
-          paddingBottom: 200,
+          paddingTop: insets.top + 92,
+          paddingBottom: 250,
         }}
       />
 
       {/* Bottom Controls */}
       <Animated.View
         entering={FadeInUp.delay(200).duration(400)}
-        className={"absolute bottom-0 left-0 right-0 px-6"}
-        style={{ paddingBottom: insets.bottom + 16 }}
+        style={{
+          position: "absolute",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          paddingHorizontal: 16,
+          paddingBottom: insets.bottom + 12,
+        }}
       >
-        {/* Dot Indicator */}
-        <View className={"mb-4"}>
-          <DotIndicator currentIndex={currentIndex} total={ONBOARDING_SLIDES.length} />
-        </View>
+        <BlurView
+          intensity={42}
+          tint={"dark"}
+          className={"overflow-hidden rounded-2xl"}
+          style={{
+            borderRadius: 28,
+            borderCurve: "continuous",
+            boxShadow: "0 22px 50px rgba(0,0,0,0.28)",
+          }}
+        >
+          <View
+            style={{
+              padding: 16,
+              gap: 14,
+              backgroundColor: "rgba(12, 16, 24, 0.48)",
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+              }}
+            >
+              <View style={{ gap: 2 }}>
+                <ThemedText
+                  variant={"caption1"}
+                  style={{
+                    color: "rgba(255,255,255,0.64)",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.8,
+                    fontWeight: "700",
+                  }}
+                >
+                  {`Step ${currentIndex + 1} of ${ONBOARDING_SLIDES.length}`}
+                </ThemedText>
+              </View>
 
-        {/* Action Button */}
-        <Button onPress={handleNext} size={"lg"} className={"bg-white"} loading={isRequestingPermission}>
-          <ButtonText className={"text-black font-semibold"}>
-            {isLastSlide ? "Get Started" : currentSlide.buttonText ? currentSlide.buttonText : "Continue"}
-          </ButtonText>
-        </Button>
+              <View
+                style={{
+                  borderRadius: 999,
+                  borderCurve: "continuous",
+                  paddingHorizontal: 10,
+                  paddingVertical: 8,
+                  backgroundColor: "rgba(255,255,255,0.06)",
+                  borderWidth: 1,
+                  borderColor: "rgba(255,255,255,0.08)",
+                }}
+              >
+                <DotIndicator currentIndex={currentIndex} total={ONBOARDING_SLIDES.length} />
+              </View>
+            </View>
+
+            <Button
+              onPress={handleNext}
+              haptic={false}
+              size={"lg"}
+              loading={isRequestingPermission}
+              className={"bg-[#0A84FF]"}
+              style={{
+                height: 54,
+                borderRadius: 18,
+              }}
+            >
+              <ButtonText size={"lg"} className={"text-white font-semibold"}>
+                {isLastSlide ? "Get Started" : currentSlide.buttonText ? currentSlide.buttonText : "Continue"}
+              </ButtonText>
+            </Button>
+          </View>
+        </BlurView>
       </Animated.View>
     </View>
   );

@@ -38,6 +38,7 @@ export async function getPendingVisitsForReview(): Promise<PendingVisitForReview
     suggestedRestaurantsJson: string | null;
     foodLabelsJson: string | null;
     priority: number;
+    hasUnanalyzedPhotos: number;
   }>(
     `WITH 
       -- Pre-filter pending visits with basic joins
@@ -124,7 +125,16 @@ export async function getPendingVisitsForReview(): Promise<PendingVisitForReview
         WHEN pv.suggestedRestaurantId IS NOT NULL OR sr.restaurants IS NOT NULL THEN 2
         WHEN pv.foodProbable = 1 THEN 3
         ELSE 4
-      END as priority
+      END as priority,
+      CASE
+        WHEN EXISTS (
+          SELECT 1
+          FROM photos p_check
+          WHERE p_check.visitId = pv.id
+            AND p_check.foodDetected IS NULL
+        ) THEN 1
+        ELSE 0
+      END as hasUnanalyzedPhotos
     FROM pending_visits pv
     LEFT JOIN preview_photos pp ON pv.id = pp.visitId
     LEFT JOIN suggested_restaurants sr ON pv.id = sr.visitId
@@ -255,6 +265,7 @@ export async function getPendingVisitsForReview(): Promise<PendingVisitForReview
       previewPhotos,
       suggestedRestaurants,
       foodLabels,
+      hasUnanalyzedPhotos: row.hasUnanalyzedPhotos === 1,
     });
   }
 

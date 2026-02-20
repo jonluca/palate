@@ -19,6 +19,7 @@ export interface OnboardingSlide {
   CustomContent?: React.ComponentType<{
     scrollX: SharedValue<number>;
     index: number;
+    currentIndex: number;
     /**
      * Allows nested scrollable content (like a calendar list) to temporarily
      * disable the parent onboarding FlatList paging while the user interacts.

@@ -1,6 +1,5 @@
 import React, { useCallback } from "react";
-import { StyleSheet, View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
@@ -48,7 +47,6 @@ export default function ScanScreen() {
 
   return (
     <View className={"flex-1 bg-background"} style={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 20 }}>
-      <LinearGradient colors={["#0B0D11", "#12171F"]} style={StyleSheet.absoluteFill} />
       <View className={"flex-1 px-6"}>
         <View className={"items-center gap-2 mt-6 mb-8"}>
           <ScanHeader

@@ -9,7 +9,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { usePendingReview, useBatchUpdateVisitStatus, useBatchConfirmVisits } from "@/hooks/queries";
 
-const PHOTO_THRESHOLD_OPTIONS = [3, 5, 10, 20, 50];
+const PHOTO_THRESHOLD_OPTIONS = [2, 3, 5, 10, 20];
 
 // Aggregate all unique food labels with visit counts
 function useAllFoodLabels(pendingVisits: Array<{ id: string; foodLabels: Array<{ label: string }> }>) {
@@ -39,7 +39,7 @@ function useAllFoodLabels(pendingVisits: Array<{ id: string; foodLabels: Array<{
 
 export default function QuickActionsScreen() {
   const insets = useSafeAreaInsets();
-  const [selectedPhotoThreshold, setSelectedPhotoThreshold] = useState(3);
+  const [selectedPhotoThreshold, setSelectedPhotoThreshold] = useState(2);
   const [selectedFoodLabels, setSelectedFoodLabels] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
   const { showToast } = useToast();
@@ -429,7 +429,7 @@ export default function QuickActionsScreen() {
                   Skip Low-Photo Visits
                 </ThemedText>
                 <ThemedText variant={"footnote"} color={"secondary"}>
-                  Ignore visits with fewer photos than threshold
+                  Mark low-photo visits as rejected
                 </ThemedText>
               </View>
             </View>

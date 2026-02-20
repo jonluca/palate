@@ -56,6 +56,7 @@ export interface VisitActionsProps {
   onFindRestaurant?: () => void;
   onNotThisRestaurant?: () => void;
   hasSuggestion: boolean;
+  skipDisabled?: boolean;
   /** Which action is currently loading (shows spinner only on that button) */
   loadingAction?: LoadingAction;
   variant?: "pill" | "full";

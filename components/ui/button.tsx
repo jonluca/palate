@@ -12,7 +12,7 @@ const buttonVariants = cva("flex-row items-center justify-center gap-2 rounded-2
     variant: {
       default: "bg-primary",
       secondary: "bg-secondary ",
-      destructive: "bg-red-500/15 border border-red-500/25",
+      destructive: "bg-red-500/15",
       success: "bg-green-600/90",
       outline: " bg-transparent",
       ghost: "bg-transparent",
@@ -98,20 +98,13 @@ export function Button({
     onPress?.(e);
   };
 
-  const shadowStyle =
-    resolvedVariant === "default"
-      ? { boxShadow: "0 8px 18px rgba(10, 132, 255, 0.28)" }
-      : resolvedVariant === "success"
-        ? { boxShadow: "0 8px 18px rgba(22, 163, 74, 0.22)" }
-        : undefined;
-
   return (
     <AnimatedPressable
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       onPress={handlePress}
       disabled={disabled || loading}
-      style={[shadowStyle, animatedStyle, style]}
+      style={[animatedStyle, style]}
       className={cn(buttonVariants({ variant: resolvedVariant, size }), disabled && "opacity-50", className)}
       {...props}
     >

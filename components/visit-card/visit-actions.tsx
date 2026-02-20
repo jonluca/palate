@@ -11,6 +11,7 @@ export function VisitActions({
   onFindRestaurant,
   onNotThisRestaurant,
   hasSuggestion,
+  skipDisabled = false,
   loadingAction = null,
   variant = "pill",
   promptText,
@@ -20,6 +21,7 @@ export function VisitActions({
   const isConfirmLoading = loadingAction === "confirm";
   const isFindLoading = loadingAction === "find";
   const isAnyLoading = loadingAction !== null;
+  const isSkipDisabled = isAnyLoading || skipDisabled;
 
   const handleSkip = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -54,7 +56,7 @@ export function VisitActions({
             <Button
               onPress={handleSkip}
               loading={isSkipLoading}
-              disabled={isAnyLoading}
+              disabled={isSkipDisabled}
               variant={"destructive"}
               className={"w-full"}
             >
@@ -104,15 +106,20 @@ export function VisitActions({
     <View className={"flex-row items-center gap-3"}>
       <Pressable
         onPress={handleSkip}
-        disabled={isAnyLoading}
-        className={"flex-row items-center gap-2 px-4 py-2 bg-red-500/10 rounded-full"}
+        disabled={isSkipDisabled}
+        className={`flex-row items-center gap-2 px-4 py-2 rounded-full ${
+          isSkipDisabled ? "bg-muted opacity-50" : "bg-red-500/10"
+        }`}
       >
         {isSkipLoading ? (
           <ActivityIndicator size={"small"} color={"#ef4444"} />
         ) : (
           <>
-            <IconSymbol name={"xmark"} size={16} color={"#ef4444"} />
-            <ThemedText variant={"subhead"} className={"text-red-500 font-medium"}>
+            <IconSymbol name={"xmark"} size={16} color={isSkipDisabled ? "#8E8E93" : "#ef4444"} />
+            <ThemedText
+              variant={"subhead"}
+              className={`${isSkipDisabled ? "text-muted-foreground" : "text-red-500"} font-medium`}
+            >
               Skip
             </ThemedText>
           </>
