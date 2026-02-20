@@ -6,7 +6,7 @@ import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/icon-symbol";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
-import { useDeepScan, type DeepScanProgress } from "@/hooks/queries";
+import { useDeepScan, useUnanalyzedPhotoCount, type DeepScanProgress } from "@/hooks/queries";
 
 function CardIcon({ name, color, bgColor }: { name: SymbolViewProps["name"]; color: string; bgColor: string }) {
   return (
@@ -18,8 +18,10 @@ function CardIcon({ name, color, bgColor }: { name: SymbolViewProps["name"]; col
 
 export function DeepScanCard() {
   const { showToast } = useToast();
+  const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
   const [progress, setProgress] = useState<DeepScanProgress | null>(null);
   const deepScanMutation = useDeepScan((p) => setProgress(p));
+  const isScanning = deepScanMutation.isPending;
 
   const handleDeepScan = useCallback(() => {
     Alert.alert(
@@ -60,9 +62,12 @@ export function DeepScanCard() {
     );
   }, [deepScanMutation, showToast]);
 
-  const isScanning = deepScanMutation.isPending;
   const progressPercent =
     progress && progress.totalPhotos > 0 ? (progress.processedPhotos / progress.totalPhotos) * 100 : 0;
+
+  if (!isScanning && (unanalyzedPhotoCount ?? 0) === 0) {
+    return null;
+  }
 
   return (
     <Card animated={false}>

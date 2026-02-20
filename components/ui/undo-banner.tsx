@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useCallback, useState, useRef, useEffect } from "react";
-import { View, Pressable } from "react-native";
+import { View, Pressable, Platform } from "react-native";
+import { useSegments } from "expo-router";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -49,6 +50,12 @@ export function useUndo() {
 }
 
 const UNDO_DURATION_MS = 5000; // 5 seconds to undo
+const TAB_BAR_HEIGHT = Platform.select({
+  ios: 49,
+  android: 56,
+  default: 56,
+});
+const TAB_BAR_BANNER_GAP = 8;
 
 function UndoBanner({
   action,
@@ -160,7 +167,9 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
   const idCounter = useRef(0);
   const onUndoCompleteRef = useRef<((visitId: string) => void) | null>(null);
   const insets = useSafeAreaInsets();
+  const segments = useSegments();
   const hideUndoBar = useHideUndoBar();
+  const tabBarOffset = segments.includes("(tabs)") ? TAB_BAR_HEIGHT + TAB_BAR_BANNER_GAP : 0;
 
   const showUndo = useCallback(
     (action: Omit<UndoableAction, "id">) => {
@@ -211,7 +220,7 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
       {currentAction && !hideUndoBar && (
         <View
           className={"absolute bottom-0 left-0 right-0 px-4 z-50"}
-          style={{ paddingBottom: insets.bottom }}
+          style={{ paddingBottom: insets.bottom + tabBarOffset }}
           pointerEvents={"box-none"}
         >
           <UndoBanner key={currentAction.id} action={currentAction} onUndo={handleUndo} onDismiss={clearUndo} />

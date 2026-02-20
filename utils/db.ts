@@ -28,6 +28,7 @@ export {
   getPhotosByAssetIds,
   getPhotosByVisitId,
   getTotalPhotoCount,
+  getUnanalyzedPhotoCount,
   getUnanalyzedPhotoIds,
   getUnvisitedPhotos,
   getVisitablePhotoCounts,
@@ -38,6 +39,7 @@ export { batchUpdatePhotoVisits, movePhotosToVisit, removePhotosFromVisit } from
 
 export {
   batchUpdateVisitPhotoCounts,
+  batchConfirmVisits,
   confirmVisit,
   createManualVisit,
   getVisitById,

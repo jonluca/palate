@@ -12,6 +12,7 @@ import {
   getConfirmedRestaurantsWithVisits,
   getVisitsByRestaurantId,
   getPendingVisitsForReview,
+  batchConfirmVisits,
   confirmVisit,
   getAllMichelinRestaurants,
   getWrappedStats,
@@ -34,6 +35,7 @@ import {
   resetFoodKeywordsToDefaults,
   reclassifyPhotosWithCurrentKeywords,
   getPhotosWithLabelsCount,
+  getUnanalyzedPhotoCount,
   recomputeSuggestedRestaurants,
   getPhotosByAssetIds,
   movePhotosToVisit,
@@ -78,6 +80,7 @@ import {
 /** Invalidate all visit-related queries */
 function invalidateVisitQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
+  queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
 }
 
 // ============================================================================
@@ -173,6 +176,7 @@ export const queryKeys = {
   permissions: ["permissions"] as const,
   calendarPermissions: ["calendarPermissions"] as const,
   photoCount: ["photoCount"] as const,
+  unanalyzedPhotoCount: ["unanalyzedPhotoCount"] as const,
   placesConfigured: ["static", "placesConfigured"] as const,
   // Restaurant-centric keys
   confirmedRestaurants: ["confirmedRestaurants"] as const,
@@ -771,16 +775,20 @@ export function useBatchConfirmVisits() {
         startTime: number;
       }>,
     ) => {
-      await Promise.all(
+      const confirmationsWithAwards = await Promise.all(
         confirmations.map(async (c) => {
           // Look up the historical award for this restaurant at the time of visit
           let awardAtVisit: string | null = null;
           if (c.restaurantId.startsWith("michelin-")) {
             awardAtVisit = await getAwardForDate(c.restaurantId, c.startTime);
           }
-          return confirmVisit(c.visitId, c.restaurantId, c.restaurantName, c.latitude, c.longitude, awardAtVisit);
+          return {
+            ...c,
+            awardAtVisit,
+          };
         }),
       );
+      await batchConfirmVisits(confirmationsWithAwards);
       return { count: confirmations.length };
     },
     onMutate: async (confirmations) => {
@@ -1598,6 +1606,16 @@ export function usePhotosWithLabelsCount() {
   return useQuery({
     queryKey: queryKeys.photosWithLabelsCount,
     queryFn: getPhotosWithLabelsCount,
+  });
+}
+
+/**
+ * Get count of photos that still need food detection (used to gate deep scan UI)
+ */
+export function useUnanalyzedPhotoCount() {
+  return useQuery({
+    queryKey: queryKeys.unanalyzedPhotoCount,
+    queryFn: getUnanalyzedPhotoCount,
   });
 }
 

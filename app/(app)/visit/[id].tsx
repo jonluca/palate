@@ -45,7 +45,7 @@ import type { FoodLabel } from "@/utils/db";
 import { cleanCalendarEventTitle } from "@/services/calendar";
 import { logVisitViewed } from "@/services/analytics";
 import { createAlbumWithPhotos } from "@/services/scanner";
-import { ActivityIndicator, View, Alert, Pressable } from "react-native";
+import { ActivityIndicator, View, Alert, Pressable, LayoutAnimation } from "react-native";
 import { useToast } from "@/components/ui/toast";
 import { useHasSeenAddPhotosAlert, useSetHasSeenAddPhotosAlert } from "@/store";
 import tzLookup from "tz-lookup";
@@ -96,6 +96,7 @@ export default function VisitDetailScreen() {
   const [foodScanProgress, setFoodScanProgress] = useState<VisitFoodScanProgress | null>(null);
   const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
   const [isCreatingAlbum, setIsCreatingAlbum] = useState(false);
+  const [isNittyGrittyExpanded, setIsNittyGrittyExpanded] = useState(false);
   const { showToast } = useToast();
   const hasSeenAddPhotosAlert = useHasSeenAddPhotosAlert();
   const setHasSeenAddPhotosAlert = useSetHasSeenAddPhotosAlert();
@@ -502,6 +503,11 @@ export default function VisitDetailScreen() {
     ]);
   }, [data, showToast]);
 
+  const handleToggleNittyGritty = useCallback(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setIsNittyGrittyExpanded((prev) => !prev);
+  }, []);
+
   if (isLoading) {
     return (
       <View className={"flex-1 bg-background items-center justify-center"}>
@@ -554,6 +560,9 @@ export default function VisitDetailScreen() {
   // Check if any photos haven't been scanned for food yet
   const unscannedPhotosCount = photos.filter((p) => p.foodDetected === null).length;
   const showFoodScanCard = unscannedPhotosCount > 0;
+  const showFoodDetectionLabels = Boolean(visit.foodProbable) && aggregatedFoodLabels.length > 0;
+  const hasAllImageLabels = photos.some((p) => (p.allLabels?.length ?? 0) > 0);
+  const hasNittyGrittyContent = showFoodScanCard || showFoodDetectionLabels || hasAllImageLabels;
   return (
     <>
       <ScreenLayout>
@@ -622,44 +631,7 @@ export default function VisitDetailScreen() {
           isCreatingAlbum={isCreatingAlbum}
         />
 
-        {showFoodScanCard && (
-          <Card delay={90}>
-            <View className={"p-4 gap-3"}>
-              <View className={"flex-row items-center justify-between"}>
-                <View className={"flex-row items-center gap-2"}>
-                  <View className={"w-7 h-7 rounded-full bg-emerald-500/20 items-center justify-center"}>
-                    <Ionicons name={"scan"} size={16} color={"#10b981"} />
-                  </View>
-                  <ThemedText variant={"footnote"} color={"secondary"}>
-                    {"Food Detection"}
-                  </ThemedText>
-                </View>
-                <Button variant={"secondary"} size={"sm"} onPress={handleScanForFood} disabled={scanForFood.isPending}>
-                  <ButtonText variant={"secondary"}>
-                    {scanForFood.isPending
-                      ? foodScanProgress
-                        ? `${foodScanProgress.processedPhotos.toLocaleString()}/${foodScanProgress.totalPhotos.toLocaleString()}`
-                        : "Starting..."
-                      : "Scan Photos"}
-                  </ButtonText>
-                </Button>
-              </View>
-              <ThemedText variant={"caption1"} color={"tertiary"}>
-                {scanForFood.isPending
-                  ? `Analyzing photos for food... ${(foodScanProgress?.foodPhotosFound ?? 0).toLocaleString()} found so far`
-                  : `${unscannedPhotosCount.toLocaleString()} of ${photos.length.toLocaleString()} photos haven't been scanned for food`}
-              </ThemedText>
-            </View>
-          </Card>
-        )}
-
-        {Boolean(visit.foodProbable) && aggregatedFoodLabels.length > 0 && (
-          <FoodDetectionCard labels={aggregatedFoodLabels} />
-        )}
-
         <NotesCard notes={visit.notes} onSave={handleSaveNotes} isSaving={updateNotes.isPending} />
-
-        <AllLabelsCard photos={photos} />
 
         {visit.status !== "pending" && (
           <View className={"flex-row items-center justify-center gap-6 py-4 mt-2"}>
@@ -686,6 +658,75 @@ export default function VisitDetailScreen() {
               </ThemedText>
             </Pressable>
           </View>
+        )}
+
+        {hasNittyGrittyContent && (
+          <>
+            <Card delay={90}>
+              <Pressable onPress={handleToggleNittyGritty} className={"p-4"}>
+                <View className={"flex-row items-center justify-between gap-3"}>
+                  <View className={"flex-row items-center gap-2 flex-1"}>
+                    <View className={"w-7 h-7 rounded-full bg-zinc-500/15 items-center justify-center"}>
+                      <Ionicons name={"options-outline"} size={16} color={"#71717a"} />
+                    </View>
+                    <View className={"flex-1"}>
+                      <ThemedText variant={"footnote"} color={"secondary"}>
+                        {"nitty gritty"}
+                      </ThemedText>
+                      <ThemedText variant={"caption1"} color={"tertiary"} numberOfLines={1}>
+                        {"Food detection labels and scan options"}
+                      </ThemedText>
+                    </View>
+                  </View>
+                  <Ionicons name={isNittyGrittyExpanded ? "chevron-up" : "chevron-down"} size={18} color={"#9ca3af"} />
+                </View>
+              </Pressable>
+            </Card>
+
+            {isNittyGrittyExpanded && (
+              <>
+                {showFoodScanCard && (
+                  <Card delay={90}>
+                    <View className={"p-4 gap-3"}>
+                      <View className={"flex-row items-center justify-between"}>
+                        <View className={"flex-row items-center gap-2"}>
+                          <View className={"w-7 h-7 rounded-full bg-emerald-500/20 items-center justify-center"}>
+                            <Ionicons name={"scan"} size={16} color={"#10b981"} />
+                          </View>
+                          <ThemedText variant={"footnote"} color={"secondary"}>
+                            {"Food Detection"}
+                          </ThemedText>
+                        </View>
+                        <Button
+                          variant={"secondary"}
+                          size={"sm"}
+                          onPress={handleScanForFood}
+                          disabled={scanForFood.isPending}
+                        >
+                          <ButtonText variant={"secondary"}>
+                            {scanForFood.isPending
+                              ? foodScanProgress
+                                ? `${foodScanProgress.processedPhotos.toLocaleString()}/${foodScanProgress.totalPhotos.toLocaleString()}`
+                                : "Starting..."
+                              : "Scan Photos"}
+                          </ButtonText>
+                        </Button>
+                      </View>
+                      <ThemedText variant={"caption1"} color={"tertiary"}>
+                        {scanForFood.isPending
+                          ? `Analyzing photos for food... ${(foodScanProgress?.foodPhotosFound ?? 0).toLocaleString()} found so far`
+                          : `${unscannedPhotosCount.toLocaleString()} of ${photos.length.toLocaleString()} photos haven't been scanned for food`}
+                      </ThemedText>
+                    </View>
+                  </Card>
+                )}
+
+                {showFoodDetectionLabels && <FoodDetectionCard labels={aggregatedFoodLabels} />}
+
+                <AllLabelsCard photos={photos} />
+              </>
+            )}
+          </>
         )}
       </ScreenLayout>
 

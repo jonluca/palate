@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from "react";
 import { Alert, RefreshControl, ScrollView, View } from "react-native";
 import { Stack } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
@@ -68,7 +67,6 @@ function AdvancedIntroCard() {
 }
 
 export default function AdvancedSettingsScreen() {
-  const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
   const { showToast } = useToast();
@@ -117,8 +115,6 @@ export default function AdvancedSettingsScreen() {
         className={"flex-1 bg-background"}
         contentInsetAdjustmentBehavior={"automatic"}
         contentContainerStyle={{
-          paddingTop: 12,
-          paddingBottom: insets.bottom + 24,
           paddingHorizontal: 16,
         }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}

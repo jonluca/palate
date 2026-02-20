@@ -101,6 +101,17 @@ export async function getUnanalyzedPhotoIds(): Promise<{ id: string }[]> {
   );
 }
 
+/**
+ * Get count of photos that haven't been analyzed for food yet (foodDetected IS NULL)
+ */
+export async function getUnanalyzedPhotoCount(): Promise<number> {
+  const database = await getDatabase();
+  const result = await database.getFirstAsync<{ count: number }>(
+    `SELECT COUNT(*) as count FROM photos WHERE foodDetected IS NULL`,
+  );
+  return result?.count ?? 0;
+}
+
 export async function getTotalPhotoCount(): Promise<number> {
   const database = await getDatabase();
   const result = await database.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM photos`);
