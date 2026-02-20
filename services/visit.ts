@@ -34,8 +34,9 @@ import {
 import {
   hasCalendarPermission,
   requestCalendarPermission,
-  batchFindEventsForVisits,
+  batchFindCandidateEventsForVisits,
   cleanCalendarEventTitle,
+  compareRestaurantAndCalendarTitle,
   isFuzzyRestaurantMatch,
   getReservationEvents,
   normalizeForComparison,
@@ -724,6 +725,10 @@ async function enrichVisitsWithCalendarEvents(
     etaMs: null,
   };
 
+  const emitProgress = () => {
+    onProgress?.({ ...progress });
+  };
+
   let hasPermission = await hasCalendarPermission();
   if (!hasPermission) {
     hasPermission = await requestCalendarPermission();
@@ -731,7 +736,7 @@ async function enrichVisitsWithCalendarEvents(
 
   if (!hasPermission) {
     progress.isComplete = true;
-    onProgress?.(progress);
+    emitProgress();
     return progress;
   }
 
@@ -740,11 +745,11 @@ async function enrichVisitsWithCalendarEvents(
 
   if (visitsToProcess.length === 0) {
     progress.isComplete = true;
-    onProgress?.(progress);
+    emitProgress();
     return progress;
   }
 
-  onProgress?.(progress);
+  emitProgress();
   const tracker = createProgressTracker();
   const BATCH_SIZE = 300;
   const calendarUpdates: CalendarEventUpdate[] = [];
@@ -754,15 +759,45 @@ async function enrichVisitsWithCalendarEvents(
     const batch = visitsToProcess.slice(i, i + BATCH_SIZE);
     const batchVisitIds = batch.map((v) => v.id);
 
-    const [eventMap, suggestedRestaurantsMap] = await Promise.all([
-      batchFindEventsForVisits(batch),
+    const [candidateEventMap, suggestedRestaurantsMap] = await Promise.all([
+      batchFindCandidateEventsForVisits(batch),
       getSuggestedRestaurantsForVisits(batchVisitIds),
     ]);
 
     for (const visit of batch) {
-      const event = eventMap.get(visit.id);
-      if (!event) {
+      const candidateEvents = candidateEventMap.get(visit.id) ?? [];
+      if (candidateEvents.length === 0) {
         continue;
+      }
+
+      const suggestedRestaurants = suggestedRestaurantsMap.get(visit.id) ?? [];
+      let matchedRestaurant: (typeof suggestedRestaurants)[number] | undefined;
+      let event = candidateEvents[0]!;
+
+      if (suggestedRestaurants.length > 0) {
+        for (const useFuzzyMatching of [false, true]) {
+          for (const candidate of candidateEvents) {
+            const cleanedTitle = cleanCalendarEventTitle(candidate.title);
+            if (cleanedTitle.length < 3) {
+              continue;
+            }
+
+            const match = suggestedRestaurants.find(
+              (r) =>
+                compareRestaurantAndCalendarTitle(candidate.title, r.name) ||
+                (useFuzzyMatching && isFuzzyRestaurantMatch(cleanedTitle, r.name)),
+            );
+            if (match) {
+              event = candidate;
+              matchedRestaurant = match;
+              break;
+            }
+          }
+
+          if (matchedRestaurant) {
+            break;
+          }
+        }
       }
 
       calendarUpdates.push({
@@ -774,15 +809,8 @@ async function enrichVisitsWithCalendarEvents(
       });
       progress.visitsWithEvents++;
 
-      // Try to match calendar title to a nearby restaurant
-      const cleanedTitle = cleanCalendarEventTitle(event.title);
-      if (cleanedTitle.length >= 3) {
-        const matchedRestaurant = (suggestedRestaurantsMap.get(visit.id) ?? []).find((r) =>
-          isFuzzyRestaurantMatch(cleanedTitle, r.name),
-        );
-        if (matchedRestaurant) {
-          restaurantSuggestionUpdates.push({ visitId: visit.id, suggestedRestaurantId: matchedRestaurant.id });
-        }
+      if (matchedRestaurant) {
+        restaurantSuggestionUpdates.push({ visitId: visit.id, suggestedRestaurantId: matchedRestaurant.id });
       }
     }
 
@@ -791,7 +819,7 @@ async function enrichVisitsWithCalendarEvents(
     progress.elapsedMs = stats.elapsedMs;
     progress.visitsPerSecond = stats.perSecond;
     progress.etaMs = stats.etaMs;
-    onProgress?.(progress);
+    emitProgress();
   }
 
   await Promise.all([
@@ -803,7 +831,7 @@ async function enrichVisitsWithCalendarEvents(
 
   progress.isComplete = true;
   progress.etaMs = 0;
-  onProgress?.(progress);
+  emitProgress();
 
   return progress;
 }
@@ -1481,15 +1509,29 @@ export async function processPhotos(
       if (!p.totalVisits) {
         return;
       }
+      const totalVisits = p.totalVisits.toLocaleString();
+      const processedVisits = p.processedVisits.toLocaleString();
+      const matchedEvents = p.visitsWithEvents.toLocaleString();
+
+      const detail =
+        p.processedVisits === 0
+          ? `Matching calendar events for ${totalVisits} visits`
+          : p.processedVisits >= p.totalVisits
+            ? `Matched ${matchedEvents} events of ${totalVisits} visits`
+            : `Matched ${matchedEvents} events while checking ${processedVisits} of ${totalVisits} visits`;
+
       scanProgress?.({
         phase: "calendar-events",
-        detail: `Matched ${p.visitsWithEvents.toLocaleString()} events for ${p.processedVisits.toLocaleString()} visits`,
+        detail,
         photosPerSecond: p.visitsPerSecond,
         eta: formatEta(p.etaMs),
         progress: p.totalVisits > 0 ? p.processedVisits / p.totalVisits : 0,
       });
     },
   });
+
+  // Let the UI paint the final calendar match count before the next phase updates the status.
+  await yieldToEventLoop();
 
   // Phase 4: Detect food in visit photos
   scanProgress?.({ phase: "detecting-food", detail: "Analyzing photos for food..." });

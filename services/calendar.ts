@@ -203,19 +203,25 @@ function getEndOfDay(timestamp: number): number {
   return date.getTime();
 }
 
+interface VisitTimeRange {
+  id: string;
+  startTime: number;
+  endTime: number;
+}
+
 /**
- * Batch find calendar events for multiple visits efficiently.
- * Groups visits by date to minimize calendar queries.
+ * Batch find overlapping calendar event candidates for multiple visits efficiently.
+ * Returns candidates sorted by relevance (best first) for each visit.
  */
-export async function batchFindEventsForVisits(
-  visits: Array<{ id: string; startTime: number; endTime: number }>,
+export async function batchFindCandidateEventsForVisits(
+  visits: VisitTimeRange[],
   bufferMinutes: number = 30,
-): Promise<Map<string, CalendarEventInfo | null>> {
+): Promise<Map<string, CalendarEventInfo[]>> {
   if (visits.length === 0) {
     return new Map();
   }
   if (!(await hasCalendarPermission())) {
-    return new Map(visits.map((v) => [v.id, null]));
+    return new Map(visits.map((v) => [v.id, []]));
   }
 
   // Find overall date range (single calendar query for the batch)
@@ -239,7 +245,7 @@ export async function batchFindEventsForVisits(
     }
   }
 
-  const results = new Map<string, CalendarEventInfo | null>();
+  const results = new Map<string, CalendarEventInfo[]>();
 
   for (const visit of visits) {
     const windowStart = visit.startTime - bufferMs;
@@ -249,8 +255,7 @@ export async function batchFindEventsForVisits(
     const startIdx = lowerBoundByStartDate(timedEvents, windowStart - maxDurationMs);
     const endExclusiveIdx = upperBoundByStartDate(timedEvents, windowEnd);
 
-    let bestEvent: CalendarEventInfo | null = null;
-    let bestScore = -Infinity;
+    const candidates: Array<{ event: CalendarEventInfo; score: number }> = [];
 
     for (let i = startIdx; i < endExclusiveIdx; i++) {
       const event = timedEvents[i]!;
@@ -258,14 +263,44 @@ export async function batchFindEventsForVisits(
         continue;
       }
 
-      const s = scoreEvent(event, visit.startTime, visit.endTime);
-      if (s > bestScore) {
-        bestScore = s;
-        bestEvent = event;
-      }
+      candidates.push({
+        event,
+        score: scoreEvent(event, visit.startTime, visit.endTime),
+      });
     }
 
-    results.set(visit.id, bestEvent);
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      if (a.event.startDate !== b.event.startDate) {
+        return a.event.startDate - b.event.startDate;
+      }
+      return a.event.endDate - b.event.endDate;
+    });
+
+    results.set(
+      visit.id,
+      candidates.map((c) => c.event),
+    );
+  }
+
+  return results;
+}
+
+/**
+ * Batch find the single best calendar event for multiple visits efficiently.
+ * Uses the same ranked candidates as batchFindCandidateEventsForVisits and returns the top one.
+ */
+export async function batchFindEventsForVisits(
+  visits: VisitTimeRange[],
+  bufferMinutes: number = 30,
+): Promise<Map<string, CalendarEventInfo | null>> {
+  const candidateMap = await batchFindCandidateEventsForVisits(visits, bufferMinutes);
+  const results = new Map<string, CalendarEventInfo | null>();
+
+  for (const visit of visits) {
+    results.set(visit.id, candidateMap.get(visit.id)?.[0] ?? null);
   }
 
   return results;
