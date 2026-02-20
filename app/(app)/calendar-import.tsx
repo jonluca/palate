@@ -42,14 +42,18 @@ export default function CalendarImportScreen() {
 
   // Data queries
   const { data: importableCalendarEvents = [], isLoading } = useImportableCalendarEvents();
+  const pastImportableCalendarEvents = useMemo(
+    () => importableCalendarEvents.filter((event) => event.startDate <= Date.now()),
+    [importableCalendarEvents],
+  );
 
   // Mutations
   const importCalendarMutation = useImportCalendarEvents();
   const dismissCalendarMutation = useDismissCalendarEvents();
 
   // UI state
-  const isImportingAll = importingEventIds.size === importableCalendarEvents.length && importingEventIds.size > 0;
-  const isEmpty = importableCalendarEvents.length === 0;
+  const isImportingAll = importingEventIds.size === pastImportableCalendarEvents.length && importingEventIds.size > 0;
+  const isEmpty = pastImportableCalendarEvents.length === 0;
 
   // Handlers
   const onRefresh = useCallback(async () => {
@@ -59,7 +63,13 @@ export default function CalendarImportScreen() {
   }, [queryClient]);
 
   const handleImportCalendarEvent = useCallback(
-    async (calendarEventId: string, selectedRestaurantId?: string) => {
+    async (event: ImportableCalendarEvent, selectedRestaurantId?: string) => {
+      const calendarEventId = event.calendarEventId;
+      if (event.startDate > Date.now()) {
+        showToast({ type: "error", message: "Future calendar events can't be imported yet." });
+        return;
+      }
+
       setImportingEventIds((prev) => new Set(prev).add(calendarEventId));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       try {
@@ -110,20 +120,20 @@ export default function CalendarImportScreen() {
   );
 
   const handleImportAllCalendarEvents = useCallback(() => {
-    if (importableCalendarEvents.length === 0) {
+    if (pastImportableCalendarEvents.length === 0) {
       return;
     }
 
     Alert.alert(
       "Import All Calendar Events",
-      `This will create ${importableCalendarEvents.length.toLocaleString()} visit${importableCalendarEvents.length === 1 ? "" : "s"} from calendar events that match Michelin restaurants.`,
+      `This will create ${pastImportableCalendarEvents.length.toLocaleString()} visit${pastImportableCalendarEvents.length === 1 ? "" : "s"} from calendar events that match Michelin restaurants.`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Import All",
           style: "default",
           onPress: async () => {
-            const allIds = importableCalendarEvents.map((e) => e.calendarEventId);
+            const allIds = pastImportableCalendarEvents.map((e) => e.calendarEventId);
             setImportingEventIds(new Set(allIds));
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             try {
@@ -144,13 +154,13 @@ export default function CalendarImportScreen() {
         },
       ],
     );
-  }, [importableCalendarEvents, importCalendarMutation, showToast]);
+  }, [pastImportableCalendarEvents, importCalendarMutation, showToast]);
 
   // Group events by date for better organization
   const groupedEvents = useMemo(() => {
     const groups: Map<string, ImportableCalendarEvent[]> = new Map();
 
-    for (const event of importableCalendarEvents) {
+    for (const event of pastImportableCalendarEvents) {
       const date = new Date(event.startDate);
       const key = date.toLocaleDateString("en-US", { year: "numeric", month: "long" });
       const existing = groups.get(key) ?? [];
@@ -162,7 +172,7 @@ export default function CalendarImportScreen() {
       // Sort by date descending (most recent first)
       return new Date(b).getTime() - new Date(a).getTime();
     });
-  }, [importableCalendarEvents]);
+  }, [pastImportableCalendarEvents]);
 
   const refreshControl = useMemo(
     () => <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={"#999"} colors={["#999"]} />,
@@ -208,10 +218,10 @@ export default function CalendarImportScreen() {
                   </View>
                   <View className={"flex-1"}>
                     <ThemedText variant={"title3"} className={"font-bold"}>
-                      {importableCalendarEvents.length.toLocaleString()}
+                      {pastImportableCalendarEvents.length.toLocaleString()}
                     </ThemedText>
                     <ThemedText variant={"footnote"} color={"secondary"}>
-                      Calendar event{importableCalendarEvents.length === 1 ? "" : "s"} matching Michelin restaurants
+                      Calendar event{pastImportableCalendarEvents.length === 1 ? "" : "s"} matching Michelin restaurants
                     </ThemedText>
                   </View>
                 </View>
@@ -224,7 +234,7 @@ export default function CalendarImportScreen() {
                 >
                   <IconSymbol name={"plus.circle.fill"} size={18} color={"#fff"} />
                   <ButtonText className={"ml-2"}>
-                    Import All ({importableCalendarEvents.length.toLocaleString()})
+                    Import All ({pastImportableCalendarEvents.length.toLocaleString()})
                   </ButtonText>
                 </Button>
               </View>
@@ -233,7 +243,7 @@ export default function CalendarImportScreen() {
         )}
       </View>
     );
-  }, [handleImportAllCalendarEvents, importableCalendarEvents.length, isEmpty, isImportingAll]);
+  }, [handleImportAllCalendarEvents, pastImportableCalendarEvents.length, isEmpty, isImportingAll]);
 
   const ListFooter = useCallback(() => {
     if (isLoading || isEmpty) {
@@ -295,9 +305,7 @@ export default function CalendarImportScreen() {
       return (
         <CalendarImportCard
           event={item.event}
-          onImport={(selectedRestaurantId) =>
-            handleImportCalendarEvent(item.event.calendarEventId, selectedRestaurantId)
-          }
+          onImport={(selectedRestaurantId) => handleImportCalendarEvent(item.event, selectedRestaurantId)}
           onDismiss={() => handleDismissCalendarEvent(item.event.calendarEventId)}
           isImporting={importingEventIds.has(item.event.calendarEventId)}
           isDismissing={dismissingEventIds.has(item.event.calendarEventId)}

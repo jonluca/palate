@@ -1219,12 +1219,13 @@ export async function importCalendarEvents(
 
   // Filter to only the requested events
   const eventsToImport = importableEvents.filter((e) => calendarEventIds.includes(e.calendarEventId));
+  const pastEventsToImport = eventsToImport.filter((event) => event.startDate <= Date.now());
 
-  if (eventsToImport.length === 0) {
+  if (pastEventsToImport.length === 0) {
     return 0;
   }
 
-  const visitsToCreate = eventsToImport.map((event) => {
+  const visitsToCreate = pastEventsToImport.map((event) => {
     // Check if there's an override for this event's restaurant
     const overrideRestaurantId = restaurantOverrides?.get(event.calendarEventId);
     let restaurant = event.matchedRestaurant;
