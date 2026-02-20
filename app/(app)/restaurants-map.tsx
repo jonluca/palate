@@ -126,6 +126,22 @@ function isRestaurantInBounds(restaurant: MichelinRestaurantRecord, bounds: View
   return restaurant.longitude >= bounds.minLongitude || restaurant.longitude <= bounds.maxLongitude;
 }
 
+function getCenterDistanceScore(restaurant: MichelinRestaurantRecord, camera: CameraSnapshot) {
+  const zoom = Math.max(0, camera.zoom);
+  const scale = mercatorScale(zoom);
+
+  const centerX = longitudeToPixelX(camera.longitude, zoom);
+  const centerY = latitudeToPixelY(camera.latitude, zoom);
+  const restaurantX = longitudeToPixelX(restaurant.longitude, zoom);
+  const restaurantY = latitudeToPixelY(restaurant.latitude, zoom);
+
+  let deltaX = Math.abs(restaurantX - centerX);
+  deltaX = Math.min(deltaX, scale - deltaX);
+  const deltaY = restaurantY - centerY;
+
+  return deltaX * deltaX + deltaY * deltaY;
+}
+
 function normalizeAwardValue(award: string | null | undefined) {
   return (award ?? "").trim();
 }
@@ -282,28 +298,36 @@ export default function RestaurantsMapScreen() {
       };
     }
 
-    const candidates: MichelinRestaurantRecord[] = [];
+    const candidates: Array<{ restaurant: MichelinRestaurantRecord; centerDistanceScore: number }> = [];
     for (const restaurant of awardFilteredRestaurants) {
       if (isRestaurantInBounds(restaurant, viewportBounds)) {
-        candidates.push(restaurant);
+        candidates.push({
+          restaurant,
+          centerDistanceScore: getCenterDistanceScore(restaurant, camera),
+        });
       }
     }
 
     candidates.sort((a, b) => {
-      const awardPriorityDiff = getAwardPriority(b.award) - getAwardPriority(a.award);
+      const distanceDiff = a.centerDistanceScore - b.centerDistanceScore;
+      if (distanceDiff !== 0) {
+        return distanceDiff;
+      }
+
+      const awardPriorityDiff = getAwardPriority(b.restaurant.award) - getAwardPriority(a.restaurant.award);
       if (awardPriorityDiff !== 0) {
         return awardPriorityDiff;
       }
 
-      const visitedDiff = Number(visitedRestaurantIds.has(b.id)) - Number(visitedRestaurantIds.has(a.id));
+      const visitedDiff = Number(visitedRestaurantIds.has(b.restaurant.id)) - Number(visitedRestaurantIds.has(a.restaurant.id));
       if (visitedDiff !== 0) {
         return visitedDiff;
       }
 
-      return a.name.localeCompare(b.name);
+      return a.restaurant.name.localeCompare(b.restaurant.name);
     });
 
-    const visible = candidates.slice(0, MAX_RESTAURANTS_IN_VIEW).map((restaurant) => ({
+    const visible = candidates.slice(0, MAX_RESTAURANTS_IN_VIEW).map(({ restaurant }) => ({
       ...restaurant,
       visited: visitedRestaurantIds.has(restaurant.id),
     }));
@@ -315,7 +339,7 @@ export default function RestaurantsMapScreen() {
       totalInView: candidates.length,
       visibleVisitedCount: visibleVisited,
     };
-  }, [awardFilteredRestaurants, viewportBounds, visitedRestaurantIds]);
+  }, [awardFilteredRestaurants, camera, viewportBounds, visitedRestaurantIds]);
 
   const visibleUnvisitedCount = restaurantsInView.length - visibleVisitedCount;
 
@@ -334,6 +358,16 @@ export default function RestaurantsMapScreen() {
 
   const handleCameraMove = useCallback(
     (event: { coordinates?: { latitude?: number; longitude?: number }; zoom?: number }) => {
+      if (Platform.OS === "ios") {
+        if (cameraDebounceRef.current) {
+          clearTimeout(cameraDebounceRef.current);
+          cameraDebounceRef.current = null;
+        }
+        pendingCameraRef.current = null;
+        setCamera((previous) => normalizeCameraEvent(event, previous));
+        return;
+      }
+
       pendingCameraRef.current = normalizeCameraEvent(event, pendingCameraRef.current ?? camera);
 
       if (!cameraDebounceRef.current) {
