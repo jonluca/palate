@@ -1704,14 +1704,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@expo/vector-icons@npm:15.0.3, @expo/vector-icons@npm:^15.0.3":
-  version: 15.0.3
-  resolution: "@expo/vector-icons@npm:15.0.3"
+"@expo/vector-icons@npm:15.1.1, @expo/vector-icons@npm:^15.0.3":
+  version: 15.1.1
+  resolution: "@expo/vector-icons@npm:15.1.1"
   peerDependencies:
     expo-font: ">=14.0.4"
     react: "*"
     react-native: "*"
-  checksum: 10c0/f33274dede267c713618512969afdee28e47e97ba8a7ee7e1d0ab18b417683ace7c4a1b79152d6ec2d254420a23a685582fd956f6cd83a2120514d9efbab1109
+  checksum: 10c0/fdd50c90484934204b90d345904fa69ca788a5de704d62b3cb580c52aa4cf4bffe1c05c509d043cf2b6842f1bdad6b78585524f3c6ae5f77e36385d83c0aa577
   languageName: node
   linkType: hard
 
@@ -8012,9 +8012,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"knip@npm:^5.84.1":
-  version: 5.84.1
-  resolution: "knip@npm:5.84.1"
+"knip@npm:^5.85.0":
+  version: 5.85.0
+  resolution: "knip@npm:5.85.0"
   dependencies:
     "@nodelib/fs.walk": "npm:^1.2.3"
     fast-glob: "npm:^3.3.3"
@@ -8034,7 +8034,7 @@ __metadata:
   bin:
     knip: bin/knip.js
     knip-bun: bin/knip-bun.js
-  checksum: 10c0/f4160689df565951be993d851934aa7879362dd9631ac8a4f0129c0fbad17c6bc12e2c0c187e64c42822ea4a98c84eee857147dba2d5744caf822a7e0223cbfd
+  checksum: 10c0/d1eb6c85bb24cd357cedf67d02f9697261b70721a59eed48bd0be716e99b86ceb3e55ee9e6cfef60110272303e2de8dc6ea0621936f9e209490eaf5c24b2697f
   languageName: node
   linkType: hard
 
@@ -9351,7 +9351,7 @@ __metadata:
     "@eslint/compat": "npm:^2.0.2"
     "@eslint/js": "npm:^10.0.1"
     "@expo/metro-runtime": "npm:6.1.2"
-    "@expo/vector-icons": "npm:15.0.3"
+    "@expo/vector-icons": "npm:15.1.1"
     "@react-native-firebase/analytics": "npm:^23.8.6"
     "@react-native-firebase/app": "npm:^23.8.6"
     "@react-native-menu/menu": "npm:^2.0.0"
@@ -9414,7 +9414,7 @@ __metadata:
     geokdbush: "npm:^2.0.1"
     globals: "npm:^17.3.0"
     kdbush: "npm:^4.0.2"
-    knip: "npm:^5.84.1"
+    knip: "npm:^5.85.0"
     lodash-es: "npm:^4.17.23"
     p-map: "npm:^7.0.4"
     prettier: "npm:^3.8.1"
@@ -9430,7 +9430,7 @@ __metadata:
     react-native-worklets: "npm:0.7.4"
     react-refresh: "npm:^0.18.0"
     tailwind-merge: "npm:3.5.0"
-    tailwindcss: "npm:^4.2.0"
+    tailwindcss: "npm:^4.2.1"
     typescript: "npm:^5.9.3"
     typescript-eslint: "npm:^8.56.0"
     tz-lookup: "npm:^6.1.25"
@@ -10995,10 +10995,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"tailwindcss@npm:^4.2.0":
-  version: 4.2.0
-  resolution: "tailwindcss@npm:4.2.0"
-  checksum: 10c0/f3152625466651a44b4e397a47f571158477c9ebf35442842f6bbe9728039724e57567ae35972cbfebbc13aaadb053dfa32d20907b971e79dab20568e11b197f
+"tailwindcss@npm:^4.2.1":
+  version: 4.2.1
+  resolution: "tailwindcss@npm:4.2.1"
+  checksum: 10c0/482d734b582e9da509042ff59c1d7564d99e39e238c50ae907c20fa56177a8a00c3902f6971329971bd6a1c5357026ac76a849b8f2c69c94f0f59be99530ba54
   languageName: node
   linkType: hard
 
