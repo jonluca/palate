@@ -17,6 +17,7 @@ const DEFAULT_CAMERA: CameraPosition = {
   coordinates: { latitude: 20, longitude: 0 },
   zoom: 2.5,
 };
+const INITIAL_RECENT_PIN_ZOOM = 8;
 
 interface CameraSnapshot {
   latitude: number;
@@ -241,11 +242,12 @@ function normalizeCameraEvent(
 export default function RestaurantsMapScreen() {
   const insets = useSafeAreaInsets();
   const { data: michelinRestaurants = [], isLoading: michelinLoading } = useMichelinRestaurants();
-  const { data: confirmedRestaurants = [] } = useConfirmedRestaurants();
+  const { data: confirmedRestaurants = [], isLoading: confirmedRestaurantsLoading } = useConfirmedRestaurants();
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [visitStatusFilter, setVisitStatusFilter] = useState<VisitStatusFilter>("visited");
   const [quickAwardFilter, setQuickAwardFilter] = useState<QuickAwardFilter>("all");
+  const [hasUserMovedMapCamera, setHasUserMovedMapCamera] = useState(false);
   const [camera, setCamera] = useState<CameraSnapshot>({
     latitude: DEFAULT_CAMERA.coordinates?.latitude ?? 20,
     longitude: DEFAULT_CAMERA.coordinates?.longitude ?? 0,
@@ -319,9 +321,48 @@ export default function RestaurantsMapScreen() {
     });
   }, [michelinRestaurants, minimumCurrentAwardYear, quickAwardFilter, visitStatusFilter, visitedRestaurantIds]);
 
+  const mostRecentConfirmedPin = useMemo(() => {
+    let latestRestaurant: (typeof confirmedRestaurants)[number] | null = null;
+    let latestTimestamp = Number.NEGATIVE_INFINITY;
+
+    for (const restaurant of confirmedRestaurants) {
+      const timestamp = restaurant.lastConfirmedAt ?? restaurant.lastVisit;
+      if (timestamp > latestTimestamp) {
+        latestRestaurant = restaurant;
+        latestTimestamp = timestamp;
+      }
+    }
+
+    return latestRestaurant;
+  }, [confirmedRestaurants]);
+
+  const initialMapCamera = useMemo<CameraPosition>(() => {
+    if (!mostRecentConfirmedPin) {
+      return DEFAULT_CAMERA;
+    }
+
+    return {
+      coordinates: {
+        latitude: clampLatitude(mostRecentConfirmedPin.latitude),
+        longitude: normalizeLongitude(mostRecentConfirmedPin.longitude),
+      },
+      zoom: INITIAL_RECENT_PIN_ZOOM,
+    };
+  }, [mostRecentConfirmedPin]);
+
+  const initialViewportCamera = useMemo<CameraSnapshot>(() => {
+    return {
+      latitude: initialMapCamera.coordinates?.latitude ?? (DEFAULT_CAMERA.coordinates?.latitude ?? 20),
+      longitude: initialMapCamera.coordinates?.longitude ?? (DEFAULT_CAMERA.coordinates?.longitude ?? 0),
+      zoom: initialMapCamera.zoom ?? (DEFAULT_CAMERA.zoom ?? 2.5),
+    };
+  }, [initialMapCamera]);
+
+  const viewportCamera = hasUserMovedMapCamera ? camera : initialViewportCamera;
+
   const viewportBounds = useMemo(() => {
-    return getViewportBounds(camera, mapSize.width, mapSize.height);
-  }, [camera, mapSize.height, mapSize.width]);
+    return getViewportBounds(viewportCamera, mapSize.width, mapSize.height);
+  }, [mapSize.height, mapSize.width, viewportCamera]);
 
   const { restaurantsInView, totalInView } = useMemo(() => {
     if (!viewportBounds) {
@@ -336,7 +377,7 @@ export default function RestaurantsMapScreen() {
       if (isRestaurantInBounds(restaurant, viewportBounds)) {
         candidates.push({
           restaurant,
-          centerDistanceScore: getCenterDistanceScore(restaurant, camera),
+          centerDistanceScore: getCenterDistanceScore(restaurant, viewportCamera),
         });
       }
     }
@@ -370,7 +411,7 @@ export default function RestaurantsMapScreen() {
       restaurantsInView: visible,
       totalInView: candidates.length,
     };
-  }, [camera, filteredRestaurants, viewportBounds, visitedRestaurantIds]);
+  }, [filteredRestaurants, viewportBounds, viewportCamera, visitedRestaurantIds]);
 
   const handleMapLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -387,6 +428,8 @@ export default function RestaurantsMapScreen() {
 
   const handleCameraMove = useCallback(
     (event: { coordinates?: { latitude?: number; longitude?: number }; zoom?: number }) => {
+      setHasUserMovedMapCamera(true);
+
       if (Platform.OS === "ios") {
         if (cameraDebounceRef.current) {
           clearTimeout(cameraDebounceRef.current);
@@ -585,8 +628,9 @@ export default function RestaurantsMapScreen() {
                 </View>
               ) : Platform.OS === "ios" ? (
                 <AppleMaps.View
+                  key={`apple-${confirmedRestaurantsLoading ? "loading" : (mostRecentConfirmedPin?.id ?? "default")}`}
                   style={{ flex: 1 }}
-                  cameraPosition={DEFAULT_CAMERA}
+                  cameraPosition={initialMapCamera}
                   markers={appleMarkers}
                   circles={appleCircles}
                   uiSettings={{
@@ -602,8 +646,9 @@ export default function RestaurantsMapScreen() {
                 />
               ) : (
                 <GoogleMaps.View
+                  key={`google-${confirmedRestaurantsLoading ? "loading" : (mostRecentConfirmedPin?.id ?? "default")}`}
                   style={{ flex: 1 }}
-                  cameraPosition={DEFAULT_CAMERA}
+                  cameraPosition={initialMapCamera}
                   markers={googleMarkers}
                   circles={googleCircles}
                   uiSettings={{
