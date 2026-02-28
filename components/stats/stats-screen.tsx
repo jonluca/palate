@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { View, ScrollView, Pressable, Platform } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { View, ScrollView, Pressable, Platform, Modal } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { AppleMaps, GoogleMaps } from "expo-maps";
 import Animated, { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
@@ -829,6 +829,8 @@ function DiningMapSection({
   points: WrappedStats["mapPoints"];
   selectedYear: number | null;
 }) {
+  const insets = useSafeAreaInsets();
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
   const cameraPosition = useMemo(() => getMapCameraPosition(points), [points]);
 
   const appleMarkers = useMemo<AppleMaps.Marker[]>(
@@ -854,73 +856,151 @@ function DiningMapSection({
     [points],
   );
 
+  const openRestaurant = useCallback((restaurantId: string) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsFullscreenOpen(false);
+    router.push(`/restaurant/${restaurantId}`);
+  }, []);
+
+  const handleMarkerPress = useCallback(
+    (event: { id?: string }) => {
+      if (!event.id) {
+        return;
+      }
+      openRestaurant(event.id);
+    },
+    [openRestaurant],
+  );
+
   if (points.length === 0) {
     return null;
   }
 
-  return (
-    <Animated.View entering={FadeInDown.delay(420).duration(400)} className={"gap-4"}>
-      <SectionHeading title={"Dining Map"} icon={"🗺️"} accentClass={"bg-emerald-300"} />
-
-      <View className={"bg-card rounded-2xl p-3 gap-3"}>
-        <View className={"flex-row items-center justify-between gap-3 px-1"}>
-          <View className={"flex-1"}>
-            <ThemedText variant={"footnote"} className={"text-muted-foreground"} numberOfLines={2}>
-              {selectedYear
-                ? `Top visited restaurants in ${selectedYear}`
-                : "Top visited restaurants across your confirmed visits"}
-            </ThemedText>
-          </View>
-          <View className={"rounded-full px-2.5 py-1 bg-emerald-500/15 border border-emerald-500/25"}>
-            <ThemedText variant={"caption2"} className={"text-emerald-300 font-semibold"}>
-              {points.length} pins
-            </ThemedText>
-          </View>
+  const renderMap = () => {
+    if (!cameraPosition) {
+      return (
+        <View className={"flex-1 items-center justify-center px-6"}>
+          <ThemedText variant={"footnote"} className={"text-muted-foreground text-center"}>
+            Map preview is available on iOS and Android builds.
+          </ThemedText>
         </View>
+      );
+    }
 
-        <View
-          className={"rounded-2xl overflow-hidden border bg-secondary/40"}
-          style={{
-            height: 220,
-            borderCurve: "continuous",
-            borderColor: "rgba(52, 211, 153, 0.18)",
+    if (Platform.OS === "ios") {
+      return (
+        <AppleMaps.View
+          style={{ flex: 1 }}
+          cameraPosition={cameraPosition}
+          markers={appleMarkers}
+          uiSettings={{
+            compassEnabled: false,
+            myLocationButtonEnabled: false,
+            scaleBarEnabled: false,
+            togglePitchEnabled: false,
           }}
-        >
-          {cameraPosition && Platform.OS === "ios" ? (
-            <AppleMaps.View
-              style={{ flex: 1 }}
-              cameraPosition={cameraPosition}
-              markers={appleMarkers}
-              uiSettings={{
-                compassEnabled: false,
-                myLocationButtonEnabled: false,
-                scaleBarEnabled: false,
-                togglePitchEnabled: false,
-              }}
-            />
-          ) : cameraPosition && Platform.OS === "android" ? (
-            <GoogleMaps.View
-              style={{ flex: 1 }}
-              cameraPosition={cameraPosition}
-              markers={googleMarkers}
-              uiSettings={{
-                compassEnabled: false,
-                mapToolbarEnabled: false,
-                myLocationButtonEnabled: false,
-                scaleBarEnabled: false,
-                zoomControlsEnabled: false,
-              }}
-            />
-          ) : (
-            <View className={"flex-1 items-center justify-center px-6"}>
-              <ThemedText variant={"footnote"} className={"text-muted-foreground text-center"}>
-                Map preview is available on iOS and Android builds.
+          properties={{
+            selectionEnabled: false,
+          }}
+          onMarkerClick={handleMarkerPress}
+        />
+      );
+    }
+
+    if (Platform.OS === "android") {
+      return (
+        <GoogleMaps.View
+          style={{ flex: 1 }}
+          cameraPosition={cameraPosition}
+          markers={googleMarkers}
+          uiSettings={{
+            compassEnabled: false,
+            mapToolbarEnabled: false,
+            myLocationButtonEnabled: false,
+            scaleBarEnabled: false,
+            zoomControlsEnabled: false,
+          }}
+          properties={{
+            selectionEnabled: false,
+          }}
+          onMarkerClick={handleMarkerPress}
+        />
+      );
+    }
+
+    return (
+      <View className={"flex-1 items-center justify-center px-6"}>
+        <ThemedText variant={"footnote"} className={"text-muted-foreground text-center"}>
+          Map preview is available on iOS and Android builds.
+        </ThemedText>
+      </View>
+    );
+  };
+
+  return (
+    <>
+      <Animated.View entering={FadeInDown.delay(420).duration(400)} className={"gap-4"}>
+        <SectionHeading title={"Dining Map"} icon={"🗺️"} accentClass={"bg-emerald-300"} />
+
+        <View className={"bg-card rounded-2xl p-3 gap-3"}>
+          <View className={"flex-row items-center justify-between gap-3 px-1"}>
+            <View className={"flex-1"}>
+              <ThemedText variant={"footnote"} className={"text-muted-foreground"} numberOfLines={2}>
+                {selectedYear
+                  ? `Top visited restaurants in ${selectedYear}`
+                  : "Top visited restaurants across your confirmed visits"}
               </ThemedText>
             </View>
-          )}
+            <View className={"rounded-full px-2.5 py-1 bg-emerald-500/15 border border-emerald-500/25"}>
+              <ThemedText variant={"caption2"} className={"text-emerald-300 font-semibold"}>
+                {points.length} pins
+              </ThemedText>
+            </View>
+          </View>
+
+          <View
+            className={"relative rounded-2xl overflow-hidden border bg-secondary/40"}
+            style={{
+              height: 220,
+              borderCurve: "continuous",
+              borderColor: "rgba(52, 211, 153, 0.18)",
+            }}
+          >
+            {renderMap()}
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setIsFullscreenOpen(true);
+              }}
+              className={"absolute top-2.5 right-2.5 rounded-lg px-2.5 py-2 bg-background/85 border border-border"}
+            >
+              <ThemedText variant={"caption1"} className={"font-semibold"}>
+                ⛶
+              </ThemedText>
+            </Pressable>
+          </View>
         </View>
-      </View>
-    </Animated.View>
+      </Animated.View>
+
+      <Modal animationType={"slide"} visible={isFullscreenOpen} onRequestClose={() => setIsFullscreenOpen(false)}>
+        <View className={"flex-1 bg-black"}>
+          <View className={"flex-1"}>{renderMap()}</View>
+          <View style={{ position: "absolute", top: insets.top + 10, right: 12 }}>
+            <Pressable
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setIsFullscreenOpen(false);
+              }}
+              className={"rounded-lg px-3 py-2 bg-background/85 border border-border"}
+            >
+              <ThemedText variant={"subhead"} className={"font-semibold"}>
+                Done
+              </ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
