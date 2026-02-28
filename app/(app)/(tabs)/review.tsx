@@ -55,7 +55,7 @@ function LoadingState() {
   );
 }
 
-function ReviewCaughtUpCard() {
+function ReviewCompletionCard() {
   return (
     <Card className={"border border-green-500/20 bg-green-500/10"}>
       <View className={"p-5 gap-3"}>
@@ -66,9 +66,9 @@ function ReviewCaughtUpCard() {
             <IconSymbol name={"checkmark.circle.fill"} size={20} color={"#22c55e"} />
           </View>
           <View className={"flex-1"}>
-            <ThemedText className={"font-semibold"}>All caught up</ThemedText>
+            <ThemedText className={"font-semibold"}>Review complete</ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              You’ve reviewed everything pending.
+              No more visits to review right now.
             </ThemedText>
           </View>
         </View>
@@ -206,6 +206,24 @@ export default function ReviewScreen() {
   // UI state
   const hasExactMatches = exactMatches.length > 0;
   const isAllCaughtUp = !isLoading && pendingVisits.length === 0;
+  const reviewSummary = useMemo(() => {
+    if (isAllCaughtUp) {
+      return "No visits pending review";
+    }
+
+    if (hasExactMatches) {
+      return `${exactMatches.length.toLocaleString()} exact match${exactMatches.length === 1 ? "" : "es"} shown first${
+        filteredReviewableVisits.length > 0
+          ? `, ${filteredReviewableVisits.length.toLocaleString()} ${filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"} manual review`
+          : ""
+      }`;
+    }
+
+    return `${filteredReviewableVisits.length.toLocaleString()} ${
+      filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"
+    } manual review`;
+  }, [isAllCaughtUp, hasExactMatches, exactMatches.length, filteredReviewableVisits.length]);
+
   const shouldShowDeepScanEmptyCard =
     foodFilter === "on" && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable);
 
@@ -296,15 +314,7 @@ export default function ReviewScreen() {
             Review Visits
           </ThemedText>
           <ThemedText variant={"footnote"} color={"secondary"}>
-            {hasExactMatches
-              ? `${exactMatches.length.toLocaleString()} exact match${exactMatches.length === 1 ? "" : "es"} shown first${
-                  filteredReviewableVisits.length > 0
-                    ? `, ${filteredReviewableVisits.length.toLocaleString()} ${filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"} manual review`
-                    : ""
-                }`
-              : `${filteredReviewableVisits.length.toLocaleString()} ${
-                  filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"
-                } manual review`}
+            {reviewSummary}
           </ThemedText>
         </View>
 
@@ -366,6 +376,7 @@ export default function ReviewScreen() {
       filteredReviewableVisits.length,
       hasExactMatches,
       exactMatches.length,
+      reviewSummary,
       handleApproveAllExactMatches,
       isApproving,
       reviewableVisits.length,
@@ -410,7 +421,7 @@ export default function ReviewScreen() {
             isLoading ? (
               <LoadingState />
             ) : isAllCaughtUp ? (
-              <ReviewCaughtUpCard />
+              <ReviewCompletionCard />
             ) : (
               <View className={"gap-3"}>
                 <ThemedText variant={"title3"} className={"font-semibold"}>
