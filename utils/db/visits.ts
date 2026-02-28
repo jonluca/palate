@@ -237,6 +237,21 @@ export interface BatchVisitConfirmation {
   awardAtVisit?: string | null;
 }
 
+const BUSY_RETRY_ATTEMPTS = 5;
+const BUSY_RETRY_BASE_DELAY_MS = 50;
+
+function isDatabaseBusyError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes("database is locked") || message.includes("sqlite_busy");
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function batchConfirmVisits(confirmations: BatchVisitConfirmation[]): Promise<void> {
   if (confirmations.length === 0) {
     return;
@@ -247,59 +262,72 @@ export async function batchConfirmVisits(confirmations: BatchVisitConfirmation[]
   // Keep the CASE update under SQLite's default 999 bind parameter limit (~5 params per row).
   const batchSize = 150;
 
-  await database.withExclusiveTransactionAsync(async (tx) => {
-    for (let i = 0; i < confirmations.length; i += batchSize) {
-      const batch = confirmations.slice(i, i + batchSize);
+  for (let attempt = 0; attempt < BUSY_RETRY_ATTEMPTS; attempt++) {
+    try {
+      await database.withExclusiveTransactionAsync(async (tx) => {
+        for (let i = 0; i < confirmations.length; i += batchSize) {
+          const batch = confirmations.slice(i, i + batchSize);
 
-      // Insert any missing restaurants once per batch before updating visits (foreign key on visits.restaurantId).
-      const restaurantsById = new Map<string, { id: string; name: string; latitude: number; longitude: number }>();
+          // Insert any missing restaurants once per batch before updating visits (foreign key on visits.restaurantId).
+          const restaurantsById = new Map<string, { id: string; name: string; latitude: number; longitude: number }>();
 
-      for (const confirmation of batch) {
-        if (!restaurantsById.has(confirmation.restaurantId)) {
-          restaurantsById.set(confirmation.restaurantId, {
-            id: confirmation.restaurantId,
-            name: confirmation.restaurantName,
-            latitude: confirmation.latitude,
-            longitude: confirmation.longitude,
-          });
+          for (const confirmation of batch) {
+            if (!restaurantsById.has(confirmation.restaurantId)) {
+              restaurantsById.set(confirmation.restaurantId, {
+                id: confirmation.restaurantId,
+                name: confirmation.restaurantName,
+                latitude: confirmation.latitude,
+                longitude: confirmation.longitude,
+              });
+            }
+          }
+
+          const restaurants = Array.from(restaurantsById.values());
+          const restaurantPlaceholders = restaurants.map(() => "(?, ?, ?, ?)").join(", ");
+          const restaurantValues = restaurants.flatMap((restaurant) => [
+            restaurant.id,
+            restaurant.name,
+            restaurant.latitude,
+            restaurant.longitude,
+          ]);
+
+          await tx.runAsync(
+            `INSERT OR IGNORE INTO restaurants (id, name, latitude, longitude) VALUES ${restaurantPlaceholders}`,
+            restaurantValues,
+          );
+
+          const restaurantWhenClauses = batch.map(() => "WHEN ? THEN ?").join(" ");
+          const awardWhenClauses = batch.map(() => "WHEN ? THEN ?").join(" ");
+          const visitIds = batch.map((confirmation) => confirmation.visitId);
+          const visitPlaceholders = visitIds.map(() => "?").join(", ");
+
+          await tx.runAsync(
+            `UPDATE visits
+             SET restaurantId = CASE id ${restaurantWhenClauses} END,
+                 status = 'confirmed',
+                 updatedAt = ?,
+                 awardAtVisit = CASE id ${awardWhenClauses} END
+             WHERE id IN (${visitPlaceholders})`,
+            [
+              ...batch.flatMap((confirmation) => [confirmation.visitId, confirmation.restaurantId]),
+              now,
+              ...batch.flatMap((confirmation) => [confirmation.visitId, confirmation.awardAtVisit ?? null]),
+              ...visitIds,
+            ],
+          );
         }
+      });
+      return;
+    } catch (error) {
+      const isBusyError = isDatabaseBusyError(error);
+      const isLastAttempt = attempt === BUSY_RETRY_ATTEMPTS - 1;
+      if (!isBusyError || isLastAttempt) {
+        throw error;
       }
-
-      const restaurants = Array.from(restaurantsById.values());
-      const restaurantPlaceholders = restaurants.map(() => "(?, ?, ?, ?)").join(", ");
-      const restaurantValues = restaurants.flatMap((restaurant) => [
-        restaurant.id,
-        restaurant.name,
-        restaurant.latitude,
-        restaurant.longitude,
-      ]);
-
-      await tx.runAsync(
-        `INSERT OR IGNORE INTO restaurants (id, name, latitude, longitude) VALUES ${restaurantPlaceholders}`,
-        restaurantValues,
-      );
-
-      const restaurantWhenClauses = batch.map(() => "WHEN ? THEN ?").join(" ");
-      const awardWhenClauses = batch.map(() => "WHEN ? THEN ?").join(" ");
-      const visitIds = batch.map((confirmation) => confirmation.visitId);
-      const visitPlaceholders = visitIds.map(() => "?").join(", ");
-
-      await tx.runAsync(
-        `UPDATE visits
-         SET restaurantId = CASE id ${restaurantWhenClauses} END,
-             status = 'confirmed',
-             updatedAt = ?,
-             awardAtVisit = CASE id ${awardWhenClauses} END
-         WHERE id IN (${visitPlaceholders})`,
-        [
-          ...batch.flatMap((confirmation) => [confirmation.visitId, confirmation.restaurantId]),
-          now,
-          ...batch.flatMap((confirmation) => [confirmation.visitId, confirmation.awardAtVisit ?? null]),
-          ...visitIds,
-        ],
-      );
+      const delayMs = BUSY_RETRY_BASE_DELAY_MS * 2 ** attempt;
+      await delay(delayMs);
     }
-  });
+  }
 }
 
 // Confirm a visit by linking visit to restaurant

@@ -96,6 +96,7 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
   // Performance PRAGMAs
   await database.execAsync(`
     PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 5000;
     PRAGMA synchronous = NORMAL;
     PRAGMA temp_store = MEMORY;
     PRAGMA cache_size = -128000;

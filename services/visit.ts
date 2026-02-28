@@ -700,7 +700,7 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
 
       if (batchResults.length > 0) {
         try {
-          void onBatchResults?.(batchResults);
+          await onBatchResults?.(batchResults);
         } catch (error) {
           console.warn("Food detection batch save failed:", error);
         }
@@ -1342,7 +1342,6 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
 
   const tracker = createProgressTracker();
 
-  const promises: Promise<void>[] = [];
   const { results, foodFoundCount } = await processFoodDetectionBatches(
     allPhotos,
     confidenceThreshold,
@@ -1357,13 +1356,12 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
       onProgress?.({ ...progress });
     },
     undefined,
-    (batchResults) => {
-      promises.push(batchUpdatePhotosFoodDetected(batchResults));
+    async (batchResults) => {
+      await batchUpdatePhotosFoodDetected(batchResults);
     },
   );
 
-  await Promise.all(promises);
-  // Batch update all results
+  // Final reconciliation in case a per-batch write failed.
   await batchUpdatePhotosFoodDetected(results);
   await syncAllVisitsFoodProbable();
 

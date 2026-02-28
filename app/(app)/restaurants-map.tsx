@@ -8,7 +8,7 @@ import { AppleMaps, GoogleMaps, type CameraPosition } from "expo-maps";
 import { Stack, router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, View, type LayoutChangeEvent } from "react-native";
+import { ActivityIndicator, PanResponder, Platform, Pressable, View, type LayoutChangeEvent } from "react-native";
 
 const MAX_RESTAURANTS_IN_VIEW = 500;
 const CURRENT_AWARD_LOOKBACK_YEARS = 2;
@@ -17,6 +17,7 @@ const DEFAULT_CAMERA: CameraPosition = {
   zoom: 2.5,
 };
 const INITIAL_RECENT_PIN_ZOOM = 8;
+const IOS_BACK_SWIPE_EDGE_WIDTH = 26;
 
 interface CameraSnapshot {
   latitude: number;
@@ -518,6 +519,24 @@ export default function RestaurantsMapScreen() {
 
   const isUnsupportedPlatform = Platform.OS !== "ios" && Platform.OS !== "android";
   const isMapLoading = michelinLoading;
+  const iosBackSwipePanResponder = useMemo(() => {
+    if (Platform.OS !== "ios") {
+      return null;
+    }
+
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dx > 40 && Math.abs(gestureState.dy) < 60) {
+          router.back();
+        }
+      },
+      onPanResponderTerminate: () => undefined,
+      onPanResponderTerminationRequest: () => true,
+    });
+  }, []);
+
   const handleToggleFilters = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setFiltersExpanded((previous) => !previous);
@@ -541,10 +560,14 @@ export default function RestaurantsMapScreen() {
           title: "Michelin Map",
           headerLargeTitle: false,
           headerTransparent: false,
+          gestureEnabled: true,
+          gestureResponseDistance: {
+            start: 40,
+          },
         }}
       />
 
-      <View className={"flex-1 pt-3 gap-3"}>
+      <View className={"flex-1 gap-3"}>
         <View className={"px-3"}>
           <View
             className={"rounded-2xl border border-border bg-background/90 overflow-hidden"}
@@ -598,7 +621,7 @@ export default function RestaurantsMapScreen() {
         </View>
 
         <View
-          className={"flex-1 rounded-t-2xl overflow-hidden"}
+          className={"flex-1 overflow-hidden"}
           style={{
             boxShadow: "0 8px 24px rgba(0,0,0,0.28)",
           }}
@@ -670,6 +693,19 @@ export default function RestaurantsMapScreen() {
                   onMarkerClick={handleMarkerPress}
                 />
               )}
+              {iosBackSwipePanResponder ? (
+                <View
+                  {...iosBackSwipePanResponder.panHandlers}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    bottom: 0,
+                    left: 0,
+                    width: IOS_BACK_SWIPE_EDGE_WIDTH,
+                    zIndex: 20,
+                  }}
+                />
+              ) : null}
             </View>
           )}
         </View>
