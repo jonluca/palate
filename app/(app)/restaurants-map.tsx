@@ -363,7 +363,7 @@ export default function RestaurantsMapScreen() {
     return getViewportBounds(viewportCamera, mapSize.width, mapSize.height);
   }, [mapSize.height, mapSize.width, viewportCamera]);
 
-  const { restaurantsInView, totalInView } = useMemo(() => {
+  const { restaurantsInView } = useMemo(() => {
     if (!viewportBounds) {
       return {
         restaurantsInView: [] as MapRestaurantPoint[],
@@ -573,31 +573,21 @@ export default function RestaurantsMapScreen() {
             className={"rounded-2xl border border-border bg-background/90 overflow-hidden"}
             style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.28)" }}
           >
-            <View className={"px-3 py-2 gap-2"}>
-              <View className={"flex-row items-center justify-between gap-3"}>
+            <View className={"px-3 py-2"}>
+              <View className={"flex-row items-center gap-2"}>
                 <View className={"flex-1"}>
-                  <ThemedText variant={"footnote"} className={"font-semibold"} numberOfLines={1}>
-                    {totalInView > restaurantsInView.length
-                      ? `Showing ${restaurantsInView.length.toLocaleString()} of ${totalInView.toLocaleString()} restaurants on the map`
-                      : `${restaurantsInView.length.toLocaleString()} restaurants on the map`}
+                  <FilterPills options={viewModeOptions} value={viewMode} onChange={handleViewModeChange} />
+                </View>
+                {isMapLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
+                <Pressable
+                  onPress={handleToggleFilters}
+                  className={"h-8 px-2.5 rounded-full border border-border bg-secondary/70 items-center justify-center"}
+                >
+                  <ThemedText variant={"caption1"} className={"font-semibold"}>
+                    {filtersExpanded ? "Hide" : "Filters"}
                   </ThemedText>
-                </View>
-                <View className={"flex-row items-center gap-2"}>
-                  {isMapLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
-                  <Pressable
-                    onPress={handleToggleFilters}
-                    className={
-                      "h-8 px-2.5 rounded-full border border-border bg-secondary/70 items-center justify-center"
-                    }
-                  >
-                    <ThemedText variant={"caption1"} className={"font-semibold"}>
-                      {filtersExpanded ? "Hide" : "Filters"}
-                    </ThemedText>
-                  </Pressable>
-                </View>
+                </Pressable>
               </View>
-
-              <FilterPills options={viewModeOptions} value={viewMode} onChange={handleViewModeChange} />
             </View>
 
             {filtersExpanded ? (
