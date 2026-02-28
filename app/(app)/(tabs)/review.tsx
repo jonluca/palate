@@ -57,8 +57,8 @@ function LoadingState() {
 
 function ReviewCompletionCard() {
   return (
-    <Card className={"border border-green-500/20 bg-green-500/10"}>
-      <View className={"p-5 gap-3"}>
+    <Card>
+      <View className={"p-5 gap-4"}>
         <View className={"flex-row items-center gap-3"}>
           <View
             className={"w-10 h-10 rounded-2xl bg-green-500/15 border border-green-500/20 items-center justify-center"}
@@ -72,8 +72,8 @@ function ReviewCompletionCard() {
             </ThemedText>
           </View>
         </View>
-        <Button variant={"outline"} onPress={() => router.push("/rescan")}>
-          <ButtonText variant={"outline"}>Scan for new photos</ButtonText>
+        <Button onPress={() => router.push("/rescan")} size={"lg"}>
+          <ButtonText>Scan for new photos</ButtonText>
         </Button>
       </View>
     </Card>
