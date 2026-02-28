@@ -670,10 +670,12 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
       );
 
       const batchResults: FoodBatchResult[] = [];
+      const resultAssetIds = new Set<string>();
       for (const result of detectionResults) {
         if (!itemMap.has(result.assetId)) {
           continue;
         }
+        resultAssetIds.add(result.assetId);
         const record: FoodBatchResult = {
           photoId: result.assetId,
           foodDetected: result.containsFood,
@@ -685,6 +687,14 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
         batchResults.push(record);
         if (result.containsFood) {
           foodFoundCount++;
+        }
+      }
+      // Ensure every batch item gets an update (detector may skip assets not found on device)
+      for (const item of batch) {
+        if (!resultAssetIds.has(item.id)) {
+          const record: FoodBatchResult = { photoId: item.id, foodDetected: false };
+          results.push(record);
+          batchResults.push(record);
         }
       }
 

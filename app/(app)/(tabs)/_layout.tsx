@@ -27,7 +27,11 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label>Restaurants</NativeTabs.Trigger.Label>
         {Platform.select({
           ios: <NativeTabs.Trigger.Icon sf={{ default: "fork.knife", selected: "fork.knife" }} />,
-          android: <NativeTabs.Trigger.Icon src={<NativeTabs.Trigger.VectorIcon family={MaterialIcons} name={"restaurant"} />} />,
+          android: (
+            <NativeTabs.Trigger.Icon
+              src={<NativeTabs.Trigger.VectorIcon family={MaterialIcons} name={"restaurant"} />}
+            />
+          ),
         })}
       </NativeTabs.Trigger>
 
@@ -35,7 +39,11 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label>Review</NativeTabs.Trigger.Label>
         {Platform.select({
           ios: <NativeTabs.Trigger.Icon sf={{ default: "checkmark.circle", selected: "checkmark.circle.fill" }} />,
-          android: <NativeTabs.Trigger.Icon src={<NativeTabs.Trigger.VectorIcon family={MaterialIcons} name={"check-circle"} />} />,
+          android: (
+            <NativeTabs.Trigger.Icon
+              src={<NativeTabs.Trigger.VectorIcon family={MaterialIcons} name={"check-circle"} />}
+            />
+          ),
         })}
       </NativeTabs.Trigger>
 
@@ -43,7 +51,11 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label>Stats</NativeTabs.Trigger.Label>
         {Platform.select({
           ios: <NativeTabs.Trigger.Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />,
-          android: <NativeTabs.Trigger.Icon src={<NativeTabs.Trigger.VectorIcon family={MaterialIcons} name={"bar-chart"} />} />,
+          android: (
+            <NativeTabs.Trigger.Icon
+              src={<NativeTabs.Trigger.VectorIcon family={MaterialIcons} name={"bar-chart"} />}
+            />
+          ),
         })}
       </NativeTabs.Trigger>
 
@@ -51,7 +63,9 @@ export default function TabLayout() {
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
         {Platform.select({
           ios: <NativeTabs.Trigger.Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} />,
-          android: <NativeTabs.Trigger.Icon src={<NativeTabs.Trigger.VectorIcon family={MaterialIcons} name={"settings"} />} />,
+          android: (
+            <NativeTabs.Trigger.Icon src={<NativeTabs.Trigger.VectorIcon family={MaterialIcons} name={"settings"} />} />
+          ),
         })}
       </NativeTabs.Trigger>
     </NativeTabs>

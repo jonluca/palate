@@ -9,7 +9,6 @@ import { Stack, router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, View, type LayoutChangeEvent } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const MAX_RESTAURANTS_IN_VIEW = 500;
 const CURRENT_AWARD_LOOKBACK_YEARS = 2;
@@ -240,7 +239,6 @@ function normalizeCameraEvent(
 }
 
 export default function RestaurantsMapScreen() {
-  const insets = useSafeAreaInsets();
   const { data: michelinRestaurants = [], isLoading: michelinLoading } = useMichelinRestaurants();
   const { data: confirmedRestaurants = [], isLoading: confirmedRestaurantsLoading } = useConfirmedRestaurants();
   const [viewMode, setViewMode] = useState<ViewMode>("map");
@@ -352,9 +350,9 @@ export default function RestaurantsMapScreen() {
 
   const initialViewportCamera = useMemo<CameraSnapshot>(() => {
     return {
-      latitude: initialMapCamera.coordinates?.latitude ?? (DEFAULT_CAMERA.coordinates?.latitude ?? 20),
-      longitude: initialMapCamera.coordinates?.longitude ?? (DEFAULT_CAMERA.coordinates?.longitude ?? 0),
-      zoom: initialMapCamera.zoom ?? (DEFAULT_CAMERA.zoom ?? 2.5),
+      latitude: initialMapCamera.coordinates?.latitude ?? DEFAULT_CAMERA.coordinates?.latitude ?? 20,
+      longitude: initialMapCamera.coordinates?.longitude ?? DEFAULT_CAMERA.coordinates?.longitude ?? 0,
+      zoom: initialMapCamera.zoom ?? DEFAULT_CAMERA.zoom ?? 2.5,
     };
   }, [initialMapCamera]);
 
@@ -546,53 +544,61 @@ export default function RestaurantsMapScreen() {
         }}
       />
 
-      <View className={"flex-1 px-3 pt-3 gap-3"} style={{ paddingBottom: insets.bottom + 12 }}>
-        <View
-          className={"rounded-2xl border border-border bg-background/90 overflow-hidden"}
-          style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.28)" }}
-        >
-          <View className={"px-3 py-2 gap-2"}>
-            <View className={"flex-row items-center justify-between gap-3"}>
-              <View className={"flex-1"}>
-                <ThemedText variant={"footnote"} className={"font-semibold"} numberOfLines={1}>
-                  {totalInView > restaurantsInView.length
-                    ? `Showing ${restaurantsInView.length.toLocaleString()} of ${totalInView.toLocaleString()} restaurants on the map`
-                    : `${restaurantsInView.length.toLocaleString()} restaurants on the map`}
-                </ThemedText>
-              </View>
-              <View className={"flex-row items-center gap-2"}>
-                {isMapLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
-                <Pressable
-                  onPress={handleToggleFilters}
-                  className={"h-8 px-2.5 rounded-full border border-border bg-secondary/70 items-center justify-center"}
-                >
-                  <ThemedText variant={"caption1"} className={"font-semibold"}>
-                    {filtersExpanded ? "Hide" : "Filters"}
+      <View className={"flex-1 pt-3 gap-3"}>
+        <View className={"px-3"}>
+          <View
+            className={"rounded-2xl border border-border bg-background/90 overflow-hidden"}
+            style={{ boxShadow: "0 8px 24px rgba(0,0,0,0.28)" }}
+          >
+            <View className={"px-3 py-2 gap-2"}>
+              <View className={"flex-row items-center justify-between gap-3"}>
+                <View className={"flex-1"}>
+                  <ThemedText variant={"footnote"} className={"font-semibold"} numberOfLines={1}>
+                    {totalInView > restaurantsInView.length
+                      ? `Showing ${restaurantsInView.length.toLocaleString()} of ${totalInView.toLocaleString()} restaurants on the map`
+                      : `${restaurantsInView.length.toLocaleString()} restaurants on the map`}
                   </ThemedText>
-                </Pressable>
+                </View>
+                <View className={"flex-row items-center gap-2"}>
+                  {isMapLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
+                  <Pressable
+                    onPress={handleToggleFilters}
+                    className={
+                      "h-8 px-2.5 rounded-full border border-border bg-secondary/70 items-center justify-center"
+                    }
+                  >
+                    <ThemedText variant={"caption1"} className={"font-semibold"}>
+                      {filtersExpanded ? "Hide" : "Filters"}
+                    </ThemedText>
+                  </Pressable>
+                </View>
               </View>
+
+              <FilterPills options={viewModeOptions} value={viewMode} onChange={handleViewModeChange} />
             </View>
 
-            <FilterPills options={viewModeOptions} value={viewMode} onChange={handleViewModeChange} />
+            {filtersExpanded ? (
+              <View className={"gap-2 pb-3 px-3 border-t border-border pt-2.5"}>
+                <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
+                  Visited
+                </ThemedText>
+                <FilterPills options={visitFilterOptions} value={visitStatusFilter} onChange={setVisitStatusFilter} />
+
+                <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
+                  Awards
+                </ThemedText>
+                <FilterPills
+                  options={quickAwardFilterOptions}
+                  value={quickAwardFilter}
+                  onChange={setQuickAwardFilter}
+                />
+              </View>
+            ) : null}
           </View>
-
-          {filtersExpanded ? (
-            <View className={"gap-2 pb-3 px-3 border-t border-border pt-2.5"}>
-              <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
-                Visited
-              </ThemedText>
-              <FilterPills options={visitFilterOptions} value={visitStatusFilter} onChange={setVisitStatusFilter} />
-
-              <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
-                Awards
-              </ThemedText>
-              <FilterPills options={quickAwardFilterOptions} value={quickAwardFilter} onChange={setQuickAwardFilter} />
-            </View>
-          ) : null}
         </View>
 
         <View
-          className={"flex-1 rounded-2xl border border-border bg-background/90 overflow-hidden"}
+          className={"flex-1 rounded-t-2xl overflow-hidden"}
           style={{
             boxShadow: "0 8px 24px rgba(0,0,0,0.28)",
           }}

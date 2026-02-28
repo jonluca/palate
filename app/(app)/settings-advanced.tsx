@@ -126,7 +126,6 @@ export default function AdvancedSettingsScreen() {
       <Stack.Screen
         options={{
           title: "Advanced Settings",
-          headerLargeTitle: true,
         }}
       />
       <ScreenLayout>

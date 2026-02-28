@@ -51,8 +51,8 @@ export function IconSymbol({
   animationSpec?: SymbolViewProps["animationSpec"];
   backgroundColor?: string;
 }) {
-  const symbolName = typeof name === "string" ? name : name.android ?? name.web ?? name.ios;
-  const materialName = symbolName ? MAPPING[symbolName] ?? FALLBACK_ICON_NAME : FALLBACK_ICON_NAME;
+  const symbolName = typeof name === "string" ? name : (name.android ?? name.web ?? name.ios);
+  const materialName = symbolName ? (MAPPING[symbolName] ?? FALLBACK_ICON_NAME) : FALLBACK_ICON_NAME;
 
   return <MaterialIcons color={color} size={size} name={materialName} style={style} />;
 }

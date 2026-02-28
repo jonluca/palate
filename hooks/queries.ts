@@ -1427,7 +1427,11 @@ export function useDeepScan(onProgress?: (progress: DeepScanProgress) => void) {
 
   return useMutation({
     mutationFn: () => deepScanAllPhotosForFood({ onProgress: (p) => onProgressRef.current?.(p) }),
-    onSuccess: () => invalidateVisitQueries(queryClient),
+    onSuccess: () => {
+      invalidateVisitQueries(queryClient);
+      // Hide deep scan card immediately; count is 0 after a full scan
+      queryClient.setQueryData<number>(queryKeys.unanalyzedPhotoCount, 0);
+    },
   });
 }
 

@@ -41,10 +41,10 @@ export function ScreenLayout({
         className={cn("flex-1 bg-background", className)}
         contentContainerClassName={cn("p-4", contentClassName)}
         contentContainerStyle={contentStyle}
+        contentInsetAdjustmentBehavior={"never"}
         showsVerticalScrollIndicator={false}
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps={"handled"}
-        contentInsetAdjustmentBehavior={"never"}
         refreshControl={
           onRefresh ? <RefreshControl refreshing={refreshing ?? false} onRefresh={onRefresh} /> : undefined
         }
