@@ -1,5 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, ScrollView, Pressable, Platform, Modal } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  View,
+  ScrollView,
+  Pressable,
+  Platform,
+  Modal,
+  Alert,
+  ActivityIndicator,
+  useWindowDimensions,
+} from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { AppleMaps, GoogleMaps } from "expo-maps";
 import Animated, { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
@@ -8,6 +17,9 @@ import { useWrappedStats, type WrappedStats } from "@/hooks/queries";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
+import * as Sharing from "expo-sharing";
+import { File, Paths } from "expo-file-system";
+import { makeImageFromView, ImageFormat } from "@shopify/react-native-skia";
 import { logWrappedViewed } from "@/services/analytics";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -36,6 +48,25 @@ function formatPercent(value: number, decimals = 0): string {
     return "—";
   }
   return `${(value * 100).toFixed(decimals)}%`;
+}
+
+function getFourthStat(stats: WrappedStats) {
+  if (stats.uniqueCountries > 1) {
+    return { icon: "🌍", value: stats.uniqueCountries, label: "Countries" };
+  }
+  if (stats.michelinStats.totalAccumulatedStars > 0) {
+    return { icon: "⭐", value: stats.michelinStats.totalAccumulatedStars, label: "Michelin Stars" };
+  }
+  if (stats.photoStats.totalPhotos > 0) {
+    return { icon: "📸", value: stats.photoStats.totalPhotos, label: "Photos" };
+  }
+  if (stats.topCuisines.length > 0) {
+    return { icon: "🍜", value: stats.topCuisines.length, label: "Cuisines" };
+  }
+  if (stats.longestStreak && stats.longestStreak.days >= 2) {
+    return { icon: "🔥", value: stats.longestStreak.days, label: "Day Streak" };
+  }
+  return { icon: "📅", value: stats.averageVisitsPerMonth || "—", label: "Per Month" };
 }
 
 function getMapZoomForSpan(span: number): number {
@@ -1462,6 +1493,293 @@ function SectionHeading({ title, icon, accentClass }: { title: string; icon: str
   );
 }
 
+function StatsStoriesModal({
+  visible,
+  onClose,
+  stats,
+  selectedYear,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  stats: WrappedStats;
+  selectedYear: number | null;
+}) {
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const storyRefs = useRef<Array<React.RefObject<View | null>>>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [sharingStoryId, setSharingStoryId] = useState<string | null>(null);
+
+  const fourthStat = useMemo(() => getFourthStat(stats), [stats]);
+  const hasMonthlyData = stats.monthlyVisits.length > 0;
+  const hasMichelinData = stats.michelinStats.totalStarredVisits > 0;
+  const hasLocationData = stats.topLocations.length > 0;
+  const hasCuisineData = stats.topCuisines.length > 0;
+  const hasPhotoData = stats.photoStats.totalPhotos > 0;
+  const hasMealTimeData =
+    stats.mealTimeBreakdown.breakfast +
+      stats.mealTimeBreakdown.lunch +
+      stats.mealTimeBreakdown.dinner +
+      stats.mealTimeBreakdown.lateNight >
+    0;
+  const hasGreenStar = stats.michelinStats.greenStarVisits > 0;
+
+  const stories = useMemo(
+    () =>
+      [
+        {
+          id: "overview",
+          title: selectedYear ? `${selectedYear} Overview` : "All-Time Overview",
+          content: (
+            <View className={"gap-5"}>
+              <View className={"flex-row gap-3"}>
+                <StatCard icon={"📍"} value={stats.totalConfirmedVisits} label={"Visits"} accentColor={"amber"} />
+                <StatCard
+                  icon={"👨🏻‍🍳"}
+                  value={stats.totalUniqueRestaurants}
+                  label={"Restaurants"}
+                  accentColor={"emerald"}
+                />
+              </View>
+              <View className={"flex-row gap-3"}>
+                <StatCard
+                  icon={"🏙️"}
+                  value={stats.uniqueCities > 0 ? stats.uniqueCities : "—"}
+                  label={"Cities"}
+                  accentColor={"violet"}
+                />
+                <StatCard
+                  icon={fourthStat.icon}
+                  value={fourthStat.value}
+                  label={fourthStat.label}
+                  accentColor={"rose"}
+                />
+              </View>
+              {hasMonthlyData && (
+                <View className={"gap-5"}>
+                  <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />
+                  <SeasonalitySection monthlyVisits={stats.monthlyVisits} />
+                </View>
+              )}
+            </View>
+          ),
+        },
+        hasMichelinData
+          ? {
+              id: "michelin",
+              title: "Michelin Moments",
+              content: (
+                <View className={"gap-5"}>
+                  {hasGreenStar && <GreenStarSection greenStarVisits={stats.michelinStats.greenStarVisits} />}
+                  <StarBreakdown stats={stats.michelinStats} />
+                </View>
+              ),
+            }
+          : null,
+        hasLocationData || hasCuisineData
+          ? {
+              id: "places",
+              title: "Where You Dine",
+              content: (
+                <View className={"gap-5"}>
+                  {hasLocationData && <LocationBreakdown locations={stats.topLocations} />}
+                  {hasCuisineData && <CuisineCloud cuisines={stats.topCuisines} />}
+                </View>
+              ),
+            }
+          : null,
+        hasMealTimeData || hasPhotoData
+          ? {
+              id: "habits",
+              title: "Habits & Captures",
+              content: (
+                <View className={"gap-5"}>
+                  {hasMealTimeData && <DiningTimeChart mealTimes={stats.mealTimeBreakdown} />}
+                  <WeekendWeekdayChart weekendVsWeekday={stats.weekendVsWeekday} />
+                  {hasPhotoData && <PhotoStatsSection photoStats={stats.photoStats} />}
+                </View>
+              ),
+            }
+          : null,
+        {
+          id: "deep-dive",
+          title: "Deep Dive",
+          content: <DeepDiveSection stats={stats} selectedYear={selectedYear} />,
+        },
+      ].filter(Boolean) as Array<{ id: string; title: string; content: React.ReactNode }>,
+    [
+      fourthStat.icon,
+      fourthStat.label,
+      fourthStat.value,
+      hasCuisineData,
+      hasGreenStar,
+      hasLocationData,
+      hasMealTimeData,
+      hasMichelinData,
+      hasMonthlyData,
+      hasPhotoData,
+      selectedYear,
+      stats,
+    ],
+  );
+
+  const sanitizeForFileName = useCallback((value: string) => {
+    return value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }, []);
+
+  const shareStory = useCallback(
+    async (storyIndex: number) => {
+      const story = stories[storyIndex];
+      const targetRef = storyRefs.current[storyIndex];
+      if (!story || !targetRef) {
+        return;
+      }
+
+      try {
+        setSharingStoryId(story.id);
+        const isSharingAvailable = await Sharing.isAvailableAsync();
+        if (!isSharingAvailable) {
+          Alert.alert("Sharing unavailable", "This device does not support sharing right now.");
+          return;
+        }
+
+        const image = await makeImageFromView(targetRef);
+        if (!image) {
+          Alert.alert("Share failed", "Could not generate this story image. Please try again.");
+          return;
+        }
+        const base64Image = image.encodeToBase64(ImageFormat.PNG, 100);
+        const outputDirectory = Paths.cache ?? Paths.document;
+        const yearSegment = selectedYear ? String(selectedYear) : "all-time";
+        const storySegment = sanitizeForFileName(story.title) || story.id;
+        const fileName = `palate-stats-${yearSegment}-${storySegment}.png`;
+        const outputFile = new File(outputDirectory, fileName);
+        outputFile.write(base64Image, { encoding: "base64" });
+
+        await Sharing.shareAsync(outputFile.uri, {
+          mimeType: "image/png",
+          dialogTitle: `Share ${story.title}`,
+        });
+      } catch (error) {
+        console.warn("Failed to share story image", error);
+        Alert.alert("Share failed", "Could not generate this story image. Please try again.");
+      } finally {
+        setSharingStoryId(null);
+      }
+    },
+    [sanitizeForFileName, selectedYear, stories],
+  );
+
+  useEffect(() => {
+    if (!visible) {
+      setCurrentIndex(0);
+      setSharingStoryId(null);
+    }
+  }, [visible]);
+
+  return (
+    <Modal visible={visible} animationType={"slide"} onRequestClose={onClose}>
+      <View
+        className={"flex-1 bg-background"}
+        style={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 16 }}
+      >
+        <View className={"px-4 pb-4 flex-row items-center justify-between"}>
+          <ThemedText variant={"heading"} className={"font-semibold"}>
+            Stats Stories
+          </ThemedText>
+          <Pressable
+            onPress={() => {
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onClose();
+            }}
+            className={"rounded-full px-3 py-1.5 bg-secondary/70 border border-border"}
+          >
+            <ThemedText variant={"subhead"} className={"font-semibold"}>
+              Done
+            </ThemedText>
+          </Pressable>
+        </View>
+
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          contentInsetAdjustmentBehavior={"never"}
+          onMomentumScrollEnd={(event) => {
+            const index = Math.round(event.nativeEvent.contentOffset.x / width);
+            setCurrentIndex(index);
+          }}
+        >
+          {stories.map((story, index) => {
+            if (!storyRefs.current[index]) {
+              storyRefs.current[index] = React.createRef<View>();
+            }
+            return (
+              <View key={story.id} style={{ width }} className={"px-4 gap-4"}>
+                <View className={"flex-row items-center justify-between"}>
+                  <ThemedText variant={"title3"} className={"font-semibold text-foreground"}>
+                    {story.title}
+                  </ThemedText>
+                  <Pressable
+                    onPress={() => {
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      void shareStory(index);
+                    }}
+                    disabled={sharingStoryId === story.id}
+                    className={
+                      "rounded-full px-3.5 py-2 bg-primary/20 border border-primary/30 flex-row items-center gap-2"
+                    }
+                  >
+                    {sharingStoryId === story.id ? (
+                      <ActivityIndicator size={"small"} color={"#0A84FF"} />
+                    ) : (
+                      <ThemedText variant={"body"}>📤</ThemedText>
+                    )}
+                    <ThemedText variant={"subhead"} className={"text-primary font-semibold"}>
+                      {sharingStoryId === story.id ? "Sharing..." : "Share"}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+
+                <ScrollView
+                  contentInsetAdjustmentBehavior={"never"}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={{ paddingBottom: 24 }}
+                >
+                  <View
+                    ref={storyRefs.current[index]}
+                    collapsable={false}
+                    className={"rounded-3xl bg-background p-4 border border-border gap-5"}
+                    style={{ borderCurve: "continuous" }}
+                  >
+                    {story.content}
+                  </View>
+                </ScrollView>
+              </View>
+            );
+          })}
+        </ScrollView>
+
+        <View className={"pt-3 px-4 flex-row items-center justify-center gap-2"}>
+          {stories.map((story, index) => (
+            <View
+              key={`${story.id}-dot`}
+              className={"h-1.5 rounded-full"}
+              style={{
+                width: index === currentIndex ? 18 : 6,
+                backgroundColor: index === currentIndex ? "rgba(10, 132, 255, 0.9)" : "rgba(255, 255, 255, 0.24)",
+              }}
+            />
+          ))}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selectedYear: number | null }) {
   const hasMichelinData = stats.michelinStats.totalStarredVisits > 0;
   const hasCuisineData = stats.topCuisines.length > 0;
@@ -1478,25 +1796,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
   const hasGreenStar = stats.michelinStats.greenStarVisits > 0;
   const hasYearlyData = stats.yearlyStats.length > 0;
 
-  // Determine the 4th stat to show - now can include photo count or countries
-  const fourthStat = useMemo(() => {
-    if (stats.uniqueCountries > 1) {
-      return { icon: "🌍", value: stats.uniqueCountries, label: "Countries" };
-    }
-    if (stats.michelinStats.totalAccumulatedStars > 0) {
-      return { icon: "⭐", value: stats.michelinStats.totalAccumulatedStars, label: "Michelin Stars" };
-    }
-    if (stats.photoStats.totalPhotos > 0) {
-      return { icon: "📸", value: stats.photoStats.totalPhotos, label: "Photos" };
-    }
-    if (stats.topCuisines.length > 0) {
-      return { icon: "🍜", value: stats.topCuisines.length, label: "Cuisines" };
-    }
-    if (stats.longestStreak && stats.longestStreak.days >= 2) {
-      return { icon: "🔥", value: stats.longestStreak.days, label: "Day Streak" };
-    }
-    return { icon: "📅", value: stats.averageVisitsPerMonth || "—", label: "Per Month" };
-  }, [stats]);
+  const fourthStat = useMemo(() => getFourthStat(stats), [stats]);
 
   return (
     <View className={"gap-6"}>
@@ -1703,6 +2003,7 @@ function EmptyState() {
 export default function StatsScreen() {
   const insets = useSafeAreaInsets();
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [isStoriesOpen, setIsStoriesOpen] = useState(false);
 
   // Fetch all-time stats to get available years
   const { data: allTimeStats, isLoading: isLoadingAllTime } = useWrappedStats(null);
@@ -1757,6 +2058,19 @@ export default function StatsScreen() {
               {headerSubtitle}
             </ThemedText>
           </View>
+          {hasData && (
+            <Pressable
+              onPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setIsStoriesOpen(true);
+              }}
+              className={"rounded-full px-3.5 py-2 bg-primary/15 border border-primary/25"}
+            >
+              <ThemedText variant={"subhead"} className={"font-semibold text-primary"}>
+                Stories
+              </ThemedText>
+            </Pressable>
+          )}
         </View>
       </Animated.View>
       {/* Year Tabs */}
@@ -1797,6 +2111,15 @@ export default function StatsScreen() {
         <WrappedContent stats={stats} selectedYear={selectedYear} />
       ) : (
         <EmptyState />
+      )}
+
+      {hasData && stats && (
+        <StatsStoriesModal
+          visible={isStoriesOpen}
+          onClose={() => setIsStoriesOpen(false)}
+          stats={stats}
+          selectedYear={selectedYear}
+        />
       )}
     </ScrollView>
   );
