@@ -5,15 +5,15 @@ import type { SymbolType, SymbolViewProps, SymbolWeight } from "expo-symbols";
 import type { ComponentProps } from "react";
 import type { OpaqueColorValue, StyleProp, TextStyle } from "react-native";
 
-type IconMapping = Record<SymbolViewProps["name"], ComponentProps<typeof MaterialIcons>["name"]>;
-export type IconSymbolName = keyof typeof MAPPING;
+type MaterialIconName = ComponentProps<typeof MaterialIcons>["name"];
+export type IconSymbolName = SymbolViewProps["name"];
 
 /**
  * Add your SF Symbols to Material Icons mappings here.
  * - see Material Icons in the [Icons Directory](https://icons.expo.fyi).
  * - see SF Symbols in the [SF Symbols](https://developer.apple.com/sf-symbols/) app.
  */
-const MAPPING = {
+const MAPPING: Record<string, MaterialIconName> = {
   "house.fill": "home",
   "paperplane.fill": "send",
   "chevron.left.forwardslash.chevron.right": "code",
@@ -25,7 +25,9 @@ const MAPPING = {
   "circle.righthalf.filled": "brightness-6",
   "xmark.circle.fill": "close",
   photo: "image",
-} as IconMapping;
+};
+
+const FALLBACK_ICON_NAME: MaterialIconName = "help-outline";
 
 /**
  * An icon component that uses native SF Symbols on iOS, and Material Icons on Android and web.
@@ -49,5 +51,8 @@ export function IconSymbol({
   animationSpec?: SymbolViewProps["animationSpec"];
   backgroundColor?: string;
 }) {
-  return <MaterialIcons color={color} size={size} name={MAPPING[name]} style={style} />;
+  const symbolName = typeof name === "string" ? name : name.android ?? name.web ?? name.ios;
+  const materialName = symbolName ? MAPPING[symbolName] ?? FALLBACK_ICON_NAME : FALLBACK_ICON_NAME;
+
+  return <MaterialIcons color={color} size={size} name={materialName} style={style} />;
 }

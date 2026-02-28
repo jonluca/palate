@@ -1,6 +1,6 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
-const VERSION = "1.0.9";
+const VERSION = "1.0.10";
 
 const getConfig = ({ config }: ConfigContext): ExpoConfig => {
   return {
@@ -12,7 +12,6 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
     icon: "./assets/images/icon.jpeg",
     scheme: "palate",
     userInterfaceStyle: "automatic",
-    newArchEnabled: true,
     ios: {
       ...config.ios,
       googleServicesFile: "./GoogleService-Info.plist",
@@ -71,7 +70,6 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
       },
     },
     android: {
-      edgeToEdgeEnabled: true,
       predictiveBackGestureEnabled: false,
       package: "com.jonluca.restaurantmatcher",
       googleServicesFile: "./google-services.json",
@@ -119,6 +117,11 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       "expo-asset",
+      "expo-font",
+      "expo-image",
+      "expo-sharing",
+      "expo-sqlite",
+      "expo-video",
       [
         "expo-calendar",
         {

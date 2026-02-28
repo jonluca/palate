@@ -218,7 +218,7 @@ export function AnimatedProgressCard({ sharedValues }: AnimatedProgressCardProps
   return (
     <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)} layout={LinearTransition}>
       <View className={isComplete ? "bg-green-500/10 p-4" : "border-none p-4"}>
-        <View className={"gap-3"}>
+        <View className={"gap-3 h-[80px]"}>
           {/* Status Row */}
           <View className={"flex-row items-center gap-3"}>
             {showStats && !isComplete && <PulsingIndicator />}
