@@ -14,6 +14,8 @@ import { OnboardingFlow } from "@/components/onboarding";
 import { ScanHeader, PermissionCard, ScanCard } from "@/components/scan";
 import { Button, ButtonText } from "@/components/ui";
 
+const ONBOARDING_AUTO_DEEP_SCAN_PHOTO_THRESHOLD = 10_000;
+
 /**
  * Initial scan screen - shown only during onboarding for new users.
  * For rescanning, use the rescan page at /(app)/rescan
@@ -35,7 +37,7 @@ export default function ScanScreen() {
     isDeepScanning,
     scan,
     sharedValues,
-  } = useScan();
+  } = useScan({ autoDeepScanPhotoThreshold: ONBOARDING_AUTO_DEEP_SCAN_PHOTO_THRESHOLD });
 
   const handleOnboardingComplete = useCallback(() => {
     setHasCompletedOnboarding(true);

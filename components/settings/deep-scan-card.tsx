@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import type { SymbolViewProps } from "expo-symbols";
@@ -9,6 +9,54 @@ import { useToast } from "@/components/ui/toast";
 import { useDeepScan, useUnanalyzedPhotoCount, type DeepScanProgress } from "@/hooks/queries";
 import { formatEta } from "@/services/scanner";
 
+interface DeepScanCardProps {
+  autoStart?: boolean;
+}
+
+function createInitialProgress(): DeepScanProgress {
+  return {
+    totalPhotos: 0,
+    processedPhotos: 0,
+    foodPhotosFound: 0,
+    isComplete: false,
+    elapsedMs: 0,
+    photosPerSecond: 0,
+    etaMs: null,
+  };
+}
+
+async function runDeepScan({
+  source,
+  mutateAsync,
+  setProgress,
+  showToast,
+}: {
+  source: "auto" | "manual";
+  mutateAsync: () => Promise<DeepScanProgress>;
+  setProgress: React.Dispatch<React.SetStateAction<DeepScanProgress | null>>;
+  showToast: ReturnType<typeof useToast>["showToast"];
+}) {
+  if (source === "manual") {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  }
+
+  try {
+    setProgress(createInitialProgress());
+    const result = await mutateAsync();
+    setProgress(null);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    showToast({
+      type: "success",
+      message: `Found ${result.foodPhotosFound.toLocaleString()} food photo${result.foodPhotosFound === 1 ? "" : "s"} in ${result.processedPhotos.toLocaleString()} photos`,
+    });
+  } catch (error) {
+    console.error("Deep scan error:", error);
+    setProgress(null);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    showToast({ type: "error", message: "Deep scan failed" });
+  }
+}
+
 function CardIcon({ name, color, bgColor }: { name: SymbolViewProps["name"]; color: string; bgColor: string }) {
   return (
     <View className={`w-10 h-10 rounded-full items-center justify-center ${bgColor}`}>
@@ -17,12 +65,24 @@ function CardIcon({ name, color, bgColor }: { name: SymbolViewProps["name"]; col
   );
 }
 
-export function DeepScanCard() {
+export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
   const { showToast } = useToast();
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
   const [progress, setProgress] = useState<DeepScanProgress | null>(null);
   const deepScanMutation = useDeepScan((p) => setProgress(p));
   const isScanning = deepScanMutation.isPending;
+  const hasAutoStartedRef = useRef(false);
+
+  const startDeepScan = useCallback(
+    async (source: "auto" | "manual") =>
+      runDeepScan({
+        source,
+        mutateAsync: deepScanMutation.mutateAsync,
+        setProgress,
+        showToast,
+      }),
+    [deepScanMutation, showToast],
+  );
 
   const handleDeepScan = useCallback(() => {
     Alert.alert(
@@ -33,35 +93,25 @@ export function DeepScanCard() {
         {
           text: "Start Deep Scan",
           onPress: async () => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            try {
-              setProgress({
-                totalPhotos: 0,
-                processedPhotos: 0,
-                foodPhotosFound: 0,
-                isComplete: false,
-                elapsedMs: 0,
-                photosPerSecond: 0,
-                etaMs: null,
-              });
-              const result = await deepScanMutation.mutateAsync();
-              setProgress(null);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              showToast({
-                type: "success",
-                message: `Found ${result.foodPhotosFound.toLocaleString()} food photo${result.foodPhotosFound === 1 ? "" : "s"} in ${result.processedPhotos.toLocaleString()} photos`,
-              });
-            } catch (error) {
-              console.error("Deep scan error:", error);
-              setProgress(null);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-              showToast({ type: "error", message: "Deep scan failed" });
-            }
+            await startDeepScan("manual");
           },
         },
       ],
     );
-  }, [deepScanMutation, showToast]);
+  }, [startDeepScan]);
+
+  useEffect(() => {
+    if (!autoStart || hasAutoStartedRef.current || isScanning || (unanalyzedPhotoCount ?? 0) === 0) {
+      return;
+    }
+
+    hasAutoStartedRef.current = true;
+    const autoStartTimer = setTimeout(() => {
+      void startDeepScan("auto");
+    }, 0);
+
+    return () => clearTimeout(autoStartTimer);
+  }, [autoStart, isScanning, startDeepScan, unanalyzedPhotoCount]);
 
   const progressPercent =
     progress && progress.totalPhotos > 0 ? (progress.processedPhotos / progress.totalPhotos) * 100 : 0;
@@ -80,7 +130,9 @@ export function DeepScanCard() {
               Deep Scan Photos
             </ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              Slower full-library scan to find missed food photos
+              {autoStart && isScanning
+                ? "Automatically scanning the rest of your library for missed food photos"
+                : "Slower full-library scan to find missed food photos"}
             </ThemedText>
           </View>
         </View>

@@ -9,7 +9,7 @@ import {
 } from "./queries";
 import { useScanProgress, type ProgressSharedValues } from "./use-progress";
 import { useAppStore, useHasCompletedInitialScan } from "@/store/app-store";
-import { formatEta } from "@/services/scanner";
+import { formatEta, getPhotoCount } from "@/services/scanner";
 import { logScanStarted, logScanCompleted } from "@/services/analytics";
 
 export interface UseScanReturn {
@@ -36,7 +36,12 @@ export interface UseScanReturn {
   sharedValues: ProgressSharedValues;
 }
 
-export function useScan(): UseScanReturn {
+interface UseScanOptions {
+  autoDeepScanPhotoThreshold?: number;
+}
+
+export function useScan(options: UseScanOptions = {}): UseScanReturn {
+  const { autoDeepScanPhotoThreshold } = options;
   const { data: hasPermission } = usePermissions();
   const { data: cameraRollCount } = usePhotoCount(hasPermission === true);
   const requestPermissionMutation = useRequestPermission();
@@ -91,6 +96,15 @@ export function useScan(): UseScanReturn {
     requestPermissionMutation.mutate();
   }, [requestPermissionMutation]);
 
+  const shouldAutoDeepScan = useCallback(async () => {
+    if (autoDeepScanPhotoThreshold === undefined || hasCompletedInitialScan) {
+      return false;
+    }
+
+    const libraryPhotoCount = cameraRollCount ?? (await getPhotoCount().catch(() => null));
+    return libraryPhotoCount !== null && libraryPhotoCount < autoDeepScanPhotoThreshold;
+  }, [autoDeepScanPhotoThreshold, cameraRollCount, hasCompletedInitialScan]);
+
   const scan = useCallback(async () => {
     if (!hasPermission) {
       requestPermission();
@@ -103,6 +117,9 @@ export function useScan(): UseScanReturn {
 
     try {
       const result = await scanMutation.mutateAsync();
+      if (await shouldAutoDeepScan()) {
+        await deepScanMutation.mutateAsync();
+      }
       const message = `Done!`;
       complete(message);
       completeScan(message);
@@ -113,7 +130,19 @@ export function useScan(): UseScanReturn {
       error(errorMessage);
       failScan(errorMessage);
     }
-  }, [hasPermission, requestPermission, start, startScan, scanMutation, complete, completeScan, error, failScan]);
+  }, [
+    hasPermission,
+    requestPermission,
+    start,
+    startScan,
+    scanMutation,
+    shouldAutoDeepScan,
+    deepScanMutation,
+    complete,
+    completeScan,
+    error,
+    failScan,
+  ]);
 
   const deepScan = useCallback(async () => {
     if (!hasPermission) {

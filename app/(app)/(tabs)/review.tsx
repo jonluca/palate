@@ -7,6 +7,7 @@ import { IconSymbol } from "@/components/icon-symbol";
 import {
   usePendingReview,
   useBatchConfirmVisits,
+  useUnanalyzedPhotoCount,
   type PendingVisitForReview,
   type ExactCalendarMatch,
 } from "@/hooks/queries";
@@ -80,6 +81,35 @@ function ReviewCompletionCard() {
   );
 }
 
+async function approveAllExactMatches({
+  exactMatches,
+  batchConfirm,
+  setIsApproving,
+  showToast,
+}: {
+  exactMatches: ExactCalendarMatch[];
+  batchConfirm: (matches: ExactCalendarMatch[]) => Promise<unknown>;
+  setIsApproving: React.Dispatch<React.SetStateAction<boolean>>;
+  showToast: ReturnType<typeof useToast>["showToast"];
+}) {
+  setIsApproving(true);
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+  try {
+    await batchConfirm(exactMatches);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    showToast({
+      type: "success",
+      message: `Confirmed ${exactMatches.length.toLocaleString()} visit${exactMatches.length === 1 ? "" : "s"}.`,
+    });
+  } catch (error) {
+    console.error("Error confirming visits:", error);
+    showToast({ type: "error", message: "Failed to confirm visits. Please try again." });
+  } finally {
+    setIsApproving(false);
+  }
+}
+
 export default function ReviewScreen() {
   "use no memo";
 
@@ -105,6 +135,7 @@ export default function ReviewScreen() {
 
   // Data queries
   const { data, isLoading } = usePendingReview();
+  const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
   const pendingVisits = useMemo(() => data?.visits ?? [], [data?.visits]);
   const exactMatches = useMemo(() => data?.exactMatches ?? [], [data?.exactMatches]);
 
@@ -224,8 +255,10 @@ export default function ReviewScreen() {
     } manual review`;
   }, [isAllCaughtUp, hasExactMatches, exactMatches.length, filteredReviewableVisits.length]);
 
-  const shouldShowDeepScanEmptyCard =
-    foodFilter === "on" && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable);
+  const shouldAutoDeepScan =
+    !isLoading &&
+    (unanalyzedPhotoCount ?? 0) > 0 &&
+    (isAllCaughtUp || (foodFilter === "on" && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable)));
 
   // Register undo complete callback to scroll back to restored item
   useEffect(() => {
@@ -263,21 +296,12 @@ export default function ReviewScreen() {
           text: "Approve All",
           style: "default",
           onPress: async () => {
-            setIsApproving(true);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            try {
-              await batchConfirmMutation.mutateAsync(exactMatches);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              showToast({
-                type: "success",
-                message: `Confirmed ${exactMatches.length.toLocaleString()} visit${exactMatches.length === 1 ? "" : "s"}.`,
-              });
-            } catch (error) {
-              console.error("Error confirming visits:", error);
-              showToast({ type: "error", message: "Failed to confirm visits. Please try again." });
-            } finally {
-              setIsApproving(false);
-            }
+            await approveAllExactMatches({
+              exactMatches,
+              batchConfirm: batchConfirmMutation.mutateAsync,
+              setIsApproving,
+              showToast,
+            });
           },
         },
       ],
@@ -418,6 +442,8 @@ export default function ReviewScreen() {
           ListEmptyComponent={
             isLoading ? (
               <LoadingState />
+            ) : shouldAutoDeepScan ? (
+              <DeepScanCard autoStart={true} />
             ) : isAllCaughtUp ? (
               <ReviewCompletionCard />
             ) : (
@@ -428,7 +454,6 @@ export default function ReviewScreen() {
                 <ThemedText variant={"body"} color={"secondary"}>
                   Try changing the filters above.
                 </ThemedText>
-                {shouldShowDeepScanEmptyCard && <DeepScanCard />}
               </View>
             )
           }
