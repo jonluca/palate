@@ -258,7 +258,8 @@ export default function ReviewScreen() {
   const shouldAutoDeepScan =
     !isLoading &&
     (unanalyzedPhotoCount ?? 0) > 0 &&
-    (isAllCaughtUp || (foodFilter === "on" && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable)));
+    (isAllCaughtUp ||
+      (foodFilter === "on" && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable)));
 
   // Register undo complete callback to scroll back to restored item
   useEffect(() => {
