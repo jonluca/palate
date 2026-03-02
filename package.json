@@ -11,8 +11,10 @@
     "mobile:dev": "expo run:ios --device",
     "mobile:submit": "eas build --platform ios --auto-submit --non-interactive",
     "web": "expo start --web",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix && prettier --write . --cache",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix . && oxfmt --write .",
     "android": "expo run:android"
   },
   "dependencies": {
@@ -88,36 +90,14 @@
   "private": true,
   "packageManager": "yarn@4.12.0",
   "devDependencies": {
-    "@eslint/compat": "^2.0.2",
-    "@eslint/js": "^10.0.1",
     "@types/babel__core": "^7",
     "@types/lodash-es": "^4",
     "@types/node": "^25.3.2",
     "@types/react-dom": "~19.1.7",
     "@types/react-refresh": "^0",
-    "@typescript-eslint/utils": "^8.56.1",
-    "eslint": "^10.0.2",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-eslint-comments": "^3.2.0",
-    "eslint-plugin-import": "^2.32.0",
-    "eslint-plugin-prettier": "^5.5.5",
-    "eslint-plugin-promise": "^7.2.1",
-    "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-compiler": "^19.1.0-rc.2",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-native": "^5.0.0",
-    "eslint-plugin-unused-imports": "^4.4.1",
-    "globals": "^17.3.0",
     "knip": "^5.85.0",
-    "prettier": "^3.8.1",
-    "typescript-eslint": "^8.56.1"
-  },
-  "prettier": {
-    "printWidth": 120,
-    "arrowParens": "always",
-    "semi": true,
-    "tabWidth": 2,
-    "trailingComma": "all",
-    "singleQuote": false
+    "oxfmt": "^0.35.0",
+    "oxlint": "^1.50.0"
   }
 }
