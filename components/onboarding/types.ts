@@ -1,3 +1,4 @@
+import type { ImageSource } from "expo-image";
 import type { SymbolViewProps } from "expo-symbols";
 import type { SharedValue } from "react-native-reanimated";
 import type React from "react";
@@ -6,6 +7,7 @@ export type PermissionType = "photos" | "calendar";
 
 export interface OnboardingSlide {
   id: string;
+  heroImage: ImageSource | number;
   icon: SymbolViewProps["name"];
   iconColor: string;
   iconBg: string;

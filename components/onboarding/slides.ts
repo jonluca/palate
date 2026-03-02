@@ -1,9 +1,14 @@
 import type { OnboardingSlide } from "./types";
 import { CalendarSelectionContent } from "./calendar-selection";
+import heroOne from "../../assets/images/img1.jpeg";
+import heroTwo from "../../assets/images/img2.jpeg";
+import heroThree from "../../assets/images/img3.jpeg";
+import heroLogo from "../../assets/images/icon.jpeg";
 
 export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   {
     id: "1",
+    heroImage: heroOne,
     icon: "camera.viewfinder",
     iconColor: "#f97316",
     iconBg: "bg-orange-500/20",
@@ -15,6 +20,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   },
   {
     id: "2",
+    heroImage: heroTwo,
     icon: "photo.stack",
     iconColor: "#22c55e",
     iconBg: "bg-green-500/20",
@@ -27,6 +33,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   },
   {
     id: "3",
+    heroImage: heroThree,
     icon: "calendar",
     iconColor: "#3b82f6",
     iconBg: "bg-blue-500/20",
@@ -39,6 +46,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   },
   {
     id: "4",
+    heroImage: heroLogo,
     icon: "checklist",
     iconColor: "#06b6d4",
     iconBg: "bg-cyan-500/20",
@@ -51,6 +59,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   },
   {
     id: "5",
+    heroImage: heroTwo,
     icon: "fork.knife",
     iconColor: "#8b5cf6",
     iconBg: "bg-purple-500/20",
@@ -62,6 +71,7 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
   },
   {
     id: "7",
+    heroImage: heroOne,
     icon: "chart.bar.fill",
     iconColor: "#eab308",
     iconBg: "bg-yellow-500/20",

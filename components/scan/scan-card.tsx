@@ -16,6 +16,7 @@ interface ScanCardProps {
   deepScanButtonText?: string;
   showDeepScan?: boolean;
   animationDelay?: number;
+  primaryAction?: "scan" | "deep-scan";
 }
 
 export function ScanCard({
@@ -29,8 +30,12 @@ export function ScanCard({
   deepScanButtonText = "Deep Scan for Food",
   showDeepScan = false,
   animationDelay = 100,
+  primaryAction = "scan",
 }: ScanCardProps) {
   const isInProgress = isScanning || isDeepScanning;
+  const scanVariant = primaryAction === "scan" ? "default" : "outline";
+  const deepScanVariant = primaryAction === "deep-scan" ? "default" : "outline";
+  const deepScanTextVariant = primaryAction === "deep-scan" ? "default" : "outline";
 
   return (
     <Animated.View entering={FadeInDown.delay(animationDelay).duration(300)}>
@@ -43,15 +48,15 @@ export function ScanCard({
 
           {/* Scan Button */}
           {!isInProgress && (
-            <Button onPress={onScan} size={"lg"}>
-              <ButtonText>{scanButtonText}</ButtonText>
+            <Button onPress={onScan} size={"lg"} variant={scanVariant}>
+              <ButtonText variant={scanVariant}>{scanButtonText}</ButtonText>
             </Button>
           )}
 
           {/* Deep Scan Button */}
           {showDeepScan && !isInProgress && onDeepScan && (
-            <Button onPress={onDeepScan} variant={"outline"} size={"lg"}>
-              <ButtonText variant={"outline"}>{deepScanButtonText}</ButtonText>
+            <Button onPress={onDeepScan} variant={deepScanVariant} size={"lg"}>
+              <ButtonText variant={deepScanTextVariant}>{deepScanButtonText}</ButtonText>
             </Button>
           )}
 

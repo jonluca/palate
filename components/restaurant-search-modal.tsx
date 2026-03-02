@@ -1,6 +1,6 @@
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
-import { Card, Button, ButtonText } from "@/components/ui";
+import { Button, ButtonText } from "@/components/ui";
 import {
   useUnifiedNearbyRestaurants,
   useSearchNearbyRestaurants,
@@ -8,6 +8,12 @@ import {
   type NearbyRestaurant,
   type RestaurantWithVisits,
 } from "@/hooks";
+import {
+  RestaurantRowCard,
+  getRestaurantAwardBadge,
+  getRestaurantSourceBadge,
+  formatRestaurantDistance,
+} from "@/components/restaurants/restaurant-row-card";
 import type { PlaceResult } from "@/services/places";
 import type { VisitRecord } from "@/utils/db";
 import { useGoogleMapsApiKey } from "@/store";
@@ -29,35 +35,29 @@ export interface RestaurantOption {
   source: "michelin" | "mapkit" | "google";
 }
 
-function formatDistance(meters: number): string {
-  if (meters < 1000) {
-    return `${Math.round(meters).toLocaleString()}m`;
-  }
-  const km = meters / 1000;
-  return `${km.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}km`;
-}
-
 export function getMichelinBadge(award: string): { emoji: string; label: string } | null {
-  if (!award) {
+  const badge = getRestaurantAwardBadge(award);
+  if (!badge) {
     return null;
   }
-  const lowerAward = award.toLowerCase();
-  if (lowerAward.includes("3 star")) {
-    return { emoji: "⭐⭐⭐", label: "3 Michelin Stars" };
+
+  if (badge.label.startsWith("3 Michelin")) {
+    return { emoji: "⭐⭐⭐", label: badge.label };
   }
-  if (lowerAward.includes("2 star")) {
-    return { emoji: "⭐⭐", label: "2 Michelin Stars" };
+  if (badge.label.startsWith("2 Michelin")) {
+    return { emoji: "⭐⭐", label: badge.label };
   }
-  if (lowerAward.includes("1 star")) {
-    return { emoji: "⭐", label: "1 Michelin Star" };
+  if (badge.label.startsWith("1 Michelin")) {
+    return { emoji: "⭐", label: badge.label };
   }
-  if (lowerAward.includes("bib")) {
-    return { emoji: "🍽️", label: "Bib Gourmand" };
+  if (badge.label === "Bib Gourmand") {
+    return { emoji: "🍽️", label: badge.label };
   }
-  if (lowerAward.includes("selected")) {
-    return { emoji: "🏆", label: "Michelin Selected" };
+  if (badge.label === "Green Star") {
+    return { emoji: "🌿", label: badge.label };
   }
-  return null;
+
+  return { emoji: "🏆", label: badge.label };
 }
 
 /**
@@ -126,6 +126,16 @@ interface RestaurantSearchModalProps {
   onClose: () => void;
   onSelect: (restaurant: RestaurantOption) => void;
   visit: VisitRecord;
+}
+
+function MatchPill() {
+  return (
+    <View className={"px-2 py-1 rounded-full border border-emerald-500/20 bg-emerald-500/12"}>
+      <ThemedText variant={"caption2"} className={"text-emerald-400 font-medium"}>
+        Match
+      </ThemedText>
+    </View>
+  );
 }
 
 export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: RestaurantSearchModalProps) {
@@ -315,47 +325,24 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
                 Your Restaurants
               </ThemedText>
               <View className={"gap-3"}>
-                {visitedOptions.map((restaurant, idx) => {
+                {visitedOptions.map((restaurant) => {
                   const similarity = sortTerm ? calculateSimilarity(restaurant.name, sortTerm) : 0;
                   const isLikelyMatch = similarity > 0.5;
                   return (
-                    <Pressable
-                      key={`visited-${restaurant.id}-${idx}`}
+                    <RestaurantRowCard
+                      key={`visited-${restaurant.id}`}
                       onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                         onSelect(restaurant);
                         handleClose();
                       }}
-                    >
-                      <Card animated={false}>
-                        <View className={"p-3 gap-1"}>
-                          <View className={"flex-row items-start justify-between"}>
-                            <View className={"flex-1"}>
-                              <View className={"flex-row items-center gap-2"}>
-                                <ThemedText variant={"subhead"} className={"font-medium"}>
-                                  {restaurant.name}
-                                </ThemedText>
-                                {isLikelyMatch && (
-                                  <View className={"bg-emerald-500/20 px-1.5 py-0.5 rounded"}>
-                                    <ThemedText variant={"caption2"} className={"text-emerald-400"}>
-                                      Match
-                                    </ThemedText>
-                                  </View>
-                                )}
-                              </View>
-                              <ThemedText variant={"footnote"} color={"tertiary"}>
-                                {restaurant.visitCount} {restaurant.visitCount === 1 ? "visit" : "visits"}
-                              </ThemedText>
-                            </View>
-                            <View className={"bg-violet-500/20 px-1.5 py-0.5 rounded"}>
-                              <ThemedText variant={"caption2"} className={"text-violet-400"}>
-                                Visited
-                              </ThemedText>
-                            </View>
-                          </View>
-                        </View>
-                      </Card>
-                    </Pressable>
+                      title={restaurant.name}
+                      subtitle={`${restaurant.visitCount} ${restaurant.visitCount === 1 ? "visit" : "visits"}`}
+                      variant={"selection"}
+                      source={"visited"}
+                      badge={getRestaurantSourceBadge("visited")}
+                      rightAccessory={isLikelyMatch ? <MatchPill /> : undefined}
+                    />
                   );
                 })}
               </View>
@@ -389,63 +376,36 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
                 </View>
               ) : (
                 <View className={"gap-3"}>
-                  {nearbyOptions.map((restaurant, idx) => {
-                    const badge = restaurant.award ? getMichelinBadge(restaurant.award) : null;
+                  {nearbyOptions.map((restaurant) => {
                     const similarity = sortTerm ? calculateSimilarity(restaurant.name, sortTerm) : 0;
                     const isLikelyMatch = similarity > 0.5;
+                    const badge =
+                      getRestaurantAwardBadge(restaurant.award) ?? getRestaurantSourceBadge(restaurant.source);
                     return (
-                      <Pressable
-                        key={`${restaurant.id}-${idx}`}
+                      <RestaurantRowCard
+                        key={restaurant.id}
                         onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                           onSelect(restaurant);
                           handleClose();
                         }}
-                      >
-                        <Card animated={false}>
-                          <View className={"p-3 gap-1"}>
-                            <View className={"flex-row items-start justify-between"}>
-                              <View className={"flex-1"}>
-                                <View className={"flex-row items-center gap-2"}>
-                                  <ThemedText variant={"subhead"} className={"font-medium"}>
-                                    {restaurant.name}
-                                  </ThemedText>
-                                  {isLikelyMatch && (
-                                    <View className={"bg-emerald-500/20 px-1.5 py-0.5 rounded"}>
-                                      <ThemedText variant={"caption2"} className={"text-emerald-400"}>
-                                        Match
-                                      </ThemedText>
-                                    </View>
-                                  )}
-                                </View>
-                                {restaurant.cuisine && (
-                                  <ThemedText variant={"footnote"} color={"tertiary"}>
-                                    {restaurant.cuisine}
-                                  </ThemedText>
-                                )}
-                                {!restaurant.cuisine && restaurant.address && (
-                                  <ThemedText variant={"footnote"} color={"tertiary"} numberOfLines={1}>
-                                    {restaurant.address}
-                                  </ThemedText>
-                                )}
-                              </View>
-                              {restaurant.distance !== undefined && (
-                                <ThemedText variant={"footnote"} color={"tertiary"}>
-                                  {formatDistance(restaurant.distance)}
-                                </ThemedText>
-                              )}
-                            </View>
-                            {badge && (
-                              <View className={"flex-row items-center gap-1 mt-1"}>
-                                <ThemedText variant={"caption1"}>{badge.emoji}</ThemedText>
-                                <ThemedText variant={"caption2"} color={"secondary"}>
-                                  {badge.label}
-                                </ThemedText>
-                              </View>
-                            )}
+                        title={restaurant.name}
+                        subtitle={restaurant.cuisine ?? restaurant.address}
+                        supportingText={restaurant.cuisine && restaurant.address ? restaurant.address : null}
+                        variant={"selection"}
+                        source={restaurant.source}
+                        badge={badge}
+                        rightAccessory={
+                          <View className={"items-end gap-2"}>
+                            {isLikelyMatch ? <MatchPill /> : null}
+                            {restaurant.distance !== undefined ? (
+                              <ThemedText variant={"caption1"} color={"tertiary"}>
+                                {formatRestaurantDistance(restaurant.distance)}
+                              </ThemedText>
+                            ) : null}
                           </View>
-                        </Card>
-                      </Pressable>
+                        }
+                      />
                     );
                   })}
                 </View>
@@ -484,57 +444,25 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
                     const isLikelyMatch = similarity > 0.5;
                     const priceString = formatPriceLevel(restaurant.priceLevel);
                     return (
-                      <Pressable
+                      <RestaurantRowCard
                         key={restaurant.id}
                         onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                           onSelect(restaurant);
                           handleClose();
                         }}
-                      >
-                        <Card animated={false}>
-                          <View className={"p-3 gap-1"}>
-                            <View className={"flex-row items-start justify-between"}>
-                              <View className={"flex-1"}>
-                                <View className={"flex-row items-center gap-2"}>
-                                  <ThemedText variant={"subhead"} className={"font-medium"}>
-                                    {restaurant.name}
-                                  </ThemedText>
-                                  {isLikelyMatch && (
-                                    <View className={"bg-emerald-500/20 px-1.5 py-0.5 rounded"}>
-                                      <ThemedText variant={"caption2"} className={"text-emerald-400"}>
-                                        Match
-                                      </ThemedText>
-                                    </View>
-                                  )}
-                                </View>
-                                {restaurant.address && (
-                                  <ThemedText variant={"footnote"} color={"tertiary"} numberOfLines={1}>
-                                    {restaurant.address}
-                                  </ThemedText>
-                                )}
-                              </View>
-                              <View className={"items-end"}>
-                                {restaurant.rating !== undefined && (
-                                  <View className={"flex-row items-center gap-1"}>
-                                    <ThemedText variant={"footnote"} className={"text-amber-400"}>
-                                      ★
-                                    </ThemedText>
-                                    <ThemedText variant={"footnote"} color={"secondary"}>
-                                      {restaurant.rating.toFixed(1)}
-                                    </ThemedText>
-                                  </View>
-                                )}
-                                {priceString && (
-                                  <ThemedText variant={"caption2"} color={"tertiary"}>
-                                    {priceString}
-                                  </ThemedText>
-                                )}
-                              </View>
-                            </View>
-                          </View>
-                        </Card>
-                      </Pressable>
+                        title={restaurant.name}
+                        subtitle={restaurant.address}
+                        supportingText={
+                          restaurant.rating !== undefined
+                            ? `${restaurant.rating.toFixed(1)}${priceString ? ` · ${priceString}` : ""}`
+                            : priceString
+                        }
+                        variant={"selection"}
+                        source={"google"}
+                        badge={getRestaurantSourceBadge("google")}
+                        rightAccessory={isLikelyMatch ? <MatchPill /> : undefined}
+                      />
                     );
                   })}
                 </View>

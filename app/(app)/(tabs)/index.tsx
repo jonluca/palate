@@ -1,8 +1,13 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
-import { Card, SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills } from "@/components/ui";
+import { SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills } from "@/components/ui";
 import { HomeHeader, NewPhotosCard } from "@/components/home";
 import { MichelinRestaurantCard } from "@/components/restaurants/michelin-restaurant-card";
+import {
+  RestaurantRowCard,
+  RestaurantRowChevron,
+  getRestaurantAwardBadge,
+} from "@/components/restaurants/restaurant-row-card";
 import { useConfirmedRestaurants, useMichelinRestaurants, type RestaurantWithVisits } from "@/hooks/queries";
 import type { MichelinRestaurantRecord } from "@/utils/db";
 import { FlashList } from "@shopify/flash-list";
@@ -20,7 +25,6 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconSymbol } from "@/components/icon-symbol";
-import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { cn } from "@/utils/cn";
 
@@ -48,7 +52,6 @@ function formatDate(timestamp: number): string {
   return date.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
-    year: "numeric",
   });
 }
 
@@ -69,108 +72,35 @@ function getStarCount(award: string | null): number {
   return 0;
 }
 
-function formatAward(award: string | null): string | null {
-  if (!award) {
-    return null;
-  }
-  const lower = award.toLowerCase();
-  if (lower.includes("3 star")) {
-    return "⭐⭐⭐";
-  }
-  if (lower.includes("2 star")) {
-    return "⭐⭐";
-  }
-  if (lower.includes("1 star")) {
-    return "⭐";
-  }
-  if (lower.includes("bib gourmand")) {
-    return "🍽️ Bib";
-  }
-  if (lower.includes("green star")) {
-    return "🌿";
-  }
-  return null;
-}
-
-function PhotoPreview({ photos }: { photos: string[] }) {
-  if (photos.length === 0) {
-    return null;
-  }
-
-  return (
-    <View className={"flex-row h-32 overflow-hidden border-b border-border"}>
-      {photos.slice(0, 3).map((uri) => (
-        <View key={uri} className={"flex-1"}>
-          <Image recyclingKey={uri} source={{ uri }} style={{ width: "100%", height: 128 }} contentFit={"cover"} />
-        </View>
-      ))}
-    </View>
-  );
-}
-
 function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisits; index: number }) {
   const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(`/restaurant/${restaurant.id}`);
   };
 
-  const hasPhotos = restaurant.previewPhotos.length > 0;
-  const currentAwardDisplay = formatAward(restaurant.currentAward);
-  const visitedAwardDisplay = formatAward(restaurant.visitedAward);
+  const subtitle = restaurant.cuisine ?? restaurant.address ?? "Saved restaurant";
+  const supportingText = [
+    restaurant.cuisine ? restaurant.address : null,
+    `${restaurant.visitCount.toLocaleString()} visit${restaurant.visitCount === 1 ? "" : "s"}`,
+    `Last visit ${formatDate(restaurant.lastVisit)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const badge = getRestaurantAwardBadge(restaurant.currentAward) ?? getRestaurantAwardBadge(restaurant.visitedAward);
 
   return (
     <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>
-      <Pressable onPress={handlePress} className={"rounded-2xl"}>
-        <Card animated={false}>
-          <PhotoPreview photos={restaurant.previewPhotos} />
-          <View className={hasPhotos ? "p-3.5 gap-1.5" : "p-4 gap-2"}>
-            <View className={"flex-row items-start justify-between"}>
-              <View className={"flex-1 gap-0.5"}>
-                <View className={"flex-row items-center gap-2"}>
-                  <ThemedText variant={"heading"} className={"font-semibold flex-shrink"} numberOfLines={1}>
-                    {restaurant.name}
-                  </ThemedText>
-                  {currentAwardDisplay && (
-                    <ThemedText variant={"subhead"} className={"text-amber-300"}>
-                      {currentAwardDisplay}
-                    </ThemedText>
-                  )}
-                </View>
-                <View className={"flex-row items-center gap-1"}>
-                  <ThemedText variant={"footnote"} color={"tertiary"}>
-                    Last visit: {formatDate(restaurant.lastVisit)}
-                  </ThemedText>
-                  {visitedAwardDisplay && (
-                    <ThemedText variant={"footnote"} color={"tertiary"}>
-                      · Visited at {visitedAwardDisplay}
-                    </ThemedText>
-                  )}
-                </View>
-              </View>
-              <View className={"items-end gap-2 ml-3"}>
-                {restaurant.visitCount > 1 ? (
-                  <View className={"px-2 py-1 rounded-full bg-secondary/80  flex-row items-center gap-1"}>
-                    <ThemedText
-                      variant={"caption1"}
-                      color={"secondary"}
-                      className={"font-semibold"}
-                      style={{ fontVariant: ["tabular-nums"] }}
-                    >
-                      {restaurant.visitCount.toLocaleString()}
-                    </ThemedText>
-                    <ThemedText variant={"caption2"} color={"tertiary"}>
-                      {"visits"}
-                    </ThemedText>
-                  </View>
-                ) : null}
-                <View className={"w-7 h-7 rounded-full bg-secondary/70 items-center justify-center"}>
-                  <IconSymbol name={"chevron.right"} size={12} color={"#8E8E93"} weight={"semibold"} />
-                </View>
-              </View>
-            </View>
-          </View>
-        </Card>
-      </Pressable>
+      <RestaurantRowCard
+        title={restaurant.name}
+        subtitle={subtitle}
+        supportingText={supportingText}
+        imageUri={restaurant.previewPhotos[0] ?? null}
+        variant={"main"}
+        source={restaurant.previewPhotos.length > 0 ? "visited" : "michelin"}
+        badge={badge}
+        rightAccessory={<RestaurantRowChevron />}
+        onPress={handlePress}
+      />
     </Animated.View>
   );
 }
@@ -212,12 +142,14 @@ function SearchBar({
 
   return (
     <View className={"flex-row items-center gap-2"}>
-      <View className={"flex-1 h-11 flex-row items-center bg-secondary/70  rounded-2xl px-3 gap-2"}>
+      <View
+        className={"flex-1 h-12 flex-row items-center bg-secondary/70 rounded-2xl px-3 gap-2 border border-white/6"}
+      >
         <IconSymbol name={"magnifyingglass"} size={16} color={"#8E8E93"} />
         <TextInput
           value={value}
           onChangeText={onChangeText}
-          placeholder={"Search restaurants..."}
+          placeholder={"Search restaurants, cuisines, places..."}
           placeholderTextColor={"#8E8E93"}
           className={"flex-1 text-foreground"}
           style={{ height: 22, fontSize: 16 }}
@@ -242,13 +174,13 @@ function SearchBar({
       </View>
       <Pressable
         onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           onToggleFilters();
         }}
         hitSlop={8}
         className={cn(
-          "w-11 h-11 rounded-2xl border items-center justify-center",
-          filtersExpanded ? "bg-primary/15 border-primary/25" : "bg-secondary/70 border-border",
+          "w-12 h-12 rounded-2xl border items-center justify-center",
+          filtersExpanded ? "bg-primary/15 border-primary/25" : "bg-secondary/70 border-white/6",
         )}
       >
         <Animated.View style={arrowStyle}>
@@ -264,6 +196,21 @@ type ListItem =
   | { type: "visited"; data: RestaurantWithVisits }
   | { type: "michelin"; data: MichelinRestaurantRecord }
   | { type: "section-header"; title: string };
+
+function MichelinMapShortcut({ onPress }: { onPress: () => void }) {
+  return (
+    <RestaurantRowCard
+      title={"Michelin Map"}
+      subtitle={"Explore nearby Michelin restaurants"}
+      supportingText={"Browse the guide geographically and jump straight into restaurant details."}
+      variant={"compact"}
+      source={"michelin"}
+      badge={{ label: "Nearby", icon: "map.fill", tone: "primary" }}
+      rightAccessory={<RestaurantRowChevron />}
+      onPress={onPress}
+    />
+  );
+}
 
 export default function RestaurantsScreen() {
   const [refreshing, setRefreshing] = useState(false);
@@ -397,7 +344,7 @@ export default function RestaurantsScreen() {
   }, []);
 
   const handleOpenMap = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push("/restaurants-map");
   }, []);
 
@@ -474,10 +421,8 @@ export default function RestaurantsScreen() {
       {/* Header controls rendered outside FlashList to prevent keyboard dismissal */}
       {restaurants.length > 0 && (
         <View style={{ paddingTop: insets.top + 16, paddingHorizontal: 16 }} className={"gap-3 bg-background"}>
-          {/* Header */}
-          {!searchQuery && <HomeHeader onMapPress={handleOpenMap} />}
+          <HomeHeader />
 
-          {/* New Photos Card */}
           <NewPhotosCard />
 
           <SearchBar
@@ -494,7 +439,8 @@ export default function RestaurantsScreen() {
             </Animated.View>
           )}
 
-          {/* Restaurant List Section Title */}
+          <MichelinMapShortcut onPress={handleOpenMap} />
+
           {filteredAndSortedRestaurants.length > 0 && (
             <ThemedText
               variant={"footnote"}

@@ -162,11 +162,17 @@ export function GoogleMapsApiKeyCard() {
 // Calendar Section - All calendar-related settings in one place
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function CalendarSection() {
+export function CalendarSection({
+  showHeader = true,
+  initiallyExpanded = false,
+}: {
+  showHeader?: boolean;
+  initiallyExpanded?: boolean;
+} = {}) {
   const { showToast } = useToast();
 
   // Section collapsed state
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(!showHeader || initiallyExpanded);
 
   // Calendar Sync state
   const {
@@ -384,24 +390,25 @@ export function CalendarSection() {
   return (
     <>
       <Card animated={false}>
-        {/* Header - Collapsible Toggle */}
-        <Pressable onPress={() => setIsExpanded(!isExpanded)}>
-          <View className={"p-4 flex-row items-center gap-3"}>
-            <CardIcon name={"calendar"} color={"#3b82f6"} bgColor={"bg-blue-500/15"} />
-            <View className={"flex-1"}>
-              <ThemedText variant={"subhead"} className={"font-medium"}>
-                Calendar Integration
-              </ThemedText>
-              <ThemedText variant={"footnote"} color={"secondary"}>
-                Import reservations and export visits
-              </ThemedText>
+        {showHeader ? (
+          <Pressable onPress={() => setIsExpanded(!isExpanded)}>
+            <View className={"p-4 flex-row items-center gap-3"}>
+              <CardIcon name={"calendar"} color={"#3b82f6"} bgColor={"bg-blue-500/15"} />
+              <View className={"flex-1"}>
+                <ThemedText variant={"subhead"} className={"font-medium"}>
+                  Calendar Integration
+                </ThemedText>
+                <ThemedText variant={"footnote"} color={"secondary"}>
+                  Import reservations and export visits
+                </ThemedText>
+              </View>
+              <IconSymbol name={isExpanded ? "chevron.up" : "chevron.down"} size={16} color={"#9ca3af"} />
             </View>
-            <IconSymbol name={isExpanded ? "chevron.up" : "chevron.down"} size={16} color={"#9ca3af"} />
-          </View>
-        </Pressable>
+          </Pressable>
+        ) : null}
 
-        {isExpanded && (
-          <View className={"px-4 pb-4 gap-4"}>
+        {(isExpanded || !showHeader) && (
+          <View className={showHeader ? "px-4 pb-4 gap-4" : "p-4 gap-4"}>
             {/* Calendar Sources - Expandable */}
             <View className={"bg-background/30 rounded-xl overflow-hidden"}>
               <Pressable

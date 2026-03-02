@@ -12,20 +12,19 @@ import {
 } from "@/hooks/queries";
 import { FlashList } from "@shopify/flash-list";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, RefreshControl, Alert, Pressable } from "react-native";
+import { View, RefreshControl, Alert, Pressable, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useToast } from "@/components/ui/toast";
-import Animated, { LinearTransition } from "react-native-reanimated";
 import { router } from "expo-router";
 import {
   useReviewFoodFilter,
   useSetReviewFoodFilter,
+  useReviewCalendarMatchesFilter,
+  useSetReviewCalendarMatchesFilter,
   useReviewRestaurantMatchesFilter,
   useSetReviewRestaurantMatchesFilter,
-  useReviewFiltersCollapsed,
-  useSetReviewFiltersCollapsed,
 } from "@/store";
 import { ReviewModeCard } from "@/components/visit-card/review-mode-card";
 
@@ -44,6 +43,8 @@ type ReviewListItem =
       visit: PendingVisitForReview;
       manualIndex: number;
     };
+
+type ReviewQuickFilter = "all" | "food" | "matched" | "calendar";
 
 function LoadingState() {
   return (
@@ -89,10 +90,10 @@ export default function ReviewScreen() {
   // Review filters from store
   const foodFilter = useReviewFoodFilter();
   const setFoodFilter = useSetReviewFoodFilter();
+  const calendarMatchesFilter = useReviewCalendarMatchesFilter();
+  const setCalendarMatchesFilter = useSetReviewCalendarMatchesFilter();
   const restaurantMatchesFilter = useReviewRestaurantMatchesFilter();
   const setRestaurantMatchesFilter = useSetReviewRestaurantMatchesFilter();
-  const filtersCollapsed = useReviewFiltersCollapsed();
-  const setFiltersCollapsed = useSetReviewFiltersCollapsed();
 
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -119,42 +120,85 @@ export default function ReviewScreen() {
     [pendingVisits, exactMatchVisitIds],
   );
 
-  const ToggleChip = useCallback(
-    ({ label, value, onToggle }: { label: string; value: boolean; onToggle: () => void }) => {
-      return (
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            onToggle();
-          }}
-          className={`h-8 px-3 rounded-full border items-center justify-center ${
-            value ? "bg-primary/15 border-primary/25" : "bg-secondary/70 border-border"
-          }`}
-        >
-          <ThemedText
-            variant={"footnote"}
-            className={`font-semibold ${value ? "text-primary" : "text-secondary-foreground"}`}
-          >
-            {label}
-          </ThemedText>
-        </Pressable>
-      );
+  const activeFilterCount =
+    Number(foodFilter === "on") + Number(restaurantMatchesFilter === "on") + Number(calendarMatchesFilter === "on");
+  const activeQuickFilter: ReviewQuickFilter =
+    activeFilterCount > 1
+      ? "all"
+      : calendarMatchesFilter === "on"
+        ? "calendar"
+        : restaurantMatchesFilter === "on"
+          ? "matched"
+          : foodFilter === "on"
+            ? "food"
+            : "all";
+  const isFoodFilterActive = activeQuickFilter === "food";
+  const isMatchFilterActive = activeQuickFilter === "matched";
+  const isCalendarFilterActive = activeQuickFilter === "calendar";
+
+  const setQuickFilter = useCallback(
+    (next: ReviewQuickFilter) => {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setFoodFilter(next === "food" ? "on" : "off");
+      setRestaurantMatchesFilter(next === "matched" ? "on" : "off");
+      setCalendarMatchesFilter(next === "calendar" ? "on" : "off");
     },
-    [],
+    [setCalendarMatchesFilter, setFoodFilter, setRestaurantMatchesFilter],
+  );
+
+  const FilterPill = useCallback(
+    ({ label, value }: { label: string; value: ReviewQuickFilter }) => (
+      <Pressable
+        onPress={() => setQuickFilter(value)}
+        className={`h-9 px-3.5 rounded-full items-center justify-center border ${
+          activeQuickFilter === value ? "bg-foreground border-foreground" : "bg-secondary/70 border-border"
+        }`}
+      >
+        <ThemedText
+          variant={"footnote"}
+          className={`font-semibold ${activeQuickFilter === value ? "text-background" : "text-secondary-foreground"}`}
+        >
+          {label}
+        </ThemedText>
+      </Pressable>
+    ),
+    [activeQuickFilter, setQuickFilter],
+  );
+
+  const filterExactMatches = useCallback(
+    (match: ExactCalendarMatch) => {
+      if (isFoodFilterActive && !match.visit.foodProbable) {
+        return false;
+      }
+      if (isMatchFilterActive && !match.restaurantId) {
+        return false;
+      }
+      if (isCalendarFilterActive && !match.calendarTitle) {
+        return false;
+      }
+      return true;
+    },
+    [isCalendarFilterActive, isFoodFilterActive, isMatchFilterActive],
+  );
+
+  const filteredExactMatches = useMemo(
+    () => exactMatches.filter(filterExactMatches),
+    [exactMatches, filterExactMatches],
   );
 
   const filteredReviewableVisits = useMemo(() => {
     const filtered = reviewableVisits.filter((v) => {
-      // Food toggle: ON => must have food
-      if (foodFilter === "on" && !v.foodProbable) {
+      if (isFoodFilterActive && !v.foodProbable) {
         return false;
       }
 
-      // Restaurant matches toggle: ON => must have matches
-      // Treat "no matches" as both [] and missing/null (defensive).
       const matchCount = v.suggestedRestaurants?.length ?? 0;
       const hasRestaurantMatches = matchCount > 0;
-      if (restaurantMatchesFilter === "on" && !hasRestaurantMatches) {
+      if (isMatchFilterActive && !hasRestaurantMatches) {
+        return false;
+      }
+
+      if (isCalendarFilterActive && !v.calendarEventTitle) {
         return false;
       }
 
@@ -175,11 +219,11 @@ export default function ReviewScreen() {
         return a.index - b.index;
       })
       .map(({ visit }) => visit);
-  }, [reviewableVisits, foodFilter, restaurantMatchesFilter]);
+  }, [reviewableVisits, isFoodFilterActive, isMatchFilterActive, isCalendarFilterActive]);
 
   const mergedReviewItems = useMemo<ReviewListItem[]>(
     () => [
-      ...exactMatches.map(
+      ...filteredExactMatches.map(
         (match, exactIndex) =>
           ({
             type: "exact",
@@ -200,32 +244,18 @@ export default function ReviewScreen() {
           }) satisfies ReviewListItem,
       ),
     ],
-    [exactMatches, filteredReviewableVisits],
+    [filteredExactMatches, filteredReviewableVisits],
   );
 
   // UI state
-  const hasExactMatches = exactMatches.length > 0;
+  const hasVisibleExactMatches = filteredExactMatches.length > 0;
   const isAllCaughtUp = !isLoading && pendingVisits.length === 0;
-  const reviewSummary = useMemo(() => {
-    if (isAllCaughtUp) {
-      return "No visits pending review";
-    }
-
-    if (hasExactMatches) {
-      return `${exactMatches.length.toLocaleString()} exact match${exactMatches.length === 1 ? "" : "es"} shown first${
-        filteredReviewableVisits.length > 0
-          ? `, ${filteredReviewableVisits.length.toLocaleString()} ${filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"} manual review`
-          : ""
-      }`;
-    }
-
-    return `${filteredReviewableVisits.length.toLocaleString()} ${
-      filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"
-    } manual review`;
-  }, [isAllCaughtUp, hasExactMatches, exactMatches.length, filteredReviewableVisits.length]);
+  const reviewSummary = isAllCaughtUp
+    ? "No visits pending review"
+    : `${pendingVisits.length.toLocaleString()} pending visit${pendingVisits.length === 1 ? "" : "s"}`;
 
   const shouldShowDeepScanEmptyCard =
-    foodFilter === "on" && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable);
+    isFoodFilterActive && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable);
 
   // Register undo complete callback to scroll back to restored item
   useEffect(() => {
@@ -250,13 +280,13 @@ export default function ReviewScreen() {
   }, [queryClient]);
 
   const handleApproveAllExactMatches = useCallback(() => {
-    if (exactMatches.length === 0) {
+    if (filteredExactMatches.length === 0) {
       return;
     }
 
     Alert.alert(
       "Approve All Exact Matches",
-      `This will confirm ${exactMatches.length.toLocaleString()} visit${exactMatches.length === 1 ? "" : "s"} where the calendar event name exactly matches a Michelin restaurant.`,
+      `This will confirm ${filteredExactMatches.length.toLocaleString()} visit${filteredExactMatches.length === 1 ? "" : "s"} where the calendar event name exactly matches a Michelin restaurant.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -264,13 +294,13 @@ export default function ReviewScreen() {
           style: "default",
           onPress: async () => {
             setIsApproving(true);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             try {
-              await batchConfirmMutation.mutateAsync(exactMatches);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              await batchConfirmMutation.mutateAsync(filteredExactMatches);
+              void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               showToast({
                 type: "success",
-                message: `Confirmed ${exactMatches.length.toLocaleString()} visit${exactMatches.length === 1 ? "" : "s"}.`,
+                message: `Confirmed ${filteredExactMatches.length.toLocaleString()} visit${filteredExactMatches.length === 1 ? "" : "s"}.`,
               });
             } catch (error) {
               console.error("Error confirming visits:", error);
@@ -282,7 +312,7 @@ export default function ReviewScreen() {
         },
       ],
     );
-  }, [exactMatches, batchConfirmMutation, showToast]);
+  }, [filteredExactMatches, batchConfirmMutation, showToast]);
 
   // Render functions
   const renderReviewItem = useCallback(({ item }: { item: ReviewListItem; index: number }) => {
@@ -310,83 +340,103 @@ export default function ReviewScreen() {
     () => (
       <View className={"gap-3"}>
         <View className={"gap-1"}>
-          <ThemedText variant={"largeTitle"} className={"font-bold p-0 m-0"}>
-            Review Visits
+          <ThemedText variant={"largeTitle"} className={"font-bold"}>
+            Review
           </ThemedText>
           <ThemedText variant={"footnote"} color={"secondary"}>
             {reviewSummary}
           </ThemedText>
         </View>
 
-        {exactMatches.length > 1 && (
-          <Button
-            variant={"success"}
-            onPress={handleApproveAllExactMatches}
-            loading={isApproving}
-            disabled={isApproving}
-            className={"w-full"}
-          >
-            <IconSymbol name={"checkmark.circle.fill"} size={18} color={"#fff"} />
-            <ButtonText variant={"success"} className={"ml-2"}>
-              Approve All Exact Matches ({exactMatches.length.toLocaleString()})
-            </ButtonText>
-          </Button>
-        )}
-
-        {/* Filters */}
-        {reviewableVisits.length > 0 && (
+        {hasVisibleExactMatches ? (
           <Pressable
-            className={"bg-card rounded-2xl px-3 py-2.5"}
-            onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              setFiltersCollapsed(!filtersCollapsed);
-            }}
+            onPress={handleApproveAllExactMatches}
+            className={"rounded-2xl border border-green-500/20 bg-green-500/10 px-4 py-3"}
           >
-            <View className={"flex-row items-center justify-between gap-2"}>
-              <View className={"flex-row items-center gap-2 flex-1"}>
-                <IconSymbol name={"line.3.horizontal.decrease"} size={14} color={"#8E8E93"} />
-                <ThemedText variant={"footnote"} color={"secondary"} numberOfLines={1} className={"flex-1"}>
-                  Filters
+            <View className={"flex-row items-center gap-3"}>
+              <View
+                className={
+                  "w-10 h-10 rounded-2xl bg-green-500/15 border border-green-500/20 items-center justify-center"
+                }
+              >
+                <IconSymbol name={"checkmark.circle.fill"} size={20} color={"#22c55e"} />
+              </View>
+              <View className={"flex-1"}>
+                <ThemedText variant={"footnote"} className={"font-semibold"}>
+                  {filteredExactMatches.length.toLocaleString()} exact calendar match
+                  {filteredExactMatches.length === 1 ? "" : "es"}
+                </ThemedText>
+                <ThemedText variant={"caption1"} color={"secondary"}>
+                  {isApproving ? "Approving..." : "Tap to bulk approve"}
                 </ThemedText>
               </View>
-              <IconSymbol name={filtersCollapsed ? "chevron.down" : "chevron.up"} size={14} color={"#8E8E93"} />
             </View>
-
-            {!filtersCollapsed && (
-              <Animated.View layout={LinearTransition.duration(200)} className={"gap-2.5 pt-2.5"}>
-                <View className={"flex-row gap-2 flex-wrap"}>
-                  <ToggleChip
-                    label={"Food"}
-                    value={foodFilter === "on"}
-                    onToggle={() => setFoodFilter(foodFilter === "on" ? "off" : "on")}
-                  />
-                  <ToggleChip
-                    label={"Restaurant Match"}
-                    value={restaurantMatchesFilter === "on"}
-                    onToggle={() => setRestaurantMatchesFilter(restaurantMatchesFilter === "on" ? "off" : "on")}
-                  />
-                </View>
-              </Animated.View>
-            )}
           </Pressable>
-        )}
+        ) : null}
+
+        <Pressable
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push("/quick-actions");
+          }}
+          className={"rounded-2xl border border-white/8 bg-card px-4 py-3"}
+        >
+          <View className={"flex-row items-center gap-3"}>
+            <View className={"w-10 h-10 rounded-2xl bg-secondary items-center justify-center"}>
+              <IconSymbol name={"bolt.fill"} size={18} color={"#F59E0B"} />
+            </View>
+            <View className={"flex-1"}>
+              <ThemedText variant={"subhead"} className={"font-semibold"}>
+                Quick Actions
+              </ThemedText>
+              <ThemedText variant={"caption1"} color={"secondary"}>
+                Bulk approve or skip visits
+              </ThemedText>
+            </View>
+            <IconSymbol name={"chevron.right"} size={16} color={"#8E8E93"} />
+          </View>
+        </Pressable>
+
+        {reviewableVisits.length > 0 || exactMatches.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            className={"-mx-4"}
+            contentContainerStyle={{ paddingHorizontal: 16, gap: 8 }}
+          >
+            <View className={"flex-row gap-2"}>
+              <FilterPill label={"All"} value={"all"} />
+              <FilterPill label={"Has Food"} value={"food"} />
+              <FilterPill label={"Has Match"} value={"matched"} />
+              <FilterPill label={"Calendar"} value={"calendar"} />
+            </View>
+          </ScrollView>
+        ) : null}
+
+        {mergedReviewItems.length === 0 && !isAllCaughtUp ? (
+          <Pressable
+            onPress={() => setQuickFilter("all")}
+            className={"self-start rounded-full border border-primary/20 bg-primary/10 px-3 py-1.5"}
+          >
+            <ThemedText variant={"caption1"} className={"text-primary font-semibold"}>
+              Clear filters
+            </ThemedText>
+          </Pressable>
+        ) : null}
       </View>
     ),
     [
-      filteredReviewableVisits.length,
-      hasExactMatches,
+      mergedReviewItems.length,
       exactMatches.length,
+      filteredExactMatches.length,
+      hasVisibleExactMatches,
       reviewSummary,
       handleApproveAllExactMatches,
       isApproving,
       reviewableVisits.length,
-      filtersCollapsed,
-      setFiltersCollapsed,
-      foodFilter,
-      setFoodFilter,
-      restaurantMatchesFilter,
-      setRestaurantMatchesFilter,
-      ToggleChip,
+      isAllCaughtUp,
+      FilterPill,
+      setQuickFilter,
     ],
   );
 

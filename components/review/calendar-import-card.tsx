@@ -1,6 +1,11 @@
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, NearbyRestaurantsList } from "@/components/ui";
+import {
+  RestaurantRowCard,
+  RestaurantRowChevron,
+  getRestaurantAwardBadge,
+} from "@/components/restaurants/restaurant-row-card";
 import type { ImportableCalendarEvent, NearbyRestaurant } from "@/hooks/queries";
 import { router } from "expo-router";
 import React, { useState, useMemo, useCallback, useEffect } from "react";
@@ -110,64 +115,31 @@ export function CalendarImportCard({ event, onImport, onDismiss, isImporting, is
           />
         </View>
       ) : (
-        /* Single Match - Show Detailed Card */
-        <Pressable
-          onPress={() => router.push(`/restaurant/${displayRestaurant.id}`)}
-          accessibilityRole={"button"}
-          className={"bg-background/50 rounded-xl p-3"}
-          hitSlop={6}
-        >
-          <View className={"flex-row items-center justify-between"}>
-            <View className={"flex-row items-center gap-2"}>
+        <View>
+          <Pressable
+            onPress={() => router.push(`/restaurant/${displayRestaurant.id}`)}
+            accessibilityRole={"button"}
+            className={"mb-2"}
+            hitSlop={6}
+          >
+            <View className={"flex-row items-center gap-2 mb-2"}>
               <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#34C759"} />
               <ThemedText variant={"caption1"} color={"secondary"}>
                 Matches Michelin Restaurant
               </ThemedText>
             </View>
-            <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
-          </View>
-
-          <ThemedText className={"font-medium mt-1 text-blue-400"} numberOfLines={2}>
-            {displayRestaurant.name}
-          </ThemedText>
-
-          {/* Award badge */}
-          {displayRestaurant.award && (
-            <View className={"flex-row items-center gap-1 mt-1"}>
-              <IconSymbol name={"star.fill"} size={12} color={"#f59e0b"} />
-              <ThemedText variant={"caption1"} color={"secondary"}>
-                {displayRestaurant.award}
-              </ThemedText>
-            </View>
-          )}
-
-          {/* Location details */}
-          <View className={"mt-1.5 gap-0.5"}>
-            {displayRestaurant.location && (
-              <View className={"flex-row items-center gap-1"}>
-                <IconSymbol name={"mappin"} size={12} color={"#9ca3af"} />
-                <ThemedText variant={"caption1"} color={"tertiary"} numberOfLines={1}>
-                  {displayRestaurant.location}
-                </ThemedText>
-              </View>
-            )}
-            {displayRestaurant.address && (
-              <ThemedText variant={"caption2"} color={"tertiary"} numberOfLines={1} className={"ml-4"}>
-                {displayRestaurant.address}
-              </ThemedText>
-            )}
-          </View>
-
-          {/* Cuisine */}
-          {displayRestaurant.cuisine && (
-            <View className={"flex-row items-center gap-1 mt-1"}>
-              <IconSymbol name={"fork.knife"} size={12} color={"#9ca3af"} />
-              <ThemedText variant={"caption1"} color={"tertiary"}>
-                {displayRestaurant.cuisine}
-              </ThemedText>
-            </View>
-          )}
-        </Pressable>
+          </Pressable>
+          <RestaurantRowCard
+            title={displayRestaurant.name}
+            subtitle={displayRestaurant.cuisine}
+            supportingText={displayRestaurant.address ?? displayRestaurant.location}
+            variant={"selection"}
+            source={"michelin"}
+            badge={getRestaurantAwardBadge(displayRestaurant.award)}
+            rightAccessory={<RestaurantRowChevron />}
+            onPress={() => router.push(`/restaurant/${displayRestaurant.id}`)}
+          />
+        </View>
       )}
 
       {/* Action Buttons */}
