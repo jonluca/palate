@@ -1,4 +1,4 @@
-/* eslint react-compiler/react-compiler: 0 */
+/* oxlint-disable react-compiler/react-compiler */
 
 import { useEffect } from "react";
 import { StyleSheet } from "react-native";
@@ -19,7 +19,7 @@ import { useVector } from "../hooks";
 import { RTL, TIMING_CONFIG } from "../constants";
 import type { ResizableImageProps, RenderItemInfo } from "../types";
 
-export const ResizableImage = <T = string,>({
+export const ResizableImage = <T = string>({
   item,
   translateX,
   index,
@@ -205,7 +205,7 @@ export const ResizableImage = <T = string,>({
     setRef(index, {
       reset: (animated: boolean) => resetValues(animated),
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [index]);
 
   const setImageDimensions: RenderItemInfo<T>["setImageDimensions"] = ({ width: w, height: h }) => {
@@ -225,7 +225,7 @@ export const ResizableImage = <T = string,>({
       width: originalLayout.x.value,
       height: originalLayout.y.value,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [width, height]);
 
   const itemProps: RenderItemInfo<T> = {

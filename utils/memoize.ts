@@ -3,7 +3,7 @@
  * Uses a simple Map with stringified keys for caching.
  * Assumes all arguments are strings, numbers, or booleans.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// oxlint-disable-next-line @typescript-eslint/no-explicit-any
 export function memoize<T extends (...args: any[]) => any>(fn: T): T {
   const cache = new Map<string, ReturnType<T>>();
 

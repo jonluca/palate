@@ -46,7 +46,7 @@ function useProgressUpdater(sharedValues: ProgressSharedValues) {
     (data: Partial<ProgressData>) => {
       "worklet";
       // Shared values are designed to be mutated - disable react-compiler for this block
-      /* eslint-disable react-compiler/react-compiler */
+      /* oxlint-disable react-compiler/react-compiler */
       if (data.status !== undefined) {
         statusRef.value = data.status;
       }
@@ -62,7 +62,7 @@ function useProgressUpdater(sharedValues: ProgressSharedValues) {
       if (data.isActive !== undefined) {
         isActiveRef.value = data.isActive;
       }
-      /* eslint-enable react-compiler/react-compiler */
+      /* oxlint-enable react-compiler/react-compiler */
     },
     [statusRef, speedRef, etaRef, progressRef, isActiveRef],
   );

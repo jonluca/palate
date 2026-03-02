@@ -872,7 +872,7 @@ export function useBatchConfirmVisits() {
 }
 
 /**
- * Exact calendar match - visit where calendar event name exactly matches a Michelin restaurant
+ * Exact calendar match - visit where the calendar event matches a Michelin restaurant
  */
 export interface ExactCalendarMatch {
   visitId: string;
@@ -886,7 +886,7 @@ export interface ExactCalendarMatch {
 }
 
 /**
- * Find exact calendar event matches to Michelin restaurant names
+ * Find exact-style calendar event matches to Michelin restaurant names
  * Pure function that can be called independently
  */
 function getExactCalendarMatches(pendingVisits: PendingVisitForReview[]): ExactCalendarMatch[] {

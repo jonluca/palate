@@ -1,4 +1,4 @@
-/* eslint react-compiler/react-compiler: 0 */
+/* oxlint-disable react-compiler/react-compiler */
 
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { StyleSheet, useWindowDimensions } from "react-native";
@@ -17,7 +17,7 @@ import type { GalleryProps, GalleryReactRef, ItemRef, RenderItem } from "./types
 
 export type { RenderItemInfo } from "./types";
 
-const GalleryComponent = <T = string,>(
+const GalleryComponent = <T = string>(
   {
     data,
     renderItem = DefaultImage as RenderItem<T>,
@@ -82,7 +82,7 @@ const GalleryComponent = <T = string,>(
 
   useEffect(() => {
     translateX.value = index * -(dimensions.width + emptySpaceWidth);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [dimensions.width]);
 
   useImperativeHandle(ref, () => ({
@@ -108,7 +108,7 @@ const GalleryComponent = <T = string,>(
       currentIndex.value = newIndex;
       translateX.value = newIndex * -(dimensions.width + emptySpaceWidth);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [index, data?.length, dimensions.width]);
 
   return (

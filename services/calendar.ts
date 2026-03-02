@@ -533,61 +533,68 @@ function _cleanCalendarEventTitle(title: string): string {
 }
 export const cleanCalendarEventTitle = memoize(_cleanCalendarEventTitle);
 
+const COMPARISON_SUFFIX_DESCRIPTOR_TERMS = [
+  "wine\\s+bar",
+  "cocktail\\s+bar",
+  "steak\\s?house",
+  "restaurant",
+  "gourmet",
+  "cafe",
+  "café",
+  "bar",
+  "bistro",
+  "kitchen",
+  "grill",
+  "company",
+  "brewing",
+  "house",
+  "japanese",
+  "farm",
+  "inn",
+  "room",
+  "place",
+  "experience",
+  "eatery",
+  "dining",
+  "tavern",
+  "pub",
+  "pizzeria",
+  "trattoria",
+  "osteria",
+  "ristorante",
+  "brasserie",
+  "chophouse",
+  "seafood",
+  "sushi",
+  "ramen",
+  "izakaya",
+  "taqueria",
+  "cantina",
+  "bodega",
+  "diner",
+  "lounge",
+  "gastropub",
+  "bakery",
+  "patisserie",
+  "delicatessen",
+  "deli",
+  "creamery",
+  "rooftop",
+  "terrace",
+  "garden",
+  "spot",
+  "joint",
+  "shack",
+  "club",
+];
+
+const COMPARISON_SUFFIX_DESCRIPTOR_PATTERN = COMPARISON_SUFFIX_DESCRIPTOR_TERMS.join("|");
+
 const COMPARISON_SUFFIXES_TO_STRIP = [
-  /\s+bar\s+(and|&)\s+restaurant\s*$/i,
-  /\s+restaurant\s*$/i,
-  /\s+steak ?house\s*$/i,
-  /\s+gourmet\s*$/i,
-  /\s+cafe\s*$/i,
-  /\s+café\s*$/i,
-  /\s+bar\s*$/i,
-  /\s+bistro\s*$/i,
-  /\s+kitchen\s*$/i,
-  /\s+grill\s*$/i,
-  /\s+company\s*$/i,
-  /\s+brewing\s*$/i,
-  /\s+house\s*$/i,
-  /\s+japanese\s*$/i,
-  /\s+farm\s*$/i,
-  /\s+inn\s*$/i,
-  /\s+room\s*$/i,
-  /\s+place\s*$/i,
-  /\s+experience\s*$/i,
-  /\s+eatery\s*$/i,
-  /\s+dining\s*$/i,
-  /\s+tavern\s*$/i,
-  /\s+pub\s*$/i,
-  /\s+pizzeria\s*$/i,
-  /\s+trattoria\s*$/i,
-  /\s+osteria\s*$/i,
-  /\s+ristorante\s*$/i,
-  /\s+brasserie\s*$/i,
-  /\s+steakhouse\s*$/i,
-  /\s+chophouse\s*$/i,
-  /\s+seafood\s*$/i,
-  /\s+sushi\s*$/i,
-  /\s+ramen\s*$/i,
-  /\s+izakaya\s*$/i,
-  /\s+taqueria\s*$/i,
-  /\s+cantina\s*$/i,
-  /\s+bodega\s*$/i,
-  /\s+diner\s*$/i,
-  /\s+lounge\s*$/i,
-  /\s+wine\s*bar\s*$/i,
-  /\s+cocktail\s*bar\s*$/i,
-  /\s+gastropub\s*$/i,
-  /\s+bakery\s*$/i,
-  /\s+patisserie\s*$/i,
-  /\s+delicatessen\s*$/i,
-  /\s+deli\s*$/i,
-  /\s+creamery\s*$/i,
-  /\s+rooftop\s*$/i,
-  /\s+terrace\s*$/i,
-  /\s+garden\s*$/i,
-  /\s+spot\s*$/i,
-  /\s+joint\s*$/i,
-  /\s+shack\s*$/i,
-  /\s+club\s*$/i,
+  new RegExp(
+    `\\s+(?:${COMPARISON_SUFFIX_DESCRIPTOR_PATTERN})(?:\\s+(?:(?:and|&|/)\\s+)?(?:${COMPARISON_SUFFIX_DESCRIPTOR_PATTERN}))*\\s*$`,
+    "i",
+  ),
   // City abbreviations at the end
   /\s+(nyc|la|sf|london|dc|atl|chi|bos|sea|pdx|phx|den|mia|dal|hou|austin)\s*$/i,
   /^the\s+/i,
@@ -655,14 +662,22 @@ function _compareRestaurantAndCalendarTitle(calendarTitle: string, restaurantNam
     return false;
   }
 
-  const normCalendar = normalizeForComparison(stripComparisonAffixes(cleanCalendarEventTitle(calendarTitle)));
-  const normRestaurant = normalizeForComparison(stripComparisonAffixes(restaurantName));
+  const cleanedCalendar = stripComparisonAffixes(cleanCalendarEventTitle(calendarTitle));
+  const cleanedRestaurant = stripComparisonAffixes(restaurantName);
+  const normCalendar = normalizeForComparison(cleanedCalendar);
+  const normRestaurant = normalizeForComparison(cleanedRestaurant);
 
   if (normCalendar.length < 3 || normRestaurant.length < 3) {
     return false;
   }
 
-  return normCalendar === normRestaurant;
+  if (normCalendar === normRestaurant) {
+    return true;
+  }
+
+  // Treat long cleaned restaurant names as exact when they appear verbatim within the
+  // normalized calendar title, e.g. "Dinner at Le Bernardin".
+  return cleanedRestaurant.length >= 8 && normCalendar.split(" ").some((l) => l === normRestaurant);
 }
 export const compareRestaurantAndCalendarTitle = memoize(_compareRestaurantAndCalendarTitle);
 /** Normalize a string for fuzzy comparison */
@@ -867,7 +882,11 @@ export async function batchCreateCalendarEvents(
   visits: VisitForCalendarExport[],
   calendarId: string,
 ): Promise<{ created: number; failed: number; eventIds: Map<string, string> }> {
-  const results = { created: 0, failed: 0, eventIds: new Map<string, string>() };
+  const results = {
+    created: 0,
+    failed: 0,
+    eventIds: new Map<string, string>(),
+  };
 
   for (const visit of visits) {
     const eventId = await createCalendarEvent({

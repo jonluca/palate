@@ -273,7 +273,7 @@ export default function RestaurantsScreen() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // oxlint-disable-next-line @typescript-eslint/no-explicit-any
   const listRef = useRef<any>(null);
 
   const { data: restaurants = [], isLoading } = useConfirmedRestaurants();

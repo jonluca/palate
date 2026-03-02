@@ -100,7 +100,7 @@ export default function ReviewScreen() {
   const { setOnUndoComplete } = useUndo();
 
   // FlashList refs for scrolling back after undo
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // oxlint-disable-next-line @typescript-eslint/no-explicit-any
   const reviewListRef = useRef<any>(null);
 
   // Data queries
@@ -256,7 +256,7 @@ export default function ReviewScreen() {
 
     Alert.alert(
       "Approve All Exact Matches",
-      `This will confirm ${exactMatches.length.toLocaleString()} visit${exactMatches.length === 1 ? "" : "s"} where the calendar event name exactly matches a Michelin restaurant.`,
+      `This will confirm ${exactMatches.length.toLocaleString()} visit${exactMatches.length === 1 ? "" : "s"} where the calendar event name matches a Michelin restaurant.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -373,8 +373,6 @@ export default function ReviewScreen() {
       </View>
     ),
     [
-      filteredReviewableVisits.length,
-      hasExactMatches,
       exactMatches.length,
       reviewSummary,
       handleApproveAllExactMatches,

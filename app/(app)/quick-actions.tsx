@@ -272,7 +272,7 @@ export default function QuickActionsScreen() {
 
     Alert.alert(
       "Auto-Approve Calendar Matches",
-      `This will confirm ${exactCalendarMatches.length.toLocaleString()} visit${exactCalendarMatches.length === 1 ? "" : "s"} where the calendar event name exactly matches a Michelin restaurant. This action cannot be undone.`,
+      `This will confirm ${exactCalendarMatches.length.toLocaleString()} visit${exactCalendarMatches.length === 1 ? "" : "s"} where the calendar event name matches a Michelin restaurant. This action cannot be undone.`,
       [
         { text: "Cancel", style: "cancel" },
         {
