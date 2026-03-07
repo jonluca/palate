@@ -205,7 +205,7 @@ export function SettingsScreenContent({ showSignInButton = false }: SettingsScre
         <Animated.View entering={FadeInDown.delay(140).duration(300)} className={"mb-6 gap-2"}>
           <AppleSignInButton />
           <ThemedText variant={"footnote"} color={"tertiary"} className={"px-1"}>
-            Sign in only when you want cloud sync, public profiles, or social features.
+            Sign in if you want cloud sync, public profiles, and to follow friends.
           </ThemedText>
         </Animated.View>
       ) : null}
