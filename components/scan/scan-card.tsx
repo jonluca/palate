@@ -8,6 +8,7 @@ import type { ProgressSharedValues } from "@/hooks/use-progress";
 interface ScanCardProps {
   cameraRollCount: number | null | undefined;
   isScanning: boolean;
+  isComplete?: boolean;
   isDeepScanning: boolean;
   onScan: () => void;
   onDeepScan?: () => void;
@@ -29,6 +30,7 @@ export function ScanCard({
   deepScanButtonText = "Deep Scan for Food",
   showDeepScan = false,
   animationDelay = 100,
+  isComplete,
 }: ScanCardProps) {
   const isInProgress = isScanning || isDeepScanning;
 
@@ -42,7 +44,7 @@ export function ScanCard({
           )}
 
           {/* Scan Button */}
-          {!isInProgress && (
+          {!isInProgress && !isComplete && (
             <Button onPress={onScan} size={"lg"}>
               <ButtonText>{scanButtonText}</ButtonText>
             </Button>

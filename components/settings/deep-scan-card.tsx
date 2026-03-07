@@ -2,12 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import type { SymbolViewProps } from "expo-symbols";
+import { useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/icon-symbol";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
-import { useDeepScan, useUnanalyzedPhotoCount, type DeepScanProgress } from "@/hooks/queries";
+import { queryKeys, useDeepScan, useUnanalyzedPhotoCount, type DeepScanProgress } from "@/hooks/queries";
 import { formatEta } from "@/services/scanner";
+import { getUnanalyzedPhotoIds } from "@/utils/db";
 
 interface DeepScanCardProps {
   autoStart?: boolean;
@@ -67,21 +69,54 @@ function CardIcon({ name, color, bgColor }: { name: SymbolViewProps["name"]; col
 
 export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
   const [progress, setProgress] = useState<DeepScanProgress | null>(null);
   const deepScanMutation = useDeepScan((p) => setProgress(p));
   const isScanning = deepScanMutation.isPending;
   const hasAutoStartedRef = useRef(false);
+  const isStartingRef = useRef(false);
 
   const startDeepScan = useCallback(
-    async (source: "auto" | "manual") =>
-      runDeepScan({
+    async (source: "auto" | "manual") => {
+      if (isStartingRef.current || deepScanMutation.isPending) {
+        return;
+      }
+
+      isStartingRef.current = true;
+      const photosToScan = await getUnanalyzedPhotoIds().catch((error) => {
+        console.error("Failed to load pending deep scan photos:", error);
+        showToast({ type: "error", message: "Deep scan failed" });
+        return null;
+      });
+
+      if (!photosToScan) {
+        isStartingRef.current = false;
+        return;
+      }
+
+      if (photosToScan.length === 0) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
+        if (source === "manual") {
+          showToast({ type: "info", message: "No photos left to deep scan" });
+        }
+        isStartingRef.current = false;
+        return;
+      }
+
+      await runDeepScan({
         source,
-        mutateAsync: deepScanMutation.mutateAsync,
+        mutateAsync: () => deepScanMutation.mutateAsync(photosToScan),
         setProgress,
         showToast,
-      }),
-    [deepScanMutation, showToast],
+      }).catch((error) => {
+        console.error("Unexpected deep scan error:", error);
+        setProgress(null);
+        showToast({ type: "error", message: "Deep scan failed" });
+      });
+      isStartingRef.current = false;
+    },
+    [deepScanMutation, queryClient, showToast],
   );
 
   const handleDeepScan = useCallback(() => {

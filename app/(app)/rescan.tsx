@@ -60,6 +60,7 @@ export default function RescanScreen() {
             cameraRollCount={cameraRollCount}
             isScanning={isScanning}
             isDeepScanning={isDeepScanning}
+            isComplete={isComplete}
             onScan={scan}
             onDeepScan={deepScan}
             sharedValues={sharedValues}

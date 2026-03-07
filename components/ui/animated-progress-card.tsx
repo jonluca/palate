@@ -18,6 +18,7 @@ import { cn } from "@/utils/cn";
 import { ThemedText } from "../themed-text";
 import { IconSymbol } from "../icon-symbol";
 import type { ProgressSharedValues } from "@/hooks/use-progress";
+import { twMerge } from "tailwind-merge";
 
 interface AnimatedProgressCardProps {
   sharedValues: ProgressSharedValues;
@@ -227,7 +228,7 @@ export function AnimatedProgressCard({ sharedValues }: AnimatedProgressCardProps
         className={cn("p-4", isComplete && "rounded-2xl border border-green-500/20 bg-green-500/10")}
         style={isComplete ? styles.completeContainer : undefined}
       >
-        <View className={cn("gap-3 min-h-[80px]", !showStats && "justify-center")}>
+        <View className={twMerge("gap-3 min-h-[80px]", !showStats && "justify-center", isComplete && "min-h-auto")}>
           {/* Status Row */}
           <View className={"flex-row items-center gap-3"}>
             {showStats && !isComplete && <PulsingIndicator />}

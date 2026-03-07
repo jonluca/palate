@@ -290,6 +290,7 @@ export const useSetSelectedCalendarIds = () => useAppStore((state) => state.setS
 
 export const useHasSeenAddPhotosAlert = () => useAppStore((state) => state.hasSeenAddPhotosAlert);
 export const useSetHasSeenAddPhotosAlert = () => useAppStore((state) => state.setHasSeenAddPhotosAlert);
+export const useResetScan = () => useAppStore((state) => state.resetScan);
 
 export const useHideUndoBar = () => useAppStore((state) => state.hideUndoBar);
 export const useSetHideUndoBar = () => useAppStore((state) => state.setHideUndoBar);

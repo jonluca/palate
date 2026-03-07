@@ -19,6 +19,7 @@ import {
   UndoBarCard,
 } from "@/components/settings";
 import { ScreenLayout } from "@/components/screen-layout";
+import { useResetScan } from "@/store";
 
 function SectionHeader({ children }: { children: string }) {
   return (
@@ -66,8 +67,15 @@ function AdvancedIntroCard() {
 }
 
 function RescanPhotosCard() {
+  const resetScan = useResetScan();
+
   return (
-    <Pressable onPress={() => router.push("/rescan")}>
+    <Pressable
+      onPress={() => {
+        resetScan();
+        router.push("/rescan");
+      }}
+    >
       <Card animated={false}>
         <View className={"p-4 gap-3"}>
           <View className={"flex-row items-center justify-between gap-3"}>

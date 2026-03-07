@@ -1316,16 +1316,16 @@ export interface DeepScanProgress {
 export interface DeepScanOptions {
   confidenceThreshold?: number;
   onProgress?: (progress: DeepScanProgress) => void;
+  photos?: Array<{ id: string }>;
 }
 
 /**
- * Deep scan ALL photos for food detection.
- * Scans every photo in the library (not just samples).
- * Skips photos that have already been analyzed (foodDetected IS NOT NULL).
+ * Deep scan photos for food detection.
+ * Scans the provided photos, or every unanalyzed photo when none are specified.
  * Photos are processed in deterministic order (by creationTime, then id).
  */
 export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): Promise<DeepScanProgress> {
-  const { confidenceThreshold = 0.3, onProgress } = options;
+  const { confidenceThreshold = 0.3, onProgress, photos } = options;
 
   const progress: DeepScanProgress = {
     totalPhotos: 0,
@@ -1343,11 +1343,10 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
     return progress;
   }
 
-  // Only get photos that haven't been analyzed yet (deterministic order)
-  const allPhotos = await getUnanalyzedPhotoIds();
-  progress.totalPhotos = allPhotos.length;
+  const photosToScan = photos ?? (await getUnanalyzedPhotoIds());
+  progress.totalPhotos = photosToScan.length;
 
-  if (allPhotos.length === 0) {
+  if (photosToScan.length === 0) {
     progress.isComplete = true;
     onProgress?.({ ...progress });
     return progress;
@@ -1358,12 +1357,12 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
   const tracker = createProgressTracker();
 
   const { results, foodFoundCount } = await processFoodDetectionBatches(
-    allPhotos,
+    photosToScan,
     confidenceThreshold,
     (processed, foodFound) => {
       progress.processedPhotos = processed;
       progress.foodPhotosFound = foodFound;
-      const stats = tracker.update(processed, allPhotos.length);
+      const stats = tracker.update(processed, photosToScan.length);
       progress.elapsedMs = stats.elapsedMs;
       progress.photosPerSecond = stats.perSecond;
       progress.etaMs = stats.etaMs;

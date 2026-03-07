@@ -118,7 +118,7 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
     try {
       const result = await scanMutation.mutateAsync();
       if (await shouldAutoDeepScan()) {
-        await deepScanMutation.mutateAsync();
+        await deepScanMutation.mutateAsync(undefined);
       }
       const message = `Done!`;
       complete(message);
@@ -155,7 +155,7 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
     logScanStarted();
 
     try {
-      const result = await deepScanMutation.mutateAsync();
+      const result = await deepScanMutation.mutateAsync(undefined);
       const message = `Done!`;
       complete(message);
       completeScan(message);

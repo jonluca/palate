@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getTotalPhotoCount } from "@/utils/db";
 import { usePermissions, usePhotoCount, queryKeys } from "@/hooks/queries";
 import { useEffect } from "react";
+import { useResetScan } from "@/store";
 
 /**
  * Hook to check for new photos that haven't been scanned yet
@@ -49,6 +50,7 @@ export function NewPhotosCard() {
   const { newPhotosCount, hasPermission, isLoading } = useNewPhotosCount();
   const cardScale = useSharedValue(1);
   const pulseOpacity = useSharedValue(1);
+  const resetScan = useResetScan();
 
   // Subtle pulse animation on the badge
   useEffect(() => {
@@ -64,6 +66,7 @@ export function NewPhotosCard() {
 
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    resetScan();
     router.push("/rescan");
   };
 
