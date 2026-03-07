@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1772919489342,
-      "tag": "0000_tricky_captain_stacy",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1772921133929,
-      "tag": "0001_breezy_darkstar",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1772925141674,
-      "tag": "0002_wise_professor_monster",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1772926199304,
-      "tag": "0003_cooing_alex_power",
+      "when": 1772927028613,
+      "tag": "0000_pale_trish_tilby",
       "breakpoints": true
     }
   ]
