@@ -13,7 +13,7 @@ export const authClient = createAuthClient({
       storage: {
         getItem: (key) => SecureStore.getItem(key) ?? null,
         setItem: (key, value) => {
-          void SecureStore.setItemAsync(key, value);
+          SecureStore.setItem(key, value);
         },
       },
     }),
@@ -21,6 +21,10 @@ export const authClient = createAuthClient({
 });
 
 export const { signIn, signOut, useSession } = authClient;
+
+export async function refreshAuthSession() {
+  await authClient.$store.atoms.session.get().refetch();
+}
 
 export async function signInWithApple() {
   const credential = await AppleAuthentication.signInAsync({
@@ -34,12 +38,18 @@ export async function signInWithApple() {
     throw new Error("Apple did not return an identity token.");
   }
 
-  return signIn.social({
+  const result = await signIn.social({
     provider: "apple",
     idToken: {
       token: credential.identityToken,
     },
   });
+
+  if (!result.error) {
+    await refreshAuthSession();
+  }
+
+  return result;
 }
 
 export function isAppleSignInCanceled(error: unknown) {

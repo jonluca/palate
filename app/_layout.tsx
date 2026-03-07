@@ -16,7 +16,6 @@ import { useDrizzleStudioInspector, useAnalyticsScreenTracking } from "@/hooks";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ReducedMotionConfig, ReduceMotion } from "react-native-reanimated";
 import { useFastAnimations, useHasHydrated } from "@/store";
-import { useSession } from "@/lib/auth-client";
 import { createPalateQueryClient, getTrpcClient, TRPCProvider } from "@/lib/trpc";
 
 function onAppStateChange(status: AppStateStatus) {
@@ -32,9 +31,8 @@ const trpcClient = getTrpcClient();
 
 function RootLayoutContent() {
   const hasHydrated = useHasHydrated();
-  const { isPending } = useSession();
 
-  if (!hasHydrated || isPending) {
+  if (!hasHydrated) {
     return <FullScreenLoader label={"Loading Palate..."} />;
   }
 
