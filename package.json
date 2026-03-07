@@ -3,9 +3,8 @@
   "main": "main.ts",
   "version": "1.0.0",
   "scripts": {
-    "start": "expo start",
     "server:dev": "tsx watch server/index.ts",
-    "server:start": "tsx server/index.ts",
+    "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf android ios .expo node_modules",
     "ios": "expo run:ios",
