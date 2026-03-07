@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
-import { useScan } from "@/hooks";
+import { useScan, useUnanalyzedPhotoCount } from "@/hooks";
 import { ScanHeader, PermissionCard, ScanCard } from "@/components/scan";
 import { Button, ButtonText } from "@/components/ui";
 
@@ -26,6 +26,7 @@ export default function RescanScreen() {
     deepScan,
     sharedValues,
   } = useScan();
+  const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
 
   const handleGoBack = () => {
     router.back();
@@ -36,6 +37,7 @@ export default function RescanScreen() {
   };
 
   const isInProgress = isScanning || isDeepScanning;
+  const shouldShowDeepScan = (unanalyzedPhotoCount ?? 0) > 0;
 
   return (
     <View className={"flex-1"} style={{ paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }}>
@@ -62,7 +64,7 @@ export default function RescanScreen() {
             onDeepScan={deepScan}
             sharedValues={sharedValues}
             scanButtonText={"Rescan Now"}
-            showDeepScan={true}
+            showDeepScan={shouldShowDeepScan}
           />
         )}
 

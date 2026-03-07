@@ -14,6 +14,7 @@ import Animated, {
   Easing,
   type SharedValue,
 } from "react-native-reanimated";
+import { cn } from "@/utils/cn";
 import { ThemedText } from "../themed-text";
 import { IconSymbol } from "../icon-symbol";
 import type { ProgressSharedValues } from "@/hooks/use-progress";
@@ -61,7 +62,7 @@ function PulsingIndicator() {
 }
 
 // Animated text component that reads from shared value
-function AnimatedStatusText({ value }: { value: SharedValue<string> }) {
+function AnimatedStatusText({ value, isComplete = false }: { value: SharedValue<string>; isComplete?: boolean }) {
   const [text, setText] = React.useState("");
 
   useAnimatedReaction(
@@ -79,7 +80,12 @@ function AnimatedStatusText({ value }: { value: SharedValue<string> }) {
   }
 
   return (
-    <ThemedText variant={"subhead"} color={"secondary"} className={"flex-1 font-medium"} numberOfLines={1}>
+    <ThemedText
+      variant={isComplete ? "callout" : "subhead"}
+      color={isComplete ? undefined : "secondary"}
+      className={cn("flex-1 font-medium", isComplete && "text-green-300 font-semibold")}
+      numberOfLines={1}
+    >
       {text}
     </ThemedText>
   );
@@ -107,7 +113,7 @@ function AnimatedSpeedText({ value }: { value: SharedValue<number> }) {
     <View className={"flex-row items-center gap-1.5 bg-green-500/10 px-2.5 py-1 rounded-full"}>
       <IconSymbol name={"bolt.fill"} size={12} color={"#22c55e"} />
       <ThemedText variant={"caption1"} className={"text-green-500 font-semibold"}>
-        {Math.round(speed).toLocaleString()}/s
+        {`${Math.round(speed).toLocaleString()}/s`}
       </ThemedText>
     </View>
   );
@@ -217,13 +223,16 @@ export function AnimatedProgressCard({ sharedValues }: AnimatedProgressCardProps
 
   return (
     <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(200)} layout={LinearTransition}>
-      <View className={isComplete ? "bg-green-500/10 p-4" : "border-none p-4"}>
-        <View className={"gap-3 h-[80px]"}>
+      <View
+        className={cn("p-4", isComplete && "rounded-2xl border border-green-500/20 bg-green-500/10")}
+        style={isComplete ? styles.completeContainer : undefined}
+      >
+        <View className={cn("gap-3 min-h-[80px]", !showStats && "justify-center")}>
           {/* Status Row */}
           <View className={"flex-row items-center gap-3"}>
             {showStats && !isComplete && <PulsingIndicator />}
             {isComplete && <CompletionBadge />}
-            <AnimatedStatusText value={status} />
+            <AnimatedStatusText value={status} isComplete={isComplete} />
           </View>
 
           {/* Progress Bar */}
@@ -247,6 +256,9 @@ export function AnimatedProgressCard({ sharedValues }: AnimatedProgressCardProps
 }
 
 const styles = StyleSheet.create({
+  completeContainer: {
+    borderCurve: "continuous",
+  },
   progressBar: {
     borderRadius: 4,
   },

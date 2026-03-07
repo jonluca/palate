@@ -221,7 +221,10 @@ function generateVisitHash(startTime: number, endTime: number, centerLat: number
 /**
  * Calculate the centroid (center point) of a group of photos
  */
-function calculateCentroid(photos: PhotoRecord[]): { lat: number; lon: number } {
+function calculateCentroid(photos: PhotoRecord[]): {
+  lat: number;
+  lon: number;
+} {
   const validPhotos = photos.filter((p) => p.latitude !== null && p.longitude !== null);
 
   if (validPhotos.length === 0) {
@@ -452,7 +455,10 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
           endTime: visitEndTime,
           hash,
           suggestedRestaurantId: primarySuggestion?.id ?? null,
-          suggestedRestaurants: nearbyRestaurants.map((r) => ({ id: r.id, distance: r.distance })),
+          suggestedRestaurants: nearbyRestaurants.map((r) => ({
+            id: r.id,
+            distance: r.distance,
+          })),
         } as VisitGroup;
       },
       PARALLEL_CHUNK_SIZE,
@@ -692,7 +698,10 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
       // Ensure every batch item gets an update (detector may skip assets not found on device)
       for (const item of batch) {
         if (!resultAssetIds.has(item.id)) {
-          const record: FoodBatchResult = { photoId: item.id, foodDetected: false };
+          const record: FoodBatchResult = {
+            photoId: item.id,
+            foodDetected: false,
+          };
           results.push(record);
           batchResults.push(record);
         }
@@ -762,7 +771,10 @@ async function enrichVisitsWithCalendarEvents(
   const tracker = createProgressTracker();
   const BATCH_SIZE = 300;
   const calendarUpdates: CalendarEventUpdate[] = [];
-  const restaurantSuggestionUpdates: { visitId: string; suggestedRestaurantId: string }[] = [];
+  const restaurantSuggestionUpdates: {
+    visitId: string;
+    suggestedRestaurantId: string;
+  }[] = [];
 
   for (let i = 0; i < visitsToProcess.length; i += BATCH_SIZE) {
     const batch = visitsToProcess.slice(i, i + BATCH_SIZE);
@@ -819,7 +831,10 @@ async function enrichVisitsWithCalendarEvents(
       progress.visitsWithEvents++;
 
       if (matchedRestaurant) {
-        restaurantSuggestionUpdates.push({ visitId: visit.id, suggestedRestaurantId: matchedRestaurant.id });
+        restaurantSuggestionUpdates.push({
+          visitId: visit.id,
+          suggestedRestaurantId: matchedRestaurant.id,
+        });
       }
     }
 
@@ -1495,7 +1510,10 @@ export async function processPhotos(
   });
 
   // Phase 2: Group photos into visits (with Michelin suggestions)
-  scanProgress?.({ phase: "grouping-visits", detail: "Grouping photos by location and time..." });
+  scanProgress?.({
+    phase: "grouping-visits",
+    detail: "Grouping photos by location and time...",
+  });
 
   const visitResult = await visitPhotos({
     onProgress: (p) => {
@@ -1510,7 +1528,10 @@ export async function processPhotos(
   });
 
   // Phase 3: Enrich visits with calendar events
-  scanProgress?.({ phase: "calendar-events", detail: "Matching calendar events..." });
+  scanProgress?.({
+    phase: "calendar-events",
+    detail: "Matching calendar events...",
+  });
 
   const calendarResult = await enrichVisitsWithCalendarEvents({
     onProgress: (p) => {
@@ -1523,7 +1544,7 @@ export async function processPhotos(
       const detail =
         p.processedVisits === 0 || p.visitsWithEvents === 0
           ? `Matching calendar events for visits`
-          : `Matched ${matchedEvents} events of ${totalVisits} visits`;
+          : `Matched ${matchedEvents} events for ${totalVisits} visits`;
 
       scanProgress?.({
         phase: "calendar-events",
@@ -1539,7 +1560,10 @@ export async function processPhotos(
   await yieldToEventLoop();
 
   // Phase 4: Detect food in visit photos
-  scanProgress?.({ phase: "detecting-food", detail: "Analyzing photos for food..." });
+  scanProgress?.({
+    phase: "detecting-food",
+    detail: "Analyzing photos for food...",
+  });
 
   const foodResult = await detectFoodInVisits({
     onProgress: (p) => {
@@ -1556,12 +1580,18 @@ export async function processPhotos(
     },
   });
 
-  scanProgress?.({ phase: "recomputing-suggested-restaurants", detail: "Recomputing suggested restaurants..." });
+  scanProgress?.({
+    phase: "recomputing-suggested-restaurants",
+    detail: "Recomputing suggested restaurants...",
+  });
 
   await recomputeSuggestedRestaurants();
 
   // Phase 6: Database maintenance (VACUUM, ANALYZE, WAL checkpoint)
-  scanProgress?.({ phase: "optimizing-database", detail: "Optimizing database..." });
+  scanProgress?.({
+    phase: "optimizing-database",
+    detail: "Optimizing database...",
+  });
 
   await performDatabaseMaintenance();
 
