@@ -135,8 +135,8 @@ Users review pending visits in the **Review** tab — confirm the suggested rest
 ## Scripts
 
 ```bash
-yarn server:dev   # Run the Hono backend with Vite reload on 127.0.0.1:3001
-yarn server:build # Build the backend into dist/server
+yarn server:dev   # Run the Hono backend with Vite reload on all interfaces
+yarn build        # Build the backend into dist/server
 yarn server:start # Start the compiled backend
 yarn start        # Alias for yarn server:start
 yarn ios          # Build and run on iOS
