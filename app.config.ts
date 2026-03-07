@@ -1,6 +1,6 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
-const VERSION = "1.0.11";
+const VERSION = "1.1.0";
 
 const getConfig = ({ config }: ConfigContext): ExpoConfig => {
   return {
