@@ -111,7 +111,14 @@ export default function RootLayoutNav() {
       <Stack.Screen
         name={"account"}
         options={{
-          title: "Account",
+          title: "Profile",
+          headerLargeTitle: false,
+        }}
+      />
+      <Stack.Screen
+        name={"preferences"}
+        options={{
+          title: "Settings",
           headerLargeTitle: false,
         }}
       />

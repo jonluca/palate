@@ -1480,5 +1480,4 @@ export function AboutCard() {
   );
 }
 
-export { AuthEntryCard } from "./auth-entry-card";
 export { DeepScanCard } from "./deep-scan-card";

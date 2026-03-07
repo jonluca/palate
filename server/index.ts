@@ -9,6 +9,8 @@ import { serverEnv } from "./env";
 import { createTRPCContext } from "./trpc/context";
 import { appRouter } from "./trpc/router";
 
+const APP_STORE_URL = "https://apps.apple.com/us/app/palate-fine-dining-tracker/id6757490799";
+
 const app = new Hono();
 
 app.use("*", logger());
@@ -21,6 +23,8 @@ app.use(
     credentials: true,
   }),
 );
+
+app.get("/", (c) => c.redirect(APP_STORE_URL, 302));
 
 app.get("/health", (c) =>
   c.json({

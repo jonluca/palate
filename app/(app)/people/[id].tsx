@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { router, Stack, useLocalSearchParams, type Href } from "expo-router";
+import { Stack, useLocalSearchParams } from "expo-router";
 import React from "react";
 import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppleSignInButton } from "@/components/auth/apple-sign-in-button";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
@@ -126,9 +127,7 @@ export default function PersonProfileScreen() {
                     <ButtonText>{getFollowActionLabel(profile.relationship)}</ButtonText>
                   </Button>
                 ) : (
-                  <Button variant={"secondary"} onPress={() => router.push("/sign-in" as Href)}>
-                    <ButtonText variant={"secondary"}>Sign In To Follow</ButtonText>
-                  </Button>
+                  <AppleSignInButton variant={"secondary"} label={"Sign In To Follow"} />
                 )
               ) : null}
             </Card>

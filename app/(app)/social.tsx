@@ -3,10 +3,11 @@ import { router, type Href } from "expo-router";
 import React, { useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppleSignInButton } from "@/components/auth/apple-sign-in-button";
 import { AuthTextField } from "@/components/auth/auth-text-field";
 import { UserRow } from "@/components/social/user-row";
 import { ThemedText } from "@/components/themed-text";
-import { Button, ButtonText, Card } from "@/components/ui";
+import { Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
 import { useSession } from "@/lib/auth-client";
 import { cloudQueryKeys } from "@/lib/cloud-sync";
@@ -105,9 +106,7 @@ export default function SocialScreen() {
             </ThemedText>
           </View>
 
-          <Button onPress={() => router.push("/sign-in" as Href)}>
-            <ButtonText>Continue with Apple</ButtonText>
-          </Button>
+          <AppleSignInButton />
         </Card>
       ) : (
         <>

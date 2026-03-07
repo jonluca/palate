@@ -45,3 +45,26 @@ export async function signInWithApple() {
 export function isAppleSignInCanceled(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ERR_REQUEST_CANCELED";
 }
+
+export function getAppleSignInErrorMessage(error: unknown) {
+  if (typeof error === "object" && error !== null) {
+    const candidate = error as {
+      status?: number;
+      message?: string | null;
+    };
+
+    if (candidate.status === 404) {
+      return "Apple sign-in is not configured on the backend yet. Add your Apple provider env vars and restart the server.";
+    }
+
+    if (candidate.message) {
+      return candidate.message;
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Unable to sign in with Apple.";
+}
