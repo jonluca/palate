@@ -110,12 +110,8 @@
           "name": "account_user_id_user_id_fk",
           "tableFrom": "account",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -202,12 +198,8 @@
           "name": "session_user_id_user_id_fk",
           "tableFrom": "session",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -217,9 +209,7 @@
         "session_token_unique": {
           "name": "session_token_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "token"
-          ]
+          "columns": ["token"]
         }
       },
       "policies": {},
@@ -283,9 +273,7 @@
         "user_email_unique": {
           "name": "user_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -467,12 +455,8 @@
           "name": "user_confirmed_visit_user_id_user_id_fk",
           "tableFrom": "user_confirmed_visit",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -480,10 +464,7 @@
       "compositePrimaryKeys": {
         "user_confirmed_visit_pk": {
           "name": "user_confirmed_visit_pk",
-          "columns": [
-            "user_id",
-            "local_visit_id"
-          ]
+          "columns": ["user_id", "local_visit_id"]
         }
       },
       "uniqueConstraints": {},
@@ -589,12 +570,8 @@
           "name": "user_confirmed_visit_comment_visit_user_id_user_id_fk",
           "tableFrom": "user_confirmed_visit_comment",
           "tableTo": "user",
-          "columnsFrom": [
-            "visit_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["visit_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -602,12 +579,8 @@
           "name": "user_confirmed_visit_comment_author_user_id_user_id_fk",
           "tableFrom": "user_confirmed_visit_comment",
           "tableTo": "user",
-          "columnsFrom": [
-            "author_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["author_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -615,14 +588,8 @@
           "name": "user_confirmed_visit_comment_visit_fk",
           "tableFrom": "user_confirmed_visit_comment",
           "tableTo": "user_confirmed_visit",
-          "columnsFrom": [
-            "visit_user_id",
-            "visit_local_visit_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "local_visit_id"
-          ],
+          "columnsFrom": ["visit_user_id", "visit_local_visit_id"],
+          "columnsTo": ["user_id", "local_visit_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -706,12 +673,8 @@
           "name": "user_confirmed_visit_like_visit_user_id_user_id_fk",
           "tableFrom": "user_confirmed_visit_like",
           "tableTo": "user",
-          "columnsFrom": [
-            "visit_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["visit_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -719,12 +682,8 @@
           "name": "user_confirmed_visit_like_user_id_user_id_fk",
           "tableFrom": "user_confirmed_visit_like",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -732,14 +691,8 @@
           "name": "user_confirmed_visit_like_visit_fk",
           "tableFrom": "user_confirmed_visit_like",
           "tableTo": "user_confirmed_visit",
-          "columnsFrom": [
-            "visit_user_id",
-            "visit_local_visit_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "local_visit_id"
-          ],
+          "columnsFrom": ["visit_user_id", "visit_local_visit_id"],
+          "columnsTo": ["user_id", "local_visit_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -747,11 +700,7 @@
       "compositePrimaryKeys": {
         "user_confirmed_visit_like_pk": {
           "name": "user_confirmed_visit_like_pk",
-          "columns": [
-            "visit_user_id",
-            "visit_local_visit_id",
-            "user_id"
-          ]
+          "columns": ["visit_user_id", "visit_local_visit_id", "user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -820,12 +769,8 @@
           "name": "user_follow_follower_id_user_id_fk",
           "tableFrom": "user_follow",
           "tableTo": "user",
-          "columnsFrom": [
-            "follower_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["follower_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -833,12 +778,8 @@
           "name": "user_follow_followee_id_user_id_fk",
           "tableFrom": "user_follow",
           "tableTo": "user",
-          "columnsFrom": [
-            "followee_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["followee_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -846,10 +787,7 @@
       "compositePrimaryKeys": {
         "user_follow_pk": {
           "name": "user_follow_pk",
-          "columns": [
-            "follower_id",
-            "followee_id"
-          ]
+          "columns": ["follower_id", "followee_id"]
         }
       },
       "uniqueConstraints": {},
@@ -913,12 +851,8 @@
           "name": "user_profile_user_id_user_id_fk",
           "tableFrom": "user_profile",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }

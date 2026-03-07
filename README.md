@@ -135,11 +135,15 @@ Users review pending visits in the **Review** tab — confirm the suggested rest
 ## Scripts
 
 ```bash
-yarn start        # Start Expo dev server
+yarn server:dev   # Run the Hono backend with Vite reload on 127.0.0.1:3001
+yarn server:build # Build the backend into dist/server
+yarn server:start # Start the compiled backend
+yarn start        # Alias for yarn server:start
 yarn ios          # Build and run on iOS
 yarn android      # Build and run on Android
+yarn web          # Start Expo for web
 yarn typecheck    # Run TypeScript checks
-yarn lint         # Run ESLint
+yarn lint         # Run oxlint
 yarn clean        # Remove build artifacts & node_modules
 ```
 
