@@ -6,8 +6,11 @@ export const cloudQueryKeys = {
   health: ["cloud", "health"] as const,
   profile: ["cloud", "profile"] as const,
   socialMe: ["cloud", "social", "me"] as const,
+  socialFeed: ["cloud", "social", "feed"] as const,
   socialSearch: (query: string) => ["cloud", "social", "search", query] as const,
   publicProfile: (userId: string) => ["cloud", "social", "profile", userId] as const,
+  socialVisitComments: (visitUserId: string, localVisitId: string) =>
+    ["cloud", "social", "visit", visitUserId, localVisitId, "comments"] as const,
 };
 
 function normalizeTimestamp(timestamp: number) {

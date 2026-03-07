@@ -1,6 +1,6 @@
 {
-  "id": "12414500-ea46-4308-b29d-9c48bc1a6fca",
-  "prevId": "e52e10ea-a235-4842-98d6-5c771755722b",
+  "id": "7f77a257-8232-4702-8aeb-2d55938fe22d",
+  "prevId": "12414500-ea46-4308-b29d-9c48bc1a6fca",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -465,6 +465,242 @@
         "user_confirmed_visit_pk": {
           "name": "user_confirmed_visit_pk",
           "columns": ["user_id", "local_visit_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.user_confirmed_visit_comment": {
+      "name": "user_confirmed_visit_comment",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "visit_user_id": {
+          "name": "visit_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "visit_local_visit_id": {
+          "name": "visit_local_visit_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "author_user_id": {
+          "name": "author_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "user_confirmed_visit_comment_author_idx": {
+          "name": "user_confirmed_visit_comment_author_idx",
+          "columns": [
+            {
+              "expression": "author_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_confirmed_visit_comment_visit_idx": {
+          "name": "user_confirmed_visit_comment_visit_idx",
+          "columns": [
+            {
+              "expression": "visit_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "visit_local_visit_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "user_confirmed_visit_comment_visit_user_id_user_id_fk": {
+          "name": "user_confirmed_visit_comment_visit_user_id_user_id_fk",
+          "tableFrom": "user_confirmed_visit_comment",
+          "tableTo": "user",
+          "columnsFrom": ["visit_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "user_confirmed_visit_comment_author_user_id_user_id_fk": {
+          "name": "user_confirmed_visit_comment_author_user_id_user_id_fk",
+          "tableFrom": "user_confirmed_visit_comment",
+          "tableTo": "user",
+          "columnsFrom": ["author_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "user_confirmed_visit_comment_visit_fk": {
+          "name": "user_confirmed_visit_comment_visit_fk",
+          "tableFrom": "user_confirmed_visit_comment",
+          "tableTo": "user_confirmed_visit",
+          "columnsFrom": ["visit_user_id", "visit_local_visit_id"],
+          "columnsTo": ["user_id", "local_visit_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.user_confirmed_visit_like": {
+      "name": "user_confirmed_visit_like",
+      "schema": "",
+      "columns": {
+        "visit_user_id": {
+          "name": "visit_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "visit_local_visit_id": {
+          "name": "visit_local_visit_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "user_confirmed_visit_like_user_idx": {
+          "name": "user_confirmed_visit_like_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "user_confirmed_visit_like_visit_idx": {
+          "name": "user_confirmed_visit_like_visit_idx",
+          "columns": [
+            {
+              "expression": "visit_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "visit_local_visit_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "user_confirmed_visit_like_visit_user_id_user_id_fk": {
+          "name": "user_confirmed_visit_like_visit_user_id_user_id_fk",
+          "tableFrom": "user_confirmed_visit_like",
+          "tableTo": "user",
+          "columnsFrom": ["visit_user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "user_confirmed_visit_like_user_id_user_id_fk": {
+          "name": "user_confirmed_visit_like_user_id_user_id_fk",
+          "tableFrom": "user_confirmed_visit_like",
+          "tableTo": "user",
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "user_confirmed_visit_like_visit_fk": {
+          "name": "user_confirmed_visit_like_visit_fk",
+          "tableFrom": "user_confirmed_visit_like",
+          "tableTo": "user_confirmed_visit",
+          "columnsFrom": ["visit_user_id", "visit_local_visit_id"],
+          "columnsTo": ["user_id", "local_visit_id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "user_confirmed_visit_like_pk": {
+          "name": "user_confirmed_visit_like_pk",
+          "columns": ["visit_user_id", "visit_local_visit_id", "user_id"]
         }
       },
       "uniqueConstraints": {},

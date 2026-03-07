@@ -4,3 +4,4 @@ export * from "./use-drizzle-studio";
 export * from "./use-apple-sign-in";
 export * from "./use-progress";
 export * from "./use-scan";
+export * from "./use-social";

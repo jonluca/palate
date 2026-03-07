@@ -1,11 +1,19 @@
 import { authSchema } from "./auth-schema";
-import { userConfirmedVisit, userFollow, userProfile } from "./profile";
+import {
+  userConfirmedVisit,
+  userConfirmedVisitComment,
+  userConfirmedVisitLike,
+  userFollow,
+  userProfile,
+} from "./profile";
 
-export { authSchema, userConfirmedVisit, userFollow, userProfile };
+export { authSchema, userConfirmedVisit, userConfirmedVisitComment, userConfirmedVisitLike, userFollow, userProfile };
 
 export const databaseSchema = {
   ...authSchema,
   userConfirmedVisit,
+  userConfirmedVisitComment,
+  userConfirmedVisitLike,
   userFollow,
   userProfile,
 };

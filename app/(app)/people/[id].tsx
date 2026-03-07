@@ -1,4 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Stack, useLocalSearchParams } from "expo-router";
 import React from "react";
 import { ScrollView, View } from "react-native";
@@ -7,9 +6,8 @@ import { AppleSignInButton } from "@/components/auth/apple-sign-in-button";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
+import { usePublicProfile, useSetFollowState } from "@/hooks/use-social";
 import { useSession } from "@/lib/auth-client";
-import { cloudQueryKeys } from "@/lib/cloud-sync";
-import { useTRPCClient } from "@/lib/trpc";
 
 function CountTile({ label, value }: { label: string; value: number | undefined }) {
   return (
@@ -47,41 +45,29 @@ function getFollowActionLabel(relationship: { isFollowing: boolean; followsYou: 
 export default function PersonProfileScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const insets = useSafeAreaInsets();
-  const queryClient = useQueryClient();
-  const trpcClient = useTRPCClient();
   const { showToast } = useToast();
   const { data: session } = useSession();
 
-  const profileQuery = useQuery({
-    queryKey: cloudQueryKeys.publicProfile(id ?? ""),
-    enabled: Boolean(id),
-    queryFn: () => trpcClient.social.publicProfile.query({ userId: id! }),
-  });
-
-  const followMutation = useMutation({
-    mutationFn: async () => {
-      const profile = profileQuery.data;
-
-      if (!profile) {
-        throw new Error("Profile not loaded.");
-      }
-
-      return profile.relationship.isFollowing
-        ? trpcClient.social.unfollow.mutate({ userId: profile.user.id })
-        : trpcClient.social.follow.mutate({ userId: profile.user.id });
-    },
-    onSuccess: (_result, _variables) => {
-      if (!id) {
-        return;
-      }
-
-      queryClient.invalidateQueries({ queryKey: ["cloud", "social"] });
-      queryClient.invalidateQueries({ queryKey: cloudQueryKeys.publicProfile(id) });
-    },
+  const profileQuery = usePublicProfile(id);
+  const followMutation = useSetFollowState({
     onError: (error) => {
       showToast({ type: "error", message: error.message || "Unable to update follow state." });
     },
   });
+
+  const handleFollowPress = () => {
+    const profile = profileQuery.data;
+
+    if (!profile) {
+      showToast({ type: "error", message: "Profile not loaded." });
+      return;
+    }
+
+    followMutation.mutate({
+      userId: profile.user.id,
+      isFollowing: profile.relationship.isFollowing,
+    });
+  };
 
   const profile = profileQuery.data;
 
@@ -116,7 +102,11 @@ export default function PersonProfileScreen() {
                   </ThemedText>
                 ) : null}
                 <ThemedText variant={"footnote"} color={"tertiary"}>
-                  {profile.profile.publicVisits ? "Public visit history enabled" : "Visit history is private"}
+                  {profile.profile.publicVisits
+                    ? "Public visit history enabled"
+                    : profile.relationship.isFollowing
+                      ? "You can see this visit history because you follow them"
+                      : "Visit history is private"}
                 </ThemedText>
               </View>
 
@@ -128,7 +118,7 @@ export default function PersonProfileScreen() {
 
               {!profile.relationship.isSelf ? (
                 session?.user ? (
-                  <Button onPress={() => followMutation.mutate()} loading={followMutation.isPending}>
+                  <Button onPress={handleFollowPress} loading={followMutation.isPending}>
                     <ButtonText>{getFollowActionLabel(profile.relationship)}</ButtonText>
                   </Button>
                 ) : (
@@ -172,7 +162,7 @@ export default function PersonProfileScreen() {
                 )
               ) : (
                 <ThemedText variant={"footnote"} color={"secondary"}>
-                  This user has not made their confirmed visits public.
+                  Follow this person or wait until they make their confirmed visits public.
                 </ThemedText>
               )}
             </Card>

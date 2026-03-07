@@ -15,6 +15,7 @@ export default function TabLayout() {
   const restaurantsTabLabel = "Restaurants";
   const reviewTabLabel = "Review";
   const statsTabLabel = "Stats";
+  const feedTabLabel = "Feed";
   const settingsTabLabel = isSignedIn ? "Profile" : "Settings";
 
   useEffect(() => {
@@ -65,6 +66,24 @@ export default function TabLayout() {
           ),
         })}
       </NativeTabs.Trigger>
+
+      {isSignedIn ? (
+        <NativeTabs.Trigger name={"feed"}>
+          <NativeTabs.Trigger.Label>{feedTabLabel}</NativeTabs.Trigger.Label>
+          {Platform.select({
+            ios: (
+              <NativeTabs.Trigger.Icon
+                sf={{ default: "bubble.left.and.bubble.right", selected: "bubble.left.and.bubble.right.fill" }}
+              />
+            ),
+            android: (
+              <NativeTabs.Trigger.Icon
+                src={<NativeTabs.Trigger.VectorIcon family={MaterialIcons} name={"dynamic-feed"} />}
+              />
+            ),
+          })}
+        </NativeTabs.Trigger>
+      ) : null}
 
       <NativeTabs.Trigger name={"settings"}>
         <NativeTabs.Trigger.Label>{settingsTabLabel}</NativeTabs.Trigger.Label>

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, type Href } from "expo-router";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import React, { useState } from "react";
-import { Pressable, ScrollView, TextInput, View } from "react-native";
+import { Pressable, ScrollView, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppleSignInButton } from "@/components/auth/apple-sign-in-button";
 import { AuthTextField } from "@/components/auth/auth-text-field";
@@ -30,6 +30,7 @@ interface ProfileDraft {
   bio: string;
   homeCity: string;
   favoriteCuisine: string;
+  publicVisits: boolean;
 }
 
 function getProfileDraft(
@@ -38,6 +39,7 @@ function getProfileDraft(
         bio?: string | null;
         homeCity?: string | null;
         favoriteCuisine?: string | null;
+        publicVisits?: boolean | null;
       }
     | null
     | undefined,
@@ -46,6 +48,7 @@ function getProfileDraft(
     bio: profile?.bio ?? "",
     homeCity: profile?.homeCity ?? "",
     favoriteCuisine: profile?.favoriteCuisine ?? "",
+    publicVisits: profile?.publicVisits ?? false,
   };
 }
 
@@ -73,11 +76,13 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
   const bio = activeDraft?.bio ?? "";
   const homeCity = activeDraft?.homeCity ?? profile?.homeCity ?? "";
   const favoriteCuisine = activeDraft?.favoriteCuisine ?? profile?.favoriteCuisine ?? "";
+  const publicVisits = activeDraft?.publicVisits ?? profile?.publicVisits ?? false;
   const hasProfileChanges =
     draft !== null &&
     (draft.bio !== savedDraft.bio ||
       draft.homeCity !== savedDraft.homeCity ||
-      draft.favoriteCuisine !== savedDraft.favoriteCuisine);
+      draft.favoriteCuisine !== savedDraft.favoriteCuisine ||
+      draft.publicVisits !== savedDraft.publicVisits);
 
   const updateProfileMutation = useMutation({
     mutationFn: async () => {
@@ -89,7 +94,7 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
         bio: bio.trim() || null,
         homeCity: homeCity.trim() || null,
         favoriteCuisine: favoriteCuisine.trim() || null,
-        publicVisits: profile?.publicVisits ?? false,
+        publicVisits,
       });
     },
     onSuccess: (updatedProfile) => {
@@ -270,6 +275,29 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
               }
               placeholder={"Japanese"}
             />
+
+            <View className={"rounded-2xl border border-white/10 bg-background px-4 py-3"}>
+              <View className={"flex-row items-start justify-between gap-4"}>
+                <View className={"flex-1 gap-1"}>
+                  <ThemedText variant={"subhead"} className={"font-semibold"}>
+                    Public visit history
+                  </ThemedText>
+                  <ThemedText variant={"footnote"} color={"secondary"}>
+                    Let anyone who opens your profile see your confirmed visits. Followers can already see them.
+                  </ThemedText>
+                </View>
+
+                <Switch
+                  value={publicVisits}
+                  onValueChange={(value) =>
+                    setDraft((current) => ({
+                      ...(current ?? getProfileDraft(profile)),
+                      publicVisits: value,
+                    }))
+                  }
+                />
+              </View>
+            </View>
 
             {profileQuery.error ? (
               <ThemedText

@@ -1,4 +1,3 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, type Href } from "expo-router";
 import React, { useState } from "react";
 import { ActivityIndicator, ScrollView, View } from "react-native";
@@ -9,9 +8,8 @@ import { UserRow } from "@/components/social/user-row";
 import { ThemedText } from "@/components/themed-text";
 import { Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
+import { useSetFollowState, useSocialMe, useSocialSearch } from "@/hooks/use-social";
 import { useSession } from "@/lib/auth-client";
-import { cloudQueryKeys } from "@/lib/cloud-sync";
-import { useTRPCClient } from "@/lib/trpc";
 
 function CountTile({ label, value }: { label: string; value: number | undefined }) {
   return (
@@ -48,33 +46,14 @@ function getFollowActionLabel(relationship: { isFollowing: boolean; followsYou: 
 
 export default function SocialScreen() {
   const insets = useSafeAreaInsets();
-  const queryClient = useQueryClient();
-  const trpcClient = useTRPCClient();
   const { showToast } = useToast();
   const { data: session } = useSession();
   const [query, setQuery] = useState("");
 
-  const socialQuery = useQuery({
-    queryKey: cloudQueryKeys.socialMe,
-    enabled: Boolean(session?.user),
-    queryFn: () => trpcClient.social.me.query(),
-  });
-
   const trimmedQuery = query.trim();
-  const searchQuery = useQuery({
-    queryKey: cloudQueryKeys.socialSearch(trimmedQuery),
-    enabled: Boolean(session?.user) && trimmedQuery.length >= 2,
-    queryFn: () => trpcClient.social.search.query({ query: trimmedQuery }),
-  });
-
-  const followMutation = useMutation({
-    mutationFn: async ({ userId, isFollowing }: { userId: string; isFollowing: boolean }) => {
-      return isFollowing ? trpcClient.social.unfollow.mutate({ userId }) : trpcClient.social.follow.mutate({ userId });
-    },
-    onSuccess: (_result, variables) => {
-      queryClient.invalidateQueries({ queryKey: ["cloud", "social"] });
-      queryClient.invalidateQueries({ queryKey: cloudQueryKeys.publicProfile(variables.userId) });
-    },
+  const socialQuery = useSocialMe();
+  const searchQuery = useSocialSearch(trimmedQuery);
+  const followMutation = useSetFollowState({
     onError: (error) => {
       showToast({ type: "error", message: error.message || "Unable to update follow state." });
     },
