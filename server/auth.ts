@@ -74,7 +74,7 @@ export const auth = betterAuth({
   baseURL: serverEnv.betterAuthUrl,
   trustedOrigins: Array.from(defaultTrustedOrigins),
   advanced: {
-    useSecureCookies: true,
+    useSecureCookies: false,
   },
   emailAndPassword: {
     enabled: false,
