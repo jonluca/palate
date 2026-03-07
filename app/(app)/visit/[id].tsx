@@ -17,6 +17,7 @@ import {
   MergeVisitsModal,
   NotesCard,
   AllLabelsCard,
+  FriendsWhoVisitedCard,
   type AggregatedFoodLabel,
   type LoadingAction,
 } from "@/components/visit";
@@ -551,6 +552,32 @@ export default function VisitDetailScreen() {
 
   // Nearby restaurants are already in the correct format
   const nearbyRestaurantsForCard: NearbyRestaurant[] = suggestedRestaurants;
+  const socialRestaurant = selectedRestaurant
+    ? {
+        id: selectedRestaurant.id,
+        name: selectedRestaurant.name,
+      }
+    : restaurant
+      ? {
+          id: restaurant.id,
+          name: restaurant.name,
+        }
+      : suggestedRestaurant
+        ? {
+            id: suggestedRestaurant.id,
+            name: suggestedRestaurant.name,
+          }
+        : visit.restaurantId
+          ? {
+              id: visit.restaurantId,
+              name: null,
+            }
+          : visit.suggestedRestaurantId
+            ? {
+                id: visit.suggestedRestaurantId,
+                name: null,
+              }
+            : null;
 
   const showSuggestedRestaurant =
     visit.status === "pending" && suggestedRestaurant && !restaurant && suggestedRestaurants.length <= 1;
@@ -575,6 +602,8 @@ export default function VisitDetailScreen() {
           award={suggestedRestaurant?.award}
           timeZone={visitTimeZone}
         />
+
+        <FriendsWhoVisitedCard restaurantId={socialRestaurant?.id} restaurantName={socialRestaurant?.name} />
 
         {visit.status === "pending" && <CalendarEventCard visit={{ ...visit, calendarEvents: data.calendarEvents }} />}
 

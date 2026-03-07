@@ -9,6 +9,9 @@ export const cloudQueryKeys = {
   socialFeed: ["cloud", "social", "feed"] as const,
   socialSearch: (query: string) => ["cloud", "social", "search", query] as const,
   publicProfile: (userId: string) => ["cloud", "social", "profile", userId] as const,
+  socialRestaurantFriends: ["cloud", "social", "restaurant-friends"] as const,
+  socialRestaurantFriendsByRestaurant: (restaurantId: string) =>
+    ["cloud", "social", "restaurant-friends", restaurantId] as const,
   socialVisitComments: (visitUserId: string, localVisitId: string) =>
     ["cloud", "social", "visit", visitUserId, localVisitId, "comments"] as const,
 };

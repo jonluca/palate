@@ -10,4 +10,5 @@ export { PhotoGalleryModal } from "./photo-gallery-modal";
 export { MergeVisitsModal } from "./merge-visits-modal";
 export { NotesCard } from "./notes-card";
 export { AllLabelsCard } from "./all-labels-card";
+export { FriendsWhoVisitedCard } from "./friends-who-visited-card";
 export type { LoadingAction } from "@/components/visit-card";

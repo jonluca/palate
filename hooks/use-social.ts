@@ -11,6 +11,7 @@ function invalidateSocialCollections(queryClient: QueryClient, targetUserId?: st
   queryClient.invalidateQueries({ queryKey: cloudQueryKeys.profile });
   queryClient.invalidateQueries({ queryKey: cloudQueryKeys.socialMe });
   queryClient.invalidateQueries({ queryKey: cloudQueryKeys.socialFeed });
+  queryClient.invalidateQueries({ queryKey: cloudQueryKeys.socialRestaurantFriends });
 
   if (targetUserId) {
     queryClient.invalidateQueries({ queryKey: cloudQueryKeys.publicProfile(targetUserId) });
@@ -69,6 +70,17 @@ export function usePublicProfile(userId?: string) {
     queryKey: cloudQueryKeys.publicProfile(userId ?? ""),
     enabled: Boolean(userId),
     queryFn: () => trpcClient.social.publicProfile.query({ userId: userId! }),
+  });
+}
+
+export function useRestaurantFriends(restaurantId?: string) {
+  const trpcClient = useTRPCClient();
+  const { data: session } = useSession();
+
+  return useQuery({
+    queryKey: cloudQueryKeys.socialRestaurantFriendsByRestaurant(restaurantId ?? ""),
+    enabled: Boolean(session?.user) && Boolean(restaurantId),
+    queryFn: () => trpcClient.social.restaurantFriends.query({ restaurantId: restaurantId! }),
   });
 }
 

@@ -15,6 +15,7 @@ import { protectedProcedure, publicProcedure, router } from "../trpc";
 
 const FEED_LIMIT = 60;
 const COMMENT_PREVIEW_LIMIT = 2;
+const RESTAURANT_FRIEND_MATCH_LIMIT = 12;
 
 const syncedTimestampSchema = z
   .number()
@@ -465,6 +466,74 @@ async function getFeedData(ctx: Pick<TRPCContext, "db" | "session">, viewerUserI
     .filter((item): item is NonNullable<typeof item> => Boolean(item));
 }
 
+async function getRestaurantFriendMatches(
+  ctx: Pick<TRPCContext, "db"> & { session: NonNullable<TRPCContext["session"]> },
+  restaurantId: string,
+) {
+  const state = await getSocialState(ctx, ctx.session.user.id);
+
+  if (state.friendIds.length === 0) {
+    return [];
+  }
+
+  const visits = await ctx.db
+    .select({
+      userId: userConfirmedVisit.userId,
+      startTime: userConfirmedVisit.startTime,
+    })
+    .from(userConfirmedVisit)
+    .where(and(eq(userConfirmedVisit.restaurantId, restaurantId), inArray(userConfirmedVisit.userId, state.friendIds)))
+    .orderBy(desc(userConfirmedVisit.startTime), desc(userConfirmedVisit.createdAt));
+
+  if (visits.length === 0) {
+    return [];
+  }
+
+  const usersById = await getUserRowsByIds(ctx, Array.from(new Set(visits.map((visit) => visit.userId))));
+
+  const matchesByUserId = new Map<
+    string,
+    {
+      user: ReturnType<typeof buildUserSummary>;
+      relationship: ReturnType<typeof buildRelationship>;
+      visitCount: number;
+      lastVisitedAt: Date;
+    }
+  >();
+
+  for (const visit of visits) {
+    const existingMatch = matchesByUserId.get(visit.userId);
+
+    if (existingMatch) {
+      existingMatch.visitCount += 1;
+      continue;
+    }
+
+    const friend = usersById.get(visit.userId);
+
+    if (!friend) {
+      continue;
+    }
+
+    matchesByUserId.set(visit.userId, {
+      user: buildUserSummary(friend),
+      relationship: buildRelationship({
+        isFollowing: true,
+        followsYou: true,
+      }),
+      visitCount: 1,
+      lastVisitedAt: visit.startTime,
+    });
+  }
+
+  return Array.from(matchesByUserId.values())
+    .sort((a, b) => {
+      const timeDelta = b.lastVisitedAt.getTime() - a.lastVisitedAt.getTime();
+      return timeDelta !== 0 ? timeDelta : b.visitCount - a.visitCount;
+    })
+    .slice(0, RESTAURANT_FRIEND_MATCH_LIMIT);
+}
+
 export const socialRouter = router({
   me: protectedProcedure.query(async ({ ctx }) => {
     const selfUserId = ctx.session.user.id;
@@ -512,6 +581,16 @@ export const socialRouter = router({
   feed: protectedProcedure.query(async ({ ctx }) => {
     return getFeedData(ctx, ctx.session.user.id);
   }),
+
+  restaurantFriends: protectedProcedure
+    .input(
+      z.object({
+        restaurantId: z.string().trim().min(1).max(255),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      return getRestaurantFriendMatches(ctx, input.restaurantId);
+    }),
 
   visitComments: protectedProcedure.input(visitReferenceSchema).query(async ({ ctx, input }) => {
     await assertViewerCanAccessVisit(ctx, input);

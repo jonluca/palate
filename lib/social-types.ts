@@ -8,4 +8,5 @@ export type SocialUser = SocialMe["following"][number];
 export type SocialRelationship = SocialUser["relationship"];
 export type SocialPublicProfile = RouterOutputs["social"]["publicProfile"];
 export type SocialFeedItem = RouterOutputs["social"]["feed"][number];
+export type SocialRestaurantFriend = RouterOutputs["social"]["restaurantFriends"][number];
 export type SocialFeedComment = RouterOutputs["social"]["visitComments"][number];
