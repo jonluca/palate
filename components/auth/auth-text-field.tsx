@@ -29,4 +29,3 @@ export function AuthTextField({ label, hint, ...props }: AuthTextFieldProps) {
     </View>
   );
 }
-

@@ -49,13 +49,15 @@ export default function AccountScreen() {
         favoriteCuisine: favoriteCuisine.trim() || null,
       }),
     onSuccess: (profile) => {
-      queryClient.setQueryData(REMOTE_PROFILE_QUERY_KEY, (current: Awaited<ReturnType<typeof trpcClient.profile.me.query>>) =>
-        current
-          ? {
-              ...current,
-              profile,
-            }
-          : current,
+      queryClient.setQueryData(
+        REMOTE_PROFILE_QUERY_KEY,
+        (current: Awaited<ReturnType<typeof trpcClient.profile.me.query>>) =>
+          current
+            ? {
+                ...current,
+                profile,
+              }
+            : current,
       );
       showToast({ type: "success", message: "Profile synced to Postgres" });
     },
@@ -126,12 +128,7 @@ export default function AccountScreen() {
           </ThemedText>
         </View>
 
-        <AuthTextField
-          label={"Home city"}
-          value={homeCity}
-          onChangeText={setHomeCity}
-          placeholder={"San Francisco"}
-        />
+        <AuthTextField label={"Home city"} value={homeCity} onChangeText={setHomeCity} placeholder={"San Francisco"} />
         <AuthTextField
           label={"Favorite cuisine"}
           value={favoriteCuisine}

@@ -41,7 +41,9 @@ export default function SignInScreen() {
     <AuthShell
       eyebrow={"Palate Cloud"}
       title={"Sign in to sync Palate"}
-      subtitle={"Your scans stay local. Your account, preferences, and future backend features live behind Better Auth."}
+      subtitle={
+        "Your scans stay local. Your account, preferences, and future backend features live behind Better Auth."
+      }
       footer={
         <View className={"items-center px-2"}>
           <ThemedText variant={"footnote"} color={"secondary"}>

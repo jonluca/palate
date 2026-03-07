@@ -11,10 +11,12 @@ function requireEnv(name: string) {
 }
 
 function parseOrigins(value: string | undefined) {
-  return value
-    ?.split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean) ?? [];
+  return (
+    value
+      ?.split(",")
+      .map((origin) => origin.trim())
+      .filter(Boolean) ?? []
+  );
 }
 
 const port = Number(process.env.PORT ?? 3001);
@@ -27,4 +29,3 @@ export const serverEnv = {
   betterAuthUrl: process.env.BETTER_AUTH_URL ?? `http://127.0.0.1:${port}`,
   trustedOrigins: parseOrigins(process.env.BETTER_AUTH_TRUSTED_ORIGINS),
 };
-

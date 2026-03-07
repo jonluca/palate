@@ -48,7 +48,9 @@ export default function SignUpScreen() {
     <AuthShell
       eyebrow={"Backend Ready"}
       title={"Create your Palate account"}
-      subtitle={"Set up Better Auth, connect the Expo app to the tRPC backend, and keep a lightweight profile in Postgres."}
+      subtitle={
+        "Set up Better Auth, connect the Expo app to the tRPC backend, and keep a lightweight profile in Postgres."
+      }
       footer={
         <View className={"items-center px-2"}>
           <ThemedText variant={"footnote"} color={"secondary"}>

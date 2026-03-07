@@ -1426,7 +1426,8 @@ export function useDeepScan(onProgress?: (progress: DeepScanProgress) => void) {
   onProgressRef.current = onProgress;
 
   return useMutation({
-    mutationFn: (photos?: Array<{ id: string }>) => deepScanAllPhotosForFood({ photos, onProgress: (p) => onProgressRef.current?.(p) }),
+    mutationFn: (photos?: Array<{ id: string }>) =>
+      deepScanAllPhotosForFood({ photos, onProgress: (p) => onProgressRef.current?.(p) }),
     onSuccess: () => {
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });

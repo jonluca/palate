@@ -12,4 +12,3 @@ export function FullScreenLoader({ label = "Loading..." }: { label?: string }) {
     </View>
   );
 }
-
