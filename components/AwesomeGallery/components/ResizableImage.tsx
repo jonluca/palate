@@ -98,7 +98,7 @@ export const ResizableImage = <T = string>({
 
     const resetProperty = (prop: SharedValue<number>, target: number) => {
       if (prop.value !== target) {
-        prop.value = animated ? withTiming(target) : target;
+        prop.value = animated ? withTiming(target, TIMING_CONFIG) : target;
       }
     };
 
@@ -299,44 +299,44 @@ export const ResizableImage = <T = string>({
         const diffX = nextTransX + offset.x.value - (newWidth - width) / 2;
 
         if (scale.value > maxScale) {
-          scale.value = withTiming(maxScale);
+          scale.value = withTiming(maxScale, TIMING_CONFIG);
         }
 
         if (newWidth <= width) {
-          translation.x.value = withTiming(0);
+          translation.x.value = withTiming(0, TIMING_CONFIG);
         } else {
           let moved;
           if (diffX > 0) {
-            translation.x.value = withTiming(nextTransX - diffX);
+            translation.x.value = withTiming(nextTransX - diffX, TIMING_CONFIG);
             moved = true;
           }
 
           if (newWidth + diffX < width) {
-            translation.x.value = withTiming(nextTransX + width - (newWidth + diffX));
+            translation.x.value = withTiming(nextTransX + width - (newWidth + diffX), TIMING_CONFIG);
             moved = true;
           }
           if (!moved) {
-            translation.x.value = withTiming(nextTransX);
+            translation.x.value = withTiming(nextTransX, TIMING_CONFIG);
           }
         }
 
         const diffY = nextTransY + offset.y.value - (newHeight - height) / 2;
 
         if (newHeight <= height) {
-          translation.y.value = withTiming(-offset.y.value);
+          translation.y.value = withTiming(-offset.y.value, TIMING_CONFIG);
         } else {
           let moved;
           if (diffY > 0) {
-            translation.y.value = withTiming(nextTransY - diffY);
+            translation.y.value = withTiming(nextTransY - diffY, TIMING_CONFIG);
             moved = true;
           }
 
           if (newHeight + diffY < height) {
-            translation.y.value = withTiming(nextTransY + height - (newHeight + diffY));
+            translation.y.value = withTiming(nextTransY + height - (newHeight + diffY), TIMING_CONFIG);
             moved = true;
           }
           if (!moved) {
-            translation.y.value = withTiming(nextTransY);
+            translation.y.value = withTiming(nextTransY, TIMING_CONFIG);
           }
         }
       }
@@ -576,7 +576,7 @@ export const ResizableImage = <T = string>({
 
         if (newHeight <= height && diffY !== height - diffY - newHeight) {
           const moveTo = diffY - (height - newHeight) / 2;
-          translation.y.value = withTiming(translation.y.value - moveTo);
+          translation.y.value = withTiming(translation.y.value - moveTo, TIMING_CONFIG);
         }
       }
     });
@@ -630,15 +630,17 @@ export const ResizableImage = <T = string>({
       }
 
       if (scale.value === 1) {
-        scale.value = withTiming(doubleTapScale);
+        scale.value = withTiming(doubleTapScale, TIMING_CONFIG);
 
         setAdjustedFocal({ focalX: x, focalY: y });
 
         offset.x.value = withTiming(
           clampX(adjustedFocal.x.value + -1 * doubleTapScale * adjustedFocal.x.value, doubleTapScale),
+          TIMING_CONFIG,
         );
         offset.y.value = withTiming(
           clampY(adjustedFocal.y.value + -1 * doubleTapScale * adjustedFocal.y.value, doubleTapScale),
+          TIMING_CONFIG,
         );
       } else {
         resetValues();
