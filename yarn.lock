@@ -7241,6 +7241,16 @@ __metadata:
   languageName: node
   linkType: hard
 
+"expo-apple-authentication@npm:~55.0.8":
+  version: 55.0.8
+  resolution: "expo-apple-authentication@npm:55.0.8"
+  peerDependencies:
+    expo: "*"
+    react-native: "*"
+  checksum: 10c0/59aa9ded6f7422ff0725ca865f0256ce73ee1cef5d2c7de0deb843ff8efdc1f124af02d58179ac1ca3bac5ac8db0d2142661a0741396dedff6569b1bb8d76b59
+  languageName: node
+  linkType: hard
+
 "expo-asset@npm:~55.0.8":
   version: 55.0.8
   resolution: "expo-asset@npm:55.0.8"
@@ -10581,6 +10591,7 @@ __metadata:
     drizzle-orm: "npm:^0.45.1"
     eslint-plugin-react-compiler: "npm:^19.1.0-rc.2"
     expo: "npm:^55.0.5"
+    expo-apple-authentication: "npm:~55.0.8"
     expo-asset: "npm:~55.0.8"
     expo-blur: "npm:~55.0.8"
     expo-build-properties: "npm:~55.0.9"
