@@ -1,8 +1,9 @@
 import React, { useCallback } from "react";
 import { View } from "react-native";
-import { Redirect, router } from "expo-router";
+import { Redirect, router, type Href } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
+import { FullScreenLoader } from "@/components/ui";
 import { useScan } from "@/hooks";
 import {
   useHasCompletedInitialScan,
@@ -13,6 +14,7 @@ import {
 import { OnboardingFlow } from "@/components/onboarding";
 import { ScanHeader, PermissionCard, ScanCard } from "@/components/scan";
 import { Button, ButtonText } from "@/components/ui";
+import { useSession } from "@/lib/auth-client";
 
 const ONBOARDING_AUTO_DEEP_SCAN_PHOTO_THRESHOLD = 10_000;
 
@@ -26,6 +28,7 @@ export default function ScanScreen() {
   const setHasCompletedInitialScan = useSetHasCompletedInitialScan();
   const setHasCompletedOnboarding = useSetHasCompletedOnboarding();
   const hasCompletedOnboarding = useHasCompletedOnboarding();
+  const { data: session, isPending } = useSession();
 
   const {
     hasPermission,
@@ -47,6 +50,14 @@ export default function ScanScreen() {
     setHasCompletedInitialScan(true);
     router.replace("/review");
   };
+
+  if (isPending) {
+    return <FullScreenLoader label={"Checking your account..."} />;
+  }
+
+  if (!session?.user) {
+    return <Redirect href={"/(auth)/sign-in" as Href} />;
+  }
 
   // Show onboarding flow if not completed
   if (!hasCompletedOnboarding) {

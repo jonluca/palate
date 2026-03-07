@@ -1,5 +1,5 @@
 import "@/globals.css";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import type { QueryCacheNotifyEvent } from "@tanstack/query-core";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
@@ -15,6 +15,7 @@ import { useDrizzleStudioInspector, useAnalyticsScreenTracking } from "@/hooks";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ReducedMotionConfig, ReduceMotion } from "react-native-reanimated";
 import { useFastAnimations } from "@/store";
+import { createPalateQueryClient, getTrpcClient, TRPCProvider } from "@/lib/trpc";
 
 function onAppStateChange(status: AppStateStatus) {
   if (Platform.OS !== "web") {
@@ -24,22 +25,8 @@ function onAppStateChange(status: AppStateStatus) {
 // Always use dark theme
 Uniwind.setTheme("dark");
 
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 30, // 30 seconds
-      retry: false,
-      refetchOnMount: (query) => {
-        const queryKey = query.queryKey;
-        const isStaticQuery = Array.isArray(queryKey) && queryKey[0] === "static";
-        return isStaticQuery ? false : "always";
-      },
-    },
-    mutations: {
-      retry: 1, // Retry failed mutations once
-    },
-  },
-});
+export const queryClient = createPalateQueryClient();
+const trpcClient = getTrpcClient();
 
 export default function RootLayout() {
   useDrizzleStudioInspector();
@@ -93,14 +80,16 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ReducedMotionConfig mode={fastAnimations ? ReduceMotion.Always : ReduceMotion.System} />
       <QueryClientProvider client={queryClient}>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <ToastProvider>
-            <UndoProvider>
-              <Slot />
-              {/* {__DEV__ && <FloatingDevTools disableHints />} */}
-            </UndoProvider>
-          </ToastProvider>
-        </GestureHandlerRootView>
+        <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <ToastProvider>
+              <UndoProvider>
+                <Slot />
+                {/* {__DEV__ && <FloatingDevTools disableHints />} */}
+              </UndoProvider>
+            </ToastProvider>
+          </GestureHandlerRootView>
+        </TRPCProvider>
         <StatusBar style={"light"} />
       </QueryClientProvider>
     </SafeAreaProvider>

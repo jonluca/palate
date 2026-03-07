@@ -21,10 +21,10 @@ import {
 import { ScreenLayout } from "@/components/screen-layout";
 import { useResetScan } from "@/store";
 
-function SectionHeader({ children }: { children: string }) {
+function SectionHeader({ title }: { title: string }) {
   return (
     <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase font-semibold tracking-wide px-1 mb-3"}>
-      {children}
+      {title}
     </ThemedText>
   );
 }
@@ -139,18 +139,18 @@ export default function AdvancedSettingsScreen() {
       <ScreenLayout>
         <AdvancedIntroCard />
 
-        <SectionHeader>Interface</SectionHeader>
+        <SectionHeader title={"Interface"} />
         <View className={"gap-3"}>
           <UndoBarCard />
           <FastAnimationsCard />
         </View>
 
-        <SectionHeader>Scanning</SectionHeader>
+        <SectionHeader title={"Scanning"} />
         <View className={"gap-3"}>
           <RescanPhotosCard />
         </View>
 
-        <SectionHeader>Matching</SectionHeader>
+        <SectionHeader title={"Matching"} />
         <View className={"gap-3"}>
           <RecomputeSuggestionsCard />
         </View>
@@ -158,7 +158,7 @@ export default function AdvancedSettingsScreen() {
         <MergeDuplicatesSection />
 
         <View className={"mb-6"}>
-          <SectionHeader>Detection & Matching</SectionHeader>
+          <SectionHeader title={"Detection & Matching"} />
           <View className={"gap-3"}>
             <FoodKeywordsCard />
             <GoogleMapsApiKeyCard />
@@ -167,20 +167,20 @@ export default function AdvancedSettingsScreen() {
 
         {ignoredLocations.length > 0 && (
           <View className={"mb-6"}>
-            <SectionHeader>Ignored Locations</SectionHeader>
+            <SectionHeader title={"Ignored Locations"} />
             <IgnoredLocationsCard locations={ignoredLocations} onRemove={handleRemoveIgnoredLocation} />
           </View>
         )}
 
         {stats && stats.confirmedVisits > 0 && (
           <View className={"mb-6"}>
-            <SectionHeader>Backup</SectionHeader>
+            <SectionHeader title={"Backup"} />
             <ExportVisitsCard />
           </View>
         )}
 
         <View>
-          <SectionHeader>Danger Zone</SectionHeader>
+          <SectionHeader title={"Danger Zone"} />
           <DangerZoneCard />
         </View>
       </ScreenLayout>

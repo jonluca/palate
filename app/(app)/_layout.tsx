@@ -1,9 +1,11 @@
 import "@/globals.css";
-import { Redirect, Stack } from "expo-router";
+import { Redirect, Stack, type Href } from "expo-router";
 import React from "react";
-import { Platform, View, ActivityIndicator } from "react-native";
+import { Platform } from "react-native";
+import { FullScreenLoader } from "@/components/ui";
 import { useHasCompletedInitialScan, useHasHydrated } from "@/store";
 import { DarkTheme } from "@react-navigation/native";
+import { useSession } from "@/lib/auth-client";
 
 export default function RootLayoutNav() {
   const navigationTheme = {
@@ -19,14 +21,15 @@ export default function RootLayoutNav() {
   };
   const hasHydrated = useHasHydrated();
   const hasCompletedInitialScan = useHasCompletedInitialScan();
+  const { data: session, isPending } = useSession();
 
   // Wait for store to hydrate before making routing decisions
-  if (!hasHydrated) {
-    return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "#000" }}>
-        <ActivityIndicator size={"large"} color={"#0A84FF"} />
-      </View>
-    );
+  if (!hasHydrated || isPending) {
+    return <FullScreenLoader label={"Loading Palate..."} />;
+  }
+
+  if (!session?.user) {
+    return <Redirect href={"/(auth)/sign-in" as Href} />;
   }
 
   if (!hasCompletedInitialScan) {
@@ -101,6 +104,13 @@ export default function RootLayoutNav() {
         name={"quick-actions"}
         options={{
           title: "Quick Actions",
+          headerLargeTitle: false,
+        }}
+      />
+      <Stack.Screen
+        name={"account"}
+        options={{
+          title: "Account",
           headerLargeTitle: false,
         }}
       />
