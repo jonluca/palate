@@ -1,4 +1,5 @@
 import type { OnboardingSlide } from "./types";
+import { AuthStepContent } from "./auth-step";
 import { CalendarSelectionContent } from "./calendar-selection";
 
 export const ONBOARDING_SLIDES: OnboardingSlide[] = [
@@ -59,6 +60,18 @@ export const ONBOARDING_SLIDES: OnboardingSlide[] = [
     description:
       "Review detected visits, confirm the restaurant, and build your personal dining history with photos and memories.",
     gradient: ["#1a0f23", "#2a1a3e", "#3d1f55", "#4d0a6a"],
+  },
+  {
+    id: "6",
+    icon: "person.crop.circle.badge.checkmark",
+    iconColor: "#f59e0b",
+    iconBg: "bg-amber-500/20",
+    title: "Add Apple\nSign-In",
+    subtitle: "Optional cloud sync",
+    description:
+      "Keep using Palate fully offline, or connect Apple now to sync confirmed visits, control public profile visibility, and follow friends.",
+    gradient: ["#22160f", "#3a2414", "#4d3118", "#6d4417"],
+    CustomContent: AuthStepContent,
   },
   {
     id: "7",

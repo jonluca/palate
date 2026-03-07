@@ -1,8 +1,9 @@
 import "@/globals.css";
-import { Redirect, Stack, type Href } from "expo-router";
+import { Redirect, Stack } from "expo-router";
 import React from "react";
 import { Platform } from "react-native";
 import { FullScreenLoader } from "@/components/ui";
+import { syncConfirmedVisitsSnapshot } from "@/lib/cloud-sync";
 import { useHasCompletedInitialScan, useHasHydrated } from "@/store";
 import { DarkTheme } from "@react-navigation/native";
 import { useSession } from "@/lib/auth-client";
@@ -22,14 +23,21 @@ export default function RootLayoutNav() {
   const hasHydrated = useHasHydrated();
   const hasCompletedInitialScan = useHasCompletedInitialScan();
   const { data: session, isPending } = useSession();
+  const syncUserId = session?.user?.id;
+
+  React.useEffect(() => {
+    if (!syncUserId || !hasCompletedInitialScan) {
+      return;
+    }
+
+    void syncConfirmedVisitsSnapshot().catch((error) => {
+      console.error("Error syncing confirmed visits on app open:", error);
+    });
+  }, [hasCompletedInitialScan, syncUserId]);
 
   // Wait for store to hydrate before making routing decisions
   if (!hasHydrated || isPending) {
     return <FullScreenLoader label={"Loading Palate..."} />;
-  }
-
-  if (!session?.user) {
-    return <Redirect href={"/(auth)/sign-in" as Href} />;
   }
 
   if (!hasCompletedInitialScan) {
@@ -111,6 +119,20 @@ export default function RootLayoutNav() {
         name={"account"}
         options={{
           title: "Account",
+          headerLargeTitle: false,
+        }}
+      />
+      <Stack.Screen
+        name={"social"}
+        options={{
+          title: "Social",
+          headerLargeTitle: false,
+        }}
+      />
+      <Stack.Screen
+        name={"people/[id]"}
+        options={{
+          title: "Profile",
           headerLargeTitle: false,
         }}
       />

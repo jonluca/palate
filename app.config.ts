@@ -16,6 +16,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
       ...config.ios,
       googleServicesFile: "./GoogleService-Info.plist",
       supportsTablet: false,
+      usesAppleSignIn: true,
       bundleIdentifier: "com.jonluca.photo-restaurant-matcher",
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
@@ -97,6 +98,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       "@react-native-firebase/app",
+      "expo-apple-authentication",
       "expo-router",
       "expo-maps",
       "expo-web-browser",

@@ -58,21 +58,39 @@ export default function SettingsScreen() {
 
       <Animated.View entering={FadeInDown.delay(150).duration(300)} className={"mb-6"}>
         <SettingsSectionHeader title={"Account"} />
-        <Link href={"/(app)/account" as Href} asChild>
-          <Pressable>
-            <Card animated={false} className={"gap-1 p-4"}>
-              <ThemedText variant={"heading"} className={"font-semibold"}>
-                {session?.user.name ?? "Account"}
-              </ThemedText>
-              <ThemedText variant={"subhead"} color={"secondary"} selectable>
-                {session?.user.email ?? "Manage your sign-in and cloud profile"}
-              </ThemedText>
-              <ThemedText variant={"footnote"} color={"tertiary"}>
-                Better Auth session, tRPC profile, and sign-out controls
-              </ThemedText>
-            </Card>
-          </Pressable>
-        </Link>
+        <View className={"gap-3"}>
+          <Link href={"/(app)/account" as Href} asChild>
+            <Pressable>
+              <Card animated={false} className={"gap-1 p-4"}>
+                <ThemedText variant={"heading"} className={"font-semibold"}>
+                  {session?.user.name || "Account"}
+                </ThemedText>
+                <ThemedText variant={"subhead"} color={"secondary"} selectable>
+                  {session?.user.email ?? "Optional Apple sign-in for cloud sync and a public profile"}
+                </ThemedText>
+                <ThemedText variant={"footnote"} color={"tertiary"}>
+                  Apple sign-in, synced confirmed visits, and visit privacy controls
+                </ThemedText>
+              </Card>
+            </Pressable>
+          </Link>
+
+          <Link href={"/social" as Href} asChild>
+            <Pressable>
+              <Card animated={false} className={"gap-1 p-4"}>
+                <ThemedText variant={"heading"} className={"font-semibold"}>
+                  Friends & Following
+                </ThemedText>
+                <ThemedText variant={"subhead"} color={"secondary"}>
+                  Follow people, see mutual friends, and open public profiles
+                </ThemedText>
+                <ThemedText variant={"footnote"} color={"tertiary"}>
+                  Requires sign-in only for follow actions
+                </ThemedText>
+              </Card>
+            </Pressable>
+          </Link>
+        </View>
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(180).duration(300)} className={"mb-6"}>

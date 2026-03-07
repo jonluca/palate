@@ -1,6 +1,6 @@
 import React, { useCallback } from "react";
 import { View } from "react-native";
-import { Redirect, router, type Href } from "expo-router";
+import { Redirect, router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { FullScreenLoader } from "@/components/ui";
@@ -28,7 +28,7 @@ export default function ScanScreen() {
   const setHasCompletedInitialScan = useSetHasCompletedInitialScan();
   const setHasCompletedOnboarding = useSetHasCompletedOnboarding();
   const hasCompletedOnboarding = useHasCompletedOnboarding();
-  const { data: session, isPending } = useSession();
+  const { isPending } = useSession();
 
   const {
     hasPermission,
@@ -53,10 +53,6 @@ export default function ScanScreen() {
 
   if (isPending) {
     return <FullScreenLoader label={"Checking your account..."} />;
-  }
-
-  if (!session?.user) {
-    return <Redirect href={"/(auth)/sign-in" as Href} />;
   }
 
   // Show onboarding flow if not completed

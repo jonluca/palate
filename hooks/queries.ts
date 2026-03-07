@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import * as Location from "expo-location";
 import { useMemo, useRef } from "react";
+import { cloudQueryKeys, syncConfirmedVisitsSnapshot } from "@/lib/cloud-sync";
 import { logVisitConfirmed, logVisitRejected } from "@/services/analytics";
 import {
   getVisitsWithDetails,
@@ -81,6 +82,19 @@ import {
 function invalidateVisitQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
   queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
+}
+
+async function syncConfirmedVisitsAfterLocalChange(queryClient: QueryClient) {
+  try {
+    const result = await syncConfirmedVisitsSnapshot();
+
+    if (!result.skipped) {
+      queryClient.invalidateQueries({ queryKey: cloudQueryKeys.profile });
+      queryClient.invalidateQueries({ queryKey: ["cloud", "social"] });
+    }
+  } catch (error) {
+    console.error("Error syncing confirmed visits to backend:", error);
+  }
 }
 
 // ============================================================================
@@ -764,6 +778,7 @@ export function useConfirmVisit() {
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
       // Track analytics
       logVisitConfirmed(parseInt(variables.visitId, 10) || 0);
+      void syncConfirmedVisitsAfterLocalChange(queryClient);
     },
   });
 }
@@ -867,6 +882,7 @@ export function useBatchConfirmVisits() {
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
       queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      void syncConfirmedVisitsAfterLocalChange(queryClient);
     },
   });
 }
@@ -1057,6 +1073,7 @@ export function useUpdateVisitStatus(visitId: string | undefined) {
       } else if (newStatus === "rejected" && visitId) {
         logVisitRejected(parseInt(visitId, 10) || 0);
       }
+      void syncConfirmedVisitsAfterLocalChange(queryClient);
     },
   });
 }
@@ -1124,6 +1141,7 @@ export function useQuickUpdateVisitStatus() {
       if (newStatus === "confirmed") {
         queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
         logVisitConfirmed(parseInt(visitId, 10) || 0);
+        void syncConfirmedVisitsAfterLocalChange(queryClient);
       } else if (newStatus === "rejected") {
         logVisitRejected(parseInt(visitId, 10) || 0);
       }
@@ -1148,6 +1166,7 @@ export function useUndoVisitAction() {
       queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      void syncConfirmedVisitsAfterLocalChange(queryClient);
     },
   });
 }
@@ -1193,6 +1212,7 @@ export function useBatchUpdateVisitStatus() {
       // Only invalidate confirmed restaurants list if confirming, not pending reviews (handled optimistically)
       if (newStatus === "confirmed") {
         queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+        void syncConfirmedVisitsAfterLocalChange(queryClient);
       }
     },
   });
@@ -1227,6 +1247,7 @@ export function useMergeVisits() {
     onSuccess: ({ targetVisitId }) => {
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(targetVisitId) });
+      void syncConfirmedVisitsAfterLocalChange(queryClient);
     },
   });
 }
@@ -1256,6 +1277,7 @@ export function useBatchMergeSameRestaurantVisits() {
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
       queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      void syncConfirmedVisitsAfterLocalChange(queryClient);
     },
   });
 }
@@ -1295,6 +1317,7 @@ export function useCreateManualVisit() {
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       // Invalidate wrapped stats (invalidates all years)
       queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      void syncConfirmedVisitsAfterLocalChange(queryClient);
     },
   });
 }
@@ -1828,6 +1851,7 @@ export function useAddPhotosToVisit(visitId: string | undefined) {
       // Also invalidate any affected source visits and general queries
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      void syncConfirmedVisitsAfterLocalChange(queryClient);
     },
   });
 }
@@ -1854,6 +1878,7 @@ export function useRemovePhotosFromVisit(visitId: string | undefined) {
       // Also invalidate general queries
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      void syncConfirmedVisitsAfterLocalChange(queryClient);
     },
   });
 }
