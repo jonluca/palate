@@ -54,6 +54,7 @@
     "dotenv": "17.2.3",
     "drizzle-orm": "^0.45.1",
     "expo": "^55.0.5",
+    "expo-apple-authentication": "~55.0.8",
     "expo-asset": "~55.0.8",
     "expo-blur": "~55.0.8",
     "expo-build-properties": "~55.0.9",
@@ -105,6 +106,7 @@
     "react-refresh": "^0.18.0",
     "tailwind-merge": "3.5.0",
     "tailwindcss": "^4.2.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "tz-lookup": "^6.1.25",
     "uniwind": "^1.5.0",
@@ -125,7 +127,6 @@
     "eslint-plugin-react-compiler": "^19.1.0-rc.2",
     "knip": "^5.85.0",
     "oxfmt": "^0.36.0",
-    "oxlint": "^1.51.0",
-    "tsx": "^4.21.0"
+    "oxlint": "^1.51.0"
   }
 }
