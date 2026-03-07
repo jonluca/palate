@@ -1,20 +1,22 @@
 import "@/globals.css";
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { QueryCacheNotifyEvent } from "@tanstack/query-core";
+import { Slot } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
 import { Uniwind } from "uniwind";
+import { FullScreenLoader } from "@/components/ui";
 import { ToastProvider } from "@/components/ui/toast";
 import { UndoProvider } from "@/components/ui/undo-banner";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { Slot } from "expo-router";
 import { AppState, Platform } from "react-native";
 import type { AppStateStatus } from "react-native";
 import { focusManager } from "@tanstack/react-query";
 import { useDrizzleStudioInspector, useAnalyticsScreenTracking } from "@/hooks";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ReducedMotionConfig, ReduceMotion } from "react-native-reanimated";
-import { useFastAnimations } from "@/store";
+import { useFastAnimations, useHasHydrated } from "@/store";
+import { useSession } from "@/lib/auth-client";
 import { createPalateQueryClient, getTrpcClient, TRPCProvider } from "@/lib/trpc";
 
 function onAppStateChange(status: AppStateStatus) {
@@ -27,6 +29,17 @@ Uniwind.setTheme("dark");
 
 export const queryClient = createPalateQueryClient();
 const trpcClient = getTrpcClient();
+
+function RootLayoutContent() {
+  const hasHydrated = useHasHydrated();
+  const { isPending } = useSession();
+
+  if (!hasHydrated || isPending) {
+    return <FullScreenLoader label={"Loading Palate..."} />;
+  }
+
+  return <Slot />;
+}
 
 export default function RootLayout() {
   useDrizzleStudioInspector();
@@ -84,7 +97,7 @@ export default function RootLayout() {
           <GestureHandlerRootView style={{ flex: 1 }}>
             <ToastProvider>
               <UndoProvider>
-                <Slot />
+                <RootLayoutContent />
                 {/* {__DEV__ && <FloatingDevTools disableHints />} */}
               </UndoProvider>
             </ToastProvider>

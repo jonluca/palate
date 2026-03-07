@@ -1,20 +1,18 @@
 import React, { useCallback, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, type Href } from "expo-router";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
 import {
   AboutCard,
   AdvancedSettingsCard,
   AllVisitsCard,
+  AuthEntryCard,
   CalendarSection,
   DeepScanCard,
   QuickActionsCard,
 } from "@/components/settings";
-import { Card } from "@/components/ui";
-import { useSession } from "@/lib/auth-client";
 
 function SettingsSectionHeader({ title }: { title: string }) {
   return (
@@ -28,7 +26,6 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
-  const { data: session } = useSession();
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -52,45 +49,12 @@ export default function SettingsScreen() {
           Settings
         </ThemedText>
         <ThemedText variant={"body"} color={"secondary"}>
-          Manage your data and view stats
+          Manage your app, data, and stats
         </ThemedText>
       </View>
 
       <Animated.View entering={FadeInDown.delay(150).duration(300)} className={"mb-6"}>
-        <SettingsSectionHeader title={"Account"} />
-        <View className={"gap-3"}>
-          <Link href={"/(app)/account" as Href} asChild>
-            <Pressable>
-              <Card animated={false} className={"gap-1 p-4"}>
-                <ThemedText variant={"heading"} className={"font-semibold"}>
-                  {session?.user.name || "Account"}
-                </ThemedText>
-                <ThemedText variant={"subhead"} color={"secondary"} selectable>
-                  {session?.user.email ?? "Optional Apple sign-in for cloud sync and a public profile"}
-                </ThemedText>
-                <ThemedText variant={"footnote"} color={"tertiary"}>
-                  Apple sign-in, synced confirmed visits, and visit privacy controls
-                </ThemedText>
-              </Card>
-            </Pressable>
-          </Link>
-
-          <Link href={"/social" as Href} asChild>
-            <Pressable>
-              <Card animated={false} className={"gap-1 p-4"}>
-                <ThemedText variant={"heading"} className={"font-semibold"}>
-                  Friends & Following
-                </ThemedText>
-                <ThemedText variant={"subhead"} color={"secondary"}>
-                  Follow people, see mutual friends, and open public profiles
-                </ThemedText>
-                <ThemedText variant={"footnote"} color={"tertiary"}>
-                  Requires sign-in only for follow actions
-                </ThemedText>
-              </Card>
-            </Pressable>
-          </Link>
-        </View>
+        <AuthEntryCard />
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(180).duration(300)} className={"mb-6"}>

@@ -175,7 +175,7 @@ export default function AccountScreen() {
             <ButtonText variant={"secondary"}>Sign Out</ButtonText>
           </Button>
         ) : (
-          <Button onPress={() => router.push("/(auth)/sign-in" as Href)}>
+          <Button onPress={() => router.push("/sign-in" as Href)}>
             <ButtonText>Continue with Apple</ButtonText>
           </Button>
         )}

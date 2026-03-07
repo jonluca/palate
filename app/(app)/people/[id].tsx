@@ -126,7 +126,7 @@ export default function PersonProfileScreen() {
                     <ButtonText>{getFollowActionLabel(profile.relationship)}</ButtonText>
                   </Button>
                 ) : (
-                  <Button variant={"secondary"} onPress={() => router.push("/(auth)/sign-in" as Href)}>
+                  <Button variant={"secondary"} onPress={() => router.push("/sign-in" as Href)}>
                     <ButtonText variant={"secondary"}>Sign In To Follow</ButtonText>
                   </Button>
                 )

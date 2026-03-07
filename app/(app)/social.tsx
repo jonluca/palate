@@ -105,7 +105,7 @@ export default function SocialScreen() {
             </ThemedText>
           </View>
 
-          <Button onPress={() => router.push("/(auth)/sign-in" as Href)}>
+          <Button onPress={() => router.push("/sign-in" as Href)}>
             <ButtonText>Continue with Apple</ButtonText>
           </Button>
         </Card>

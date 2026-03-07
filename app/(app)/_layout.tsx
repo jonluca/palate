@@ -2,9 +2,8 @@ import "@/globals.css";
 import { Redirect, Stack } from "expo-router";
 import React from "react";
 import { Platform } from "react-native";
-import { FullScreenLoader } from "@/components/ui";
 import { syncConfirmedVisitsSnapshot } from "@/lib/cloud-sync";
-import { useHasCompletedInitialScan, useHasHydrated } from "@/store";
+import { useHasCompletedInitialScan } from "@/store";
 import { DarkTheme } from "@react-navigation/native";
 import { useSession } from "@/lib/auth-client";
 
@@ -20,9 +19,8 @@ export default function RootLayoutNav() {
       border: "transparent",
     },
   };
-  const hasHydrated = useHasHydrated();
   const hasCompletedInitialScan = useHasCompletedInitialScan();
-  const { data: session, isPending } = useSession();
+  const { data: session } = useSession();
   const syncUserId = session?.user?.id;
 
   React.useEffect(() => {
@@ -34,11 +32,6 @@ export default function RootLayoutNav() {
       console.error("Error syncing confirmed visits on app open:", error);
     });
   }, [hasCompletedInitialScan, syncUserId]);
-
-  // Wait for store to hydrate before making routing decisions
-  if (!hasHydrated || isPending) {
-    return <FullScreenLoader label={"Loading Palate..."} />;
-  }
 
   if (!hasCompletedInitialScan) {
     return <Redirect href={"/scan"} />;
