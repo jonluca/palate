@@ -323,6 +323,7 @@ export const socialRouter = router({
         .select({
           id: user.id,
           name: user.name,
+          bio: userProfile.bio,
           homeCity: userProfile.homeCity,
           favoriteCuisine: userProfile.favoriteCuisine,
           publicVisits: userProfile.publicVisits,
@@ -367,6 +368,7 @@ export const socialRouter = router({
           name: row.name,
         },
         profile: {
+          bio: row.bio,
           homeCity: row.homeCity,
           favoriteCuisine: row.favoriteCuisine,
           publicVisits: row.publicVisits ?? false,

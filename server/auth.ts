@@ -14,6 +14,13 @@ const APPLE_APP_BUNDLE_IDENTIFIER = "com.jonluca.photo-restaurant-matcher";
 const APPLE_TEAM_ID = "F35YQQ5672";
 const APPLE_CLIENT_SECRET_TTL_SECONDS = 86400 * 180;
 const appleClientSecretCache = new Map<string, string>();
+const betterAuthOrigin = new URL(serverEnv.betterAuthUrl).origin;
+
+defaultTrustedOrigins.add(betterAuthOrigin);
+
+if (serverEnv.isDevelopment) {
+  defaultTrustedOrigins.add(`http://localhost:${serverEnv.port}`);
+}
 
 for (const origin of serverEnv.trustedOrigins) {
   defaultTrustedOrigins.add(origin);
@@ -66,6 +73,9 @@ export const auth = betterAuth({
   secret: serverEnv.betterAuthSecret,
   baseURL: serverEnv.betterAuthUrl,
   trustedOrigins: Array.from(defaultTrustedOrigins),
+  advanced: {
+    useSecureCookies: true,
+  },
   emailAndPassword: {
     enabled: false,
   },

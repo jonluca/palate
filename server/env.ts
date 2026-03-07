@@ -25,9 +25,12 @@ function parseOrigins(value: string | undefined) {
 }
 
 const port = Number(process.env.PORT ?? 3001);
+const nodeEnv = process.env.NODE_ENV ?? "development";
+const isDevelopment = nodeEnv === "development";
 
 export const serverEnv = {
-  nodeEnv: process.env.NODE_ENV ?? "development",
+  nodeEnv,
+  isDevelopment,
   port,
   databaseUrl: requireEnv("DATABASE_URL"),
   betterAuthSecret: requireEnv("BETTER_AUTH_SECRET"),

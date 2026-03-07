@@ -105,6 +105,11 @@ export default function PersonProfileScreen() {
                 <ThemedText variant={"title2"} className={"font-bold"}>
                   {profile.user.name || "Profile"}
                 </ThemedText>
+                {profile.profile.bio ? (
+                  <ThemedText variant={"body"} color={"secondary"}>
+                    {profile.profile.bio}
+                  </ThemedText>
+                ) : null}
                 {profile.profile.homeCity || profile.profile.favoriteCuisine ? (
                   <ThemedText variant={"body"} color={"secondary"}>
                     {[profile.profile.homeCity, profile.profile.favoriteCuisine].filter(Boolean).join(" · ")}

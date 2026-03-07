@@ -15,6 +15,13 @@
       "when": 1772921133929,
       "tag": "0001_breezy_darkstar",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1772925141674,
+      "tag": "0002_wise_professor_monster",
+      "breakpoints": true
     }
   ]
 }

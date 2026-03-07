@@ -5,6 +5,7 @@ export const userProfile = pgTable("user_profile", {
   userId: text("user_id")
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
+  bio: text("bio"),
   homeCity: text("home_city"),
   favoriteCuisine: text("favorite_cuisine"),
   publicVisits: boolean("public_visits").default(false).notNull(),

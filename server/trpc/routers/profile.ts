@@ -44,6 +44,7 @@ export const profileRouter = router({
   update: protectedProcedure
     .input(
       z.object({
+        bio: z.string().max(280).nullable(),
         homeCity: z.string().max(120).nullable(),
         favoriteCuisine: z.string().max(120).nullable(),
         publicVisits: z.boolean(),
@@ -56,6 +57,7 @@ export const profileRouter = router({
         .insert(userProfile)
         .values({
           userId: ctx.session.user.id,
+          bio: normalizeOptionalField(input.bio),
           homeCity: normalizeOptionalField(input.homeCity),
           favoriteCuisine: normalizeOptionalField(input.favoriteCuisine),
           publicVisits: input.publicVisits,
@@ -65,6 +67,7 @@ export const profileRouter = router({
         .onConflictDoUpdate({
           target: userProfile.userId,
           set: {
+            bio: normalizeOptionalField(input.bio),
             homeCity: normalizeOptionalField(input.homeCity),
             favoriteCuisine: normalizeOptionalField(input.favoriteCuisine),
             publicVisits: input.publicVisits,

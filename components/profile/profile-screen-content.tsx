@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { router, type Href } from "expo-router";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import React, { useState } from "react";
-import { Pressable, ScrollView, Switch, View } from "react-native";
+import { Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppleSignInButton } from "@/components/auth/apple-sign-in-button";
 import { AuthTextField } from "@/components/auth/auth-text-field";
@@ -10,7 +10,7 @@ import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
 import { signOut, useSession } from "@/lib/auth-client";
-import { cloudQueryKeys, syncConfirmedVisitsSnapshot } from "@/lib/cloud-sync";
+import { cloudQueryKeys } from "@/lib/cloud-sync";
 import { useTRPCClient } from "@/lib/trpc";
 
 function CountTile({ label, value }: { label: string; value: number | undefined }) {
@@ -27,25 +27,25 @@ function CountTile({ label, value }: { label: string; value: number | undefined 
 }
 
 interface ProfileDraft {
+  bio: string;
   homeCity: string;
   favoriteCuisine: string;
-  publicVisits: boolean;
 }
 
 function getProfileDraft(
   profile:
     | {
+        bio?: string | null;
         homeCity?: string | null;
         favoriteCuisine?: string | null;
-        publicVisits?: boolean;
       }
     | null
     | undefined,
 ): ProfileDraft {
   return {
+    bio: profile?.bio ?? "",
     homeCity: profile?.homeCity ?? "",
     favoriteCuisine: profile?.favoriteCuisine ?? "",
-    publicVisits: profile?.publicVisits ?? false,
   };
 }
 
@@ -67,16 +67,17 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
     queryFn: () => trpcClient.profile.me.query(),
   });
 
-  const healthQuery = useQuery({
-    queryKey: cloudQueryKeys.health,
-    queryFn: () => trpcClient.health.ping.query(),
-  });
-
   const profile = profileQuery.data?.profile;
-  const activeDraft = session?.user ? draft : null;
+  const savedDraft = getProfileDraft(profile);
+  const activeDraft = session?.user ? (draft ?? savedDraft) : null;
+  const bio = activeDraft?.bio ?? "";
   const homeCity = activeDraft?.homeCity ?? profile?.homeCity ?? "";
   const favoriteCuisine = activeDraft?.favoriteCuisine ?? profile?.favoriteCuisine ?? "";
-  const publicVisits = activeDraft?.publicVisits ?? profile?.publicVisits ?? false;
+  const hasProfileChanges =
+    draft !== null &&
+    (draft.bio !== savedDraft.bio ||
+      draft.homeCity !== savedDraft.homeCity ||
+      draft.favoriteCuisine !== savedDraft.favoriteCuisine);
 
   const updateProfileMutation = useMutation({
     mutationFn: async () => {
@@ -85,9 +86,10 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
       }
 
       return trpcClient.profile.update.mutate({
+        bio: bio.trim() || null,
         homeCity: homeCity.trim() || null,
         favoriteCuisine: favoriteCuisine.trim() || null,
-        publicVisits,
+        publicVisits: profile?.publicVisits ?? false,
       });
     },
     onSuccess: (updatedProfile) => {
@@ -107,23 +109,6 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
     },
     onError: (error) => {
       showToast({ type: "error", message: error.message || "Failed to save your profile" });
-    },
-  });
-
-  const syncMutation = useMutation({
-    mutationFn: async () => syncConfirmedVisitsSnapshot({ throwOnError: true }),
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: cloudQueryKeys.profile });
-      queryClient.invalidateQueries({ queryKey: ["cloud", "social"] });
-      showToast({
-        type: "success",
-        message: result.skipped
-          ? "Sign in to sync visits."
-          : `Synced ${result.syncedCount.toLocaleString()} confirmed visits.`,
-      });
-    },
-    onError: (error) => {
-      showToast({ type: "error", message: error.message || "Failed to sync confirmed visits." });
     },
   });
 
@@ -160,7 +145,7 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
             Profile
           </ThemedText>
           <ThemedText variant={"body"} color={"secondary"}>
-            Manage Apple sign-in, cloud profile details, and synced visits.
+            Show people what you are into, keep your details fresh, and jump into your social circle.
           </ThemedText>
         </View>
 
@@ -176,31 +161,47 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
       </View>
 
       <Card animated={false} className={"gap-4 p-5"}>
-        <View className={"gap-2"}>
-          <ThemedText variant={"title2"} className={"font-bold"}>
-            {session?.user?.name || "Local-first Palate"}
-          </ThemedText>
-          <ThemedText variant={"body"} color={"secondary"} selectable>
-            {session?.user?.email ?? "Use Palate without an account, then sign in later for sync and social."}
-          </ThemedText>
-        </View>
-
-        <View className={"rounded-2xl border border-white/10 bg-background px-4 py-3"}>
-          <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase tracking-[1.4px]"}>
-            Backend status
-          </ThemedText>
-          <ThemedText variant={"subhead"} className={"mt-2 font-semibold"}>
-            {healthQuery.data?.status === "ok" ? "Connected to tRPC backend" : "Waiting for backend"}
-          </ThemedText>
-          <ThemedText variant={"footnote"} color={"secondary"} selectable>
-            {healthQuery.data?.serverTime ?? "Start `yarn server:dev` to bring the backend online."}
-          </ThemedText>
+        <View className={"flex-row items-start gap-4"}>
+          <View className={"h-16 w-16 items-center justify-center rounded-full border border-white/10 bg-primary/15"}>
+            <ThemedText variant={"title2"} className={"font-bold text-primary"}>
+              {session?.user?.name?.trim().charAt(0).toUpperCase() || "P"}
+            </ThemedText>
+          </View>
+          <View className={"flex-1 gap-1"}>
+            <ThemedText variant={"title2"} className={"font-bold"}>
+              {session?.user?.name || "Your Palate profile"}
+            </ThemedText>
+            <ThemedText variant={"body"} color={"secondary"} selectable>
+              {session?.user?.email ?? "Use Palate without an account, then sign in later for sync and social."}
+            </ThemedText>
+            {session?.user ? (
+              <ThemedText variant={"footnote"} color={"tertiary"}>
+                {bio.trim() || "Add a short bio so friends can get a feel for your food personality."}
+              </ThemedText>
+            ) : (
+              <ThemedText variant={"footnote"} color={"tertiary"}>
+                Create a profile when you are ready to sync visits, follow friends, and share your taste.
+              </ThemedText>
+            )}
+          </View>
         </View>
 
         {session?.user ? (
-          <Button variant={"secondary"} onPress={handleSignOut}>
-            <ButtonText variant={"secondary"}>Sign Out</ButtonText>
-          </Button>
+          <>
+            <View className={"flex-row gap-3"}>
+              <CountTile label={"Friends"} value={counts?.friends} />
+              <CountTile label={"Followers"} value={counts?.followers} />
+            </View>
+
+            <View className={"flex-row gap-3"}>
+              <CountTile label={"Following"} value={counts?.following} />
+              <CountTile label={"Visits"} value={counts?.syncedVisits} />
+            </View>
+
+            <Button variant={"secondary"} onPress={() => router.push("/social" as Href)}>
+              <ButtonText variant={"secondary"}>Friends & Following</ButtonText>
+            </Button>
+          </>
         ) : (
           <AppleSignInButton />
         )}
@@ -211,11 +212,40 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
           <Card animated={false} className={"gap-4 p-5"}>
             <View className={"gap-1"}>
               <ThemedText variant={"title4"} className={"font-semibold"}>
-                Cloud profile
+                Profile details
               </ThemedText>
               <ThemedText variant={"footnote"} color={"secondary"}>
-                Keep your profile data and optional visit visibility in Postgres.
+                Share the basics people should see when they open your Palate profile.
               </ThemedText>
+            </View>
+
+            <View className={"gap-2"}>
+              <View className={"flex-row items-center justify-between gap-3"}>
+                <ThemedText variant={"subhead"} className={"font-semibold"}>
+                  Bio
+                </ThemedText>
+                <ThemedText variant={"caption1"} color={"tertiary"}>
+                  280 characters
+                </ThemedText>
+              </View>
+              <TextInput
+                value={bio}
+                onChangeText={(value) =>
+                  setDraft((current) => ({
+                    ...(current ?? getProfileDraft(profile)),
+                    bio: value,
+                  }))
+                }
+                placeholder={"Neighborhood pasta obsessive. Always saving room for dessert."}
+                placeholderTextColor={"rgba(255,255,255,0.42)"}
+                multiline
+                maxLength={280}
+                textAlignVertical={"top"}
+                className={
+                  "min-h-[112px] rounded-2xl border border-white/10 bg-background px-4 py-3 text-[16px] text-foreground"
+                }
+                autoCorrect
+              />
             </View>
 
             <AuthTextField
@@ -241,28 +271,6 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
               placeholder={"Japanese"}
             />
 
-            <View className={"rounded-2xl border border-white/10 bg-background px-4 py-3"}>
-              <View className={"flex-row items-center justify-between gap-3"}>
-                <View className={"flex-1 gap-1"}>
-                  <ThemedText variant={"subhead"} className={"font-semibold"}>
-                    Public confirmed visits
-                  </ThemedText>
-                  <ThemedText variant={"footnote"} color={"secondary"}>
-                    Show synced confirmed visits on your public profile for followers and friends.
-                  </ThemedText>
-                </View>
-                <Switch
-                  value={publicVisits}
-                  onValueChange={(value) =>
-                    setDraft((current) => ({
-                      ...(current ?? getProfileDraft(profile)),
-                      publicVisits: value,
-                    }))
-                  }
-                />
-              </View>
-            </View>
-
             {profileQuery.error ? (
               <ThemedText
                 variant={"footnote"}
@@ -273,45 +281,46 @@ export function ProfileScreenContent({ showSettingsButton = false }: ProfileScre
               </ThemedText>
             ) : null}
 
-            <Button onPress={() => updateProfileMutation.mutate()} loading={updateProfileMutation.isPending}>
-              <ButtonText>Save Cloud Profile</ButtonText>
+            <Button
+              onPress={() => updateProfileMutation.mutate()}
+              loading={updateProfileMutation.isPending}
+              disabled={!hasProfileChanges}
+            >
+              <ButtonText>Save Profile</ButtonText>
             </Button>
           </Card>
 
           <Card animated={false} className={"gap-4 p-5"}>
             <View className={"gap-1"}>
               <ThemedText variant={"title4"} className={"font-semibold"}>
-                Sync & social
+                Account
               </ThemedText>
               <ThemedText variant={"footnote"} color={"secondary"}>
-                Confirmed visits sync in the background when you are logged in. You can also trigger a fresh snapshot.
+                Signed in with Apple. You can stay local-first until you are ready to come back.
               </ThemedText>
             </View>
 
-            <View className={"flex-row gap-3"}>
-              <CountTile label={"Synced visits"} value={counts?.syncedVisits} />
-              <CountTile label={"Following"} value={counts?.following} />
-              <CountTile label={"Friends"} value={counts?.friends} />
+            <View className={"rounded-2xl border border-white/10 bg-background px-4 py-3"}>
+              <ThemedText variant={"subhead"} className={"font-semibold"}>
+                {session.user.email}
+              </ThemedText>
+              <ThemedText variant={"footnote"} color={"secondary"}>
+                Sign out from the bottom of your profile whenever you want to stop syncing with this account.
+              </ThemedText>
             </View>
 
-            <View className={"flex-row gap-3"}>
-              <Button className={"flex-1"} onPress={() => syncMutation.mutate()} loading={syncMutation.isPending}>
-                <ButtonText>Sync Confirmed Visits</ButtonText>
-              </Button>
-              <Button className={"flex-1"} variant={"secondary"} onPress={() => router.push("/social" as Href)}>
-                <ButtonText variant={"secondary"}>Manage Social</ButtonText>
-              </Button>
-            </View>
+            <Button variant={"secondary"} onPress={handleSignOut}>
+              <ButtonText variant={"secondary"}>Sign Out</ButtonText>
+            </Button>
           </Card>
         </>
       ) : (
         <Card animated={false} className={"gap-3 p-5"}>
           <ThemedText variant={"title4"} className={"font-semibold"}>
-            Optional cloud features
+            Optional cloud profile
           </ThemedText>
           <ThemedText variant={"footnote"} color={"secondary"}>
-            Signing in is still optional. When you want cloud sync, public visit history, or following, continue with
-            Apple.
+            Signing in is still optional. When you want cloud sync, a public profile, or following, continue with Apple.
           </ThemedText>
         </Card>
       )}
