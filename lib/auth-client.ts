@@ -2,10 +2,10 @@ import { expoClient } from "@better-auth/expo/client";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as SecureStore from "expo-secure-store";
 import { createAuthClient } from "better-auth/react";
-import { getApiBaseUrl } from "@/lib/api-config";
+import { getCloudBaseUrl } from "@/lib/api-config";
 
 export const authClient = createAuthClient({
-  baseURL: getApiBaseUrl(),
+  baseURL: getCloudBaseUrl(),
   plugins: [
     expoClient({
       scheme: "palate",
@@ -21,10 +21,6 @@ export const authClient = createAuthClient({
 });
 
 export const { signIn, signOut, useSession } = authClient;
-
-export async function isAppleSignInAvailable() {
-  return AppleAuthentication.isAvailableAsync();
-}
 
 export async function signInWithApple() {
   const credential = await AppleAuthentication.signInAsync({

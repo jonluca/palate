@@ -1,8 +1,8 @@
 import * as AppleAuthentication from "expo-apple-authentication";
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import React, { useState } from "react";
+import { View } from "react-native";
 import { ThemedText } from "@/components/themed-text";
-import { isAppleSignInAvailable, isAppleSignInCanceled, signInWithApple, useSession } from "@/lib/auth-client";
+import { isAppleSignInCanceled, signInWithApple, useSession } from "@/lib/auth-client";
 
 interface AppleSignInPanelProps {
   onSuccess?: () => void;
@@ -17,34 +17,11 @@ export function AppleSignInPanel({
   onSuccess,
   signedInTitle = "Signed in with Apple",
   signedInMessage = "Cloud sync is ready for confirmed visits and social features.",
-  unavailableMessage = "Sign in with Apple is only available on Apple devices with the native auth capability enabled.",
-  loadingMessage = "Checking Apple sign-in availability...",
   submittingMessage = "Finishing sign-in...",
 }: AppleSignInPanelProps) {
   const { data: session } = useSession();
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isAppleAvailable, setIsAppleAvailable] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    void isAppleSignInAvailable()
-      .then((available) => {
-        if (isMounted) {
-          setIsAppleAvailable(available);
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setIsAppleAvailable(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   async function handleAppleSignIn() {
     setIsSubmitting(true);
@@ -53,6 +30,7 @@ export function AppleSignInPanel({
     const result = await signInWithApple().then(
       (value) => value,
       (caughtError) => {
+        console.error(caughtError);
         if (!isAppleSignInCanceled(caughtError)) {
           setError(caughtError instanceof Error ? caughtError.message : "Unable to sign in with Apple.");
         }
@@ -95,14 +73,7 @@ export function AppleSignInPanel({
             </ThemedText>
           ) : null}
         </View>
-      ) : isAppleAvailable === null ? (
-        <View className={"items-center rounded-2xl border border-white/10 bg-background px-4 py-5"}>
-          <ActivityIndicator color={"#FFFFFF"} />
-          <ThemedText variant={"footnote"} color={"secondary"} className={"mt-2 text-center"}>
-            {loadingMessage}
-          </ThemedText>
-        </View>
-      ) : isAppleAvailable ? (
+      ) : (
         <View className={"gap-3"}>
           <View pointerEvents={isSubmitting ? "none" : "auto"} style={{ opacity: isSubmitting ? 0.6 : 1 }}>
             <AppleAuthentication.AppleAuthenticationButton
@@ -121,12 +92,6 @@ export function AppleSignInPanel({
               {submittingMessage}
             </ThemedText>
           ) : null}
-        </View>
-      ) : (
-        <View className={"rounded-2xl border border-white/10 bg-background px-4 py-4"}>
-          <ThemedText variant={"subhead"} className={"font-semibold"}>
-            {unavailableMessage}
-          </ThemedText>
         </View>
       )}
 

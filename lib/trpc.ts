@@ -2,7 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { createTRPCContext } from "@trpc/tanstack-react-query";
 import { authClient } from "@/lib/auth-client";
-import { getApiBaseUrl } from "@/lib/api-config";
+import { getCloudBaseUrl } from "@/lib/api-config";
 import type { AppRouter } from "@/server/trpc/router";
 
 export const { TRPCProvider, useTRPC, useTRPCClient } = createTRPCContext<AppRouter>();
@@ -36,7 +36,7 @@ export function getTrpcClient() {
   trpcClientSingleton = createTRPCClient<AppRouter>({
     links: [
       httpBatchLink({
-        url: `${getApiBaseUrl()}/trpc`,
+        url: `${getCloudBaseUrl()}/trpc`,
         headers() {
           const cookie = authClient.getCookie();
 

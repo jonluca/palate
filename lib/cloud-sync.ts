@@ -10,6 +10,10 @@ export const cloudQueryKeys = {
   publicProfile: (userId: string) => ["cloud", "social", "profile", userId] as const,
 };
 
+function normalizeTimestamp(timestamp: number) {
+  return Math.round(timestamp);
+}
+
 function isUnauthorizedError(error: unknown) {
   if (!error || typeof error !== "object") {
     return false;
@@ -32,8 +36,8 @@ async function buildConfirmedVisitSyncPayload() {
     localVisitId: visit.id,
     restaurantId: visit.restaurantId,
     restaurantName: visit.restaurantName ?? visit.suggestedRestaurantName ?? "Confirmed restaurant",
-    startTime: visit.startTime,
-    endTime: visit.endTime,
+    startTime: normalizeTimestamp(visit.startTime),
+    endTime: normalizeTimestamp(visit.endTime),
     centerLat: visit.centerLat,
     centerLon: visit.centerLon,
     photoCount: visit.photoCount,

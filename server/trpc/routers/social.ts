@@ -6,12 +6,20 @@ import { userConfirmedVisit, userFollow, userProfile } from "../../db/schema/pro
 import type { TRPCContext } from "../context";
 import { protectedProcedure, publicProcedure, router } from "../trpc";
 
+const syncedTimestampSchema = z
+  .number()
+  .finite()
+  .refine((value) => Number.isSafeInteger(Math.round(value)), {
+    message: "Timestamp must be within the safe integer range.",
+  })
+  .transform((value) => Math.round(value));
+
 const syncedVisitInputSchema = z.object({
   localVisitId: z.string().trim().min(1).max(255),
   restaurantId: z.string().trim().min(1).max(255).nullable(),
   restaurantName: z.string().trim().min(1).max(240),
-  startTime: z.number().int(),
-  endTime: z.number().int(),
+  startTime: syncedTimestampSchema,
+  endTime: syncedTimestampSchema,
   centerLat: z.number().finite(),
   centerLon: z.number().finite(),
   photoCount: z.number().int().nonnegative(),
