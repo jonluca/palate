@@ -11,11 +11,7 @@ export function getApiBaseUrl() {
     return trimTrailingSlash(configuredUrl);
   }
 
-  if (!__DEV__) {
-    throw new Error("EXPO_PUBLIC_API_URL is required outside development.");
-  }
-
-  return "http://127.0.0.1:3001";
+  return PRODUCTION_CLOUD_URL;
 }
 
 export function getCloudBaseUrl() {
