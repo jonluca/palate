@@ -116,8 +116,6 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
                 paddingHorizontal: 14,
                 paddingVertical: 9,
                 backgroundColor: "rgba(18, 22, 30, 0.34)",
-                borderWidth: 1,
-                borderColor: "rgba(255,255,255,0.10)",
               }}
             >
               <ThemedText variant={"subhead"} style={{ color: "rgba(255,255,255,0.82)", fontWeight: "600" }}>

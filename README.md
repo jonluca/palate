@@ -160,6 +160,7 @@ yarn seed:demo-social --viewer-email you@example.com
 
 - `seed:canonical-restaurants` reads the bundled `assets/michelin.db` and upserts canonical Michelin restaurants into Postgres.
 - `seed:demo-social` creates a small network of public demo users, their follows, and confirmed visits. Use `--viewer-email` (or `--viewer-id`) to have an existing account follow the demo users so the feed populates immediately.
+- In production, demo users are hidden from normal social search/results unless the viewer email is included in `DEMO_USER_VISIBLE_EMAILS`.
 
 ## Thanks
 

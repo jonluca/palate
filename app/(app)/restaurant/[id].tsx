@@ -1,6 +1,7 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { Button, Card } from "@/components/ui";
+import { FriendsWhoVisitedCard } from "@/components/visit";
 import { IconSymbol } from "@/components/icon-symbol";
 import { RestaurantEditModal } from "@/components/restaurant-edit-modal";
 import {
@@ -83,10 +84,10 @@ function VisitHistoryCard({ visit }: { visit: VisitRecord }) {
           {/* Preview Photos */}
           {photos.length > 0 && (
             <View className={"flex-row h-24"} onLayout={handlePreviewLayout}>
-              {photos.slice(0, previewCount).map((photo, i) => {
+              {photos.slice(0, previewCount).map((photo) => {
                 const isVideo = photo.mediaType === "video";
                 return (
-                  <View key={i} className={"flex-1"}>
+                  <View key={photo.id} className={"flex-1"}>
                     <Image
                       source={{ uri: photo.uri }}
                       recyclingKey={photo.id}
@@ -692,8 +693,8 @@ function MichelinDetailsCard({ details }: { details: MichelinRestaurantDetails }
                 Facilities & Services
               </ThemedText>
               <View className={"flex-row flex-wrap gap-2"}>
-                {facilities.map((facility, index) => (
-                  <View key={index} className={"bg-secondary px-2.5 py-1.5 rounded-full"}>
+                {facilities.map((facility) => (
+                  <View key={facility} className={"bg-secondary px-2.5 py-1.5 rounded-full"}>
                     <ThemedText variant={"caption1"} color={"secondary"}>
                       {facility}
                     </ThemedText>
@@ -758,15 +759,17 @@ export default function RestaurantDetailScreen() {
       return;
     }
 
+    const visitPayload = {
+      restaurantId: id,
+      restaurantName: restaurant.name,
+      latitude: restaurant.latitude,
+      longitude: restaurant.longitude,
+      visitDate: date.getTime(),
+      notes: notes ?? null,
+    };
+
     try {
-      await createManualVisitMutation.mutateAsync({
-        restaurantId: id,
-        restaurantName: restaurant.name,
-        latitude: restaurant.latitude,
-        longitude: restaurant.longitude,
-        visitDate: date.getTime(),
-        notes: notes ?? null,
-      });
+      await createManualVisitMutation.mutateAsync(visitPayload);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setAddVisitModalVisible(false);
     } catch (error) {
@@ -781,6 +784,8 @@ export default function RestaurantDetailScreen() {
     () => (
       <View className={"gap-6"}>
         {restaurant && <RestaurantInfoCard restaurant={restaurant} onEdit={() => setEditModalVisible(true)} />}
+
+        <FriendsWhoVisitedCard restaurantId={restaurant?.id} restaurantName={restaurant?.name} />
 
         {/* Michelin Details */}
         {michelinDetails && <MichelinDetailsCard details={michelinDetails} />}

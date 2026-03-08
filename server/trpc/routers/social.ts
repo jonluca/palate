@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, ilike, inArray, ne, not, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, ne, not, notLike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { user } from "../../db/schema/auth-schema";
 import {
@@ -10,12 +10,14 @@ import {
   userFollow,
   userProfile,
 } from "../../db/schema/profile";
+import { serverEnv } from "../../env";
 import type { TRPCContext } from "../context";
 import { protectedProcedure, publicProcedure, router } from "../trpc";
 
 const FEED_LIMIT = 60;
 const COMMENT_PREVIEW_LIMIT = 2;
 const RESTAURANT_FRIEND_MATCH_LIMIT = 12;
+const DEMO_USER_ID_PREFIX = "demo-user-";
 
 const syncedTimestampSchema = z
   .number()
@@ -88,6 +90,42 @@ function getVisitKey(visitUserId: string, localVisitId: string) {
   return `${visitUserId}:${localVisitId}`;
 }
 
+function isDemoUserId(userId: string) {
+  return userId.startsWith(DEMO_USER_ID_PREFIX);
+}
+
+function canViewerSeeDemoUsers(ctx: Pick<TRPCContext, "session">) {
+  if (serverEnv.isDevelopment) {
+    return true;
+  }
+
+  const viewerEmail = ctx.session?.user.email?.trim().toLowerCase();
+  return viewerEmail ? serverEnv.demoUserVisibleEmails.has(viewerEmail) : false;
+}
+
+function canViewerSeeUserId(ctx: Pick<TRPCContext, "session">, userId: string) {
+  return !isDemoUserId(userId) || ctx.session?.user.id === userId || canViewerSeeDemoUsers(ctx);
+}
+
+function filterVisibleUserIds(ctx: Pick<TRPCContext, "session">, userIds: string[]) {
+  return Array.from(new Set(userIds.filter((userId) => canViewerSeeUserId(ctx, userId))));
+}
+
+function assertViewerCanSeeUser(
+  ctx: Pick<TRPCContext, "session">,
+  userId: string,
+  opts: {
+    notFoundMessage: string;
+  },
+) {
+  if (!canViewerSeeUserId(ctx, userId)) {
+    throw new TRPCError({
+      code: "NOT_FOUND",
+      message: opts.notFoundMessage,
+    });
+  }
+}
+
 function buildRelationship(args: { isFollowing: boolean; followsYou: boolean }) {
   return {
     isFollowing: args.isFollowing,
@@ -132,8 +170,10 @@ function buildCommentSummary(row: SocialCommentRow, author: SocialUserRow, viewe
   };
 }
 
-async function getUserRowsByIds(ctx: Pick<TRPCContext, "db">, userIds: string[]) {
-  if (userIds.length === 0) {
+async function getUserRowsByIds(ctx: Pick<TRPCContext, "db" | "session">, userIds: string[]) {
+  const visibleUserIds = filterVisibleUserIds(ctx, userIds);
+
+  if (visibleUserIds.length === 0) {
     return new Map<string, SocialUserRow>();
   }
 
@@ -148,7 +188,7 @@ async function getUserRowsByIds(ctx: Pick<TRPCContext, "db">, userIds: string[])
     })
     .from(user)
     .leftJoin(userProfile, eq(userProfile.userId, user.id))
-    .where(inArray(user.id, userIds));
+    .where(inArray(user.id, visibleUserIds));
 
   return new Map(
     rows.map((row) => [
@@ -165,7 +205,7 @@ async function getUserRowsByIds(ctx: Pick<TRPCContext, "db">, userIds: string[])
   );
 }
 
-async function getSocialState(ctx: Pick<TRPCContext, "db">, userId: string) {
+async function getSocialState(ctx: Pick<TRPCContext, "db" | "session">, userId: string) {
   const [followingRows, followerRows, syncedVisitRows] = await Promise.all([
     ctx.db.select({ userId: userFollow.followeeId }).from(userFollow).where(eq(userFollow.followerId, userId)),
     ctx.db.select({ userId: userFollow.followerId }).from(userFollow).where(eq(userFollow.followeeId, userId)),
@@ -175,8 +215,14 @@ async function getSocialState(ctx: Pick<TRPCContext, "db">, userId: string) {
       .where(eq(userConfirmedVisit.userId, userId)),
   ]);
 
-  const followingIds = followingRows.map((row) => row.userId);
-  const followerIds = followerRows.map((row) => row.userId);
+  const followingIds = filterVisibleUserIds(
+    ctx,
+    followingRows.map((row) => row.userId),
+  );
+  const followerIds = filterVisibleUserIds(
+    ctx,
+    followerRows.map((row) => row.userId),
+  );
   const followingSet = new Set(followingIds);
   const followerSet = new Set(followerIds);
   const friendIds = followingIds.filter((id) => followerSet.has(id));
@@ -290,6 +336,10 @@ async function assertViewerCanAccessVisit(
     };
   }
 
+  assertViewerCanSeeUser(ctx, args.visitUserId, {
+    notFoundMessage: "Visit not found.",
+  });
+
   const relationship = await getViewerRelationship(ctx, args.visitUserId);
 
   if (!relationship.isFollowing && !(visitRow.ownerPublicVisits ?? false)) {
@@ -387,8 +437,11 @@ async function getFeedData(ctx: Pick<TRPCContext, "db" | "session">, viewerUserI
       .orderBy(desc(userConfirmedVisitComment.createdAt)),
   ]);
 
+  const visibleLikeRows = likeRows.filter((row) => canViewerSeeUserId(ctx, row.userId));
+  const visibleCommentRows = commentRows.filter((row) => canViewerSeeUserId(ctx, row.authorUserId));
+
   const userIds = new Set<string>(visits.map((visit) => visit.userId));
-  commentRows.forEach((comment) => userIds.add(comment.authorUserId));
+  visibleCommentRows.forEach((comment) => userIds.add(comment.authorUserId));
   const usersById = await getUserRowsByIds(ctx, Array.from(userIds));
 
   const likeSummaryByVisit = new Map<
@@ -399,7 +452,7 @@ async function getFeedData(ctx: Pick<TRPCContext, "db" | "session">, viewerUserI
     }
   >();
 
-  likeRows.forEach((row) => {
+  visibleLikeRows.forEach((row) => {
     const key = getVisitKey(row.visitUserId, row.visitLocalVisitId);
     const current = likeSummaryByVisit.get(key) ?? {
       likeCount: 0,
@@ -414,7 +467,7 @@ async function getFeedData(ctx: Pick<TRPCContext, "db" | "session">, viewerUserI
   const commentCountByVisit = new Map<string, number>();
   const previewCommentsByVisit = new Map<string, ReturnType<typeof buildCommentSummary>[]>();
 
-  commentRows.forEach((row) => {
+  visibleCommentRows.forEach((row) => {
     const key = getVisitKey(row.visitUserId, row.visitLocalVisitId);
     commentCountByVisit.set(key, (commentCountByVisit.get(key) ?? 0) + 1);
 
@@ -614,9 +667,10 @@ export const socialRouter = router({
       )
       .orderBy(asc(userConfirmedVisitComment.createdAt));
 
-    const usersById = await getUserRowsByIds(ctx, Array.from(new Set(rows.map((row) => row.authorUserId))));
+    const visibleRows = rows.filter((row) => canViewerSeeUserId(ctx, row.authorUserId));
+    const usersById = await getUserRowsByIds(ctx, Array.from(new Set(visibleRows.map((row) => row.authorUserId))));
 
-    return rows
+    return visibleRows
       .map((row) => {
         const author = usersById.get(row.authorUserId);
         return author ? buildCommentSummary(row, author, ctx.session.user.id) : null;
@@ -721,6 +775,10 @@ export const socialRouter = router({
         });
       }
 
+      assertViewerCanSeeUser(ctx, comment.authorUserId, {
+        notFoundMessage: "Comment not found.",
+      });
+
       if (comment.authorUserId !== ctx.session.user.id) {
         throw new TRPCError({
           code: "FORBIDDEN",
@@ -750,6 +808,19 @@ export const socialRouter = router({
 
       const pattern = `%${input.query}%`;
       const selfUserId = ctx.session.user.id;
+      const conditions = [
+        ne(user.id, selfUserId),
+        or(
+          ilike(user.name, pattern),
+          ilike(user.email, pattern),
+          ilike(userProfile.homeCity, pattern),
+          ilike(userProfile.favoriteCuisine, pattern),
+        ),
+      ];
+
+      if (!canViewerSeeDemoUsers(ctx)) {
+        conditions.push(notLike(user.id, `${DEMO_USER_ID_PREFIX}%`));
+      }
 
       const rows = await ctx.db
         .select({
@@ -762,17 +833,7 @@ export const socialRouter = router({
         })
         .from(user)
         .leftJoin(userProfile, eq(userProfile.userId, user.id))
-        .where(
-          and(
-            ne(user.id, selfUserId),
-            or(
-              ilike(user.name, pattern),
-              ilike(user.email, pattern),
-              ilike(userProfile.homeCity, pattern),
-              ilike(userProfile.favoriteCuisine, pattern),
-            ),
-          ),
-        )
+        .where(and(...conditions))
         .orderBy(user.name)
         .limit(20);
 
@@ -825,6 +886,10 @@ export const socialRouter = router({
         });
       }
 
+      assertViewerCanSeeUser(ctx, input.userId, {
+        notFoundMessage: "User not found.",
+      });
+
       const targetUser = await ctx.db.query.user.findFirst({
         where: eq(user.id, input.userId),
       });
@@ -869,6 +934,10 @@ export const socialRouter = router({
       }),
     )
     .query(async ({ ctx, input }) => {
+      assertViewerCanSeeUser(ctx, input.userId, {
+        notFoundMessage: "Profile not found.",
+      });
+
       const [row] = await ctx.db
         .select({
           id: user.id,

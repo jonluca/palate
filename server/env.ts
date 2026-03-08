@@ -24,6 +24,15 @@ function parseOrigins(value: string | undefined) {
   );
 }
 
+function parseEmailAllowlist(value: string | undefined) {
+  return new Set(
+    value
+      ?.split(",")
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean) ?? [],
+  );
+}
+
 const port = Number(process.env.PORT ?? 3001);
 const nodeEnv = process.env.NODE_ENV ?? "development";
 const isDevelopment = nodeEnv === "development";
@@ -36,6 +45,7 @@ export const serverEnv = {
   betterAuthSecret: requireEnv("BETTER_AUTH_SECRET"),
   betterAuthUrl: process.env.BETTER_AUTH_URL ?? `http://127.0.0.1:${port}`,
   trustedOrigins: parseOrigins(process.env.BETTER_AUTH_TRUSTED_ORIGINS),
+  demoUserVisibleEmails: parseEmailAllowlist(process.env.DEMO_USER_VISIBLE_EMAILS),
   appleClientSecret: optionalEnv("APPLE_CLIENT_SECRET"),
   appleAppBundleIdentifier: optionalEnv("APPLE_APP_BUNDLE_IDENTIFIER"),
   appleKeyId: optionalEnv("APPLE_KEY_ID"),
