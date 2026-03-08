@@ -47,6 +47,7 @@ import {
 import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { hasCalendarPermission, requestCalendarPermission } from "@/services/calendar";
+import { clearAuthSecureStore } from "@/lib/auth-client";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Section Header Component
@@ -1068,6 +1069,7 @@ export function DangerZoneCard() {
             setIsResetting(true);
             try {
               await nukeDatabase();
+              await clearAuthSecureStore();
               queryClient.clear();
               resetAllState();
               showToast({ type: "success", message: "All data has been reset. You can start fresh now." });
