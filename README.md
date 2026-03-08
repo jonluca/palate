@@ -139,6 +139,8 @@ yarn server:dev   # Run the Hono backend with Vite reload on all interfaces
 yarn build        # Build the backend into dist/server
 yarn server:start # Start the compiled backend
 yarn start        # Alias for yarn server:start
+yarn seed:canonical-restaurants # Seed backend canonical restaurants from assets/michelin.db
+yarn seed:demo-social           # Seed demo social users and visits
 yarn ios          # Build and run on iOS
 yarn android      # Build and run on Android
 yarn web          # Start Expo for web
@@ -146,6 +148,18 @@ yarn typecheck    # Run TypeScript checks
 yarn lint         # Run oxlint
 yarn clean        # Remove build artifacts & node_modules
 ```
+
+## Backend Seeding
+
+The backend now supports two local seed flows:
+
+```bash
+yarn seed:canonical-restaurants
+yarn seed:demo-social --viewer-email you@example.com
+```
+
+- `seed:canonical-restaurants` reads the bundled `assets/michelin.db` and upserts canonical Michelin restaurants into Postgres.
+- `seed:demo-social` creates a small network of public demo users, their follows, and confirmed visits. Use `--viewer-email` (or `--viewer-id`) to have an existing account follow the demo users so the feed populates immediately.
 
 ## Thanks
 

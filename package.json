@@ -17,6 +17,8 @@
     "auth:generate": "better-auth generate --config server/auth.ts --output server/db/schema/auth-schema.ts --yes",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "seed:canonical-restaurants": "tsx scripts/seed-canonical-restaurants.ts",
+    "seed:demo-social": "tsx scripts/seed-demo-social.ts",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
     "lint": "oxlint .",

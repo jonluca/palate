@@ -46,7 +46,17 @@ export const userConfirmedVisit = pgTable(
       columns: [table.userId, table.localVisitId],
       name: "user_confirmed_visit_pk",
     }),
-    index("user_confirmed_visit_user_start_idx").on(table.userId, table.startTime),
+    index("user_confirmed_visit_user_start_created_idx").on(
+      table.userId,
+      table.startTime.desc(),
+      table.createdAt.desc(),
+    ),
+    index("user_confirmed_visit_restaurant_user_start_created_idx").on(
+      table.restaurantId,
+      table.userId,
+      table.startTime.desc(),
+      table.createdAt.desc(),
+    ),
   ],
 );
 
