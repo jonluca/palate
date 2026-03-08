@@ -1,8 +1,7 @@
 import React from "react";
-import { View, useWindowDimensions } from "react-native";
+import { useWindowDimensions } from "react-native";
 import Animated, { Extrapolation, interpolate, type SharedValue, useAnimatedStyle } from "react-native-reanimated";
 import { AppleSignInPanel } from "@/components/auth/apple-sign-in-panel";
-import { ThemedText } from "@/components/themed-text";
 
 interface AuthStepContentProps {
   scrollX: SharedValue<number>;
@@ -27,18 +26,7 @@ export function AuthStepContent({ scrollX, index }: AuthStepContentProps) {
 
   return (
     <Animated.View style={animatedStyle} className={"mt-6 w-full px-4"}>
-      <View className={"gap-3 rounded-3xl border border-white/10 bg-white/10 p-4"}>
-        <AppleSignInPanel
-          variant={"compact"}
-          signedInTitle={"Apple sign-in connected"}
-          signedInMessage={"You can keep onboarding. Confirmed visits will sync once you start using Palate."}
-          loadingMessage={"Checking whether Apple sign-in is available on this device..."}
-          submittingMessage={"Connecting your Palate account..."}
-        />
-        <ThemedText variant={"caption1"} className={"text-center text-white/55"}>
-          Skip this step and continue locally. You can connect Apple later from Account or Social.
-        </ThemedText>
-      </View>
+      <AppleSignInPanel loadingMessage={"Checking whether Apple sign-in is available on this device..."} />
     </Animated.View>
   );
 }

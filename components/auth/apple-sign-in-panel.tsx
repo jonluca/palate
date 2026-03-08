@@ -16,27 +16,10 @@ interface AppleSignInPanelProps {
   submittingMessage?: string;
 }
 
-function BenefitRow({ title, description }: { title: string; description: string }) {
-  return (
-    <View className={"flex-row items-start gap-3"}>
-      <View className={"mt-1.5 h-2.5 w-2.5 rounded-full bg-[#34d399]"} />
-      <View className={"flex-1 gap-0.5"}>
-        <ThemedText variant={"subhead"} className={"font-semibold"}>
-          {title}
-        </ThemedText>
-        <ThemedText variant={"footnote"} color={"secondary"}>
-          {description}
-        </ThemedText>
-      </View>
-    </View>
-  );
-}
-
 export function AppleSignInPanel({
   onSuccess,
   variant = "default",
   signedInTitle = "Signed in with Apple",
-  signedInMessage = "Cloud sync is ready for confirmed visits and social features.",
   unavailableMessage = "Apple sign-in is only available in an Apple build of Palate on a supported device.",
   loadingMessage = "Checking whether Apple sign-in is available on this device...",
   submittingMessage = "Finishing sign-in...",
@@ -67,34 +50,11 @@ export function AppleSignInPanel({
     };
   }, []);
 
-  const benefits =
-    variant === "compact"
-      ? [
-          {
-            title: "Sync confirmed visits",
-            description: "Back up the restaurants and notes you decide to keep.",
-          },
-          {
-            title: "Unlock profile controls",
-            description: "Choose whether your public Palate profile shares confirmed visits.",
-          },
-        ]
-      : [
-          {
-            title: "Sync confirmed visits",
-            description: "Back up the restaurants, ratings, and notes you decide to keep.",
-          },
-          {
-            title: "Turn on profile features",
-            description: "Keep your public profile and follows synced across devices when you want social features.",
-          },
-        ];
-
-  const introTitle = "Optional cloud sync";
+  const introTitle = "Optional local-first sync";
   const introMessage =
     variant === "compact"
-      ? "Keep using Palate locally, or connect Apple now to sync confirmed visits and profile features."
-      : "Palate stays local-first. Connect Apple when you want backup, profile sync, or social features.";
+      ? "Keep using Palate fully offline, or connect Apple now to sync across devices and unlock profile features."
+      : "Palate stays local-first. Connect Apple when you want cross-device sync, backup, or social features.";
   const headingVariant = variant === "compact" ? "heading" : "subhead";
 
   async function handleAppleSignIn() {
@@ -139,13 +99,8 @@ export function AppleSignInPanel({
             {signedInTitle}
           </ThemedText>
           <ThemedText variant={"footnote"} color={"secondary"} className={"mt-1"} selectable>
-            {session.user.email ?? signedInMessage}
+            {session.user.email}
           </ThemedText>
-          {session.user.email ? (
-            <ThemedText variant={"caption1"} color={"tertiary"} className={"mt-2"}>
-              {signedInMessage}
-            </ThemedText>
-          ) : null}
         </View>
       ) : (
         <View className={"gap-4"}>
@@ -159,12 +114,6 @@ export function AppleSignInPanel({
               </ThemedText>
             </View>
           ) : null}
-
-          <View className={"gap-3"}>
-            {benefits.map((benefit) => (
-              <BenefitRow key={benefit.title} title={benefit.title} description={benefit.description} />
-            ))}
-          </View>
 
           {isAppleSignInAvailable === null ? (
             <View
@@ -194,10 +143,6 @@ export function AppleSignInPanel({
                 />
               </View>
 
-              <ThemedText variant={"caption1"} color={"tertiary"} className={"text-center"}>
-                Secure Apple sign-in only. Palate stays local-first until you choose what to sync.
-              </ThemedText>
-
               {isSubmitting ? (
                 <View className={"flex-row items-center justify-center gap-2"}>
                   <ActivityIndicator size={"small"} color={"#0A84FF"} />
@@ -217,14 +162,6 @@ export function AppleSignInPanel({
               </ThemedText>
             </View>
           )}
-
-          {variant === "default" ? (
-            <View className={"rounded-2xl bg-background/60 px-4 py-3"}>
-              <ThemedText variant={"footnote"} color={"secondary"} className={"text-center"}>
-                Already have an account? Apple will sign you back in. New here? The same button creates it.
-              </ThemedText>
-            </View>
-          ) : null}
         </View>
       )}
 
