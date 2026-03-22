@@ -1,5 +1,13 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
-import type { WrappedStats } from "./types";
+import type { MichelinStatsBucket, MichelinStatsRestaurantSummary, WrappedStats } from "./types";
+
+const MICHELIN_STATS_BUCKET_WHERE: Record<MichelinStatsBucket, string> = {
+  "three-stars": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%3 star%'",
+  "two-stars": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%2 star%'",
+  "one-star": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%1 star%'",
+  "bib-gourmand": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%bib%'",
+  selected: "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%selected%'",
+};
 
 // Stats
 export async function getStats(): Promise<{
@@ -41,6 +49,39 @@ export async function getStats(): Promise<{
     confirmedVisits: visitCounts?.confirmedVisits ?? 0,
     foodProbableVisits: visitCounts?.foodProbableVisits ?? 0,
   };
+}
+
+export async function getMichelinRestaurantsForStatsBucket(
+  year: number | null | undefined,
+  bucket: MichelinStatsBucket,
+): Promise<MichelinStatsRestaurantSummary[]> {
+  const database = await getDatabase();
+  const yearFilter = year ? `AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = ?` : "";
+  const params = year ? [String(year)] : [];
+
+  const rows = await database.getAllAsync<MichelinStatsRestaurantSummary>(
+    `SELECT
+      m.id,
+      m.name,
+      TRIM(COALESCE(m.location, '')) as location,
+      TRIM(COALESCE(m.cuisine, '')) as cuisine,
+      COUNT(DISTINCT v.id) as visitCount,
+      MAX(v.startTime) as latestVisit
+    FROM visits v
+    JOIN michelin_restaurants m ON v.restaurantId = m.id
+    WHERE v.status = 'confirmed'
+      ${yearFilter}
+      AND ${MICHELIN_STATS_BUCKET_WHERE[bucket]}
+    GROUP BY m.id, m.name, m.location, m.cuisine
+    ORDER BY visitCount DESC, latestVisit DESC, m.name COLLATE NOCASE ASC`,
+    params,
+  );
+
+  return rows.map((row) => ({
+    ...row,
+    visitCount: Number(row.visitCount),
+    latestVisit: Number(row.latestVisit),
+  }));
 }
 
 // Get wrapped statistics for confirmed visits

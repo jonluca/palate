@@ -15,6 +15,7 @@ import {
   batchConfirmVisits,
   confirmVisit,
   getAllMichelinRestaurants,
+  getMichelinRestaurantsForStatsBucket,
   getWrappedStats,
   getMergeableVisits,
   mergeVisits,
@@ -56,6 +57,8 @@ import {
   type ExportedCalendarEvent,
   type FoodKeywordRecord,
   type ReclassifyProgress,
+  type MichelinStatsBucket,
+  type MichelinStatsRestaurantSummary,
   createManualVisit,
   batchMergeSameRestaurantVisits,
   type MergeableVisitGroup,
@@ -194,6 +197,8 @@ export const queryKeys = {
     }
     return ["wrapped"] as const;
   },
+  wrappedMichelinBucketRestaurants: (year: number | null | undefined, bucket: MichelinStatsBucket) =>
+    ["wrapped", "michelinAwardRestaurants", year ?? "all", bucket] as const,
   mergeableVisits: (visitId: string) => ["visits", "mergeableVisits", visitId] as const,
   mergeableSameRestaurantVisits: ["visits", "mergeableSameRestaurantVisits"] as const,
   ignoredLocations: ["ignoredLocations"] as const,
@@ -223,8 +228,8 @@ export function useStats() {
   });
 }
 
-// Re-export WrappedStats type
-export type { WrappedStats };
+// Re-export stats-related types
+export type { MichelinStatsBucket, MichelinStatsRestaurantSummary, WrappedStats };
 
 /**
  * Fetch wrapped statistics for restaurant visits
@@ -237,6 +242,18 @@ export function useWrappedStats(
   return useQuery({
     queryKey: queryKeys.wrapped(year),
     queryFn: () => getWrappedStats(year),
+    ...options,
+  });
+}
+
+export function useMichelinStatsBucketRestaurants(
+  year: number | null | undefined,
+  bucket: MichelinStatsBucket,
+  options?: Omit<UseQueryOptions<MichelinStatsRestaurantSummary[], Error>, "queryKey" | "queryFn">,
+) {
+  return useQuery({
+    queryKey: queryKeys.wrappedMichelinBucketRestaurants(year, bucket),
+    queryFn: () => getMichelinRestaurantsForStatsBucket(year, bucket),
     ...options,
   });
 }
@@ -1148,6 +1165,7 @@ export function useUndoVisitAction() {
       queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
     },
   });
 }
@@ -1828,6 +1846,7 @@ export function useAddPhotosToVisit(visitId: string | undefined) {
       // Also invalidate any affected source visits and general queries
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
     },
   });
 }
@@ -1854,6 +1873,7 @@ export function useRemovePhotosFromVisit(visitId: string | undefined) {
       // Also invalidate general queries
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
     },
   });
 }

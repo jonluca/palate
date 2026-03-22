@@ -12,8 +12,14 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { AppleMaps, GoogleMaps } from "expo-maps";
 import Animated, { FadeIn, FadeInDown, FadeInUp } from "react-native-reanimated";
+import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
-import { useWrappedStats, type WrappedStats } from "@/hooks/queries";
+import {
+  useMichelinStatsBucketRestaurants,
+  useWrappedStats,
+  type MichelinStatsBucket,
+  type WrappedStats,
+} from "@/hooks/queries";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -29,6 +35,22 @@ const SEASON_DEFS = [
   { key: "Spring", months: [3, 4, 5], emoji: "🌸", color: "bg-emerald-400", text: "text-emerald-300" },
   { key: "Summer", months: [6, 7, 8], emoji: "☀️", color: "bg-amber-400", text: "text-amber-300" },
   { key: "Fall", months: [9, 10, 11], emoji: "🍂", color: "bg-orange-400", text: "text-orange-300" },
+];
+
+interface MichelinBreakdownItem {
+  bucket: MichelinStatsBucket;
+  emoji: string;
+  label: string;
+  visits: number;
+  unique: number;
+}
+
+const MICHELIN_BREAKDOWN_META: Array<Pick<MichelinBreakdownItem, "bucket" | "emoji" | "label">> = [
+  { bucket: "three-stars", emoji: "⭐⭐⭐", label: "3 Stars" },
+  { bucket: "two-stars", emoji: "⭐⭐", label: "2 Stars" },
+  { bucket: "one-star", emoji: "⭐", label: "1 Star" },
+  { bucket: "bib-gourmand", emoji: "🍽️", label: "Bib Gourmand" },
+  { bucket: "selected", emoji: "🏆", label: "Selected" },
 ];
 
 function formatDateShort(timestamp: number): string {
@@ -656,39 +678,206 @@ function DeepDiveSection({ stats, selectedYear }: { stats: WrappedStats; selecte
   );
 }
 
-function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
-  const items = [
-    {
-      emoji: "⭐⭐⭐",
-      label: "3 Stars",
-      visits: stats.threeStars,
-      unique: stats.distinctThreeStars,
-    },
-    {
-      emoji: "⭐⭐",
-      label: "2 Stars",
-      visits: stats.twoStars,
-      unique: stats.distinctTwoStars,
-    },
-    {
-      emoji: "⭐",
-      label: "1 Star",
-      visits: stats.oneStars,
-      unique: stats.distinctOneStars,
-    },
-    {
-      emoji: "🍽️",
-      label: "Bib Gourmand",
-      visits: stats.bibGourmand,
-      unique: stats.distinctBibGourmand,
-    },
-    {
-      emoji: "🏆",
-      label: "Selected",
-      visits: stats.selected,
-      unique: stats.distinctSelected,
-    },
-  ].filter((item) => item.visits > 0);
+function StaticMichelinBreakdownRow({ item, index }: { item: MichelinBreakdownItem; index: number }) {
+  return (
+    <Animated.View
+      entering={FadeIn.delay(300 + index * 100).duration(300)}
+      className={"bg-secondary/70 rounded-xl px-4 py-3 flex-row items-center justify-between"}
+    >
+      <View className={"flex-row items-center gap-3"}>
+        <ThemedText variant={"title3"}>{item.emoji}</ThemedText>
+        <ThemedText variant={"subhead"} className={"text-foreground font-medium"}>
+          {item.label}
+        </ThemedText>
+      </View>
+      <View className={"flex-row items-center gap-4"}>
+        <View className={"items-end"}>
+          <ThemedText variant={"subhead"} className={"text-amber-400 font-semibold"}>
+            {item.unique.toLocaleString()}
+          </ThemedText>
+          <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
+            {item.unique === 1 ? "restaurant" : "restaurants"}
+          </ThemedText>
+        </View>
+        <View className={"w-px h-8 bg-secondary"} />
+        <View className={"items-end"}>
+          <ThemedText variant={"subhead"} className={"text-foreground font-semibold"}>
+            {item.visits.toLocaleString()}
+          </ThemedText>
+          <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
+            {item.visits === 1 ? "visit" : "visits"}
+          </ThemedText>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+function CollapsibleMichelinBreakdownRow({
+  item,
+  index,
+  selectedYear,
+}: {
+  item: MichelinBreakdownItem;
+  index: number;
+  selectedYear: number | null;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const {
+    data: restaurants,
+    isLoading,
+    error,
+  } = useMichelinStatsBucketRestaurants(selectedYear, item.bucket, {
+    enabled: isExpanded,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const toggleExpanded = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsExpanded((value) => !value);
+  }, []);
+
+  const openRestaurant = useCallback((restaurantId: string) => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    router.push(`/restaurant/${restaurantId}`);
+  }, []);
+
+  return (
+    <Animated.View
+      entering={FadeIn.delay(300 + index * 100).duration(300)}
+      className={"bg-secondary/70 rounded-xl overflow-hidden"}
+      style={{ borderCurve: "continuous" }}
+    >
+      <Pressable onPress={toggleExpanded} className={"px-4 py-3"}>
+        <View className={"flex-row items-center justify-between gap-3"}>
+          <View className={"flex-1 flex-row items-center gap-3"}>
+            <ThemedText variant={"title3"}>{item.emoji}</ThemedText>
+            <View className={"flex-1 gap-1"}>
+              <ThemedText variant={"subhead"} className={"text-foreground font-medium"}>
+                {item.label}
+              </ThemedText>
+              <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
+                {isExpanded ? "Hide restaurants" : "Show restaurants"}
+              </ThemedText>
+            </View>
+          </View>
+          <View className={"flex-row items-center gap-3"}>
+            <View className={"items-end"}>
+              <ThemedText variant={"subhead"} className={"text-amber-400 font-semibold"}>
+                {item.unique.toLocaleString()}
+              </ThemedText>
+              <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
+                {item.unique === 1 ? "restaurant" : "restaurants"}
+              </ThemedText>
+            </View>
+            <View className={"w-px h-8 bg-secondary"} />
+            <View className={"items-end"}>
+              <ThemedText variant={"subhead"} className={"text-foreground font-semibold"}>
+                {item.visits.toLocaleString()}
+              </ThemedText>
+              <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
+                {item.visits === 1 ? "visit" : "visits"}
+              </ThemedText>
+            </View>
+            <View className={"w-7 h-7 rounded-full bg-card/70 items-center justify-center"}>
+              <IconSymbol name={isExpanded ? "chevron.up" : "chevron.down"} size={13} color={"#8E8E93"} />
+            </View>
+          </View>
+        </View>
+      </Pressable>
+
+      {isExpanded ? (
+        <Animated.View entering={FadeIn.duration(180)} className={"border-t border-white/5 px-4 pb-4 pt-3"}>
+          {isLoading ? (
+            <View className={"min-h-24 items-center justify-center gap-3"}>
+              <ActivityIndicator color={"#f59e0b"} />
+              <ThemedText variant={"footnote"} className={"text-muted-foreground"}>
+                Loading restaurants...
+              </ThemedText>
+            </View>
+          ) : error ? (
+            <View className={"min-h-24 items-center justify-center px-4"}>
+              <ThemedText variant={"footnote"} className={"text-center text-muted-foreground"}>
+                Couldn't load restaurants right now.
+              </ThemedText>
+            </View>
+          ) : restaurants && restaurants.length > 0 ? (
+            <ScrollView
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={restaurants.length > 4}
+              style={{ maxHeight: 260 }}
+              contentContainerStyle={{ gap: 10, paddingBottom: 2 }}
+            >
+              {restaurants.map((restaurant) => {
+                const secondaryText = [restaurant.cuisine, restaurant.location].filter(Boolean).join(" • ");
+
+                return (
+                  <Pressable
+                    key={restaurant.id}
+                    onPress={() => openRestaurant(restaurant.id)}
+                    className={"bg-card/90 rounded-2xl px-3 py-3"}
+                    style={{ borderCurve: "continuous" }}
+                  >
+                    <View className={"flex-row items-start justify-between gap-3"}>
+                      <View className={"flex-1 gap-1"}>
+                        <ThemedText variant={"subhead"} className={"text-foreground font-medium"} numberOfLines={2}>
+                          {restaurant.name}
+                        </ThemedText>
+                        {secondaryText ? (
+                          <ThemedText variant={"caption1"} className={"text-muted-foreground"} numberOfLines={2}>
+                            {secondaryText}
+                          </ThemedText>
+                        ) : null}
+                      </View>
+                      <View className={"items-end gap-1"}>
+                        <ThemedText variant={"caption1"} className={"text-amber-400 font-semibold"}>
+                          {restaurant.visitCount.toLocaleString()}
+                        </ThemedText>
+                        <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
+                          {restaurant.visitCount === 1 ? "visit" : "visits"}
+                        </ThemedText>
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : (
+            <View className={"min-h-24 items-center justify-center px-4"}>
+              <ThemedText variant={"footnote"} className={"text-center text-muted-foreground"}>
+                No restaurants matched this award yet.
+              </ThemedText>
+            </View>
+          )}
+        </Animated.View>
+      ) : null}
+    </Animated.View>
+  );
+}
+
+function StarBreakdown({
+  stats,
+  selectedYear,
+  interactive = false,
+}: {
+  stats: WrappedStats["michelinStats"];
+  selectedYear: number | null;
+  interactive?: boolean;
+}) {
+  const items: MichelinBreakdownItem[] = MICHELIN_BREAKDOWN_META.map((item) => {
+    switch (item.bucket) {
+      case "three-stars":
+        return { ...item, visits: stats.threeStars, unique: stats.distinctThreeStars };
+      case "two-stars":
+        return { ...item, visits: stats.twoStars, unique: stats.distinctTwoStars };
+      case "one-star":
+        return { ...item, visits: stats.oneStars, unique: stats.distinctOneStars };
+      case "bib-gourmand":
+        return { ...item, visits: stats.bibGourmand, unique: stats.distinctBibGourmand };
+      case "selected":
+        return { ...item, visits: stats.selected, unique: stats.distinctSelected };
+    }
+  }).filter((item) => item.visits > 0);
 
   if (items.length === 0) {
     return null;
@@ -734,39 +923,13 @@ function StarBreakdown({ stats }: { stats: WrappedStats["michelinStats"] }) {
 
       {/* Breakdown by type */}
       <View className={"gap-3"}>
-        {items.map((item, index) => (
-          <Animated.View
-            key={item.label}
-            entering={FadeIn.delay(300 + index * 100).duration(300)}
-            className={"bg-secondary/70  rounded-xl px-4 py-3 flex-row items-center justify-between"}
-          >
-            <View className={"flex-row items-center gap-3"}>
-              <ThemedText variant={"title3"}>{item.emoji}</ThemedText>
-              <ThemedText variant={"subhead"} className={"text-foreground font-medium"}>
-                {item.label}
-              </ThemedText>
-            </View>
-            <View className={"flex-row items-center gap-4"}>
-              <View className={"items-end"}>
-                <ThemedText variant={"subhead"} className={"text-amber-400 font-semibold"}>
-                  {item.unique.toLocaleString()}
-                </ThemedText>
-                <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
-                  {item.unique === 1 ? "restaurant" : "restaurants"}
-                </ThemedText>
-              </View>
-              <View className={"w-px h-8 bg-secondary"} />
-              <View className={"items-end"}>
-                <ThemedText variant={"subhead"} className={"text-foreground font-semibold"}>
-                  {item.visits.toLocaleString()}
-                </ThemedText>
-                <ThemedText variant={"caption2"} className={"text-muted-foreground/80"}>
-                  {item.visits === 1 ? "visit" : "visits"}
-                </ThemedText>
-              </View>
-            </View>
-          </Animated.View>
-        ))}
+        {items.map((item, index) =>
+          interactive ? (
+            <CollapsibleMichelinBreakdownRow key={item.bucket} item={item} index={index} selectedYear={selectedYear} />
+          ) : (
+            <StaticMichelinBreakdownRow key={item.bucket} item={item} index={index} />
+          ),
+        )}
       </View>
     </Animated.View>
   );
@@ -1571,7 +1734,7 @@ function StatsStoriesModal({
               content: (
                 <View className={"gap-5"}>
                   {hasGreenStar && <GreenStarSection greenStarVisits={stats.michelinStats.greenStarVisits} />}
-                  <StarBreakdown stats={stats.michelinStats} />
+                  <StarBreakdown stats={stats.michelinStats} selectedYear={selectedYear} />
                 </View>
               ),
             }
@@ -1837,7 +2000,7 @@ function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selected
       {hasMonthlyData && <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />}
 
       {/* Michelin Stars */}
-      {hasMichelinData && <StarBreakdown stats={stats.michelinStats} />}
+      {hasMichelinData && <StarBreakdown stats={stats.michelinStats} selectedYear={selectedYear} interactive />}
 
       {/* Geographic Breakdown */}
       {hasMapData && <DiningMapSection points={stats.mapPoints} selectedYear={selectedYear} />}

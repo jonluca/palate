@@ -6,6 +6,8 @@ export type {
   IgnoredLocationRecord,
   MergeableVisitGroup,
   MichelinRestaurantRecord,
+  MichelinStatsBucket,
+  MichelinStatsRestaurantSummary,
   MovePhotosResult,
   PendingVisitForReview,
   PhotoRecord,
@@ -93,7 +95,7 @@ export {
   insertCalendarOnlyVisits,
 } from "./db/calendar";
 
-export { getStats, getWrappedStats } from "./db/stats";
+export { getMichelinRestaurantsForStatsBucket, getStats, getWrappedStats } from "./db/stats";
 
 export {
   addFoodKeyword,

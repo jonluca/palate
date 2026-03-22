@@ -59,6 +59,17 @@ export interface MichelinRestaurantRecord {
   award: string;
 }
 
+export type MichelinStatsBucket = "three-stars" | "two-stars" | "one-star" | "bib-gourmand" | "selected";
+
+export interface MichelinStatsRestaurantSummary {
+  id: string;
+  name: string;
+  location: string;
+  cuisine: string;
+  visitCount: number;
+  latestVisit: number;
+}
+
 export interface RestaurantRecord {
   id: string;
   name: string;
