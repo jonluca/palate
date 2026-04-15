@@ -34,7 +34,7 @@ interface ReservationBridgeMessage {
 }
 
 function getImportSummary(result: ReservationImportResult): string {
-  const importedPart = `added ${result.importedCount.toLocaleString()} visit${result.importedCount === 1 ? "" : "s"}`;
+  const importedPart = `Added ${result.importedCount.toLocaleString()} visit${result.importedCount === 1 ? "" : "s"}`;
   const updatedPart =
     result.linkedExistingCount > 0
       ? `updated ${result.linkedExistingCount.toLocaleString()} existing visit${result.linkedExistingCount === 1 ? "" : "s"}`
