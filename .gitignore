@@ -56,3 +56,4 @@ assets/*.db-wal
 
 expo-env.d.ts
 # @end expo-cli
+.playwright-cli
