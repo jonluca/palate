@@ -99,7 +99,6 @@ export function useReservationImportReview({ displayName, importMutation }: UseR
   const [completedReservationIds, setCompletedReservationIds] = useState<Set<string>>(new Set());
   const [importingReservationIds, setImportingReservationIds] = useState<Set<string>>(new Set());
   const [dismissingReservationIds, setDismissingReservationIds] = useState<Set<string>>(new Set());
-  const [lastResult, setLastResult] = useState<ReservationImportResult | null>(null);
 
   const pendingReservations = useMemo(
     () =>
@@ -125,7 +124,6 @@ export function useReservationImportReview({ displayName, importMutation }: UseR
     setReservations(nextReservations);
     setDismissedReservationIds((previous) => new Set([...previous].filter((id) => nextIds.has(id))));
     setCompletedReservationIds((previous) => new Set([...previous].filter((id) => nextIds.has(id))));
-    setLastResult(null);
   }, []);
 
   const resetReview = useCallback(() => {
@@ -134,7 +132,6 @@ export function useReservationImportReview({ displayName, importMutation }: UseR
     setCompletedReservationIds(new Set());
     setImportingReservationIds(new Set());
     setDismissingReservationIds(new Set());
-    setLastResult(null);
   }, []);
 
   const importReservations = useCallback(
@@ -144,31 +141,30 @@ export function useReservationImportReview({ displayName, importMutation }: UseR
       }
 
       const reservationIds = reservationsToImport.map(getReservationId);
-      setLastResult(null);
       setImportingReservationIds((previous) => new Set([...previous, ...reservationIds]));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
+      let importResult: ReservationImportResult | null = null;
       try {
-        const result = await importMutation.mutateAsync(reservationsToImport);
-        setLastResult(result);
+        importResult = await importMutation.mutateAsync(reservationsToImport);
         setCompletedReservationIds((previous) => new Set([...previous, ...reservationIds]));
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        showToast({ type: "success", message: getReservationImportSummary(result) });
-        return result;
+        showToast({ type: "success", message: getReservationImportSummary(importResult) });
       } catch (error) {
         console.error(`Error importing ${displayName} reservations:`, error);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         showToast({ type: "error", message: `Failed to import ${displayName} reservations.` });
-        return null;
-      } finally {
-        setImportingReservationIds((previous) => {
-          const next = new Set(previous);
-          for (const reservationId of reservationIds) {
-            next.delete(reservationId);
-          }
-          return next;
-        });
       }
+
+      setImportingReservationIds((previous) => {
+        const next = new Set(previous);
+        for (const reservationId of reservationIds) {
+          next.delete(reservationId);
+        }
+        return next;
+      });
+
+      return importResult;
     },
     [displayName, importMutation, showToast],
   );
@@ -221,7 +217,6 @@ export function useReservationImportReview({ displayName, importMutation }: UseR
     reservations,
     pendingReservations,
     reviewStats,
-    lastResult,
     importingReservationIds,
     dismissingReservationIds,
     isImportingAll,

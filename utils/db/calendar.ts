@@ -13,6 +13,11 @@ import type {
 const RESERVATION_IMPORT_DB_LOG_PREFIX = "[ReservationImportDB]";
 const RESERVATION_IMPORT_DB_SAMPLE_SIZE = 5;
 
+type ReservationOverlapVisit = VisitRecord & {
+  restaurantName?: string | null;
+  suggestedRestaurantName?: string | null;
+};
+
 function logReservationImportDb(message: string, details?: unknown): void {
   if (!__DEV__) {
     return;
@@ -544,12 +549,16 @@ export async function getConfirmedLinkedReservationSourceEventIds(sourceEventIds
   for (let i = 0; i < sourceEventIds.length; i += batchSize) {
     const batch = sourceEventIds.slice(i, i + batchSize);
     const placeholders = batch.map(() => "?").join(", ");
-    const linkedRows = await database.getAllAsync<{ sourceEventId: string }>(
-      `SELECT ris.sourceEventId
+    const linkedRows = await database.getAllAsync<{
+      sourceEventId: string;
+      visitId: string | null;
+      status: string | null;
+    }>(
+      `SELECT ris.sourceEventId, v.id as visitId, v.status
        FROM reservation_import_sources ris
-       JOIN visits v ON v.id = ris.visitId
+       LEFT JOIN visits v ON v.id = ris.visitId
        WHERE ris.sourceEventId IN (${placeholders})
-         AND v.status = 'confirmed'`,
+         AND (v.status = 'confirmed' OR v.id IS NULL)`,
       batch,
     );
     const legacyRows = await database.getAllAsync<{ calendarEventId: string }>(
@@ -597,12 +606,17 @@ export async function getReservationOnlyVisitsMappedToConfirmedVisitSourceIds(
   const overlapBufferMs = 30 * 60 * 1000;
   const minStartTime = Math.min(...visitsNeedingOverlapCheck.map((visit) => visit.startTime)) - overlapBufferMs;
   const maxEndTime = Math.max(...visitsNeedingOverlapCheck.map((visit) => visit.endTime)) + overlapBufferMs;
-  const existingConfirmedVisits = await database.getAllAsync<VisitRecord>(
-    `SELECT * FROM visits
-     WHERE status = 'confirmed'
-       AND startTime < ?
-       AND endTime > ?
-     ORDER BY startTime ASC`,
+  const existingConfirmedVisits = await database.getAllAsync<ReservationOverlapVisit>(
+    `SELECT v.*,
+            r.name as restaurantName,
+            m.name as suggestedRestaurantName
+     FROM visits v
+     LEFT JOIN restaurants r ON v.restaurantId = r.id
+     LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
+     WHERE v.status = 'confirmed'
+       AND v.startTime < ?
+       AND v.endTime > ?
+     ORDER BY v.startTime ASC`,
     [maxEndTime, minStartTime],
   );
 
@@ -621,10 +635,10 @@ export async function getReservationOnlyVisitsMappedToConfirmedVisitSourceIds(
 
 function findBestReservationOverlap(
   reservation: ReservationOnlyVisitInput,
-  existingVisits: VisitRecord[],
+  existingVisits: ReservationOverlapVisit[],
   bufferMs: number,
-): VisitRecord | null {
-  let bestVisit: VisitRecord | null = null;
+): ReservationOverlapVisit | null {
+  let bestVisit: ReservationOverlapVisit | null = null;
   let bestScore = 0;
 
   for (const visit of existingVisits) {
@@ -638,7 +652,11 @@ function findBestReservationOverlap(
   return bestVisit;
 }
 
-function scoreReservationOverlap(reservation: ReservationOnlyVisitInput, visit: VisitRecord, bufferMs: number): number {
+function scoreReservationOverlap(
+  reservation: ReservationOnlyVisitInput,
+  visit: ReservationOverlapVisit,
+  bufferMs: number,
+): number {
   if (visit.status === "rejected") {
     return 0;
   }
@@ -652,11 +670,13 @@ function scoreReservationOverlap(reservation: ReservationOnlyVisitInput, visit: 
     return 0;
   }
 
+  const restaurantNameMatches = doesReservationMatchExistingRestaurantName(reservation, visit);
   const restaurantMatches =
     visit.restaurantId === reservation.restaurant.id ||
     (Boolean(reservation.suggestedRestaurantId) &&
       (visit.restaurantId === reservation.suggestedRestaurantId ||
-        visit.suggestedRestaurantId === reservation.suggestedRestaurantId));
+        visit.suggestedRestaurantId === reservation.suggestedRestaurantId)) ||
+    restaurantNameMatches;
   const distance = calculateDistanceMeters(
     visit.centerLat,
     visit.centerLon,
@@ -697,6 +717,82 @@ function scoreReservationOverlap(reservation: ReservationOnlyVisitInput, visit: 
   }
 
   return score;
+}
+
+function doesReservationMatchExistingRestaurantName(
+  reservation: ReservationOnlyVisitInput,
+  visit: ReservationOverlapVisit,
+): boolean {
+  const reservationNames = [reservation.restaurant.name, reservation.sourceTitle];
+  const existingNames = [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle];
+
+  return reservationNames.some((reservationName) =>
+    existingNames.some(
+      (existingName) =>
+        typeof reservationName === "string" &&
+        typeof existingName === "string" &&
+        areReservationRestaurantNamesSimilar(reservationName, existingName),
+    ),
+  );
+}
+
+function areReservationRestaurantNamesSimilar(a: string, b: string): boolean {
+  const normalizedA = normalizeReservationRestaurantName(a);
+  const normalizedB = normalizeReservationRestaurantName(b);
+
+  if (normalizedA.length < 3 || normalizedB.length < 3) {
+    return false;
+  }
+
+  if (normalizedA === normalizedB) {
+    return true;
+  }
+
+  if (normalizedA.length >= 6 && normalizedB.length >= 6) {
+    return normalizedA.includes(normalizedB) || normalizedB.includes(normalizedA);
+  }
+
+  const wordsA = getSignificantReservationNameWords(normalizedA);
+  const wordsB = getSignificantReservationNameWords(normalizedB);
+  const shorter = wordsA.length <= wordsB.length ? wordsA : wordsB;
+  const longer = wordsA.length <= wordsB.length ? wordsB : wordsA;
+
+  return shorter.length > 0 && shorter.every((word) => longer.includes(word));
+}
+
+function normalizeReservationRestaurantName(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[–—−‐‑‒―-]/g, " ")
+    .replace(/\s*&\s*/g, " and ")
+    .replace(/'s\b/g, "s")
+    .replace(/[''’`´ʼʻ]/g, "")
+    .replace(/\b(reservation|booking|dinner|lunch|brunch|breakfast|completed|at|for|via)\b/g, " ")
+    .replace(/\b(resy|opentable|open table|tock)\b/g, " ")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getSignificantReservationNameWords(value: string): string[] {
+  const ignoredWords = new Set([
+    "the",
+    "restaurant",
+    "cafe",
+    "bar",
+    "bistro",
+    "kitchen",
+    "grill",
+    "house",
+    "room",
+    "and",
+    "of",
+    "in",
+    "on",
+  ]);
+  return value.split(" ").filter((word) => word.length > 1 && !ignoredWords.has(word));
 }
 
 function isExternalReservationRestaurantId(restaurantId: string | null): boolean {

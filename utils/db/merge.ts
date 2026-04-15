@@ -145,6 +145,12 @@ export async function mergeVisits(targetVisitId: string, sourceVisitId: string):
     [targetVisitId, sourceVisitId],
   );
 
+  // Preserve provider import mappings when a reservation-only visit is merged into another visit.
+  await database.runAsync(`UPDATE reservation_import_sources SET visitId = ? WHERE visitId = ?`, [
+    targetVisitId,
+    sourceVisitId,
+  ]);
+
   // Delete source visit's suggested restaurants
   await database.runAsync(`DELETE FROM visit_suggested_restaurants WHERE visitId = ?`, [sourceVisitId]);
 

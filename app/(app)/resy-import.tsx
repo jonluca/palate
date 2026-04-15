@@ -7,11 +7,7 @@ import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
 import { IconSymbol } from "@/components/icon-symbol";
-import {
-  getReservationImportSummary,
-  ReservationImportReviewList,
-  useReservationImportReview,
-} from "@/components/reservation-import-review";
+import { ReservationImportReviewList, useReservationImportReview } from "@/components/reservation-import-review";
 import {
   useFetchResyVisitHistory,
   useFilterProviderReservationReviewCandidates,
@@ -148,10 +144,6 @@ export default function ResyImportScreen() {
     progress?.totalCount && progress.totalCount > 0 ? Math.min(progress.fetchedCount / progress.totalCount, 1) : null;
 
   const statusText = useMemo(() => {
-    if (importMutation.isPending) {
-      return "Importing approved reservations...";
-    }
-
     if (fetchMutation.isPending) {
       return progress ? `Reading ${progress.fetchedCount.toLocaleString()} of ${totalLabel}` : "Reading history...";
     }
@@ -177,7 +169,6 @@ export default function ResyImportScreen() {
     filterReviewMutation.isPending,
     hasReview,
     hasSession,
-    importMutation.isPending,
     pendingCount,
     progress,
     review.reviewStats.capturedCount,
@@ -351,15 +342,6 @@ export default function ResyImportScreen() {
                     {skippedExistingConfirmedCount === 1 ? " maps" : "s map"} to existing confirmed visits.
                   </ThemedText>
                 )}
-              </View>
-            )}
-
-            {review.lastResult && (
-              <View className={"bg-green-500/10 rounded-xl p-3 flex-row gap-2"}>
-                <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#22c55e"} />
-                <ThemedText variant={"footnote"} className={"text-green-400 flex-1"}>
-                  {getReservationImportSummary(review.lastResult)}
-                </ThemedText>
               </View>
             )}
 

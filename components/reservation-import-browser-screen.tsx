@@ -5,11 +5,7 @@ import WebView, { type WebViewMessageEvent } from "react-native-webview";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
-import {
-  getReservationImportSummary,
-  ReservationImportReviewList,
-  useReservationImportReview,
-} from "@/components/reservation-import-review";
+import { ReservationImportReviewList, useReservationImportReview } from "@/components/reservation-import-review";
 import { useFilterProviderReservationReviewCandidates } from "@/hooks/queries";
 import type {
   ImportableReservation,
@@ -124,10 +120,6 @@ export function ReservationImportBrowserScreen({
   const pendingCount = review.reviewStats.pendingCount;
 
   const statusText = useMemo(() => {
-    if (importMutation.isPending) {
-      return "Importing approved reservations...";
-    }
-
     if (filterReviewMutation.isPending) {
       return "Preparing reservations for review...";
     }
@@ -152,7 +144,6 @@ export function ReservationImportBrowserScreen({
     hasHistory,
     hasSession,
     filterReviewMutation.isPending,
-    importMutation.isPending,
     instructions,
     lastError,
     pendingCount,
@@ -306,15 +297,6 @@ export function ReservationImportBrowserScreen({
                     {skippedExistingConfirmedCount === 1 ? " maps" : "s map"} to existing confirmed visits.
                   </ThemedText>
                 )}
-              </View>
-            )}
-
-            {review.lastResult && (
-              <View className={"bg-green-500/10 rounded-xl p-3 flex-row gap-2"}>
-                <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#22c55e"} />
-                <ThemedText variant={"footnote"} className={"text-green-400 flex-1"}>
-                  {getReservationImportSummary(review.lastResult)}
-                </ThemedText>
               </View>
             )}
 
