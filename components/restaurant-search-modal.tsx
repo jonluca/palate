@@ -13,7 +13,7 @@ import { isMapKitSearchAvailable, type MapKitSearchResult } from "@/modules/mapk
 import type { PlaceResult } from "@/services/places";
 import type { VisitRecord } from "@/utils/db";
 import { useGoogleMapsApiKey } from "@/store";
-import React, { useState, useRef, useMemo } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { View, Pressable, Modal, ScrollView, TextInput } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
@@ -203,6 +203,7 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
   const googleMapsApiKey = useGoogleMapsApiKey();
   const appleMapsAvailable = isMapKitSearchAvailable();
   const { centerLat, centerLon } = visit;
+  const appleSearchRequestIdRef = useRef(0);
 
   // Use unified hook for Michelin + MapKit results.
   const { data: unifiedRestaurants, isLoading: isLoadingNearby } = useUnifiedNearbyRestaurants(
@@ -213,12 +214,10 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
   // Also fetch confirmed restaurants (restaurants the user has visited)
   const { data: confirmedRestaurants = [] } = useConfirmedRestaurants();
 
-  const searchAppleMutation = useSearchAppleRestaurants();
+  const { mutateAsync: searchAppleRestaurants } = useSearchAppleRestaurants();
   const searchGoogleMutation = useSearchNearbyRestaurants();
 
   const calendarEventTitle = visit.calendarEventTitle;
-  const appleSearchTerm = searchQuery.trim() || (calendarEventTitle ? cleanCalendarEventTitle(calendarEventTitle) : "");
-  const canSearchApple = appleMapsAvailable && appleSearchTerm.length > 0;
 
   const scrollResultsToTop = () => {
     setTimeout(() => {
@@ -226,27 +225,60 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
     }, 100);
   };
 
-  const handleSearchApple = async () => {
-    if (!canSearchApple) {
+  const handleSearchQueryChange = (value: string) => {
+    setSearchQuery(value);
+
+    if (!value.trim()) {
+      appleSearchRequestIdRef.current += 1;
+      setSearchingApple(false);
+      setAppleResults([]);
+      setActiveResultSource("nearby");
+    }
+  };
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    appleSearchRequestIdRef.current += 1;
+    const requestId = appleSearchRequestIdRef.current;
+
+    if (!visible || !appleMapsAvailable || !query) {
       return;
     }
 
-    setSearchingApple(true);
-    try {
-      const results = await searchAppleMutation.mutateAsync({
-        query: appleSearchTerm,
-        lat: centerLat,
-        lon: centerLon,
-        radius: 1000,
-      });
-      setAppleResults(results);
+    const timeoutId = setTimeout(() => {
       setActiveResultSource("apple");
-      scrollResultsToTop();
-    } catch (error) {
-      console.error("Apple Maps search failed:", error);
-    }
-    setSearchingApple(false);
-  };
+      setSearchingApple(true);
+      setAppleResults([]);
+
+      void (async () => {
+        try {
+          const results = await searchAppleRestaurants({
+            query,
+            lat: centerLat,
+            lon: centerLon,
+            radius: 1000,
+          });
+          if (appleSearchRequestIdRef.current !== requestId) {
+            return;
+          }
+          setAppleResults(results);
+          scrollResultsToTop();
+        } catch (error) {
+          if (appleSearchRequestIdRef.current === requestId) {
+            console.error("Apple Maps search failed:", error);
+          }
+        }
+
+        if (appleSearchRequestIdRef.current === requestId) {
+          setSearchingApple(false);
+        }
+      })();
+    }, 350);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [appleMapsAvailable, centerLat, centerLon, searchAppleRestaurants, searchQuery, visible]);
 
   const handleSearchGoogle = async () => {
     setSearchingGoogle(true);
@@ -427,7 +459,7 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
             <TextInput
               ref={searchInputRef}
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={handleSearchQueryChange}
               placeholder={"Search restaurants..."}
               placeholderTextColor={"#6b7280"}
               className={"flex-1 ml-2 text-white text-base"}
@@ -436,18 +468,14 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
               clearButtonMode={"while-editing"}
             />
             {searchQuery.length > 0 && (
-              <Pressable onPress={() => setSearchQuery("")} hitSlop={8}>
+              <Pressable onPress={() => handleSearchQueryChange("")} hitSlop={8}>
                 <IconSymbol name={"xmark.circle.fill"} size={18} color={"#6b7280"} />
               </Pressable>
             )}
           </View>
         </View>
 
-        <ScrollView
-          ref={scrollViewRef}
-          className={"flex-1"}
-          contentContainerStyle={{ padding: 16, paddingBottom: 132 }}
-        >
+        <ScrollView ref={scrollViewRef} className={"flex-1"} contentContainerStyle={{ padding: 16, paddingBottom: 80 }}>
           {/* Visited Restaurants (shown when searching) */}
           {activeResultSource === "nearby" && visitedOptions.length > 0 && (
             <Animated.View entering={FadeIn} className={"gap-4 mb-6"}>
@@ -611,7 +639,13 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
                 </ThemedText>
               </View>
 
-              {appleOptions.length === 0 ? (
+              {searchingApple ? (
+                <View className={"py-8 items-center gap-2"}>
+                  <ThemedText variant={"body"} color={"tertiary"} className={"text-center"}>
+                    Searching Apple Maps...
+                  </ThemedText>
+                </View>
+              ) : appleOptions.length === 0 ? (
                 <View className={"py-8 items-center gap-2"}>
                   <ThemedText variant={"body"} color={"tertiary"} className={"text-center"}>
                     No restaurants found nearby
@@ -777,34 +811,22 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
           )}
         </ScrollView>
 
-        {/* Fixed external search buttons at bottom */}
+        {/* Fixed Google search button at bottom */}
         {activeResultSource === "nearby" && (
           <View className={"absolute bottom-0 left-0 right-0 p-4 bg-background border-t border-white/10"}>
-            <View className={"gap-2"}>
-              {appleMapsAvailable && (
-                <Button
-                  onPress={handleSearchApple}
-                  variant={"secondary"}
-                  loading={searchingApple}
-                  disabled={!canSearchApple}
-                >
-                  <ButtonText variant={"secondary"}>{searchingApple ? "Searching..." : "Search Apple Maps"}</ButtonText>
-                </Button>
-              )}
-              {googleMapsApiKey ? (
-                <Button onPress={handleSearchGoogle} variant={"secondary"} loading={searchingGoogle}>
-                  <ButtonText variant={"secondary"}>
-                    {searchingGoogle ? "Searching..." : "Search Google Maps Instead"}
-                  </ButtonText>
-                </Button>
-              ) : (
-                <View className={"items-center gap-1 py-2"}>
-                  <ThemedText variant={"footnote"} color={"tertiary"} className={"text-center"}>
-                    Set a Google Maps API key in Settings to search Google Maps
-                  </ThemedText>
-                </View>
-              )}
-            </View>
+            {googleMapsApiKey ? (
+              <Button onPress={handleSearchGoogle} variant={"secondary"} loading={searchingGoogle}>
+                <ButtonText variant={"secondary"}>
+                  {searchingGoogle ? "Searching..." : "Search Google Maps Instead"}
+                </ButtonText>
+              </Button>
+            ) : (
+              <View className={"items-center gap-1 py-2"}>
+                <ThemedText variant={"footnote"} color={"tertiary"} className={"text-center"}>
+                  Set a Google Maps API key in Settings to search Google Maps
+                </ThemedText>
+              </View>
+            )}
           </View>
         )}
       </View>
