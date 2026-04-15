@@ -259,6 +259,12 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
     );
     CREATE INDEX IF NOT EXISTS idx_reservation_import_sources_visit ON reservation_import_sources(visitId);
 
+    -- Provider reservations the user dismissed from manual import review.
+    CREATE TABLE IF NOT EXISTS dismissed_reservation_import_sources (
+      sourceEventId TEXT PRIMARY KEY,
+      dismissedAt INTEGER NOT NULL
+    );
+
     -- Dismissed calendar events (calendar events the user doesn't want to import)
     CREATE TABLE IF NOT EXISTS dismissed_calendar_events (
       calendarEventId TEXT PRIMARY KEY,
@@ -408,6 +414,7 @@ export async function nukeDatabase(): Promise<void> {
     DROP TABLE IF EXISTS restaurants;
     DROP TABLE IF EXISTS michelin_restaurants;
     DROP TABLE IF EXISTS ignored_locations;
+    DROP TABLE IF EXISTS dismissed_reservation_import_sources;
     
     PRAGMA foreign_keys = ON;
   `);
