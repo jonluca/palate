@@ -31,6 +31,14 @@ const OPENTABLE_HISTORY_BRIDGE_SCRIPT = `
     window.ReactNativeWebView.postMessage(JSON.stringify(message));
   }
 
+  function debug(message, data) {
+    post({
+      type: "opentable-history-debug",
+      debugMessage: message,
+      debug: data || null
+    });
+  }
+
   function normalizeText(text) {
     return typeof text === "string" ? text.replace(/\\s+/g, " ").trim() : "";
   }
@@ -221,6 +229,12 @@ const OPENTABLE_HISTORY_BRIDGE_SCRIPT = `
     for (var pageNumber = 1; pageNumber <= OPENTABLE_MAX_DASHBOARD_PAGES; pageNumber += 1) {
       var page = await fetchDashboardPage(pageNumber);
       var pageCards = page.reservations.concat(pageNumber === 1 ? page.invites : []);
+      debug("Dashboard page read", {
+        pageNumber: pageNumber,
+        reservationCards: page.reservations.length,
+        inviteCards: page.invites.length,
+        hasNextPage: page.hasNextPage
+      });
 
       for (var i = 0; i < pageCards.length; i += 1) {
         var card = pageCards[i];
@@ -361,6 +375,35 @@ const OPENTABLE_HISTORY_BRIDGE_SCRIPT = `
     return payload && Array.isArray(payload.reservations) ? payload.reservations.length : 0;
   }
 
+  function summarizeCard(card) {
+    return {
+      sourceKind: card.sourceKind,
+      restaurantName: card.restaurantName || null,
+      hasRid: Boolean(card.rid),
+      hasConfirmationNumber: Boolean(card.confirmationNumber),
+      hasInvitationId: Boolean(card.invitationId),
+      status: card.status || null,
+      partySize: card.partySize || null,
+      dateText: card.dateText || null
+    };
+  }
+
+  function summarizeReservation(reservation) {
+    return {
+      sourceKind: reservation.sourceKind,
+      restaurantName: reservation.restaurantName || null,
+      status: reservation.status || null,
+      partySize: reservation.partySize || null,
+      dateText: reservation.dateText || null,
+      detailDateTimeText: reservation.detailDateTimeText || null,
+      dateTime: reservation.dateTime || null,
+      hasWebsite: Boolean(reservation.website),
+      hasRid: Boolean(reservation.rid),
+      hasConfirmationNumber: Boolean(reservation.confirmationNumber),
+      hasInvitationId: Boolean(reservation.invitationId)
+    };
+  }
+
   async function readHistory() {
     if (window.__palateOpenTableHistoryPayload) {
       post({
@@ -391,6 +434,10 @@ const OPENTABLE_HISTORY_BRIDGE_SCRIPT = `
       });
 
       var cards = await readDashboardCards();
+      debug("Dashboard cards captured", {
+        count: cards.length,
+        sample: cards.slice(0, 5).map(summarizeCard)
+      });
       if (cards.length === 0) {
         post({
           type: "opentable-history",
@@ -409,6 +456,16 @@ const OPENTABLE_HISTORY_BRIDGE_SCRIPT = `
       });
 
       var reservations = await mapWithConcurrency(cards, OPENTABLE_DETAIL_CONCURRENCY, fetchDetailReservation);
+      debug("Detail reservations captured", {
+        count: reservations.length,
+        missingRestaurantNameCount: reservations.filter(function (reservation) {
+          return !reservation.restaurantName;
+        }).length,
+        missingDateTimeCount: reservations.filter(function (reservation) {
+          return !reservation.dateTime;
+        }).length,
+        sample: reservations.slice(0, 5).map(summarizeReservation)
+      });
       var payload = {
         reservations: reservations,
         fetchedCount: cards.length,

@@ -14,8 +14,36 @@ import {
 } from "@/services/reservation-import";
 
 const OPENTABLE_SOURCE = "opentable";
+const OPENTABLE_IMPORT_LOG_PREFIX = "[OpenTableImport]";
+const OPENTABLE_DEBUG_SAMPLE_SIZE = 5;
 const MONTH_PATTERN =
   "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+const OPENTABLE_MONTHS: Record<string, number> = {
+  jan: 0,
+  january: 0,
+  feb: 1,
+  february: 1,
+  mar: 2,
+  march: 2,
+  apr: 3,
+  april: 3,
+  may: 4,
+  jun: 5,
+  june: 5,
+  jul: 6,
+  july: 6,
+  aug: 7,
+  august: 7,
+  sep: 8,
+  sept: 8,
+  september: 8,
+  oct: 9,
+  october: 9,
+  nov: 10,
+  november: 10,
+  dec: 11,
+  december: 11,
+};
 
 export type OpenTableImportableReservation = ImportableReservation;
 export type OpenTableImportResult = ReservationImportResult;
@@ -24,6 +52,18 @@ interface NormalizedOpenTableHistory {
   reservations: OpenTableImportableReservation[];
   fetchedCount: number;
   invalidCount: number;
+}
+
+function logOpenTableImport(message: string, details?: unknown): void {
+  if (!__DEV__) {
+    return;
+  }
+
+  if (details === undefined) {
+    console.info(`${OPENTABLE_IMPORT_LOG_PREFIX} ${message}`);
+  } else {
+    console.info(`${OPENTABLE_IMPORT_LOG_PREFIX} ${message}`, details);
+  }
 }
 
 function isCanceledReservation(record: JsonRecord): boolean {
@@ -69,6 +109,108 @@ function extractDateTimeFromText(text: string | null): string | null {
   return normalized.match(dateThenTime)?.[0] ?? normalized.match(timeThenDate)?.[0] ?? null;
 }
 
+function getOpenTableMonthIndex(monthText: string): number | null {
+  const monthIndex = OPENTABLE_MONTHS[monthText.toLowerCase().replace(/\./g, "")];
+  return monthIndex ?? null;
+}
+
+function toOpenTableHour(hourText: string, meridiemText: string | undefined): number | null {
+  const rawHour = Number(hourText);
+  if (!Number.isInteger(rawHour)) {
+    return null;
+  }
+
+  if (!meridiemText) {
+    return rawHour >= 0 && rawHour <= 23 ? rawHour : null;
+  }
+
+  if (rawHour < 1 || rawHour > 12) {
+    return null;
+  }
+
+  const isPm = /^p/i.test(meridiemText);
+  if (rawHour === 12) {
+    return isPm ? 12 : 0;
+  }
+  return isPm ? rawHour + 12 : rawHour;
+}
+
+function buildOpenTableLocalTimestamp(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour: number,
+  minute: number,
+): number | null {
+  const date = new Date(year, monthIndex, day, hour, minute, 0, 0);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== monthIndex ||
+    date.getDate() !== day ||
+    date.getHours() !== hour ||
+    date.getMinutes() !== minute
+  ) {
+    return null;
+  }
+
+  const timestamp = date.getTime();
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function parseOpenTableMonthNameTimestamp(text: string): number | null {
+  const normalized = text
+    .replace(/\s+/g, " ")
+    .replace(/\bat\b/gi, " ")
+    .replace(/,/g, " ")
+    .trim();
+  const dateThenTime = normalized.match(
+    new RegExp(
+      `\\b(${MONTH_PATTERN})\\.?\\s+(\\d{1,2})(?:\\s+(\\d{4}))?(?:\\s+(\\d{1,2})(?::(\\d{2}))?\\s*([AP])\\.?M\\.?)?\\b`,
+      "i",
+    ),
+  );
+  const timeThenDate = normalized.match(
+    new RegExp(
+      `\\b(\\d{1,2})(?::(\\d{2}))?\\s*([AP])\\.?M\\.?\\s+(${MONTH_PATTERN})\\.?\\s+(\\d{1,2})(?:\\s+(\\d{4}))?\\b`,
+      "i",
+    ),
+  );
+
+  const monthText = dateThenTime?.[1] ?? timeThenDate?.[4];
+  const dayText = dateThenTime?.[2] ?? timeThenDate?.[5];
+  const yearText = dateThenTime?.[3] ?? timeThenDate?.[6];
+  const hourText = dateThenTime?.[4] ?? timeThenDate?.[1] ?? "0";
+  const minuteText = dateThenTime?.[5] ?? timeThenDate?.[2] ?? "0";
+  const meridiemText = dateThenTime?.[6] ?? timeThenDate?.[3];
+
+  if (!monthText || !dayText) {
+    return null;
+  }
+
+  const monthIndex = getOpenTableMonthIndex(monthText);
+  const day = Number(dayText);
+  const year = yearText ? Number(yearText) : new Date().getFullYear();
+  const minute = Number(minuteText);
+  const hour = toOpenTableHour(hourText, meridiemText);
+
+  if (
+    monthIndex === null ||
+    !Number.isInteger(day) ||
+    day < 1 ||
+    day > 31 ||
+    !Number.isInteger(year) ||
+    year < 1900 ||
+    !Number.isInteger(minute) ||
+    minute < 0 ||
+    minute > 59 ||
+    hour === null
+  ) {
+    return null;
+  }
+
+  return buildOpenTableLocalTimestamp(year, monthIndex, day, hour, minute);
+}
+
 function parseOpenTableTimestampValue(value: unknown): number | null {
   const numeric =
     typeof value === "number"
@@ -89,6 +231,11 @@ function parseOpenTableTimestampValue(value: unknown): number | null {
   if (!text) {
     return null;
   }
+  const openTableParsed = parseOpenTableMonthNameTimestamp(text);
+  if (openTableParsed !== null) {
+    return openTableParsed;
+  }
+
   const parsed = Date.parse(text);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -118,6 +265,8 @@ function parseOpenTableStartTime(record: JsonRecord): number | null {
     record.visitDateTime,
     record.diningDateTime,
     record.scheduledAt,
+    record.dateText,
+    record.detailDateTimeText,
     getPath(record, ["reservation", "startTime"]),
     getPath(record, ["reservation", "startDateTime"]),
     getPath(record, ["reservation", "dateTime"]),
@@ -272,6 +421,173 @@ function getRestaurantAddress(record: JsonRecord, restaurant: JsonRecord | null)
     ),
     getString(restaurant?.country, addressRecord?.country),
   ]);
+}
+
+function getOpenTableTopLevelReservations(payload: unknown): unknown[] | null {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  const record = asRecord(payload);
+  if (!record) {
+    return null;
+  }
+
+  const directKeys = ["reservations", "result", "items"];
+  for (const key of directKeys) {
+    if (Array.isArray(record[key])) {
+      return record[key];
+    }
+  }
+
+  const data = asRecord(record.data);
+  if (data) {
+    for (const key of directKeys) {
+      if (Array.isArray(data[key])) {
+        return data[key];
+      }
+    }
+  }
+
+  return null;
+}
+
+function describeOpenTablePayloadForLog(payload: unknown): Record<string, unknown> {
+  if (Array.isArray(payload)) {
+    return { type: "array", length: payload.length };
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return { type: payload === null ? "null" : typeof payload };
+  }
+
+  const record = payload as Record<string, unknown>;
+  return {
+    type: "object",
+    keys: Object.keys(record).slice(0, 12),
+    reservationsLength: Array.isArray(record.reservations) ? record.reservations.length : null,
+    resultLength: Array.isArray(record.result) ? record.result.length : null,
+    fetchedCount: typeof record.fetchedCount === "number" ? record.fetchedCount : null,
+    endpoint: typeof record.endpoint === "string" ? record.endpoint : null,
+    detailEndpoint: typeof record.detailEndpoint === "string" ? record.detailEndpoint : null,
+  };
+}
+
+function getOpenTableRawDateTimeText(record: JsonRecord): string | null {
+  return getString(
+    record.dateTime,
+    record.datetime,
+    record.dateTimeUtc,
+    record.reservationDateTime,
+    record.bookingDateTime,
+    record.visitDateTime,
+    record.diningDateTime,
+    record.dateText,
+    record.detailDateTimeText,
+    record.date,
+    record.reservationDate,
+    record.bookingDate,
+    record.visitDate,
+    record.diningDate,
+    extractDateTimeFromText(getString(record.text, record.description, record.label, record.ariaLabel)),
+  );
+}
+
+function getOpenTableCandidateRejectionReason(rawReservation: unknown): string | null {
+  const record = asRecord(rawReservation);
+  if (!record) {
+    return "not-object";
+  }
+
+  if (isCanceledReservation(record)) {
+    return "canceled";
+  }
+
+  const restaurant = getRestaurantRecord(record);
+  if (!getRestaurantName(record, restaurant)) {
+    return "missing-restaurant-name";
+  }
+
+  const startTime = parseOpenTableStartTime(record);
+  if (startTime === null) {
+    return "missing-start-time";
+  }
+
+  if (startTime > Date.now()) {
+    return "future-start-time";
+  }
+
+  return null;
+}
+
+function summarizeOpenTableRawReservationForLog(rawReservation: unknown): Record<string, unknown> {
+  const record = asRecord(rawReservation);
+  if (!record) {
+    return { type: typeof rawReservation };
+  }
+
+  const restaurant = getRestaurantRecord(record);
+  const restaurantName = getRestaurantName(record, restaurant);
+  const startTime = parseOpenTableStartTime(record);
+
+  return {
+    keys: Object.keys(record).slice(0, 14),
+    restaurantName: restaurantName ?? null,
+    status: getString(record.status, record.state, record.reservationStatus, record.bookingStatus) ?? null,
+    partySize:
+      getNumber(
+        record.partySize,
+        record.party_size,
+        record.covers,
+        record.numGuests,
+        record.guestCount,
+        record.numberOfGuests,
+      ) ?? null,
+    rawDateTimeText: getOpenTableRawDateTimeText(record),
+    parsedStartTime: startTime !== null ? new Date(startTime).toISOString() : null,
+    isFutureStartTime: startTime !== null ? startTime > Date.now() : null,
+    rejectionReason: getOpenTableCandidateRejectionReason(record),
+    hasCoordinates:
+      getNumber(record.latitude, record.lat, restaurant?.latitude, restaurant?.lat) !== null &&
+      getNumber(record.longitude, record.lng, record.lon, restaurant?.longitude, restaurant?.lng, restaurant?.lon) !==
+        null,
+    hasAddress: Boolean(getRestaurantAddress(record, restaurant)),
+  };
+}
+
+function summarizeOpenTableTopLevelReservationsForLog(payload: unknown): Record<string, unknown> {
+  const topLevelReservations = getOpenTableTopLevelReservations(payload);
+  if (!topLevelReservations) {
+    return {
+      topLevelReservationCount: null,
+      reasonCounts: null,
+      sample: [],
+    };
+  }
+
+  const reasonCounts: Record<string, number> = {};
+  for (const rawReservation of topLevelReservations) {
+    const reason = getOpenTableCandidateRejectionReason(rawReservation) ?? "candidate";
+    reasonCounts[reason] = (reasonCounts[reason] ?? 0) + 1;
+  }
+
+  return {
+    topLevelReservationCount: topLevelReservations.length,
+    reasonCounts,
+    sample: topLevelReservations.slice(0, OPENTABLE_DEBUG_SAMPLE_SIZE).map(summarizeOpenTableRawReservationForLog),
+  };
+}
+
+function summarizeOpenTableReservationForLog(reservation: OpenTableImportableReservation): Record<string, unknown> {
+  return {
+    restaurantName: reservation.restaurantName,
+    sourceName: reservation.sourceName,
+    startTime: new Date(reservation.startTime).toISOString(),
+    endTime: new Date(reservation.endTime).toISOString(),
+    hasCoordinates: reservation.latitude !== null && reservation.longitude !== null,
+    hasAddress: Boolean(reservation.address),
+    partySize: reservation.partySize,
+  };
 }
 
 function normalizeOpenTableCandidate(rawReservation: unknown): OpenTableImportableReservation | null {
@@ -476,6 +792,16 @@ export function normalizeOpenTableVisitHistory(payload: unknown): NormalizedOpen
 
   const reservations = Array.from(reservationsBySourceEventId.values()).sort((a, b) => b.startTime - a.startTime);
 
+  logOpenTableImport("Normalized history", {
+    payload: describeOpenTablePayloadForLog(payload),
+    topLevelReservations: summarizeOpenTableTopLevelReservationsForLog(payload),
+    rawCandidateCount: rawReservations.length,
+    normalizedCount: reservations.length,
+    invalidCandidateCount: invalidCount,
+    duplicateCandidateCount: Math.max(0, rawReservations.length - invalidCount - reservations.length),
+    normalizedSample: reservations.slice(0, OPENTABLE_DEBUG_SAMPLE_SIZE).map(summarizeOpenTableReservationForLog),
+  });
+
   return {
     reservations,
     fetchedCount: rawReservations.length,
@@ -485,9 +811,11 @@ export function normalizeOpenTableVisitHistory(payload: unknown): NormalizedOpen
 
 export async function importOpenTableVisitHistory(payload: unknown): Promise<OpenTableImportResult> {
   const history = normalizeOpenTableVisitHistory(payload);
-  return importReservationVisitHistory(history.reservations, {
+  const result = await importReservationVisitHistory(history.reservations, {
     sourceDisplayName: "OpenTable",
     fetchedCount: history.fetchedCount,
     invalidCount: history.invalidCount,
   });
+  logOpenTableImport("Import complete", result);
+  return result;
 }

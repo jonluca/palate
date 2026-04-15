@@ -8,7 +8,9 @@ import {
 import { getAwardForDate } from "@/services/michelin";
 import { searchPlaceByText } from "@/services/places";
 import {
+  batchMergeSameRestaurantVisits,
   getAllMichelinRestaurants,
+  getMergeableSameRestaurantVisitGroups,
   insertReservationOnlyVisits,
   type MichelinRestaurantRecord,
   type ReservationOnlyRestaurantInput,
@@ -19,6 +21,8 @@ const DEFAULT_VISIT_DURATION_MS = 2 * 60 * 60 * 1000;
 const EXACT_MICHELIN_MATCH_RADIUS_METERS = 1000;
 const FUZZY_MICHELIN_MATCH_RADIUS_METERS = 250;
 const RESERVATION_DEDUPE_BUFFER_MS = 2 * 60 * 60 * 1000;
+const RESERVATION_IMPORT_LOG_PREFIX = "[ReservationImport]";
+const RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE = 5;
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -50,6 +54,7 @@ export interface ReservationImportResult {
   linkedExistingCount: number;
   confirmedExistingCount: number;
   matchedMichelinCount: number;
+  mergedDuplicateCount: number;
   skippedDuplicateCount: number;
   skippedConflictCount: number;
   skippedInvalidCount: number;
@@ -75,6 +80,53 @@ export class ReservationApiError extends Error {
     super(message);
     this.name = "ReservationApiError";
   }
+}
+
+function logReservationImport(sourceDisplayName: string, message: string, details?: unknown): void {
+  if (!__DEV__) {
+    return;
+  }
+
+  if (details === undefined) {
+    console.info(`${RESERVATION_IMPORT_LOG_PREFIX} ${sourceDisplayName}: ${message}`);
+  } else {
+    console.info(`${RESERVATION_IMPORT_LOG_PREFIX} ${sourceDisplayName}: ${message}`, details);
+  }
+}
+
+function summarizeImportableReservationForLog(reservation: ImportableReservation): Record<string, unknown> {
+  return {
+    sourceName: reservation.sourceName,
+    restaurantName: reservation.restaurantName,
+    startTime: new Date(reservation.startTime).toISOString(),
+    endTime: new Date(reservation.endTime).toISOString(),
+    hasCoordinates: reservation.latitude !== null && reservation.longitude !== null,
+    hasAddress: Boolean(reservation.address),
+    partySize: reservation.partySize,
+  };
+}
+
+function summarizeLocatedReservationForLog(reservation: LocatedImportableReservation): Record<string, unknown> {
+  return {
+    ...summarizeImportableReservationForLog(reservation),
+    latitude: Number(reservation.latitude.toFixed(5)),
+    longitude: Number(reservation.longitude.toFixed(5)),
+  };
+}
+
+async function mergeDuplicateVisitsAfterProviderImport(sourceDisplayName: string): Promise<number> {
+  const mergeableGroups = await getMergeableSameRestaurantVisitGroups();
+  if (mergeableGroups.length === 0) {
+    logReservationImport(sourceDisplayName, "No duplicate visits found after provider import");
+    return 0;
+  }
+
+  const mergeCount = await batchMergeSameRestaurantVisits(mergeableGroups);
+  logReservationImport(sourceDisplayName, "Merged duplicate visits after provider import", {
+    mergeableGroupCount: mergeableGroups.length,
+    mergeCount,
+  });
+  return mergeCount;
 }
 
 export function asRecord(value: unknown): JsonRecord | null {
@@ -378,10 +430,22 @@ export async function importReservationVisitHistory(
     invalidCount?: number;
   },
 ): Promise<ReservationImportResult> {
+  logReservationImport(options.sourceDisplayName, "Starting import", {
+    receivedReservations: reservations.length,
+    fetchedCount: options.fetchedCount ?? null,
+    upstreamInvalidCount: options.invalidCount ?? 0,
+    reservationsWithCoordinates: reservations.filter(
+      (reservation) => reservation.latitude !== null && reservation.longitude !== null,
+    ).length,
+    reservationsWithAddress: reservations.filter((reservation) => Boolean(reservation.address)).length,
+    sample: reservations.slice(0, RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE).map(summarizeImportableReservationForLog),
+  });
+
   const michelinRestaurants = await getAllMichelinRestaurants();
   const restaurantsByName = buildRestaurantsByNormalizedName(michelinRestaurants);
   const locatedReservations: LocatedImportableReservation[] = [];
   let missingLocationCount = 0;
+  const missingLocationSamples: Array<Record<string, unknown>> = [];
 
   for (const reservation of reservations) {
     const located = await resolveReservationLocation(reservation, restaurantsByName);
@@ -389,8 +453,21 @@ export async function importReservationVisitHistory(
       locatedReservations.push(located);
     } else {
       missingLocationCount += 1;
+      if (missingLocationSamples.length < RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE) {
+        missingLocationSamples.push(summarizeImportableReservationForLog(reservation));
+      }
     }
   }
+
+  logReservationImport(options.sourceDisplayName, "Location resolution complete", {
+    receivedReservations: reservations.length,
+    locatedReservations: locatedReservations.length,
+    missingLocationCount,
+    missingLocationSamples,
+    locatedSample: locatedReservations
+      .slice(0, RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE)
+      .map(summarizeLocatedReservationForLog),
+  });
 
   const matchesBySourceEventId = new Map<string, MichelinMatch | null>();
   for (const reservation of locatedReservations) {
@@ -399,6 +476,11 @@ export async function importReservationVisitHistory(
       findMichelinMatch(reservation, michelinRestaurants, restaurantsByName),
     );
   }
+  const preDedupeMichelinMatchCount = Array.from(matchesBySourceEventId.values()).filter(Boolean).length;
+  logReservationImport(options.sourceDisplayName, "Michelin matching complete", {
+    locatedReservations: locatedReservations.length,
+    matchedMichelinCount: preDedupeMichelinMatchCount,
+  });
 
   const visits = await Promise.all(
     locatedReservations.map((reservation) =>
@@ -410,19 +492,43 @@ export async function importReservationVisitHistory(
     ),
   );
   const deduped = dedupeReservationOnlyVisits(visits);
+  logReservationImport(options.sourceDisplayName, "Prepared visits for database insert", {
+    visitsBeforeDedupe: visits.length,
+    visitsAfterDedupe: deduped.visits.length,
+    inPayloadDuplicateCount: deduped.duplicateCount,
+  });
   const importResult = await insertReservationOnlyVisits(deduped.visits);
   const matchedMichelinCount = deduped.visits.filter((visit) => Boolean(visit.suggestedRestaurantId)).length;
   const invalidCount = (options.invalidCount ?? 0) + missingLocationCount;
+  let mergedDuplicateCount = 0;
+  try {
+    mergedDuplicateCount = await mergeDuplicateVisitsAfterProviderImport(options.sourceDisplayName);
+  } catch (error) {
+    console.error(
+      `[ReservationImport] ${options.sourceDisplayName}: Error auto-merging duplicate visits after provider import:`,
+      error,
+    );
+  }
 
-  return {
+  const result = {
     fetchedCount: options.fetchedCount ?? reservations.length + invalidCount,
     importableCount: deduped.visits.length,
     importedCount: importResult.insertedCount,
     linkedExistingCount: importResult.linkedExistingCount,
     confirmedExistingCount: importResult.confirmedExistingCount,
     matchedMichelinCount,
+    mergedDuplicateCount,
     skippedDuplicateCount: importResult.skippedDuplicateCount + deduped.duplicateCount,
     skippedConflictCount: importResult.skippedConflictCount,
     skippedInvalidCount: invalidCount,
   };
+
+  logReservationImport(options.sourceDisplayName, "Finished import", {
+    result,
+    databaseResult: importResult,
+    missingLocationCount,
+    inPayloadDuplicateCount: deduped.duplicateCount,
+  });
+
+  return result;
 }

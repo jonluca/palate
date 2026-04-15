@@ -10,6 +10,49 @@ import type {
   VisitRecord,
 } from "./types";
 
+const RESERVATION_IMPORT_DB_LOG_PREFIX = "[ReservationImportDB]";
+const RESERVATION_IMPORT_DB_SAMPLE_SIZE = 5;
+
+function logReservationImportDb(message: string, details?: unknown): void {
+  if (!__DEV__) {
+    return;
+  }
+
+  if (details === undefined) {
+    console.info(`${RESERVATION_IMPORT_DB_LOG_PREFIX} ${message}`);
+  } else {
+    console.info(`${RESERVATION_IMPORT_DB_LOG_PREFIX} ${message}`, details);
+  }
+}
+
+function getReservationSourceCounts(visits: ReservationOnlyVisitInput[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const visit of visits) {
+    counts[visit.sourceName] = (counts[visit.sourceName] ?? 0) + 1;
+  }
+  return counts;
+}
+
+function summarizeReservationDbVisitForLog(
+  visit: ReservationOnlyVisitInput,
+  action: string,
+  existingVisit?: VisitRecord | null,
+  overlapScore?: number | null,
+): Record<string, unknown> {
+  return {
+    action,
+    sourceName: visit.sourceName,
+    restaurantName: visit.restaurant.name,
+    startTime: new Date(visit.startTime).toISOString(),
+    endTime: new Date(visit.endTime).toISOString(),
+    suggestedRestaurantId: visit.suggestedRestaurantId ?? null,
+    existingStatus: existingVisit?.status ?? null,
+    existingHasRestaurant: Boolean(existingVisit?.restaurantId),
+    existingHasCalendarEvent: Boolean(existingVisit?.calendarEventId),
+    overlapScore: overlapScore ?? null,
+  };
+}
+
 export async function batchUpdateVisitsCalendarEvents(updates: CalendarEventUpdate[]): Promise<void> {
   if (updates.length === 0) {
     return;
@@ -192,6 +235,7 @@ export async function insertReservationOnlyVisits(
   visits: ReservationOnlyVisitInput[],
 ): Promise<ReservationOnlyVisitImportResult> {
   if (visits.length === 0) {
+    logReservationImportDb("No reservation-only visits supplied");
     return {
       insertedCount: 0,
       linkedExistingCount: 0,
@@ -209,6 +253,7 @@ export async function insertReservationOnlyVisits(
   }
 
   const uniqueVisits = Array.from(uniqueVisitsBySource.values());
+  const duplicateSourceCount = visits.length - uniqueVisits.length;
   const database = await getDatabase();
   const sourceEventIds = uniqueVisits.map((visit) => visit.sourceEventId);
   const existingSourceEventIds = new Set<string>();
@@ -234,7 +279,26 @@ export async function insertReservationOnlyVisits(
   }
 
   const newVisits = uniqueVisits.filter((visit) => !existingSourceEventIds.has(visit.sourceEventId));
+  const previouslyImportedCount = uniqueVisits.length - newVisits.length;
+  logReservationImportDb("Prepared reservation-only import", {
+    inputCount: visits.length,
+    uniqueSourceCount: uniqueVisits.length,
+    duplicateSourceCount,
+    previouslyImportedCount,
+    newVisitCount: newVisits.length,
+    sourceCounts: getReservationSourceCounts(visits),
+    sample: visits
+      .slice(0, RESERVATION_IMPORT_DB_SAMPLE_SIZE)
+      .map((visit) => summarizeReservationDbVisitForLog(visit, "input")),
+  });
+
   if (newVisits.length === 0) {
+    logReservationImportDb("All reservation-only visits were already imported or duplicated", {
+      inputCount: visits.length,
+      uniqueSourceCount: uniqueVisits.length,
+      duplicateSourceCount,
+      previouslyImportedCount,
+    });
     return {
       insertedCount: 0,
       linkedExistingCount: 0,
@@ -255,11 +319,18 @@ export async function insertReservationOnlyVisits(
      ORDER BY startTime ASC`,
     [maxEndTime, minStartTime],
   );
+  logReservationImportDb("Loaded existing visits for overlap check", {
+    newVisitCount: newVisits.length,
+    windowStart: new Date(minStartTime).toISOString(),
+    windowEnd: new Date(maxEndTime).toISOString(),
+    existingOverlapCandidateCount: existingVisits.length,
+  });
 
   let insertedCount = 0;
   let linkedExistingCount = 0;
   let confirmedExistingCount = 0;
   const skippedConflictCount = 0;
+  const decisionSamples: Array<Record<string, unknown>> = [];
 
   await database.withExclusiveTransactionAsync(async (tx) => {
     for (let i = 0; i < newVisits.length; i += batchSize) {
@@ -296,6 +367,12 @@ export async function insertReservationOnlyVisits(
       const targetVisitId = existingVisit?.id ?? visit.id;
 
       if (existingVisit) {
+        const overlapScore = scoreReservationOverlap(visit, existingVisit, overlapBufferMs);
+        if (decisionSamples.length < RESERVATION_IMPORT_DB_SAMPLE_SIZE) {
+          decisionSamples.push(
+            summarizeReservationDbVisitForLog(visit, "linked-existing", existingVisit, overlapScore),
+          );
+        }
         const wasConfirmed = existingVisit.status === "confirmed" && Boolean(existingVisit.restaurantId);
         const canUpgradeExternalRestaurant =
           Boolean(visit.suggestedRestaurantId) && isExternalReservationRestaurantId(existingVisit.restaurantId);
@@ -387,6 +464,9 @@ export async function insertReservationOnlyVisits(
 
         if (visitResult.changes > 0) {
           insertedCount++;
+          if (decisionSamples.length < RESERVATION_IMPORT_DB_SAMPLE_SIZE) {
+            decisionSamples.push(summarizeReservationDbVisitForLog(visit, "inserted"));
+          }
           existingVisits.push({
             id: visit.id,
             restaurantId: visit.restaurant.id,
@@ -409,6 +489,9 @@ export async function insertReservationOnlyVisits(
           });
         } else {
           linkedExistingCount++;
+          if (decisionSamples.length < RESERVATION_IMPORT_DB_SAMPLE_SIZE) {
+            decisionSamples.push(summarizeReservationDbVisitForLog(visit, "insert-ignored"));
+          }
         }
       }
 
@@ -426,6 +509,18 @@ export async function insertReservationOnlyVisits(
         );
       }
     }
+  });
+
+  logReservationImportDb("Finished reservation-only import", {
+    inputCount: visits.length,
+    uniqueSourceCount: uniqueVisits.length,
+    newVisitCount: newVisits.length,
+    insertedCount,
+    linkedExistingCount,
+    confirmedExistingCount,
+    skippedDuplicateCount: visits.length - newVisits.length,
+    skippedConflictCount,
+    decisionSamples,
   });
 
   return {

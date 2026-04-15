@@ -31,6 +31,8 @@ interface ReservationBridgeMessage {
   reservations?: unknown;
   count?: number;
   error?: string | null;
+  debugMessage?: string;
+  debug?: unknown;
 }
 
 function getImportSummary(result: ReservationImportResult): string {
@@ -42,6 +44,10 @@ function getImportSummary(result: ReservationImportResult): string {
   const michelinPart =
     result.matchedMichelinCount > 0
       ? `${result.matchedMichelinCount.toLocaleString()} Michelin match${result.matchedMichelinCount === 1 ? "" : "es"}`
+      : null;
+  const mergedPart =
+    result.mergedDuplicateCount > 0
+      ? `merged ${result.mergedDuplicateCount.toLocaleString()} duplicate visit${result.mergedDuplicateCount === 1 ? "" : "s"}`
       : null;
   const duplicatePart =
     result.skippedDuplicateCount > 0
@@ -57,8 +63,9 @@ function getImportSummary(result: ReservationImportResult): string {
       : null;
 
   return (
-    [importedPart, updatedPart, michelinPart, duplicatePart, unreadablePart, conflictPart].filter(Boolean).join(", ") +
-    "."
+    [importedPart, updatedPart, michelinPart, mergedPart, duplicatePart, unreadablePart, conflictPart]
+      .filter(Boolean)
+      .join(", ") + "."
   );
 }
 
@@ -79,6 +86,37 @@ function getPayloadCount(payload: unknown, fallbackCount?: number): number {
     }
   }
   return 0;
+}
+
+function describePayloadForLog(payload: unknown): Record<string, unknown> {
+  if (Array.isArray(payload)) {
+    return { type: "array", length: payload.length };
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return { type: payload === null ? "null" : typeof payload };
+  }
+
+  const record = payload as Record<string, unknown>;
+  return {
+    type: "object",
+    keys: Object.keys(record).slice(0, 12),
+    reservationsLength: Array.isArray(record.reservations) ? record.reservations.length : null,
+    resultLength: Array.isArray(record.result) ? record.result.length : null,
+    fetchedCount: typeof record.fetchedCount === "number" ? record.fetchedCount : null,
+  };
+}
+
+function logImportDebug(displayName: string, message: string, details?: unknown): void {
+  if (!__DEV__) {
+    return;
+  }
+
+  if (details === undefined) {
+    console.info(`[${displayName}Import] ${message}`);
+  } else {
+    console.info(`[${displayName}Import] ${message}`, details);
+  }
 }
 
 export function ReservationImportBrowserScreen({
@@ -135,11 +173,21 @@ export function ReservationImportBrowserScreen({
       }
 
       if (message?.type !== bridgeMessageType) {
+        if (message?.type === `${bridgeMessageType}-debug`) {
+          logImportDebug(displayName, message.debugMessage ?? "Bridge debug", message.debug);
+        }
         return;
       }
 
       const payload = message.payload ?? message.reservations ?? null;
       const count = getPayloadCount(payload, message.count);
+      logImportDebug(displayName, "Bridge message", {
+        hasSession: Boolean(message.hasSession || count > 0),
+        count,
+        hasPayload: payload !== null,
+        error: message.error ?? null,
+        payload: describePayloadForLog(payload),
+      });
       setHasSession(Boolean(message.hasSession || count > 0));
       setLastError(message.error ?? null);
 
@@ -148,7 +196,7 @@ export function ReservationImportBrowserScreen({
         setReservationCount(count);
       }
     },
-    [bridgeMessageType],
+    [bridgeMessageType, displayName],
   );
 
   const handleReload = useCallback(() => {
@@ -166,7 +214,12 @@ export function ReservationImportBrowserScreen({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
+      logImportDebug(displayName, "Starting import", {
+        capturedCount: getPayloadCount(capturedPayload, reservationCount),
+        payload: describePayloadForLog(capturedPayload),
+      });
       const result = await importMutation.mutateAsync(capturedPayload);
+      logImportDebug(displayName, "Import result", result);
       setLastResult(result);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       showToast({ type: "success", message: getImportSummary(result) });
@@ -175,7 +228,7 @@ export function ReservationImportBrowserScreen({
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       showToast({ type: "error", message: `Failed to import ${displayName} history.` });
     }
-  }, [capturedPayload, displayName, importMutation, showToast]);
+  }, [capturedPayload, displayName, importMutation, reservationCount, showToast]);
 
   const handleImportPress = useCallback(() => {
     Alert.alert(
