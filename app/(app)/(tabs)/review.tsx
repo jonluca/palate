@@ -427,10 +427,13 @@ export default function ReviewScreen() {
     [refreshing, onRefresh],
   );
 
+  const reviewListKey = `${foodFilter}-${restaurantMatchesFilter}`;
+
   return (
     <ScreenLayout scrollable={false} className={"p-0"} style={{ paddingTop: 0, paddingBottom: 0 }}>
       <View style={{ flex: 1, paddingTop: insets.top }}>
         <FlashList
+          key={reviewListKey}
           ref={reviewListRef}
           data={mergedReviewItems}
           renderItem={renderReviewItem}

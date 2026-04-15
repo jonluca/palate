@@ -265,6 +265,19 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
       dismissedAt INTEGER NOT NULL
     );
 
+    -- Provider reservations hidden from manual review after approval or dismissal.
+    -- This catches providers that emit unstable source IDs for the same reservation.
+    CREATE TABLE IF NOT EXISTS reservation_import_review_exclusions (
+      fingerprint TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      restaurantName TEXT NOT NULL,
+      visitDate TEXT NOT NULL,
+      action TEXT NOT NULL,
+      excludedAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_reservation_import_review_exclusions_source_date
+      ON reservation_import_review_exclusions(source, visitDate);
+
     -- Dismissed calendar events (calendar events the user doesn't want to import)
     CREATE TABLE IF NOT EXISTS dismissed_calendar_events (
       calendarEventId TEXT PRIMARY KEY,
@@ -415,6 +428,7 @@ export async function nukeDatabase(): Promise<void> {
     DROP TABLE IF EXISTS michelin_restaurants;
     DROP TABLE IF EXISTS ignored_locations;
     DROP TABLE IF EXISTS dismissed_reservation_import_sources;
+    DROP TABLE IF EXISTS reservation_import_review_exclusions;
     
     PRAGMA foreign_keys = ON;
   `);

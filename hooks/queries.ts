@@ -66,6 +66,7 @@ import {
   batchMergeSameRestaurantVisits,
   type MergeableVisitGroup,
   getMergeableSameRestaurantVisitGroups,
+  excludeReservationImportReviews,
 } from "@/utils/db";
 import {
   compareRestaurantAndCalendarTitle,
@@ -1078,18 +1079,30 @@ export function useFilterProviderReservationReviewCandidates(sourceDisplayName: 
 }
 
 /**
+ * Dismiss provider reservations so they do not reappear in manual import review.
+ */
+export function useDismissProviderReservations() {
+  return useMutation<void, Error, ImportableReservation[]>({
+    mutationFn: (reservations: ImportableReservation[]) => excludeReservationImportReviews(reservations, "dismissed"),
+  });
+}
+
+/**
  * Import manually approved provider reservations as confirmed visits.
  */
 export function useImportProviderReservations(sourceDisplayName: string) {
   const queryClient = useQueryClient();
 
   return useMutation<ReservationImportResult, Error, ImportableReservation[]>({
-    mutationFn: (reservations: ImportableReservation[]) =>
-      importReservationVisitHistory(reservations, {
+    mutationFn: async (reservations: ImportableReservation[]) => {
+      const result = await importReservationVisitHistory(reservations, {
         sourceDisplayName,
         fetchedCount: reservations.length,
         invalidCount: 0,
-      }),
+      });
+      await excludeReservationImportReviews(reservations, "approved");
+      return result;
+    },
     onSuccess: () => {
       invalidateReservationImportQueries(queryClient);
     },

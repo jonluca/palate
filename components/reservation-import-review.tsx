@@ -13,9 +13,14 @@ interface ReservationImportMutation {
   mutateAsync: (reservations: ImportableReservation[]) => Promise<ReservationImportResult>;
 }
 
+interface ReservationDismissMutation {
+  mutateAsync: (reservations: ImportableReservation[]) => Promise<void>;
+}
+
 interface UseReservationImportReviewOptions {
   displayName: string;
   importMutation: ReservationImportMutation;
+  dismissMutation: ReservationDismissMutation;
 }
 
 type ReservationReviewListItem =
@@ -100,7 +105,11 @@ export function getReservationImportSummary(result: ReservationImportResult): st
   );
 }
 
-export function useReservationImportReview({ displayName, importMutation }: UseReservationImportReviewOptions) {
+export function useReservationImportReview({
+  displayName,
+  importMutation,
+  dismissMutation,
+}: UseReservationImportReviewOptions) {
   const { showToast } = useToast();
   const [reservations, setReservations] = useState<ImportableReservation[]>([]);
   const [dismissedReservationIds, setDismissedReservationIds] = useState<Set<string>>(new Set());
@@ -205,17 +214,33 @@ export function useReservationImportReview({ displayName, importMutation }: UseR
     );
   }, [displayName, importReservations, pendingReservations]);
 
-  const dismissReservation = useCallback((reservation: ImportableReservation) => {
-    const reservationId = getReservationId(reservation);
-    setDismissingReservationIds((previous) => new Set(previous).add(reservationId));
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setDismissedReservationIds((previous) => new Set(previous).add(reservationId));
-    setDismissingReservationIds((previous) => {
-      const next = new Set(previous);
-      next.delete(reservationId);
-      return next;
-    });
-  }, []);
+  const dismissReservation = useCallback(
+    async (reservation: ImportableReservation) => {
+      const reservationId = getReservationId(reservation);
+      setDismissingReservationIds((previous) => new Set(previous).add(reservationId));
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setDismissedReservationIds((previous) => new Set(previous).add(reservationId));
+
+      try {
+        await dismissMutation.mutateAsync([reservation]);
+      } catch (error) {
+        console.error(`Error dismissing ${displayName} reservation:`, error);
+        setDismissedReservationIds((previous) => {
+          const next = new Set(previous);
+          next.delete(reservationId);
+          return next;
+        });
+        showToast({ type: "error", message: `Failed to dismiss ${displayName} reservation.` });
+      }
+
+      setDismissingReservationIds((previous) => {
+        const next = new Set(previous);
+        next.delete(reservationId);
+        return next;
+      });
+    },
+    [dismissMutation, displayName, showToast],
+  );
 
   const isImportingAll =
     pendingReservations.length > 0 &&
@@ -411,8 +436,8 @@ export function ReservationImportReviewList({
           <IconSymbol name={"lightbulb.fill"} size={18} color={"#3b82f6"} />
           <View className={"flex-1"}>
             <ThemedText variant={"footnote"} className={"text-blue-400"}>
-              All captured {displayName} reservations have been imported or dismissed. Reload the provider page to
-              review them again.
+              All captured {displayName} reservations have been imported or dismissed. Reload the provider page to check
+              for new reservations.
             </ThemedText>
           </View>
         </View>

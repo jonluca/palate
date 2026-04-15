@@ -11,7 +11,10 @@ import {
   batchMergeSameRestaurantVisits,
   getAllMichelinRestaurants,
   getConfirmedLinkedReservationSourceEventIds,
+  getDismissedReservationImportSourceEventIds,
+  getExcludedReservationImportReviewSourceEventIds,
   getMergeableSameRestaurantVisitGroups,
+  getReservationImportCandidatesMappedToConfirmedRestaurantDateSourceIds,
   getReservationOnlyVisitsMappedToConfirmedVisitSourceIds,
   insertReservationOnlyVisits,
   type MichelinRestaurantRecord,
@@ -77,6 +80,7 @@ export interface NormalizedReservationHistory {
 export interface ReservationReviewFilterResult {
   reservations: ImportableReservation[];
   skippedExistingConfirmedCount: number;
+  skippedDismissedCount: number;
   skippedDuplicateCount: number;
 }
 
@@ -154,6 +158,7 @@ function dedupeImportableReservationsBySourceEventId(reservations: ImportableRes
   duplicateCount: number;
 } {
   const reservationsBySourceEventId = new Map<string, ImportableReservation>();
+  const sourceEventIdsByReviewKey = new Map<string, string>();
   let duplicateCount = 0;
 
   for (const reservation of reservations) {
@@ -161,13 +166,60 @@ function dedupeImportableReservationsBySourceEventId(reservations: ImportableRes
       duplicateCount += 1;
       continue;
     }
+
+    const reviewKey = getImportableReservationReviewKey(reservation);
+    const existingSourceEventId = reviewKey ? sourceEventIdsByReviewKey.get(reviewKey) : undefined;
+    const existingReservation = existingSourceEventId ? reservationsBySourceEventId.get(existingSourceEventId) : null;
+    if (reviewKey && existingSourceEventId && existingReservation) {
+      duplicateCount += 1;
+      if (
+        getImportableReservationCompletenessScore(reservation) >
+        getImportableReservationCompletenessScore(existingReservation)
+      ) {
+        reservationsBySourceEventId.delete(existingSourceEventId);
+        reservationsBySourceEventId.set(reservation.sourceEventId, reservation);
+        sourceEventIdsByReviewKey.set(reviewKey, reservation.sourceEventId);
+      }
+      continue;
+    }
+
     reservationsBySourceEventId.set(reservation.sourceEventId, reservation);
+    if (reviewKey) {
+      sourceEventIdsByReviewKey.set(reviewKey, reservation.sourceEventId);
+    }
   }
 
   return {
     reservations: Array.from(reservationsBySourceEventId.values()).sort((a, b) => b.startTime - a.startTime),
     duplicateCount,
   };
+}
+
+function getLocalDateKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getImportableReservationReviewKey(reservation: ImportableReservation): string | null {
+  const sourceName = reservation.sourceName.trim().toLowerCase();
+  const restaurantName = normalizeForComparison(stripComparisonAffixes(reservation.restaurantName));
+  if (!sourceName || restaurantName.length < 3) {
+    return null;
+  }
+
+  return `${sourceName}:${getLocalDateKey(reservation.startTime)}:${restaurantName}`;
+}
+
+function getImportableReservationCompletenessScore(reservation: ImportableReservation): number {
+  return (
+    (reservation.latitude !== null && reservation.longitude !== null ? 8 : 0) +
+    (reservation.address ? 4 : 0) +
+    (reservation.website ? 2 : 0) +
+    (reservation.partySize ? 1 : 0)
+  );
 }
 
 export function asRecord(value: unknown): JsonRecord | null {
@@ -602,15 +654,33 @@ export async function filterProviderReservationReviewCandidates(
     return {
       reservations: [],
       skippedExistingConfirmedCount: 0,
+      skippedDismissedCount: 0,
       skippedDuplicateCount: deduped.duplicateCount,
     };
   }
 
-  const exactSourceEventIdsMappedToConfirmedVisits = await getConfirmedLinkedReservationSourceEventIds(
-    deduped.reservations.map((reservation) => reservation.sourceEventId),
+  const sourceEventIds = deduped.reservations.map((reservation) => reservation.sourceEventId);
+  const dismissedSourceEventIds = await getDismissedReservationImportSourceEventIds(sourceEventIds);
+  const excludedSourceEventIds = await getExcludedReservationImportReviewSourceEventIds(deduped.reservations);
+  const exactSourceEventIdsMappedToConfirmedVisits = await getConfirmedLinkedReservationSourceEventIds(sourceEventIds);
+  const sameDateRestaurantSourceEventIds = await getReservationImportCandidatesMappedToConfirmedRestaurantDateSourceIds(
+    deduped.reservations
+      .filter((reservation) => !excludedSourceEventIds.has(reservation.sourceEventId))
+      .map((reservation) => ({
+        sourceEventId: reservation.sourceEventId,
+        restaurantName: reservation.restaurantName,
+        startTime: reservation.startTime,
+        restaurantId: reservation.restaurantId,
+      })),
   );
+  const preLocationConfirmedSourceEventIds = new Set([
+    ...exactSourceEventIdsMappedToConfirmedVisits,
+    ...sameDateRestaurantSourceEventIds,
+  ]);
   const reservationsNeedingLocationCheck = deduped.reservations.filter(
-    (reservation) => !exactSourceEventIdsMappedToConfirmedVisits.has(reservation.sourceEventId),
+    (reservation) =>
+      !excludedSourceEventIds.has(reservation.sourceEventId) &&
+      !preLocationConfirmedSourceEventIds.has(reservation.sourceEventId),
   );
   const michelinRestaurants = await getAllMichelinRestaurants();
   const restaurantsByName = buildRestaurantsByNormalizedName(michelinRestaurants);
@@ -643,11 +713,15 @@ export async function filterProviderReservationReviewCandidates(
   const overlapSourceEventIdsMappedToConfirmedVisits =
     await getReservationOnlyVisitsMappedToConfirmedVisitSourceIds(visits);
   const sourceEventIdsMappedToConfirmedVisits = new Set([
-    ...exactSourceEventIdsMappedToConfirmedVisits,
+    ...preLocationConfirmedSourceEventIds,
     ...overlapSourceEventIdsMappedToConfirmedVisits,
   ]);
   const reviewReservations = deduped.reservations
-    .filter((reservation) => !sourceEventIdsMappedToConfirmedVisits.has(reservation.sourceEventId))
+    .filter(
+      (reservation) =>
+        !excludedSourceEventIds.has(reservation.sourceEventId) &&
+        !sourceEventIdsMappedToConfirmedVisits.has(reservation.sourceEventId),
+    )
     .map((reservation) =>
       withMichelinReviewMatch(reservation, matchesBySourceEventId.get(reservation.sourceEventId) ?? null),
     );
@@ -659,14 +733,18 @@ export async function filterProviderReservationReviewCandidates(
       .length,
     skippedDuplicateCount: deduped.duplicateCount,
     skippedExistingConfirmedCount: sourceEventIdsMappedToConfirmedVisits.size,
+    skippedDismissedCount: excludedSourceEventIds.size,
+    exactDismissedSourceEventIdCount: dismissedSourceEventIds.size,
     exactConfirmedLinkCount: exactSourceEventIdsMappedToConfirmedVisits.size,
-    overlapConfirmedVisitCount: overlapSourceEventIdsMappedToConfirmedVisits.size,
+    sameDateRestaurantConfirmedVisitCount: sameDateRestaurantSourceEventIds.size,
+    overlapOrLocatedConfirmedVisitCount: overlapSourceEventIdsMappedToConfirmedVisits.size,
     unresolvedLocationCount: reservationsNeedingLocationCheck.length - locatedReservations.length,
   });
 
   return {
     reservations: reviewReservations,
     skippedExistingConfirmedCount: sourceEventIdsMappedToConfirmedVisits.size,
+    skippedDismissedCount: excludedSourceEventIds.size,
     skippedDuplicateCount: deduped.duplicateCount,
   };
 }

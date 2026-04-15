@@ -18,13 +18,22 @@ type ReservationOverlapVisit = VisitRecord & {
   suggestedRestaurantName?: string | null;
 };
 
-type ReservationRestaurantDateMatchCandidate = {
+interface ReservationRestaurantDateMatchCandidate {
   sourceEventId: string;
   restaurantName: string;
   startTime: number;
   restaurantId?: string | null;
   suggestedRestaurantId?: string | null;
-};
+}
+
+interface ReservationImportReviewExclusionInput {
+  sourceEventId: string;
+  sourceName: string;
+  restaurantName: string;
+  startTime: number;
+}
+
+type ReservationImportReviewExclusionAction = "approved" | "dismissed";
 
 function logReservationImportDb(message: string, details?: unknown): void {
   if (!__DEV__) {
@@ -200,6 +209,131 @@ export async function dismissReservationImportSources(sourceEventIds: string[]):
     await database.runAsync(
       `INSERT OR IGNORE INTO dismissed_reservation_import_sources (sourceEventId, dismissedAt)
        VALUES ${placeholders}`,
+      values,
+    );
+  }
+}
+
+export async function getExcludedReservationImportReviewSourceEventIds(
+  reservations: ReservationImportReviewExclusionInput[],
+): Promise<Set<string>> {
+  const excludedSourceEventIds = new Set<string>();
+  if (reservations.length === 0) {
+    return excludedSourceEventIds;
+  }
+
+  const sourceEventIds = reservations.map((reservation) => reservation.sourceEventId);
+  const dismissedSourceEventIds = await getDismissedReservationImportSourceEventIds(sourceEventIds);
+  for (const sourceEventId of dismissedSourceEventIds) {
+    excludedSourceEventIds.add(sourceEventId);
+  }
+
+  const reservationsNeedingFingerprintCheck = reservations.filter(
+    (reservation) => !excludedSourceEventIds.has(reservation.sourceEventId),
+  );
+  if (reservationsNeedingFingerprintCheck.length === 0) {
+    return excludedSourceEventIds;
+  }
+
+  const database = await getDatabase();
+  const fingerprintsBySourceEventId = new Map<string, string>();
+  for (const reservation of reservationsNeedingFingerprintCheck) {
+    const fingerprint = getReservationImportReviewFingerprint(reservation);
+    if (fingerprint) {
+      fingerprintsBySourceEventId.set(reservation.sourceEventId, fingerprint);
+    }
+  }
+
+  const fingerprints = Array.from(new Set(fingerprintsBySourceEventId.values()));
+  if (fingerprints.length === 0) {
+    return excludedSourceEventIds;
+  }
+
+  const excludedFingerprints = new Set<string>();
+  const batchSize = 1000;
+  for (let i = 0; i < fingerprints.length; i += batchSize) {
+    const batch = fingerprints.slice(i, i + batchSize);
+    const placeholders = batch.map(() => "?").join(", ");
+    const rows = await database.getAllAsync<{ fingerprint: string }>(
+      `SELECT fingerprint
+       FROM reservation_import_review_exclusions
+       WHERE fingerprint IN (${placeholders})`,
+      batch,
+    );
+    for (const row of rows) {
+      excludedFingerprints.add(row.fingerprint);
+    }
+  }
+
+  for (const [sourceEventId, fingerprint] of fingerprintsBySourceEventId) {
+    if (excludedFingerprints.has(fingerprint)) {
+      excludedSourceEventIds.add(sourceEventId);
+    }
+  }
+
+  return excludedSourceEventIds;
+}
+
+export async function excludeReservationImportReviews(
+  reservations: ReservationImportReviewExclusionInput[],
+  action: ReservationImportReviewExclusionAction,
+): Promise<void> {
+  if (reservations.length === 0) {
+    return;
+  }
+
+  if (action === "dismissed") {
+    await dismissReservationImportSources(reservations.map((reservation) => reservation.sourceEventId));
+  }
+
+  const rows = reservations
+    .map((reservation) => {
+      const fingerprint = getReservationImportReviewFingerprint(reservation);
+      if (!fingerprint) {
+        return null;
+      }
+
+      return {
+        fingerprint,
+        source: reservation.sourceName,
+        restaurantName: reservation.restaurantName,
+        visitDate: getLocalDateKey(reservation.startTime),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  if (rows.length === 0) {
+    return;
+  }
+
+  const database = await getDatabase();
+  const now = Date.now();
+  const batchSize = 500;
+
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const batch = rows.slice(i, i + batchSize);
+    const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
+    const values = batch.flatMap((row) => [
+      row.fingerprint,
+      row.source,
+      row.restaurantName,
+      row.visitDate,
+      action,
+      now,
+    ]);
+
+    await database.runAsync(
+      `INSERT INTO reservation_import_review_exclusions (
+         fingerprint,
+         source,
+         restaurantName,
+         visitDate,
+         action,
+         excludedAt
+       ) VALUES ${placeholders}
+       ON CONFLICT(fingerprint) DO UPDATE SET
+         action = excluded.action,
+         excludedAt = excluded.excludedAt`,
       values,
     );
   }
@@ -823,6 +957,14 @@ function getLocalDateRange(timestamp: number): { startTime: number; endTime: num
   };
 }
 
+function getLocalDateKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function isSameLocalDate(a: number, b: number): boolean {
   const dateA = new Date(a);
   const dateB = new Date(b);
@@ -1014,6 +1156,16 @@ function normalizeReservationRestaurantName(value: string): string {
     .replace(/[^\w\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function getReservationImportReviewFingerprint(reservation: ReservationImportReviewExclusionInput): string | null {
+  const sourceName = reservation.sourceName.trim().toLowerCase();
+  const restaurantName = normalizeReservationRestaurantName(reservation.restaurantName);
+  if (!sourceName || restaurantName.length < 3) {
+    return null;
+  }
+
+  return `${sourceName}:${getLocalDateKey(reservation.startTime)}:${restaurantName}`;
 }
 
 function getSignificantReservationNameWords(value: string): string[] {

@@ -6,7 +6,7 @@ import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ReservationImportReviewList, useReservationImportReview } from "@/components/reservation-import-review";
-import { useFilterProviderReservationReviewCandidates } from "@/hooks/queries";
+import { useDismissProviderReservations, useFilterProviderReservationReviewCandidates } from "@/hooks/queries";
 import type {
   ImportableReservation,
   NormalizedReservationHistory,
@@ -112,10 +112,12 @@ export function ReservationImportBrowserScreen({
   const [capturedFetchedCount, setCapturedFetchedCount] = useState(0);
   const [capturedInvalidCount, setCapturedInvalidCount] = useState(0);
   const [skippedExistingConfirmedCount, setSkippedExistingConfirmedCount] = useState(0);
+  const [skippedDismissedCount, setSkippedDismissedCount] = useState(0);
   const [reviewPrepared, setReviewPrepared] = useState(false);
   const webViewSource = useMemo(() => ({ uri: accountUrl }), [accountUrl]);
   const filterReviewMutation = useFilterProviderReservationReviewCandidates(displayName);
-  const review = useReservationImportReview({ displayName, importMutation });
+  const dismissMutation = useDismissProviderReservations();
+  const review = useReservationImportReview({ displayName, importMutation, dismissMutation });
   const hasHistory = review.reservations.length > 0 || reviewPrepared;
   const pendingCount = review.reviewStats.pendingCount;
 
@@ -187,6 +189,7 @@ export function ReservationImportBrowserScreen({
         setCapturedFetchedCount(history.fetchedCount);
         setCapturedInvalidCount(history.invalidCount);
         setSkippedExistingConfirmedCount(0);
+        setSkippedDismissedCount(0);
         setReviewPrepared(false);
         filterReviewMutation
           .mutateAsync(history.reservations)
@@ -197,10 +200,12 @@ export function ReservationImportBrowserScreen({
               importableCount: history.reservations.length,
               reviewCount: filterResult.reservations.length,
               skippedExistingConfirmedCount: filterResult.skippedExistingConfirmedCount,
+              skippedDismissedCount: filterResult.skippedDismissedCount,
               skippedDuplicateCount: filterResult.skippedDuplicateCount,
             });
             review.loadReservations(filterResult.reservations);
             setSkippedExistingConfirmedCount(filterResult.skippedExistingConfirmedCount);
+            setSkippedDismissedCount(filterResult.skippedDismissedCount);
             setReviewPrepared(true);
           })
           .catch((error) => {
@@ -217,6 +222,7 @@ export function ReservationImportBrowserScreen({
     setCapturedFetchedCount(0);
     setCapturedInvalidCount(0);
     setSkippedExistingConfirmedCount(0);
+    setSkippedDismissedCount(0);
     setReviewPrepared(false);
     review.resetReview();
     webViewRef.current?.reload();
@@ -295,6 +301,12 @@ export function ReservationImportBrowserScreen({
                   <ThemedText variant={"caption1"} color={"tertiary"}>
                     {skippedExistingConfirmedCount.toLocaleString()} reservation
                     {skippedExistingConfirmedCount === 1 ? " maps" : "s map"} to existing confirmed visits.
+                  </ThemedText>
+                )}
+                {skippedDismissedCount > 0 && (
+                  <ThemedText variant={"caption1"} color={"tertiary"}>
+                    {skippedDismissedCount.toLocaleString()} previously reviewed reservation
+                    {skippedDismissedCount === 1 ? " was" : "s were"} hidden.
                   </ThemedText>
                 )}
               </View>

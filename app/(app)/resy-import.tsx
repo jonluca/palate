@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ReservationImportReviewList, useReservationImportReview } from "@/components/reservation-import-review";
 import {
+  useDismissProviderReservations,
   useFetchResyVisitHistory,
   useFilterProviderReservationReviewCandidates,
   useImportProviderReservations,
@@ -123,6 +124,7 @@ export default function ResyImportScreen() {
   const [progress, setProgress] = useState<ResyImportProgress | null>(null);
   const [invalidCount, setInvalidCount] = useState(0);
   const [skippedExistingConfirmedCount, setSkippedExistingConfirmedCount] = useState(0);
+  const [skippedDismissedCount, setSkippedDismissedCount] = useState(0);
   const [reviewPrepared, setReviewPrepared] = useState(false);
   const webViewSource = useMemo(() => ({ uri: RESY_ACCOUNT_URL }), []);
 
@@ -132,8 +134,9 @@ export default function ResyImportScreen() {
     }, []),
   );
   const filterReviewMutation = useFilterProviderReservationReviewCandidates("Resy");
+  const dismissMutation = useDismissProviderReservations();
   const importMutation = useImportProviderReservations("Resy");
-  const review = useReservationImportReview({ displayName: "Resy", importMutation });
+  const review = useReservationImportReview({ displayName: "Resy", importMutation, dismissMutation });
 
   const hasSession = Boolean(authToken);
   const hasReview = review.reservations.length > 0 || reviewPrepared;
@@ -200,6 +203,7 @@ export default function ResyImportScreen() {
     setProgress(null);
     setInvalidCount(0);
     setSkippedExistingConfirmedCount(0);
+    setSkippedDismissedCount(0);
     setReviewPrepared(false);
     review.resetReview();
     webViewRef.current?.reload();
@@ -214,6 +218,7 @@ export default function ResyImportScreen() {
     setProgress(null);
     setInvalidCount(0);
     setSkippedExistingConfirmedCount(0);
+    setSkippedDismissedCount(0);
     setReviewPrepared(false);
     review.resetReview();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -225,6 +230,7 @@ export default function ResyImportScreen() {
       review.loadReservations(filterResult.reservations);
       setInvalidCount(history.invalidCount);
       setSkippedExistingConfirmedCount(filterResult.skippedExistingConfirmedCount);
+      setSkippedDismissedCount(filterResult.skippedDismissedCount);
       setReviewPrepared(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       showToast(getFetchHistoryToast(reservationCount));
@@ -340,6 +346,12 @@ export default function ResyImportScreen() {
                   <ThemedText variant={"caption1"} color={"tertiary"}>
                     {skippedExistingConfirmedCount.toLocaleString()} reservation
                     {skippedExistingConfirmedCount === 1 ? " maps" : "s map"} to existing confirmed visits.
+                  </ThemedText>
+                )}
+                {skippedDismissedCount > 0 && (
+                  <ThemedText variant={"caption1"} color={"tertiary"}>
+                    {skippedDismissedCount.toLocaleString()} previously reviewed reservation
+                    {skippedDismissedCount === 1 ? " was" : "s were"} hidden.
                   </ThemedText>
                 )}
               </View>
