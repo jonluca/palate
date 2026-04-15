@@ -23,7 +23,9 @@ const MAPPING: Record<string, MaterialIconName> = {
   "sun.max.fill": "light-mode",
   "camera.filters": "palette",
   "circle.righthalf.filled": "brightness-6",
+  "fork.knife": "restaurant",
   "fork.knife.circle.fill": "restaurant",
+  "star.fill": "star",
   "xmark.circle.fill": "close",
   photo: "image",
 };

@@ -41,6 +41,12 @@ export interface ImportableReservation {
   latitude: number | null;
   longitude: number | null;
   website?: string | null;
+  matchedMichelinRestaurant?: {
+    id: string;
+    name: string;
+    award: string;
+    distanceMeters: number;
+  } | null;
 }
 
 export interface ReservationImportProgress {
@@ -315,6 +321,25 @@ function findMichelinMatch(
   }
 
   return bestFuzzyMatch;
+}
+
+function withMichelinReviewMatch(
+  reservation: ImportableReservation,
+  match: MichelinMatch | null,
+): ImportableReservation {
+  if (!match) {
+    return { ...reservation, matchedMichelinRestaurant: null };
+  }
+
+  return {
+    ...reservation,
+    matchedMichelinRestaurant: {
+      id: match.restaurant.id,
+      name: match.restaurant.name,
+      award: match.restaurant.award,
+      distanceMeters: Math.round(match.distance),
+    },
+  };
 }
 
 function getReservationDedupeKey(visit: ReservationOnlyVisitInput): string {
@@ -621,13 +646,17 @@ export async function filterProviderReservationReviewCandidates(
     ...exactSourceEventIdsMappedToConfirmedVisits,
     ...overlapSourceEventIdsMappedToConfirmedVisits,
   ]);
-  const reviewReservations = deduped.reservations.filter(
-    (reservation) => !sourceEventIdsMappedToConfirmedVisits.has(reservation.sourceEventId),
-  );
+  const reviewReservations = deduped.reservations
+    .filter((reservation) => !sourceEventIdsMappedToConfirmedVisits.has(reservation.sourceEventId))
+    .map((reservation) =>
+      withMichelinReviewMatch(reservation, matchesBySourceEventId.get(reservation.sourceEventId) ?? null),
+    );
 
   logReservationImport(options.sourceDisplayName, "Prepared provider review candidates", {
     receivedReservations: reservations.length,
     reviewReservations: reviewReservations.length,
+    matchedMichelinReviewCount: reviewReservations.filter((reservation) => reservation.matchedMichelinRestaurant)
+      .length,
     skippedDuplicateCount: deduped.duplicateCount,
     skippedExistingConfirmedCount: sourceEventIdsMappedToConfirmedVisits.size,
     exactConfirmedLinkCount: exactSourceEventIdsMappedToConfirmedVisits.size,

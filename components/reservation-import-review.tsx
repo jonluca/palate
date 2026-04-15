@@ -58,6 +58,14 @@ function formatReservationTime(timestamp: number): string {
   });
 }
 
+function formatMichelinDistance(distanceMeters: number): string {
+  if (distanceMeters < 1000) {
+    return `${distanceMeters.toLocaleString()} m`;
+  }
+
+  return `${(distanceMeters / 1000).toFixed(1)} km`;
+}
+
 export function getReservationImportSummary(result: ReservationImportResult): string {
   const importedPart = `Added ${result.importedCount.toLocaleString()} visit${result.importedCount === 1 ? "" : "s"}`;
   const updatedPart =
@@ -246,6 +254,7 @@ function ReservationReviewCard({
   const partyText = reservation.partySize
     ? `${reservation.partySize.toLocaleString()} guest${reservation.partySize === 1 ? "" : "s"}`
     : null;
+  const michelinMatch = reservation.matchedMichelinRestaurant;
 
   return (
     <View className={"bg-card rounded-2xl p-4 gap-3 mb-4"}>
@@ -268,6 +277,18 @@ function ReservationReviewCard({
               <IconSymbol name={"mappin"} size={12} color={"#9ca3af"} />
               <ThemedText variant={"caption1"} color={"tertiary"} numberOfLines={1} className={"flex-1"}>
                 {reservation.address}
+              </ThemedText>
+            </View>
+          )}
+          {michelinMatch && (
+            <View className={"flex-row items-center gap-1"}>
+              <IconSymbol name={"star.fill"} size={12} color={"#facc15"} />
+              <ThemedText variant={"caption1"} color={"secondary"} numberOfLines={1} className={"flex-1"}>
+                Michelin: {michelinMatch.name}
+                {michelinMatch.award ? ` · ${michelinMatch.award}` : ""}
+                {Number.isFinite(michelinMatch.distanceMeters)
+                  ? ` · ${formatMichelinDistance(michelinMatch.distanceMeters)}`
+                  : ""}
               </ThemedText>
             </View>
           )}
