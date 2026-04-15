@@ -732,7 +732,7 @@ export default function VisitDetailScreen() {
         visible={showSearch}
         onClose={() => setShowSearch(false)}
         onSelect={handleConfirmRestaurant}
-        visit={visit}
+        visit={{ ...visit, suggestedRestaurants: data.suggestedRestaurants }}
       />
 
       {galleryIndex !== null && (

@@ -78,6 +78,7 @@ import {
   type WritableCalendar,
   type CalendarEventInfo,
 } from "@/services/calendar";
+import { compareSameNameMichelinFirst, normalizeRestaurantNameForPriority } from "@/utils/restaurant-priority";
 
 // ============================================================================
 // QUERY INVALIDATION HELPERS
@@ -544,7 +545,7 @@ function mergeNearbyRestaurants(
   const dedupedMapKit = mapKit.filter((mk) => {
     const isDuplicate = michelin.some((m) => {
       // Check if names are similar (case insensitive, trimmed)
-      const nameMatch = m.name.toLowerCase().trim() === mk.name.toLowerCase().trim();
+      const nameMatch = normalizeRestaurantNameForPriority(m.name) === normalizeRestaurantNameForPriority(mk.name);
       // Or if they're within 30m of each other
       const distanceBetween = Math.sqrt(
         Math.pow((m.latitude - mk.latitude) * 111000, 2) +
@@ -555,8 +556,8 @@ function mergeNearbyRestaurants(
     return !isDuplicate;
   });
 
-  // Combine: Michelin first, then MapKit, all sorted by distance
-  return [...michelin, ...dedupedMapKit].sort((a, b) => a.distance - b.distance);
+  // Combine: keep Michelin ahead of same-name Apple results, otherwise sort by distance.
+  return [...michelin, ...dedupedMapKit].sort((a, b) => compareSameNameMichelinFirst(a, b) || a.distance - b.distance);
 }
 
 const MAPKIT_RADIUS_METERS = 200;

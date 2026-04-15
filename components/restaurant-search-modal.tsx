@@ -16,6 +16,11 @@ import { View, Pressable, Modal, ScrollView, TextInput } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { cleanCalendarEventTitle } from "@/services/calendar";
+import {
+  compareSameNameMichelinFirst,
+  isMichelinRestaurantCandidate,
+  normalizeRestaurantNameForPriority,
+} from "@/utils/restaurant-priority";
 
 export interface RestaurantOption {
   id: string;
@@ -27,6 +32,19 @@ export interface RestaurantOption {
   cuisine?: string;
   address?: string | null;
   source: "michelin" | "mapkit" | "google";
+}
+
+interface SearchModalVisit extends VisitRecord {
+  suggestedRestaurants?: Array<{
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+    distance: number;
+    award?: string | null;
+    cuisine?: string;
+    address?: string;
+  }>;
 }
 
 function formatDistance(meters: number): string {
@@ -65,8 +83,8 @@ export function getMichelinBadge(award: string): { emoji: string; label: string 
  * Returns a score between 0 (no match) and 1 (exact match).
  */
 function calculateSimilarity(str1: string, str2: string): number {
-  const s1 = str1.toLowerCase().trim();
-  const s2 = str2.toLowerCase().trim();
+  const s1 = normalizeRestaurantNameForPriority(str1);
+  const s2 = normalizeRestaurantNameForPriority(str2);
 
   if (s1 === s2) {
     return 1;
@@ -109,12 +127,31 @@ function formatPriceLevel(level: number | undefined): string | null {
   return "$".repeat(level);
 }
 
-// Sort restaurants by similarity to a search term
-function sortBySimilarity<T extends { name: string }>(items: T[], searchTerm: string | null): T[] {
-  if (!searchTerm) {
-    return items;
+function sourceFromRestaurantId(id: string): RestaurantOption["source"] {
+  if (id.startsWith("michelin-")) {
+    return "michelin";
   }
+  if (id.startsWith("mapkit-")) {
+    return "mapkit";
+  }
+  return "google";
+}
+
+// Sort restaurants by similarity to a search term
+function sortBySimilarity<T extends { id?: string; name: string; source?: RestaurantOption["source"] }>(
+  items: T[],
+  searchTerm: string | null,
+): T[] {
   return [...items].sort((a, b) => {
+    const sameNamePriority = compareSameNameMichelinFirst(a, b);
+    if (sameNamePriority !== 0) {
+      return sameNamePriority;
+    }
+
+    if (!searchTerm) {
+      return 0;
+    }
+
     const simA = calculateSimilarity(a.name, searchTerm);
     const simB = calculateSimilarity(b.name, searchTerm);
     return simB - simA; // Higher similarity first
@@ -125,7 +162,7 @@ interface RestaurantSearchModalProps {
   visible: boolean;
   onClose: () => void;
   onSelect: (restaurant: RestaurantOption) => void;
-  visit: VisitRecord;
+  visit: SearchModalVisit;
 }
 
 export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: RestaurantSearchModalProps) {
@@ -138,10 +175,9 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
   const googleMapsApiKey = useGoogleMapsApiKey();
   const { centerLat, centerLon } = visit;
 
-  // Use unified hook for Michelin + MapKit results
-  // Pass a minimal visit object with coordinates (suggestedRestaurants not available here)
+  // Use unified hook for Michelin + MapKit results.
   const { data: unifiedRestaurants, isLoading: isLoadingNearby } = useUnifiedNearbyRestaurants(
-    { centerLat, centerLon },
+    { centerLat, centerLon, suggestedRestaurants: visit.suggestedRestaurants },
     visible,
   );
 
@@ -191,8 +227,10 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
       name: r.name,
       latitude: r.latitude,
       longitude: r.longitude,
-      address: null,
-      source: "michelin" as const, // Use michelin as source since these are confirmed
+      award: r.currentAward,
+      cuisine: r.cuisine ?? undefined,
+      address: r.address,
+      source: sourceFromRestaurantId(r.id),
       visitCount: r.visitCount,
     }));
 
@@ -232,6 +270,31 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
     return sortBySimilarity(deduplicated, sortTerm);
   }, [unifiedRestaurants, sortTerm, searchQuery, visitedOptions]);
 
+  const michelinOptionsByName = useMemo(() => {
+    const optionsByName = new Map<string, RestaurantOption>();
+
+    for (const option of [...visitedOptions, ...nearbyOptions]) {
+      if (!isMichelinRestaurantCandidate(option)) {
+        continue;
+      }
+
+      const nameKey = normalizeRestaurantNameForPriority(option.name);
+      if (!nameKey) {
+        continue;
+      }
+
+      const existing = optionsByName.get(nameKey);
+      if (
+        !existing ||
+        (option.distance ?? Number.POSITIVE_INFINITY) < (existing.distance ?? Number.POSITIVE_INFINITY)
+      ) {
+        optionsByName.set(nameKey, option);
+      }
+    }
+
+    return optionsByName;
+  }, [nearbyOptions, visitedOptions]);
+
   const googleOptions: (RestaurantOption & {
     rating?: number;
     priceLevel?: number;
@@ -255,8 +318,25 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
         })
       : options;
 
-    return sortBySimilarity(filtered, sortTerm);
-  }, [googleResults, sortTerm, searchQuery]);
+    const replacedGoogleOptions: RestaurantOption[] = [];
+    const usedMichelinReplacementNames = new Set<string>();
+
+    for (const restaurant of filtered) {
+      const nameKey = normalizeRestaurantNameForPriority(restaurant.name);
+      const michelinReplacement = michelinOptionsByName.get(nameKey);
+      if (!michelinReplacement) {
+        replacedGoogleOptions.push(restaurant);
+        continue;
+      }
+
+      if (!usedMichelinReplacementNames.has(nameKey)) {
+        usedMichelinReplacementNames.add(nameKey);
+        replacedGoogleOptions.push(michelinReplacement);
+      }
+    }
+
+    return sortBySimilarity(replacedGoogleOptions, sortTerm);
+  }, [googleResults, michelinOptionsByName, sortTerm, searchQuery]);
 
   const handleClose = () => {
     setShowGoogle(false);
@@ -483,6 +563,7 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
                     const similarity = sortTerm ? calculateSimilarity(restaurant.name, sortTerm) : 0;
                     const isLikelyMatch = similarity > 0.5;
                     const priceString = formatPriceLevel(restaurant.priceLevel);
+                    const badge = restaurant.award ? getMichelinBadge(restaurant.award) : null;
                     return (
                       <Pressable
                         key={restaurant.id}
@@ -512,6 +593,14 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
                                   <ThemedText variant={"footnote"} color={"tertiary"} numberOfLines={1}>
                                     {restaurant.address}
                                   </ThemedText>
+                                )}
+                                {badge && (
+                                  <View className={"flex-row items-center gap-1 mt-1"}>
+                                    <ThemedText variant={"caption1"}>{badge.emoji}</ThemedText>
+                                    <ThemedText variant={"caption2"} color={"secondary"}>
+                                      {badge.label}
+                                    </ThemedText>
+                                  </View>
                                 )}
                               </View>
                               <View className={"items-end"}>

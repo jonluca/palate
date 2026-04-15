@@ -5,6 +5,7 @@ import {
   compareRestaurantAndCalendarTitle,
   isFuzzyRestaurantMatch,
 } from "@/services/calendar";
+import { compareSameNameMichelinFirst } from "@/utils/restaurant-priority";
 
 interface AutoRestaurantSelectorRenderArgs {
   displayRestaurants: NearbyRestaurant[];
@@ -47,6 +48,11 @@ export function AutoRestaurantSelector({
     }
 
     return [...restaurants].sort((a, b) => {
+      const sameNamePriority = compareSameNameMichelinFirst(a, b);
+      if (sameNamePriority !== 0) {
+        return sameNamePriority;
+      }
+
       const aMatches = isFuzzyRestaurantMatch(a.name, cleanedCalendarTitle);
       const bMatches = isFuzzyRestaurantMatch(b.name, cleanedCalendarTitle);
 
@@ -76,9 +82,11 @@ export function AutoRestaurantSelector({
     if (!calendarEventTitle || restaurants.length === 0) {
       return null;
     }
-    return (
-      restaurants.find((restaurant) => compareRestaurantAndCalendarTitle(calendarEventTitle, restaurant.name)) ?? null
+    const exactMatches = restaurants.filter((restaurant) =>
+      compareRestaurantAndCalendarTitle(calendarEventTitle, restaurant.name),
     );
+
+    return [...exactMatches].sort((a, b) => compareSameNameMichelinFirst(a, b) || a.distance - b.distance)[0] ?? null;
   }, [calendarEventTitle, restaurants]);
 
   const fuzzyAutoMatch = useMemo(() => {
@@ -95,6 +103,11 @@ export function AutoRestaurantSelector({
 
     return (
       [...fuzzyMatches].sort((a, b) => {
+        const sameNamePriority = compareSameNameMichelinFirst(a, b);
+        if (sameNamePriority !== 0) {
+          return sameNamePriority;
+        }
+
         const aIsMichelin = a.source === "michelin";
         const bIsMichelin = b.source === "michelin";
         if (aIsMichelin && !bIsMichelin) {
