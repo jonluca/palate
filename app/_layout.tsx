@@ -36,7 +36,7 @@ export const queryClient = new QueryClient({
       },
     },
     mutations: {
-      retry: 1, // Retry failed mutations once
+      retry: false,
     },
   },
 });

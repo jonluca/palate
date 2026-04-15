@@ -329,7 +329,7 @@ const FOOD_DETECTION_BATCH_SIZE = 50;
  * OPTIMIZED IMPLEMENTATION using parallelization and spatial indexing:
  * - Uses spatial index for O(1) restaurant lookups instead of O(n)
  * - Processes visit groups in parallel chunks
- * - Runs independent DB operations concurrently
+ * - Keeps SQLite writes sequential to avoid statement finalization lock errors
  * - Yields to event loop to prevent UI blocking
  */
 async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<AnalyzingVisitsProgress> {
@@ -508,11 +508,10 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
     // Run DB operations - insertVisits must complete first
     await insertVisits(visitRecords);
 
-    // Assign photos to visits (and insert suggested restaurants in parallel)
-    await Promise.all([
-      allSuggestedRestaurants.length > 0 ? insertVisitSuggestedRestaurants(allSuggestedRestaurants) : Promise.resolve(),
-      batchUpdatePhotoVisits(photoVisitUpdates),
-    ]);
+    if (allSuggestedRestaurants.length > 0) {
+      await insertVisitSuggestedRestaurants(allSuggestedRestaurants);
+    }
+    await batchUpdatePhotoVisits(photoVisitUpdates);
 
     // Update progress after each batch
     progress.visitsCreated += batchVisitGroups.length;
@@ -846,12 +845,12 @@ async function enrichVisitsWithCalendarEvents(
     emitProgress();
   }
 
-  await Promise.all([
-    calendarUpdates.length > 0 ? batchUpdateVisitsCalendarEvents(calendarUpdates) : Promise.resolve(),
-    restaurantSuggestionUpdates.length > 0
-      ? batchUpdateVisitSuggestedRestaurants(restaurantSuggestionUpdates)
-      : Promise.resolve(),
-  ]);
+  if (calendarUpdates.length > 0) {
+    await batchUpdateVisitsCalendarEvents(calendarUpdates);
+  }
+  if (restaurantSuggestionUpdates.length > 0) {
+    await batchUpdateVisitSuggestedRestaurants(restaurantSuggestionUpdates);
+  }
 
   progress.isComplete = true;
   progress.etaMs = 0;
