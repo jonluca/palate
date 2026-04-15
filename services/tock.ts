@@ -40,6 +40,11 @@ function getTockResultArray(payload: unknown): unknown[] {
     return purchases;
   }
 
+  const dataPurchases = getPath(record, ["data", "purchases"]);
+  if (Array.isArray(dataPurchases)) {
+    return dataPurchases;
+  }
+
   return [];
 }
 
@@ -90,15 +95,18 @@ function normalizeTockPurchase(rawPurchase: unknown): TockImportableReservation 
   const purchaseId = getString(purchase.id, purchase.confirmationId, purchase.originalPurchaseId);
   const sourceId = purchaseId ?? hashString(`${restaurantName}:${startTime}`);
   const sourceEventId = `${TOCK_SOURCE}:${sanitizeIdPart(sourceId) || hashString(sourceId)}`;
-  const businessId = getString(business?.id, business?.domainName);
+  const businessDomain = getString(business?.domainName);
+  const businessId = getString(business?.id, businessDomain);
   const restaurantId = `tock-${sanitizeIdPart(businessId ?? hashString(`${restaurantName}:${latitude}:${longitude}`))}`;
   const address = compactAddress([
     getString(business?.address1, getPath(business, ["address", "street1"])),
     getString(business?.address2, getPath(business, ["address", "street2"])),
-    getString(business?.city, getPath(business, ["address", "city"])),
+    getString(business?.city, purchase.city, getPath(business, ["address", "city"])),
     getString(business?.state, getPath(business, ["address", "state"])),
     getString(business?.zipCode, getPath(business, ["address", "zipCode"])),
+    getString(purchase.country),
   ]);
+  const tockUrl = businessDomain ? `https://www.exploretock.com/${businessDomain}` : null;
 
   return {
     id: `tock-${hashString(`${sourceEventId}:${startTime}`)}`,
@@ -112,7 +120,7 @@ function normalizeTockPurchase(rawPurchase: unknown): TockImportableReservation 
     partySize: getNumber(purchase.ticketCount, purchase.partySize, purchase.size),
     latitude,
     longitude,
-    website: getString(business?.webUrl, business?.website, ticketType?.webUrl),
+    website: getString(business?.webUrl, business?.website, ticketType?.webUrl, tockUrl),
   };
 }
 

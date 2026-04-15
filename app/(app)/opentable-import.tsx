@@ -2,21 +2,27 @@ import React from "react";
 import { ReservationImportBrowserScreen } from "@/components/reservation-import-browser-screen";
 import { useImportOpenTableVisitHistory } from "@/hooks/queries";
 
-const OPENTABLE_ACCOUNT_URL = "https://www.opentable.com/";
+const OPENTABLE_ACCOUNT_URL = "https://www.opentable.com/user/dining-dashboard";
 
 const OPENTABLE_HISTORY_BRIDGE_SCRIPT = `
 (function () {
   if (window.__palateOpenTableBridgeInstalled) {
-    if (window.__palateOpenTableEmit) {
-      window.__palateOpenTableEmit();
+    if (window.__palateOpenTableReadHistory) {
+      window.__palateOpenTableReadHistory();
     }
     true;
     return;
   }
 
   window.__palateOpenTableBridgeInstalled = true;
-  window.__palateOpenTableNetworkCandidates = [];
-  window.__palateOpenTableSeenCandidateKeys = {};
+  window.__palateOpenTableReadingHistory = false;
+  window.__palateOpenTableHistoryPayload = null;
+
+  var OPENTABLE_DASHBOARD_ORIGIN = "https://www.opentable.com";
+  var OPENTABLE_DASHBOARD_PAGE_SIZE = 200;
+  var OPENTABLE_DETAIL_CONCURRENCY = 4;
+  var OPENTABLE_MAX_DASHBOARD_PAGES = 50;
+  var MONTH_PATTERN = "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
 
   function post(message) {
     if (!window.ReactNativeWebView || !window.ReactNativeWebView.postMessage) {
@@ -25,407 +31,424 @@ const OPENTABLE_HISTORY_BRIDGE_SCRIPT = `
     window.ReactNativeWebView.postMessage(JSON.stringify(message));
   }
 
-  function isObject(value) {
-    return value && typeof value === "object";
+  function normalizeText(text) {
+    return typeof text === "string" ? text.replace(/\\s+/g, " ").trim() : "";
   }
 
-  function firstString() {
-    for (var i = 0; i < arguments.length; i += 1) {
-      var value = arguments[i];
-      if (typeof value === "string" && value.trim()) {
-        return value.trim();
-      }
-      if (typeof value === "number" && isFinite(value)) {
-        return String(value);
+  function getElementText(element) {
+    return normalizeText(element ? element.textContent || "" : "");
+  }
+
+  function findByTestId(doc, testId) {
+    return doc.querySelector('[data-test="' + testId + '"], [data-testid="' + testId + '"]');
+  }
+
+  function asAbsoluteUrl(href) {
+    try {
+      return new URL(href || "", OPENTABLE_DASHBOARD_ORIGIN).href;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function stripPrivateUrlParams(href) {
+    try {
+      var url = new URL(href || "", OPENTABLE_DASHBOARD_ORIGIN);
+      url.searchParams.delete("token");
+      return url.pathname + url.search + url.hash;
+    } catch (error) {
+      return href || "";
+    }
+  }
+
+  function getSearchParam(href, name) {
+    try {
+      return new URL(href || "", OPENTABLE_DASHBOARD_ORIGIN).searchParams.get(name);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function makeAuthError() {
+    var error = new Error("AUTH_REQUIRED");
+    error.authRequired = true;
+    return error;
+  }
+
+  function assertDashboardResponse(response, html) {
+    if (response.status === 401 || response.status === 403) {
+      throw makeAuthError();
+    }
+    if (!response.ok) {
+      throw new Error("DASHBOARD_UNAVAILABLE");
+    }
+    if (!/Past reservations|Past invites/i.test(html) && /Sign in|Log in/i.test(html)) {
+      throw makeAuthError();
+    }
+  }
+
+  function findSection(doc, headingPattern) {
+    var headings = Array.prototype.slice.call(doc.querySelectorAll("h2"));
+    for (var i = 0; i < headings.length; i += 1) {
+      if (headingPattern.test(getElementText(headings[i]))) {
+        return headings[i].parentElement;
       }
     }
     return null;
   }
 
-  function getPath(value, path) {
-    var current = value;
-    for (var i = 0; i < path.length; i += 1) {
-      if (!isObject(current)) {
-        return undefined;
-      }
-      current = current[path[i]];
-    }
-    return current;
-  }
-
-  function normalizeText(text) {
-    return typeof text === "string" ? text.replace(/\\s+/g, " ").trim() : "";
-  }
-
-  function hashString(input) {
-    var hash = 0;
-    var text = String(input || "");
-    for (var i = 0; i < text.length; i += 1) {
-      hash = (hash << 5) - hash + text.charCodeAt(i);
-      hash |= 0;
-    }
-    return Math.abs(hash).toString(36);
-  }
-
-  function getRequestUrl(input) {
-    if (typeof input === "string") {
-      return input;
-    }
-    if (input && typeof input === "object") {
-      return input.url || input.href || "";
-    }
-    return "";
-  }
-
-  function normalizeUrl(url) {
-    try {
-      return new URL(String(url || ""), window.location.href).href;
-    } catch (error) {
-      return String(url || "");
-    }
-  }
-
-  function isRelevantUrl(url) {
-    var normalized = normalizeUrl(url);
-    if (!normalized) {
-      return false;
-    }
-    if (/akam|analytics|amplitude|branch|cdn|datadog|doubleclick|facebook|google|googletag|mapbox|newrelic|optimizely|pixel|segment|sentry|static|trustarc/i.test(normalized)) {
-      return false;
-    }
-    return /opentable|\\/api(?:\\/|\\b)|\\/dapi(?:\\/|\\b)|graphql|gql|reservation|booking|dining|history|profile|account|user|visit/i.test(normalized);
-  }
-
-  function looksVisible(element) {
-    try {
-      var rect = element.getBoundingClientRect();
-      var style = window.getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-    } catch (error) {
-      return false;
-    }
-  }
-
-  function extractDateTimeFromText(text) {
-    var normalized = normalizeText(text);
-    var isoMatch = normalized.match(/\\b\\d{4}-\\d{2}-\\d{2}[T ]\\d{1,2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?\\b/);
-    if (isoMatch) {
-      return isoMatch[0];
-    }
-
-    var month = "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
-    var dateThenTime = new RegExp("\\\\b" + month + "\\\\s+\\\\d{1,2}(?:,?\\\\s+\\\\d{4})?.{0,40}?(?:\\\\d{1,2}:\\\\d{2}|\\\\d{1,2})(?:\\\\s*[AP]\\\\.?M\\\\.?)\\\\b", "i");
-    var timeThenDate = new RegExp("\\\\b(?:\\\\d{1,2}:\\\\d{2}|\\\\d{1,2})(?:\\\\s*[AP]\\\\.?M\\\\.?).{0,40}?" + month + "\\\\s+\\\\d{1,2}(?:,?\\\\s+\\\\d{4})?\\\\b", "i");
-    var match = normalized.match(dateThenTime) || normalized.match(timeThenDate);
-    return match ? match[0] : null;
-  }
-
-  function getRestaurantRecord(record) {
+  function getDashboardPageUrl(pageNumber) {
     return (
-      record.restaurant ||
-      record.restaurantDetails ||
-      record.venue ||
-      record.venueDetails ||
-      record.merchant ||
-      record.business ||
-      record.ridInfo ||
-      record.listing ||
-      getPath(record, ["reservation", "restaurant"]) ||
-      getPath(record, ["reservation", "venue"]) ||
-      getPath(record, ["booking", "restaurant"]) ||
-      getPath(record, ["booking", "venue"]) ||
-      getPath(record, ["dining", "restaurant"]) ||
-      getPath(record, ["restaurantReservation", "restaurant"])
+      OPENTABLE_DASHBOARD_ORIGIN +
+      "/user/dining-dashboard?page=" +
+      encodeURIComponent(String(pageNumber)) +
+      "&pageSize=" +
+      encodeURIComponent(String(OPENTABLE_DASHBOARD_PAGE_SIZE))
     );
   }
 
-  function getRestaurantName(record) {
-    var restaurant = getRestaurantRecord(record);
-    return firstString(
-      record.restaurantName,
-      record.restaurant_name,
-      record.venueName,
-      record.venue_name,
-      record.merchantName,
-      record.businessName,
-      record.ridName,
-      getPath(record, ["reservation", "restaurantName"]),
-      getPath(record, ["booking", "restaurantName"]),
-      getPath(record, ["dining", "restaurantName"]),
-      getPath(record, ["restaurantReservation", "restaurantName"]),
-      restaurant && restaurant.name,
-      restaurant && restaurant.displayName,
-      restaurant && restaurant.title,
-      record.name,
-      record.title
-    );
-  }
-
-  function getDateTime(record) {
-    var date = firstString(
-      record.date,
-      record.reservationDate,
-      record.bookingDate,
-      record.visitDate,
-      record.diningDate,
-      getPath(record, ["reservation", "date"]),
-      getPath(record, ["booking", "date"]),
-      getPath(record, ["dining", "date"]),
-      getPath(record, ["restaurantReservation", "date"])
-    );
-    var time = firstString(
-      record.time,
-      record.reservationTime,
-      record.bookingTime,
-      record.visitTime,
-      record.diningTime,
-      getPath(record, ["reservation", "time"]),
-      getPath(record, ["booking", "time"]),
-      getPath(record, ["dining", "time"]),
-      getPath(record, ["restaurantReservation", "time"])
-    );
-
-    return firstString(
-      record.startTime,
-      record.start_time,
-      record.startDateTime,
-      record.startsAt,
-      record.starts_at,
-      record.dateTime,
-      record.datetime,
-      record.dateTimeUtc,
-      record.reservationDateTime,
-      record.bookingDateTime,
-      record.visitDateTime,
-      record.diningDateTime,
-      record.scheduledAt,
-      getPath(record, ["reservation", "startTime"]),
-      getPath(record, ["reservation", "startDateTime"]),
-      getPath(record, ["reservation", "dateTime"]),
-      getPath(record, ["reservation", "dateTimeUtc"]),
-      getPath(record, ["booking", "startTime"]),
-      getPath(record, ["booking", "startDateTime"]),
-      getPath(record, ["booking", "dateTime"]),
-      getPath(record, ["dining", "startTime"]),
-      getPath(record, ["dining", "dateTime"]),
-      getPath(record, ["restaurantReservation", "startTime"]),
-      getPath(record, ["restaurantReservation", "dateTime"]),
-      date && time ? date + " " + time : null,
-      record.text && extractDateTimeFromText(record.text)
-    );
-  }
-
-  function isCanceledReservation(record) {
-    var status = firstString(
-      record.status,
-      record.state,
-      record.reservationStatus,
-      record.bookingStatus,
-      getPath(record, ["reservation", "status"]),
-      getPath(record, ["booking", "status"]),
-      getPath(record, ["restaurantReservation", "status"])
-    );
-    return (
-      record.canceled === true ||
-      record.cancelled === true ||
-      record.isCanceled === true ||
-      record.isCancelled === true ||
-      !!(status && /cancelled|canceled/i.test(status))
-    );
-  }
-
-  function looksLikeReservation(record) {
-    return isObject(record) && !Array.isArray(record) && !isCanceledReservation(record) && !!getRestaurantName(record) && !!getDateTime(record);
-  }
-
-  function keyFor(record) {
-    var identifier = firstString(
-      record.reservationId,
-      record.reservation_id,
-      record.bookingId,
-      record.booking_id,
-      record.confirmationNumber,
-      record.confirmationId,
-      record.confirmationCode,
-      record.reference,
-      record.uuid,
-      record.id,
-      getPath(record, ["reservation", "id"]),
-      getPath(record, ["booking", "id"]),
-      getPath(record, ["restaurantReservation", "id"])
-    );
-    return [identifier, getRestaurantName(record), getDateTime(record)].filter(Boolean).join("|");
-  }
-
-  function collectCandidates(value, output, seen) {
-    if (!isObject(value) || seen.indexOf(value) !== -1) {
-      return;
-    }
-    seen.push(value);
-
-    if (Array.isArray(value)) {
-      for (var i = 0; i < value.length; i += 1) {
-        collectCandidates(value[i], output, seen);
-      }
-      return;
-    }
-
-    if (looksLikeReservation(value)) {
-      output.push(value);
-      return;
-    }
-
-    Object.keys(value).forEach(function (key) {
-      var next = value[key];
-      if (isObject(next)) {
-        collectCandidates(next, output, seen);
-      }
-    });
-  }
-
-  function rememberNetworkPayload(payload) {
-    var found = [];
-    collectCandidates(payload, found, []);
-
-    for (var i = 0; i < found.length; i += 1) {
-      var key = keyFor(found[i]);
-      if (!key) {
-        try {
-          key = hashString(JSON.stringify(found[i]).slice(0, 2000));
-        } catch (error) {
-          key = "candidate-" + i;
-        }
-      }
-      if (!window.__palateOpenTableSeenCandidateKeys[key]) {
-        window.__palateOpenTableSeenCandidateKeys[key] = true;
-        window.__palateOpenTableNetworkCandidates.push(found[i]);
+  function extractPartyAndDateText(cardLink) {
+    var spans = Array.prototype.slice.call(cardLink.querySelectorAll("span"));
+    var partyDatePattern = new RegExp("^(\\\\d+)\\\\s*(" + MONTH_PATTERN + ".+)$", "i");
+    for (var i = 0; i < spans.length; i += 1) {
+      var text = getElementText(spans[i]);
+      var match = text.match(partyDatePattern);
+      if (match) {
+        return {
+          partySize: Number(match[1]),
+          dateText: normalizeText(match[2])
+        };
       }
     }
 
-    emit();
+    return {
+      partySize: null,
+      dateText: null
+    };
   }
 
-  function parsePossibleJson(url, text) {
-    if (!isRelevantUrl(url) || typeof text !== "string") {
-      return;
-    }
-    var trimmed = text.trim();
-    if (!trimmed || trimmed.length > 20000000 || (trimmed[0] !== "{" && trimmed[0] !== "[")) {
-      return;
-    }
-    try {
-      rememberNetworkPayload(JSON.parse(trimmed));
-    } catch (error) {}
-  }
-
-  function clickLoadMoreControls() {
-    try {
-      var controls = Array.prototype.slice.call(document.querySelectorAll("button, a, [role='button']"));
-      for (var i = 0; i < controls.length; i += 1) {
-        var control = controls[i];
-        var text = normalizeText(control.innerText || control.textContent || control.getAttribute("aria-label") || "");
-        if (!looksVisible(control) || control.disabled || control.getAttribute("aria-disabled") === "true") {
-          continue;
-        }
-        if (/^(load|show|view)\\s+(more|older|previous)|more\\s+(reservations|visits|history)|next$/i.test(text)) {
-          control.click();
-          return true;
-        }
+  function getCardStatus(cardLink) {
+    var spans = Array.prototype.slice.call(cardLink.querySelectorAll("span"));
+    for (var i = 0; i < spans.length; i += 1) {
+      var text = getElementText(spans[i]);
+      if (/reservation/i.test(text)) {
+        return text;
       }
-    } catch (error) {}
+    }
+    return null;
+  }
+
+  function extractDashboardCards(doc, sectionPattern, sourceKind) {
+    var section = findSection(doc, sectionPattern);
+    if (!section) {
+      return [];
+    }
+
+    var links = Array.prototype.slice.call(section.querySelectorAll('a[href]'));
+    var cards = [];
+    for (var i = 0; i < links.length; i += 1) {
+      var link = links[i];
+      var href = link.getAttribute("href") || "";
+      if (href.indexOf("/booking/view") === -1) {
+        continue;
+      }
+
+      var rawUrl = asAbsoluteUrl(href);
+      if (!rawUrl) {
+        continue;
+      }
+
+      var titleElement = link.querySelector("img[alt]") || link.querySelector("span");
+      var restaurantName = normalizeText(
+        (titleElement && titleElement.getAttribute && titleElement.getAttribute("alt")) ||
+          (titleElement ? titleElement.textContent || "" : "")
+      );
+      var partyAndDate = extractPartyAndDateText(link);
+      var rid = getSearchParam(rawUrl, "rid");
+      var confirmationNumber = getSearchParam(rawUrl, "confnumber");
+      var invitationId = getSearchParam(rawUrl, "invitationId");
+      var reservationId = [sourceKind, rid, confirmationNumber, invitationId].filter(Boolean).join("-");
+
+      cards.push({
+        rawUrl: rawUrl,
+        sourceUrl: stripPrivateUrlParams(rawUrl),
+        sourceKind: sourceKind,
+        reservationId: reservationId || stripPrivateUrlParams(rawUrl),
+        rid: rid,
+        confirmationNumber: confirmationNumber,
+        invitationId: invitationId,
+        restaurantName: restaurantName,
+        status: getCardStatus(link),
+        partySize: partyAndDate.partySize,
+        dateText: partyAndDate.dateText
+      });
+    }
+
+    return cards;
+  }
+
+  function hasNextReservationPage(doc) {
+    var controls = Array.prototype.slice.call(doc.querySelectorAll("button, a"));
+    for (var i = 0; i < controls.length; i += 1) {
+      var control = controls[i];
+      var label = normalizeText(control.getAttribute("aria-label") || control.textContent || "");
+      if (!/next page/i.test(label)) {
+        continue;
+      }
+      return !control.disabled && control.getAttribute("aria-disabled") !== "true";
+    }
     return false;
   }
 
-  function scrollHistory() {
-    try {
-      window.scrollBy(0, Math.max(600, Math.floor(window.innerHeight * 0.85)));
-      Array.prototype.slice
-        .call(document.querySelectorAll("main, [role='main'], [data-test*='history'], [data-testid*='history'], [data-test*='reservation'], [data-testid*='reservation'], div"))
-        .slice(0, 300)
-        .forEach(function (element) {
-          if (element.scrollHeight > element.clientHeight + 20) {
-            element.scrollTop = Math.min(element.scrollTop + Math.max(500, element.clientHeight), element.scrollHeight);
-          }
-        });
-    } catch (error) {}
-  }
-
-  function emit() {
-    var count = window.__palateOpenTableNetworkCandidates.length;
-    post({
-      type: "opentable-history",
-      hasSession: count > 0 || !/sign in|log in/i.test(document.body ? document.body.innerText || "" : ""),
-      payload: window.__palateOpenTableNetworkCandidates,
-      count: count,
-      error: count > 0 ? null : "Waiting for OpenTable reservation network data. Sign in, open or refresh your reservations/history page, then let it finish loading."
+  async function fetchDashboardPage(pageNumber) {
+    var response = await fetch(getDashboardPageUrl(pageNumber), {
+      credentials: "include"
     });
+    var html = await response.text();
+    assertDashboardResponse(response, html);
+    var doc = new DOMParser().parseFromString(html, "text/html");
+    return {
+      reservations: extractDashboardCards(doc, /^Past reservations$/i, "reservation"),
+      invites: extractDashboardCards(doc, /^Past invites$/i, "invite"),
+      hasNextPage: hasNextReservationPage(doc)
+    };
   }
 
-  var originalFetch = window.fetch;
-  if (originalFetch && !window.__palateOpenTableFetchPatched) {
-    window.__palateOpenTableFetchPatched = true;
-    window.fetch = function () {
-      var requestUrl = getRequestUrl(arguments[0]);
-      return originalFetch.apply(this, arguments).then(function (response) {
-        try {
-          var responseUrl = response.url || requestUrl;
-          if (isRelevantUrl(responseUrl || requestUrl)) {
-            var clone = response.clone();
-            var contentType = clone.headers && clone.headers.get ? clone.headers.get("content-type") || "" : "";
-            if (/json/i.test(contentType)) {
-              clone.json().then(rememberNetworkPayload).catch(function () {});
-            } else {
-              clone.text().then(function (text) {
-                parsePossibleJson(responseUrl || requestUrl, text);
-              }).catch(function () {});
-            }
-          }
-        } catch (error) {}
-        return response;
+  async function readDashboardCards() {
+    var cards = [];
+    var seenKeys = {};
+
+    for (var pageNumber = 1; pageNumber <= OPENTABLE_MAX_DASHBOARD_PAGES; pageNumber += 1) {
+      var page = await fetchDashboardPage(pageNumber);
+      var pageCards = page.reservations.concat(pageNumber === 1 ? page.invites : []);
+
+      for (var i = 0; i < pageCards.length; i += 1) {
+        var card = pageCards[i];
+        var key = card.reservationId || card.sourceUrl;
+        if (seenKeys[key]) {
+          continue;
+        }
+        seenKeys[key] = true;
+        cards.push(card);
+      }
+
+      if (page.reservations.length === 0 || page.reservations.length < OPENTABLE_DASHBOARD_PAGE_SIZE || !page.hasNextPage) {
+        break;
+      }
+    }
+
+    return cards;
+  }
+
+  function getReservationProfileUrl(doc) {
+    var links = Array.prototype.slice.call(doc.querySelectorAll('a[href]'));
+    for (var i = 0; i < links.length; i += 1) {
+      var href = links[i].getAttribute("href") || "";
+      if (/\\/r\\//i.test(href)) {
+        return asAbsoluteUrl(href);
+      }
+    }
+    return null;
+  }
+
+  function buildDateTimeText(card, detailDateTimeText) {
+    var timeMatch = normalizeText(detailDateTimeText).match(/\\b\\d{1,2}(?::\\d{2})?\\s*(?:A\\.?M\\.?|P\\.?M\\.?)\\b/i);
+    var dateText = normalizeText(card.dateText);
+    if (!dateText) {
+      return normalizeText(detailDateTimeText) || null;
+    }
+    if (!timeMatch) {
+      return /\\b\\d{4}\\b/.test(dateText) ? dateText : dateText + ", " + new Date().getFullYear();
+    }
+    if (!/\\b\\d{4}\\b/.test(dateText)) {
+      dateText += ", " + new Date().getFullYear();
+    }
+    return dateText + " " + timeMatch[0].replace(/\\./g, "");
+  }
+
+  function parsePartySize(text, fallback) {
+    var match = normalizeText(text).match(/^\\d+/);
+    if (match) {
+      return Number(match[0]);
+    }
+    return typeof fallback === "number" && isFinite(fallback) ? fallback : null;
+  }
+
+  function buildFallbackReservation(card) {
+    return {
+      reservationId: card.reservationId,
+      rid: card.rid,
+      confirmationNumber: card.confirmationNumber,
+      invitationId: card.invitationId,
+      sourceKind: card.sourceKind,
+      sourceUrl: card.sourceUrl,
+      restaurantName: card.restaurantName,
+      status: card.status,
+      partySize: card.partySize,
+      dateText: card.dateText,
+      dateTime: buildDateTimeText(card, null)
+    };
+  }
+
+  function extractDetailReservation(card, doc) {
+    var restaurantName = getElementText(findByTestId(doc, "restaurant-name")) || card.restaurantName;
+    var status = getElementText(findByTestId(doc, "reservation-state")) || card.status;
+    var partyText = getElementText(findByTestId(doc, "reservation-party-size"));
+    var detailDateTimeText = getElementText(findByTestId(doc, "reservation-date-time"));
+
+    return {
+      reservationId: card.reservationId,
+      rid: card.rid,
+      confirmationNumber: card.confirmationNumber,
+      invitationId: card.invitationId,
+      sourceKind: card.sourceKind,
+      sourceUrl: card.sourceUrl,
+      restaurantName: restaurantName,
+      status: status,
+      partySize: parsePartySize(partyText, card.partySize),
+      dateText: card.dateText,
+      detailDateTimeText: detailDateTimeText,
+      dateTime: buildDateTimeText(card, detailDateTimeText),
+      website: getReservationProfileUrl(doc)
+    };
+  }
+
+  async function fetchDetailReservation(card) {
+    try {
+      var response = await fetch(card.rawUrl, {
+        credentials: "include"
       });
-    };
+      if (response.status === 401 || response.status === 403) {
+        throw makeAuthError();
+      }
+      if (!response.ok) {
+        return buildFallbackReservation(card);
+      }
+
+      var html = await response.text();
+      var doc = new DOMParser().parseFromString(html, "text/html");
+      return extractDetailReservation(card, doc);
+    } catch (error) {
+      if (error && error.authRequired) {
+        throw error;
+      }
+      return buildFallbackReservation(card);
+    }
   }
 
-  if (window.XMLHttpRequest && !window.__palateOpenTableXhrPatched) {
-    window.__palateOpenTableXhrPatched = true;
-    var originalXhrOpen = window.XMLHttpRequest.prototype.open;
-    var originalXhrSend = window.XMLHttpRequest.prototype.send;
-    window.XMLHttpRequest.prototype.open = function (method, url) {
-      this.__palateOpenTableUrl = url;
-      return originalXhrOpen.apply(this, arguments);
-    };
-    window.XMLHttpRequest.prototype.send = function () {
-      this.addEventListener("load", function () {
-        try {
-          var url = this.responseURL || this.__palateOpenTableUrl || "";
-          if (!isRelevantUrl(url)) {
-            return;
-          }
-          var contentType = this.getResponseHeader("content-type") || "";
-          if (/json/i.test(contentType) && this.response && typeof this.response === "object") {
-            rememberNetworkPayload(this.response);
-          } else if (/json/i.test(contentType) && this.responseText) {
-            rememberNetworkPayload(JSON.parse(this.responseText));
-          } else if (this.responseText) {
-            parsePossibleJson(url, this.responseText);
-          }
-        } catch (error) {}
+  async function mapWithConcurrency(items, concurrency, mapper) {
+    var results = new Array(items.length);
+    var nextIndex = 0;
+
+    async function worker() {
+      while (nextIndex < items.length) {
+        var currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      }
+    }
+
+    var workers = [];
+    var workerCount = Math.min(concurrency, items.length);
+    for (var i = 0; i < workerCount; i += 1) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
+    return results;
+  }
+
+  function resultCount(payload) {
+    return payload && Array.isArray(payload.reservations) ? payload.reservations.length : 0;
+  }
+
+  async function readHistory() {
+    if (window.__palateOpenTableHistoryPayload) {
+      post({
+        type: "opentable-history",
+        hasSession: true,
+        payload: window.__palateOpenTableHistoryPayload,
+        count: resultCount(window.__palateOpenTableHistoryPayload),
+        error: null
       });
-      return originalXhrSend.apply(this, arguments);
-    };
+      return;
+    }
+
+    if (window.__palateOpenTableReadingHistory) {
+      return;
+    }
+
+    window.__palateOpenTableReadingHistory = true;
+    try {
+      if (window.location.hostname !== "www.opentable.com") {
+        throw makeAuthError();
+      }
+
+      post({
+        type: "opentable-history",
+        hasSession: true,
+        count: 0,
+        error: "Reading OpenTable dining dashboard..."
+      });
+
+      var cards = await readDashboardCards();
+      if (cards.length === 0) {
+        post({
+          type: "opentable-history",
+          hasSession: true,
+          count: 0,
+          error: "No OpenTable past reservations were found on the dining dashboard."
+        });
+        return;
+      }
+
+      post({
+        type: "opentable-history",
+        hasSession: true,
+        count: 0,
+        error: "Reading OpenTable reservation details..."
+      });
+
+      var reservations = await mapWithConcurrency(cards, OPENTABLE_DETAIL_CONCURRENCY, fetchDetailReservation);
+      var payload = {
+        reservations: reservations,
+        fetchedCount: cards.length,
+        endpoint: "/user/dining-dashboard?page={page}&pageSize=" + OPENTABLE_DASHBOARD_PAGE_SIZE,
+        detailEndpoint: "/booking/view"
+      };
+
+      window.__palateOpenTableHistoryPayload = payload;
+      post({
+        type: "opentable-history",
+        hasSession: true,
+        payload: payload,
+        count: resultCount(payload),
+        error: null
+      });
+    } catch (error) {
+      if (error && error.authRequired) {
+        post({
+          type: "opentable-history",
+          hasSession: false,
+          count: 0,
+          error: "Sign in to OpenTable, then open your dining dashboard."
+        });
+        return;
+      }
+
+      post({
+        type: "opentable-history",
+        hasSession: true,
+        count: 0,
+        error: "OpenTable history was not available from the dining dashboard."
+      });
+    } finally {
+      window.__palateOpenTableReadingHistory = false;
+    }
   }
 
-  function advanceHistoryCollection() {
-    clickLoadMoreControls();
-    scrollHistory();
-    emit();
-  }
-
-  window.__palateOpenTableEmit = emit;
-  setInterval(emit, 1000);
-  setInterval(advanceHistoryCollection, 2200);
-  setTimeout(emit, 300);
-  setTimeout(advanceHistoryCollection, 900);
+  window.__palateOpenTableReadHistory = readHistory;
+  setInterval(readHistory, 5000);
+  setTimeout(readHistory, 300);
   true;
 })();
 `;
@@ -442,7 +465,7 @@ export default function OpenTableImportScreen() {
       brandColor={"#da3743"}
       importMutation={importMutation}
       instructions={
-        "Sign in to OpenTable below, then open or refresh your reservations or dining history. Palate will capture reservation history from OpenTable network responses."
+        "Sign in to OpenTable below. Palate will read your dining dashboard and booking details from the signed-in page."
       }
     />
   );

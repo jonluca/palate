@@ -388,7 +388,14 @@ function normalizeOpenTableCandidate(rawReservation: unknown): OpenTableImportab
     ),
     latitude,
     longitude,
-    website: getString(restaurant?.website, restaurant?.url, restaurant?.profileUrl, restaurant?.reservationUrl),
+    website: getString(
+      record.website,
+      record.profileUrl,
+      restaurant?.website,
+      restaurant?.url,
+      restaurant?.profileUrl,
+      restaurant?.reservationUrl,
+    ),
   };
 }
 
