@@ -32,7 +32,7 @@ export const queryClient = new QueryClient({
       refetchOnMount: (query) => {
         const queryKey = query.queryKey;
         const isStaticQuery = Array.isArray(queryKey) && queryKey[0] === "static";
-        return isStaticQuery ? false : "always";
+        return isStaticQuery ? false : true;
       },
     },
     mutations: {

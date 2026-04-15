@@ -7,14 +7,12 @@ import {
   useRestaurantVisits,
   useRestaurantDetail,
   useUpdateRestaurant,
-  useVisitPhotos,
   useMichelinRestaurantDetails,
-  type VisitRecord,
   type MichelinAward,
   type MichelinRestaurantDetails,
   useCreateManualVisit,
 } from "@/hooks/queries";
-import type { RestaurantRecord, UpdateRestaurantData } from "@/utils/db";
+import type { RestaurantRecord, RestaurantVisitWithPreview, UpdateRestaurantData } from "@/utils/db";
 import { logRestaurantViewed } from "@/services/analytics";
 import { FlashList } from "@shopify/flash-list";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -55,8 +53,8 @@ function formatTime(timestamp: number): string {
   });
 }
 
-function VisitHistoryCard({ visit }: { visit: VisitRecord }) {
-  const { data: photos = [] } = useVisitPhotos(visit.id);
+function VisitHistoryCard({ visit }: { visit: RestaurantVisitWithPreview }) {
+  const photos = visit.previewPhotos;
   const [previewCount, setPreviewCount] = useState(3);
 
   const handlePreviewLayout = useCallback((e: LayoutChangeEvent) => {
@@ -83,10 +81,10 @@ function VisitHistoryCard({ visit }: { visit: VisitRecord }) {
           {/* Preview Photos */}
           {photos.length > 0 && (
             <View className={"flex-row h-24"} onLayout={handlePreviewLayout}>
-              {photos.slice(0, previewCount).map((photo, i) => {
+              {photos.slice(0, previewCount).map((photo) => {
                 const isVideo = photo.mediaType === "video";
                 return (
-                  <View key={i} className={"flex-1"}>
+                  <View key={photo.id} className={"flex-1"}>
                     <Image
                       source={{ uri: photo.uri }}
                       recyclingKey={photo.id}
@@ -692,8 +690,8 @@ function MichelinDetailsCard({ details }: { details: MichelinRestaurantDetails }
                 Facilities & Services
               </ThemedText>
               <View className={"flex-row flex-wrap gap-2"}>
-                {facilities.map((facility, index) => (
-                  <View key={index} className={"bg-secondary px-2.5 py-1.5 rounded-full"}>
+                {facilities.map((facility) => (
+                  <View key={facility} className={"bg-secondary px-2.5 py-1.5 rounded-full"}>
                     <ThemedText variant={"caption1"} color={"secondary"}>
                       {facility}
                     </ThemedText>
@@ -775,7 +773,10 @@ export default function RestaurantDetailScreen() {
     }
   };
 
-  const renderItem = useCallback(({ item }: { item: VisitRecord }) => <VisitHistoryCard visit={item} />, []);
+  const renderItem = useCallback(
+    ({ item }: { item: RestaurantVisitWithPreview }) => <VisitHistoryCard visit={item} />,
+    [],
+  );
 
   const ListHeader = useCallback(
     () => (

@@ -33,7 +33,7 @@ export function PhotoPreview({ photos, onPhotoPress }: PhotoPreviewProps) {
         const duration = typeof item === "object" ? item.duration : null;
 
         return (
-          <Pressable key={i} className={"flex-1"} onPress={() => onPhotoPress?.(i)} disabled={!onPhotoPress}>
+          <Pressable key={uri} className={"flex-1"} onPress={() => onPhotoPress?.(i)} disabled={!onPhotoPress}>
             <Image
               recyclingKey={uri}
               source={{ uri }}

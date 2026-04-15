@@ -1,4 +1,5 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
+import { getMichelinRestaurantById } from "./michelin";
 import type { RestaurantRecord, RestaurantWithVisits, UpdateRestaurantData } from "./types";
 
 export async function getAllRestaurants(): Promise<RestaurantRecord[]> {
@@ -9,6 +10,33 @@ export async function getAllRestaurants(): Promise<RestaurantRecord[]> {
 export async function getRestaurantById(id: string): Promise<RestaurantRecord | null> {
   const database = await getDatabase();
   return database.getFirstAsync<RestaurantRecord>(`SELECT * FROM restaurants WHERE id = ?`, [id]);
+}
+
+export async function getRestaurantDisplayById(id: string): Promise<RestaurantRecord | null> {
+  const restaurant = await getRestaurantById(id);
+  if (restaurant) {
+    return restaurant;
+  }
+
+  const michelinRestaurant = await getMichelinRestaurantById(id);
+  if (!michelinRestaurant) {
+    return null;
+  }
+
+  return {
+    id: michelinRestaurant.id,
+    name: michelinRestaurant.name,
+    latitude: michelinRestaurant.latitude,
+    longitude: michelinRestaurant.longitude,
+    address: michelinRestaurant.address || null,
+    phone: null,
+    website: null,
+    googlePlaceId: null,
+    cuisine: michelinRestaurant.cuisine || null,
+    priceLevel: null,
+    rating: null,
+    notes: null,
+  };
 }
 
 export async function updateRestaurant(id: string, data: UpdateRestaurantData): Promise<void> {

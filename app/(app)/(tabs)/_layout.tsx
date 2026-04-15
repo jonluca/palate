@@ -17,8 +17,8 @@ export default function TabLayout() {
       return;
     }
 
-    // Refetch all active queries when tab changes
-    queryClient.refetchQueries({ type: "active" });
+    // Keep tab switches responsive; mutations explicitly invalidate affected data.
+    queryClient.refetchQueries({ type: "active", stale: true });
   }, [pathname]);
 
   return (

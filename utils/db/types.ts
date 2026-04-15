@@ -167,6 +167,12 @@ export type RestaurantWithVisits = RestaurantRecord & {
   visitedAward: string | null;
 };
 
+export type VisitPreviewPhoto = Pick<PhotoRecord, "id" | "uri" | "mediaType" | "duration">;
+
+export type RestaurantVisitWithPreview = VisitRecord & {
+  previewPhotos: VisitPreviewPhoto[];
+};
+
 export interface ConfirmedVisitForCalendarFilter {
   visitId: string;
   michelinRestaurantId: string;

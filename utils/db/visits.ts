@@ -1,5 +1,5 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
-import type { VisitRecord, VisitWithDetails } from "./types";
+import type { RestaurantVisitWithPreview, VisitPreviewPhoto, VisitRecord, VisitWithDetails } from "./types";
 
 // Visit operations
 export async function insertVisits(visits: Omit<VisitRecord, "photoCount" | "foodProbable">[]): Promise<void> {
@@ -226,6 +226,75 @@ export async function getVisitsByRestaurantId(restaurantId: string): Promise<Vis
     `SELECT * FROM visits WHERE restaurantId = ? AND status = 'confirmed' ORDER BY startTime DESC`,
     [restaurantId],
   );
+}
+
+export async function getRestaurantVisitsWithPreviews(restaurantId: string): Promise<RestaurantVisitWithPreview[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<VisitRecord & { previewPhotosJson: string | null }>(
+    `WITH ranked_photos AS (
+       SELECT
+         p.visitId,
+         p.id,
+         p.uri,
+         p.mediaType,
+         p.duration,
+         ROW_NUMBER() OVER (
+           PARTITION BY p.visitId
+           ORDER BY
+             CASE WHEN p.foodDetected = 1 THEN 0 WHEN p.foodDetected = 0 THEN 1 ELSE 2 END ASC,
+             p.creationTime ASC
+         ) as rn
+       FROM photos p
+       INNER JOIN visits v ON p.visitId = v.id
+       WHERE v.restaurantId = ? AND v.status = 'confirmed'
+     ),
+     preview_photos AS (
+       SELECT
+         visitId,
+         json_group_array(
+           json_object(
+             'id', id,
+             'uri', uri,
+             'mediaType', COALESCE(mediaType, 'photo'),
+             'duration', duration
+           )
+         ) as photos
+       FROM (
+         SELECT * FROM ranked_photos WHERE rn <= 4 ORDER BY visitId, rn
+       )
+       GROUP BY visitId
+     )
+     SELECT v.*, pp.photos as previewPhotosJson
+     FROM visits v
+     LEFT JOIN preview_photos pp ON pp.visitId = v.id
+     WHERE v.restaurantId = ? AND v.status = 'confirmed'
+     ORDER BY v.startTime DESC`,
+    [restaurantId, restaurantId],
+  );
+
+  return rows.map((row) => {
+    const { previewPhotosJson, ...visit } = row;
+    let previewPhotos: VisitPreviewPhoto[] = [];
+
+    if (previewPhotosJson) {
+      try {
+        const parsed = JSON.parse(previewPhotosJson) as VisitPreviewPhoto[];
+        previewPhotos = parsed.map((photo) => ({
+          id: photo.id,
+          uri: photo.uri,
+          mediaType: photo.mediaType === "video" ? "video" : "photo",
+          duration: typeof photo.duration === "number" ? photo.duration : null,
+        }));
+      } catch {
+        // Skip malformed JSON.
+      }
+    }
+
+    return {
+      ...visit,
+      previewPhotos,
+    };
+  });
 }
 
 export interface BatchVisitConfirmation {

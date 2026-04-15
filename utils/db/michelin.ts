@@ -56,3 +56,8 @@ export async function getAllMichelinRestaurants(): Promise<MichelinRestaurantRec
   const database = await getDatabase();
   return database.getAllAsync<MichelinRestaurantRecord>(`SELECT * FROM michelin_restaurants`);
 }
+
+export async function getMichelinRestaurantById(id: string): Promise<MichelinRestaurantRecord | null> {
+  const database = await getDatabase();
+  return database.getFirstAsync<MichelinRestaurantRecord>(`SELECT * FROM michelin_restaurants WHERE id = ?`, [id]);
+}

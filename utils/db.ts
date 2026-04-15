@@ -11,6 +11,7 @@ export type {
   MovePhotosResult,
   PendingVisitForReview,
   PhotoRecord,
+  RestaurantVisitWithPreview,
   ReclassifyProgress,
   RemovePhotosResult,
   RestaurantRecord,
@@ -46,6 +47,7 @@ export {
   createManualVisit,
   getVisitById,
   getVisitPhotoSamples,
+  getRestaurantVisitsWithPreviews,
   getVisits,
   getVisitsByRestaurantId,
   getVisitsNeedingFoodDetection,
@@ -68,11 +70,17 @@ export {
 export {
   getAllRestaurants,
   getConfirmedRestaurantsWithVisits,
+  getRestaurantDisplayById,
   getRestaurantById,
   updateRestaurant,
 } from "./db/restaurants";
 
-export { getAllMichelinRestaurants, getMichelinRestaurantCount, insertMichelinRestaurants } from "./db/michelin";
+export {
+  getAllMichelinRestaurants,
+  getMichelinRestaurantById,
+  getMichelinRestaurantCount,
+  insertMichelinRestaurants,
+} from "./db/michelin";
 
 export {
   addIgnoredLocation,

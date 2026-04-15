@@ -41,7 +41,7 @@ import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import type { FoodLabel } from "@/utils/db";
+import type { FoodLabel, PhotoRecord } from "@/utils/db";
 import { cleanCalendarEventTitle } from "@/services/calendar";
 import { logVisitViewed } from "@/services/analytics";
 import { createAlbumWithPhotos } from "@/services/scanner";
@@ -85,6 +85,8 @@ function useAggregatedFoodLabels(
 
 // Common shape for restaurants that can be confirmed
 type ConfirmableRestaurant = Pick<NearbyRestaurant, "id" | "name" | "latitude" | "longitude">;
+
+const EMPTY_PHOTOS: PhotoRecord[] = [];
 
 export default function VisitDetailScreen() {
   const { id, photo } = useLocalSearchParams<{ id: string; photo?: string }>();
@@ -172,7 +174,24 @@ export default function VisitDetailScreen() {
   const { data: geocodedLocation } = useReverseGeocode(data?.visit?.centerLat, data?.visit?.centerLon, needsGeocode);
 
   // Aggregate food labels
-  const aggregatedFoodLabels = useAggregatedFoodLabels(data?.photos ?? []);
+  const photos = data?.photos ?? EMPTY_PHOTOS;
+  const photoData = useMemo(
+    () =>
+      photos.map((p) => ({
+        id: p.id,
+        uri: p.uri,
+        foodLabels: p.foodLabels as FoodLabel[] | null,
+        mediaType: p.mediaType,
+        duration: p.duration,
+      })),
+    [photos],
+  );
+  const unscannedPhotosCount = useMemo(
+    () => photos.reduce((count, p) => count + (p.foodDetected === null ? 1 : 0), 0),
+    [photos],
+  );
+  const hasAllImageLabels = useMemo(() => photos.some((p) => (p.allLabels?.length ?? 0) > 0), [photos]);
+  const aggregatedFoodLabels = useAggregatedFoodLabels(photos);
 
   const handleStatusChange = useCallback(
     async (newStatus: VisitStatus) => {
@@ -534,14 +553,7 @@ export default function VisitDetailScreen() {
     );
   }
 
-  const { visit, restaurant, suggestedRestaurant, photos } = data;
-  const photoData = photos.map((p) => ({
-    id: p.id,
-    uri: p.uri,
-    foodLabels: p.foodLabels as FoodLabel[] | null,
-    mediaType: p.mediaType,
-    duration: p.duration,
-  }));
+  const { visit, restaurant, suggestedRestaurant } = data;
   const displayName =
     restaurant?.name ??
     suggestedRestaurant?.name ??
@@ -558,10 +570,8 @@ export default function VisitDetailScreen() {
     visit.status === "pending" && !suggestedRestaurant && !restaurant && suggestedRestaurants.length === 0;
 
   // Check if any photos haven't been scanned for food yet
-  const unscannedPhotosCount = photos.filter((p) => p.foodDetected === null).length;
   const showFoodScanCard = unscannedPhotosCount > 0;
   const showFoodDetectionLabels = Boolean(visit.foodProbable) && aggregatedFoodLabels.length > 0;
-  const hasAllImageLabels = photos.some((p) => (p.allLabels?.length ?? 0) > 0);
   const hasNittyGrittyContent = showFoodScanCard || showFoodDetectionLabels || hasAllImageLabels;
   return (
     <>

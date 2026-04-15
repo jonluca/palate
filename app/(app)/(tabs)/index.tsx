@@ -9,14 +9,7 @@ import { FlashList } from "@shopify/flash-list";
 import { router } from "expo-router";
 import React, { useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { View, RefreshControl, Pressable, TextInput } from "react-native";
-import Animated, {
-  FadeInDown,
-  FadeIn,
-  FadeOut,
-  useAnimatedStyle,
-  withTiming,
-  useSharedValue,
-} from "react-native-reanimated";
+import Animated, { FadeInDown, FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconSymbol } from "@/components/icon-symbol";
@@ -108,7 +101,7 @@ function PhotoPreview({ photos }: { photos: string[] }) {
   );
 }
 
-function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisits; index: number }) {
+function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisits; index?: number }) {
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(`/restaurant/${restaurant.id}`);
@@ -118,61 +111,65 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
   const currentAwardDisplay = formatAward(restaurant.currentAward);
   const visitedAwardDisplay = formatAward(restaurant.visitedAward);
 
-  return (
-    <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>
-      <Pressable onPress={handlePress} className={"rounded-2xl"}>
-        <Card animated={false}>
-          <PhotoPreview photos={restaurant.previewPhotos} />
-          <View className={hasPhotos ? "p-3.5 gap-1.5" : "p-4 gap-2"}>
-            <View className={"flex-row items-start justify-between"}>
-              <View className={"flex-1 gap-0.5"}>
-                <View className={"flex-row items-center gap-2"}>
-                  <ThemedText variant={"heading"} className={"font-semibold flex-shrink"} numberOfLines={1}>
-                    {restaurant.name}
+  const content = (
+    <Pressable onPress={handlePress} className={"rounded-2xl"}>
+      <Card animated={false}>
+        <PhotoPreview photos={restaurant.previewPhotos} />
+        <View className={hasPhotos ? "p-3.5 gap-1.5" : "p-4 gap-2"}>
+          <View className={"flex-row items-start justify-between"}>
+            <View className={"flex-1 gap-0.5"}>
+              <View className={"flex-row items-center gap-2"}>
+                <ThemedText variant={"heading"} className={"font-semibold flex-shrink"} numberOfLines={1}>
+                  {restaurant.name}
+                </ThemedText>
+                {currentAwardDisplay && (
+                  <ThemedText variant={"subhead"} className={"text-amber-300"}>
+                    {currentAwardDisplay}
                   </ThemedText>
-                  {currentAwardDisplay && (
-                    <ThemedText variant={"subhead"} className={"text-amber-300"}>
-                      {currentAwardDisplay}
-                    </ThemedText>
-                  )}
-                </View>
-                <View className={"flex-row items-center gap-1"}>
-                  <ThemedText variant={"footnote"} color={"tertiary"}>
-                    Last visit: {formatDate(restaurant.lastVisit)}
-                  </ThemedText>
-                  {visitedAwardDisplay && (
-                    <ThemedText variant={"footnote"} color={"tertiary"}>
-                      · Visited at {visitedAwardDisplay}
-                    </ThemedText>
-                  )}
-                </View>
+                )}
               </View>
-              <View className={"items-end gap-2 ml-3"}>
-                {restaurant.visitCount > 1 ? (
-                  <View className={"px-2 py-1 rounded-full bg-secondary/80  flex-row items-center gap-1"}>
-                    <ThemedText
-                      variant={"caption1"}
-                      color={"secondary"}
-                      className={"font-semibold"}
-                      style={{ fontVariant: ["tabular-nums"] }}
-                    >
-                      {restaurant.visitCount.toLocaleString()}
-                    </ThemedText>
-                    <ThemedText variant={"caption2"} color={"tertiary"}>
-                      {"visits"}
-                    </ThemedText>
-                  </View>
-                ) : null}
-                <View className={"w-7 h-7 rounded-full bg-secondary/70 items-center justify-center"}>
-                  <IconSymbol name={"chevron.right"} size={12} color={"#8E8E93"} weight={"semibold"} />
+              <View className={"flex-row items-center gap-1"}>
+                <ThemedText variant={"footnote"} color={"tertiary"}>
+                  Last visit: {formatDate(restaurant.lastVisit)}
+                </ThemedText>
+                {visitedAwardDisplay && (
+                  <ThemedText variant={"footnote"} color={"tertiary"}>
+                    · Visited at {visitedAwardDisplay}
+                  </ThemedText>
+                )}
+              </View>
+            </View>
+            <View className={"items-end gap-2 ml-3"}>
+              {restaurant.visitCount > 1 ? (
+                <View className={"px-2 py-1 rounded-full bg-secondary/80  flex-row items-center gap-1"}>
+                  <ThemedText
+                    variant={"caption1"}
+                    color={"secondary"}
+                    className={"font-semibold"}
+                    style={{ fontVariant: ["tabular-nums"] }}
+                  >
+                    {restaurant.visitCount.toLocaleString()}
+                  </ThemedText>
+                  <ThemedText variant={"caption2"} color={"tertiary"}>
+                    {"visits"}
+                  </ThemedText>
                 </View>
+              ) : null}
+              <View className={"w-7 h-7 rounded-full bg-secondary/70 items-center justify-center"}>
+                <IconSymbol name={"chevron.right"} size={12} color={"#8E8E93"} weight={"semibold"} />
               </View>
             </View>
           </View>
-        </Card>
-      </Pressable>
-    </Animated.View>
+        </View>
+      </Card>
+    </Pressable>
   );
+
+  if (typeof index !== "number") {
+    return content;
+  }
+
+  return <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>{content}</Animated.View>;
 }
 
 function LoadingState() {
@@ -198,18 +195,6 @@ function SearchBar({
   filtersExpanded: boolean;
   onToggleFilters: () => void;
 }) {
-  "use no memo";
-
-  const rotation = useSharedValue(0);
-
-  React.useEffect(() => {
-    rotation.value = withTiming(filtersExpanded ? 180 : 0, { duration: 200 });
-  }, [filtersExpanded, rotation]);
-
-  const arrowStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
   return (
     <View className={"flex-row items-center gap-2"}>
       <View className={"flex-1 h-11 flex-row items-center bg-secondary/70  rounded-2xl px-3 gap-2"}>
@@ -251,9 +236,11 @@ function SearchBar({
           filtersExpanded ? "bg-primary/15 border-primary/25" : "bg-secondary/70 border-border",
         )}
       >
-        <Animated.View style={arrowStyle}>
-          <IconSymbol name={"chevron.down"} size={16} color={filtersExpanded ? "#0A84FF" : "#8E8E93"} />
-        </Animated.View>
+        <IconSymbol
+          name={filtersExpanded ? "chevron.up" : "chevron.down"}
+          size={16}
+          color={filtersExpanded ? "#0A84FF" : "#8E8E93"}
+        />
       </Pressable>
     </View>
   );
@@ -412,9 +399,9 @@ export default function RestaurantsScreen() {
       );
     }
     if (item.type === "michelin") {
-      return <MichelinRestaurantCard restaurant={item.data} index={index < 10 ? index : 0} />;
+      return <MichelinRestaurantCard restaurant={item.data} index={index < 8 ? index : undefined} />;
     }
-    return <RestaurantCard restaurant={item.data} index={index < 10 ? index : 0} />;
+    return <RestaurantCard restaurant={item.data} index={index < 8 ? index : undefined} />;
   }, []);
 
   const ListEmpty = useCallback(() => {
@@ -519,9 +506,9 @@ export default function RestaurantsScreen() {
           renderItem={renderItem}
           keyExtractor={(item) => {
             if (item.type === "section-header") {
-              return `section-${item.title}`;
+              return "section-all-restaurants";
             }
-            return `${sortBy}-${starFilter}-${searchQuery}-${item.data.id}`;
+            return `${item.type}-${item.data.id}`;
           }}
           getItemType={(item) => item.type}
           drawDistance={250}

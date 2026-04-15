@@ -10,11 +10,14 @@ import {
   updateVisitStatus,
   updateVisitNotes,
   getConfirmedRestaurantsWithVisits,
-  getVisitsByRestaurantId,
+  getRestaurantVisitsWithPreviews,
   getPendingVisitsForReview,
   batchConfirmVisits,
   confirmVisit,
   getAllMichelinRestaurants,
+  getMichelinRestaurantById,
+  getRestaurantById,
+  getRestaurantDisplayById,
   getMichelinRestaurantsForStatsBucket,
   getWrappedStats,
   getMergeableVisits,
@@ -290,6 +293,7 @@ export function usePhotoCount(enabled: boolean) {
     queryKey: queryKeys.photoCount,
     queryFn: getPhotoCount,
     enabled,
+    staleTime: 1000 * 60 * 2,
   });
 }
 
@@ -321,9 +325,6 @@ export interface VisitDetail {
  * Fetch visit detail with restaurant and photos
  */
 export function useVisitDetail(id: string | undefined) {
-  const { data: confirmedRestaurants } = useConfirmedRestaurants();
-  const { data: allMichelinRestaurants } = useMichelinRestaurants();
-
   return useQuery({
     queryKey: queryKeys.visitDetail(id ?? ""),
     queryFn: async (): Promise<VisitDetail | null> => {
@@ -341,17 +342,12 @@ export function useVisitDetail(id: string | undefined) {
         return null;
       }
 
-      // Find restaurant from confirmed restaurants list
-      let restaurant: RestaurantRecord | null = null;
-      if (visit.restaurantId && confirmedRestaurants) {
-        restaurant = confirmedRestaurants.find((r) => r.id === visit.restaurantId) ?? null;
-      }
+      const [restaurant, suggestedRestaurantRecord] = await Promise.all([
+        visit.restaurantId ? getRestaurantById(visit.restaurantId) : Promise.resolve(null),
+        visit.suggestedRestaurantId ? getMichelinRestaurantById(visit.suggestedRestaurantId) : Promise.resolve(null),
+      ]);
 
-      // Find suggested restaurant from michelin restaurants list
-      let suggestedRestaurant: MichelinRestaurantRecord | null = null;
-      if (visit.suggestedRestaurantId && allMichelinRestaurants) {
-        suggestedRestaurant = allMichelinRestaurants.find((r) => r.id === visit.suggestedRestaurantId) ?? null;
-      }
+      let suggestedRestaurant: MichelinRestaurantRecord | null = suggestedRestaurantRecord;
 
       // For confirmed visits, prefer the historical award stored at time of confirmation
       // Fall back to current award if no historical award was stored
@@ -390,7 +386,7 @@ export function useConfirmedRestaurants() {
 export function useRestaurantVisits(restaurantId: string | undefined) {
   return useQuery({
     queryKey: queryKeys.restaurantVisits(restaurantId ?? ""),
-    queryFn: () => getVisitsByRestaurantId(restaurantId!),
+    queryFn: () => getRestaurantVisitsWithPreviews(restaurantId!),
     enabled: !!restaurantId,
   });
 }
@@ -1379,15 +1375,11 @@ export function useRemoveIgnoredLocation() {
 
 /** Restaurant detail query */
 export function useRestaurantDetail(restaurantId: string | undefined) {
-  const { data: confirmedRestaurants } = useConfirmedRestaurants();
-
-  return useMemo(() => {
-    if (!restaurantId || !confirmedRestaurants) {
-      return { data: undefined };
-    }
-    const restaurant = confirmedRestaurants.find((r) => r.id === restaurantId);
-    return { data: restaurant ?? undefined };
-  }, [restaurantId, confirmedRestaurants]);
+  return useQuery({
+    queryKey: queryKeys.restaurantDetail(restaurantId ?? ""),
+    queryFn: () => getRestaurantDisplayById(restaurantId!),
+    enabled: !!restaurantId,
+  });
 }
 
 /** Update restaurant mutation */
