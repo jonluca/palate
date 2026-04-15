@@ -1,0 +1,47 @@
+- generic [ref=e1]:
+  - region "Accept cookies":
+    - generic [ref=e3]:
+      - img "close icon" [ref=e5] [cursor=pointer]
+      - generic [ref=e6]:
+        - text: Select "Accept" to agree to Tock's use of cookies and similar technologies to enhance your browsing experience, security, analytics, customization and personalized advertising. Select "Manage settings" to make more granular choices. You can read more in our
+        - link "Privacy Policy" [ref=e7] [cursor=pointer]:
+          - /url: https://www.exploretock.com/privacy
+        - text: .
+      - generic [ref=e8]:
+        - button "Manage settings" [ref=e9] [cursor=pointer]
+        - button "Accept" [ref=e10] [cursor=pointer]
+        - button "Reject All" [ref=e11] [cursor=pointer]
+  - generic [ref=e15]:
+    - link "Skip to main content" [ref=e16] [cursor=pointer]:
+      - /url: "#maincontent"
+    - banner [ref=e17]:
+      - link "Tock home page" [ref=e23] [cursor=pointer]:
+        - /url: /
+        - img [ref=e24]
+    - main [ref=e31]:
+      - generic [ref=e35]:
+        - heading "Log in to continue" [level=1] [ref=e38]
+        - generic [ref=e39]:
+          - button "Log in with Google" [ref=e40] [cursor=pointer]:
+            - img [ref=e42]
+            - text: Log in with Google
+          - button "Log in with Apple" [ref=e44] [cursor=pointer]:
+            - img [ref=e46]
+            - text: Log in with Apple
+          - generic [ref=e51]: OR
+          - generic [ref=e52]:
+            - generic [ref=e53]:
+              - generic [ref=e55]:
+                - generic: Email
+                - textbox "Email" [active] [ref=e57]:
+                  - /placeholder: Email address
+              - generic [ref=e59]:
+                - generic: Password
+                - generic [ref=e60]:
+                  - textbox "Password" [ref=e61]
+                  - button "toggle password visibility" [ref=e63] [cursor=pointer]:
+                    - img [ref=e65]
+              - link "Forgot password?" [ref=e69] [cursor=pointer]:
+                - /url: /forgot-password?continue=%2Fprofile%2Freservations%2Fpast
+              - button "Log in" [ref=e72] [cursor=pointer]
+            - generic [ref=e74]: New to Tock? Create an account

@@ -149,7 +149,9 @@ import {
 } from "@/services/visit";
 import { hasMediaLibraryPermission, requestMediaLibraryPermission, getPhotoCount } from "@/services/scanner";
 import { exportToJSON, exportToCSV, shareExport, type ExportFormat, type ExportShareResult } from "@/services/export";
+import { importOpenTableVisitHistory } from "@/services/opentable";
 import { importResyVisitHistory, type ResyImportProgress } from "@/services/resy";
+import { importTockVisitHistory } from "@/services/tock";
 import {
   isMapKitSearchAvailable,
   searchByText as mapKitSearchByText,
@@ -1048,6 +1050,44 @@ export function useImportResyVisitHistory(onProgress?: (progress: ResyImportProg
 
   return useMutation({
     mutationFn: (authToken: string) => importResyVisitHistory(authToken, { onProgress }),
+    onSuccess: () => {
+      invalidateVisitQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: queryKeys.visits("confirmed") });
+      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
+      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+    },
+  });
+}
+
+/**
+ * Import the user's full past Tock reservation history as confirmed visits.
+ */
+export function useImportTockVisitHistory() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: unknown) => importTockVisitHistory(payload),
+    onSuccess: () => {
+      invalidateVisitQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: queryKeys.visits("confirmed") });
+      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
+      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+    },
+  });
+}
+
+/**
+ * Import the user's full past OpenTable reservation history as confirmed visits.
+ */
+export function useImportOpenTableVisitHistory() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: unknown) => importOpenTableVisitHistory(payload),
     onSuccess: () => {
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.visits("confirmed") });

@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { View, Alert, ScrollView, Pressable, Linking, TextInput, Modal, FlatList } from "react-native";
 import { useToast } from "@/components/ui/toast";
-import { router } from "expo-router";
+import { router, type Href } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
@@ -723,20 +723,86 @@ export function QuickActionsCard() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Resy Import Card
-// ─────────────────────────────────────────────────────────────────────────────
-
-export function ResyImportCard() {
+export function ProviderImportsCard() {
   return (
-    <Pressable onPress={() => router.push("/resy-import")}>
+    <Pressable onPress={() => router.push("/settings-imports")}>
       <Card animated={false}>
         <View className={"p-4 flex-row items-center justify-between"}>
           <View className={"flex-row items-center gap-3 flex-1"}>
             <CardIcon name={"fork.knife.circle.fill"} color={"#ff462d"} bgColor={"bg-red-500/15"} />
             <View className={"flex-1"}>
               <ThemedText variant={"subhead"} className={"font-medium"}>
-                Import from Resy
+                Reservation Imports
+              </ThemedText>
+              <ThemedText variant={"footnote"} color={"secondary"}>
+                Import from Resy, Tock, and OpenTable
+              </ThemedText>
+            </View>
+          </View>
+          <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resy Import Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function ResyImportCard() {
+  return (
+    <ReservationImportCard
+      href={"/resy-import"}
+      title={"Import from Resy"}
+      color={"#ff462d"}
+      bgColor={"bg-red-500/15"}
+    />
+  );
+}
+
+export function TockImportCard() {
+  return (
+    <ReservationImportCard
+      href={"/tock-import"}
+      title={"Import from Tock"}
+      color={"#111827"}
+      bgColor={"bg-zinc-500/15"}
+    />
+  );
+}
+
+export function OpenTableImportCard() {
+  return (
+    <ReservationImportCard
+      href={"/opentable-import"}
+      title={"Import from OpenTable"}
+      color={"#da3743"}
+      bgColor={"bg-red-500/15"}
+    />
+  );
+}
+
+function ReservationImportCard({
+  href,
+  title,
+  color,
+  bgColor,
+}: {
+  href: Href;
+  title: string;
+  color: string;
+  bgColor: string;
+}) {
+  return (
+    <Pressable onPress={() => router.push(href)}>
+      <Card animated={false}>
+        <View className={"p-4 flex-row items-center justify-between"}>
+          <View className={"flex-row items-center gap-3 flex-1"}>
+            <CardIcon name={"fork.knife.circle.fill"} color={color} bgColor={bgColor} />
+            <View className={"flex-1"}>
+              <ThemedText variant={"subhead"} className={"font-medium"}>
+                {title}
               </ThemedText>
               <ThemedText variant={"footnote"} color={"secondary"}>
                 Add past reservations as confirmed visits

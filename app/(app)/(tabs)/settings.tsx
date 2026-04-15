@@ -10,8 +10,8 @@ import {
   AllVisitsCard,
   CalendarSection,
   DeepScanCard,
+  ProviderImportsCard,
   QuickActionsCard,
-  ResyImportCard,
   SectionHeader,
 } from "@/components/settings";
 
@@ -51,7 +51,7 @@ export default function SettingsScreen() {
         <View className={"gap-3"}>
           <AllVisitsCard />
           <QuickActionsCard />
-          <ResyImportCard />
+          <ProviderImportsCard />
           <DeepScanCard />
         </View>
       </Animated.View>

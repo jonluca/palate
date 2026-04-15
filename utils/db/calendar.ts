@@ -184,7 +184,7 @@ export async function insertCalendarOnlyVisits(
 
 /**
  * Insert or link confirmed reservation-only visits for sources that provide
- * their own venue coordinates, such as Resy. When possible, these source
+ * their own venue coordinates, such as Resy, Tock, and OpenTable. When possible, these source
  * reservations are attached to an existing overlapping photo visit instead of
  * creating a duplicate reservation-only visit.
  */
@@ -298,7 +298,7 @@ export async function insertReservationOnlyVisits(
       if (existingVisit) {
         const wasConfirmed = existingVisit.status === "confirmed" && Boolean(existingVisit.restaurantId);
         const canUpgradeExternalRestaurant =
-          Boolean(visit.suggestedRestaurantId) && Boolean(existingVisit.restaurantId?.startsWith("resy-"));
+          Boolean(visit.suggestedRestaurantId) && isExternalReservationRestaurantId(existingVisit.restaurantId);
         const canUseImportedRestaurant =
           existingVisit.status !== "rejected" &&
           (existingVisit.status !== "confirmed" ||
@@ -516,6 +516,15 @@ function scoreReservationOverlap(reservation: ReservationOnlyVisitInput, visit: 
 
   return score;
 }
+
+function isExternalReservationRestaurantId(restaurantId: string | null): boolean {
+  return (
+    restaurantId?.startsWith("resy-") === true ||
+    restaurantId?.startsWith("tock-") === true ||
+    restaurantId?.startsWith("opentable-") === true
+  );
+}
+
 /**
  * Get confirmed visits that don't have an associated calendar event.
  * These are visits that could be exported to the user's calendar.

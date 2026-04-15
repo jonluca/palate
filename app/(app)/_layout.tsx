@@ -105,9 +105,30 @@ export default function RootLayoutNav() {
         }}
       />
       <Stack.Screen
+        name={"settings-imports"}
+        options={{
+          title: "Reservation Imports",
+          headerLargeTitle: false,
+        }}
+      />
+      <Stack.Screen
         name={"resy-import"}
         options={{
           title: "Import from Resy",
+          headerLargeTitle: false,
+        }}
+      />
+      <Stack.Screen
+        name={"tock-import"}
+        options={{
+          title: "Import from Tock",
+          headerLargeTitle: false,
+        }}
+      />
+      <Stack.Screen
+        name={"opentable-import"}
+        options={{
+          title: "Import from OpenTable",
           headerLargeTitle: false,
         }}
       />

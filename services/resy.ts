@@ -1,28 +1,24 @@
 import {
-  getAllMichelinRestaurants,
-  insertReservationOnlyVisits,
-  type MichelinRestaurantRecord,
-  type ReservationOnlyRestaurantInput,
-  type ReservationOnlyVisitInput,
-} from "@/utils/db";
-import { calculateDistanceMeters } from "@/data/restaurants";
-import {
-  compareRestaurantAndCalendarTitle,
-  isFuzzyRestaurantMatch,
-  normalizeForComparison,
-  stripComparisonAffixes,
-} from "@/services/calendar";
-import { getAwardForDate } from "@/services/michelin";
+  asRecord,
+  compactAddress,
+  defaultReservationEndTime,
+  getNumber,
+  getPath,
+  getString,
+  hashString,
+  importReservationVisitHistory,
+  parseTimestamp,
+  sanitizeIdPart,
+  ReservationApiError,
+  type ImportableReservation,
+  type JsonRecord,
+  type ReservationImportProgress,
+  type ReservationImportResult,
+} from "@/services/reservation-import";
 
 const RESY_API_KEY = "VbWk7s3L4KiK5fzlO7JD3Q5EYolJI7n5";
 const RESY_RESERVATIONS_URL = "https://api.resy.com/3/user/reservations";
 const RESY_PAGE_LIMIT = 50;
-const DEFAULT_VISIT_DURATION_MS = 2 * 60 * 60 * 1000;
-const EXACT_MICHELIN_MATCH_RADIUS_METERS = 1000;
-const FUZZY_MICHELIN_MATCH_RADIUS_METERS = 250;
-const RESERVATION_DEDUPE_BUFFER_MS = 2 * 60 * 60 * 1000;
-
-type JsonRecord = Record<string, unknown>;
 
 interface ResyReservationsPage {
   reservations?: unknown[];
@@ -33,110 +29,15 @@ interface ResyReservationsPage {
   };
 }
 
-export interface ResyImportableReservation {
-  id: string;
-  sourceEventId: string;
-  restaurantName: string;
-  restaurantId: string;
-  address: string | null;
-  startTime: number;
-  endTime: number;
-  partySize: number | null;
-  latitude: number;
-  longitude: number;
-}
+export type ResyImportableReservation = ImportableReservation;
+export type ResyImportProgress = ReservationImportProgress;
+export type ResyImportResult = ReservationImportResult;
 
-export interface ResyImportProgress {
-  fetchedCount: number;
-  totalCount: number | null;
-  page: number;
-}
-
-export interface ResyImportResult {
-  fetchedCount: number;
-  importableCount: number;
-  importedCount: number;
-  linkedExistingCount: number;
-  confirmedExistingCount: number;
-  matchedMichelinCount: number;
-  skippedDuplicateCount: number;
-  skippedConflictCount: number;
-  skippedInvalidCount: number;
-}
-
-export class ResyApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-  ) {
-    super(message);
+export class ResyApiError extends ReservationApiError {
+  constructor(message: string, status: number) {
+    super(message, status);
     this.name = "ResyApiError";
   }
-}
-
-function asRecord(value: unknown): JsonRecord | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
-}
-
-function getPath(value: unknown, path: string[]): unknown {
-  let current: unknown = value;
-  for (const key of path) {
-    const record = asRecord(current);
-    if (!record) {
-      return undefined;
-    }
-    current = record[key];
-  }
-  return current;
-}
-
-function getString(...values: unknown[]): string | null {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return String(value);
-    }
-  }
-  return null;
-}
-
-function getNumber(...values: unknown[]): number | null {
-  for (const value of values) {
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value === "string" && value.trim()) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) {
-        return parsed;
-      }
-    }
-  }
-  return null;
-}
-
-function hashString(input: string): string {
-  let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    hash = (hash << 5) - hash + input.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash).toString(36);
-}
-
-function sanitizeIdPart(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-}
-
-function compactAddress(parts: Array<string | null>): string | null {
-  const compacted = parts.filter((part): part is string => Boolean(part));
-  return compacted.length > 0 ? compacted.join(", ") : null;
 }
 
 function getVenueForReservation(reservation: JsonRecord, venues: Record<string, unknown>): JsonRecord | null {
@@ -159,28 +60,25 @@ function getVenueForReservation(reservation: JsonRecord, venues: Record<string, 
 }
 
 function parseReservationStartTime(reservation: JsonRecord): number | null {
-  const day = getString(reservation.day, reservation.date, reservation.reservation_date);
-  const time = getString(reservation.time_slot, reservation.time, reservation.reservation_time);
-
-  if (time && Number.isFinite(Date.parse(time))) {
-    return Date.parse(time);
+  const parsedTimestamp = parseTimestamp(reservation.time_slot, reservation.time, reservation.reservation_time);
+  if (parsedTimestamp !== null) {
+    return parsedTimestamp;
   }
 
+  const day = getString(reservation.day, reservation.date, reservation.reservation_date);
   if (!day) {
     return null;
   }
 
-  const normalizedTime = time || "19:00:00";
-  const timestamp = Date.parse(`${day}T${normalizedTime}`);
+  const time = getString(reservation.time_slot, reservation.time, reservation.reservation_time) ?? "19:00:00";
+  const timestamp = Date.parse(`${day}T${time}`);
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function parseReservationEndTime(reservation: JsonRecord, startTime: number): number {
-  const endTime = getString(reservation.end_time, reservation.end, reservation.endTime);
-  if (endTime && Number.isFinite(Date.parse(endTime))) {
-    return Date.parse(endTime);
-  }
-  return startTime + DEFAULT_VISIT_DURATION_MS;
+  return (
+    parseTimestamp(reservation.end_time, reservation.end, reservation.endTime) ?? defaultReservationEndTime(startTime)
+  );
 }
 
 function normalizeReservation(reservation: unknown, venues: Record<string, unknown>): ResyImportableReservation | null {
@@ -232,6 +130,7 @@ function normalizeReservation(reservation: unknown, venues: Record<string, unkno
   return {
     id: `resy-${hashString(`${sourceEventId}:${startTime}`)}`,
     sourceEventId,
+    sourceName: "resy",
     restaurantName,
     restaurantId,
     address,
@@ -240,183 +139,6 @@ function normalizeReservation(reservation: unknown, venues: Record<string, unkno
     partySize: getNumber(record.num_seats, record.party_size, record.seats),
     latitude,
     longitude,
-  };
-}
-
-interface MichelinMatch {
-  restaurant: MichelinRestaurantRecord;
-  distance: number;
-}
-
-type RestaurantsByNormalizedName = Map<string, MichelinRestaurantRecord[]>;
-
-function buildRestaurantsByNormalizedName(restaurants: MichelinRestaurantRecord[]): RestaurantsByNormalizedName {
-  const map: RestaurantsByNormalizedName = new Map();
-  for (const restaurant of restaurants) {
-    const key = normalizeForComparison(stripComparisonAffixes(restaurant.name));
-    if (!key) {
-      continue;
-    }
-    const existing = map.get(key);
-    if (existing) {
-      existing.push(restaurant);
-    } else {
-      map.set(key, [restaurant]);
-    }
-  }
-  return map;
-}
-
-function getDistanceToMichelinReservation(
-  reservation: ResyImportableReservation,
-  restaurant: MichelinRestaurantRecord,
-): number {
-  return calculateDistanceMeters(
-    reservation.latitude,
-    reservation.longitude,
-    restaurant.latitude,
-    restaurant.longitude,
-  );
-}
-
-function findMichelinMatch(
-  reservation: ResyImportableReservation,
-  restaurants: MichelinRestaurantRecord[],
-  restaurantsByName: RestaurantsByNormalizedName,
-): MichelinMatch | null {
-  const normalizedName = normalizeForComparison(stripComparisonAffixes(reservation.restaurantName));
-  const exactMatches = restaurantsByName.get(normalizedName) ?? [];
-  const exactCandidates = exactMatches
-    .map((restaurant) => ({
-      restaurant,
-      distance: getDistanceToMichelinReservation(reservation, restaurant),
-    }))
-    .filter((match) => match.distance <= EXACT_MICHELIN_MATCH_RADIUS_METERS)
-    .sort((a, b) => a.distance - b.distance);
-
-  if (exactCandidates.length > 0) {
-    return exactCandidates[0];
-  }
-
-  let bestFuzzyMatch: MichelinMatch | null = null;
-  for (const restaurant of restaurants) {
-    const distance = getDistanceToMichelinReservation(reservation, restaurant);
-    if (distance > FUZZY_MICHELIN_MATCH_RADIUS_METERS) {
-      continue;
-    }
-
-    const namesMatch =
-      compareRestaurantAndCalendarTitle(reservation.restaurantName, restaurant.name) ||
-      isFuzzyRestaurantMatch(reservation.restaurantName, restaurant.name);
-    if (!namesMatch) {
-      continue;
-    }
-
-    if (!bestFuzzyMatch || distance < bestFuzzyMatch.distance) {
-      bestFuzzyMatch = { restaurant, distance };
-    }
-  }
-
-  return bestFuzzyMatch;
-}
-
-function getReservationDedupeKey(visit: ReservationOnlyVisitInput): string {
-  return visit.suggestedRestaurantId ?? normalizeForComparison(stripComparisonAffixes(visit.restaurant.name));
-}
-
-function areReservationVisitsDuplicate(
-  a: ReservationOnlyVisitInput,
-  b: ReservationOnlyVisitInput,
-  timeBufferMs: number = RESERVATION_DEDUPE_BUFFER_MS,
-): boolean {
-  const keyA = getReservationDedupeKey(a);
-  const keyB = getReservationDedupeKey(b);
-  if (!keyA || keyA !== keyB) {
-    return false;
-  }
-
-  return a.startTime <= b.endTime + timeBufferMs && a.endTime >= b.startTime - timeBufferMs;
-}
-
-function dedupeReservationOnlyVisits(visits: ReservationOnlyVisitInput[]): {
-  visits: ReservationOnlyVisitInput[];
-  duplicateCount: number;
-} {
-  const sorted = [...visits].sort((a, b) => a.startTime - b.startTime);
-  const deduped: ReservationOnlyVisitInput[] = [];
-  let duplicateCount = 0;
-
-  for (const visit of sorted) {
-    const duplicateIndex = deduped.findIndex((existing) => areReservationVisitsDuplicate(existing, visit));
-    if (duplicateIndex === -1) {
-      deduped.push(visit);
-      continue;
-    }
-
-    duplicateCount += 1;
-    const existing = deduped[duplicateIndex];
-    const shouldReplace =
-      (visit.suggestedRestaurantId ? 1 : 0) > (existing.suggestedRestaurantId ? 1 : 0) ||
-      (visit.sourceLocation ? 1 : 0) > (existing.sourceLocation ? 1 : 0);
-    if (shouldReplace) {
-      deduped[duplicateIndex] = visit;
-    }
-  }
-
-  return { visits: deduped.sort((a, b) => b.startTime - a.startTime), duplicateCount };
-}
-
-async function getAwardForReservationVisit(restaurantId: string | null, startTime: number): Promise<string | null> {
-  if (!restaurantId?.startsWith("michelin-")) {
-    return null;
-  }
-
-  return getAwardForDate(restaurantId, startTime);
-}
-
-function getRestaurantInputForReservation(
-  reservation: ResyImportableReservation,
-  match: MichelinMatch | null,
-): ReservationOnlyRestaurantInput {
-  if (match) {
-    return {
-      id: match.restaurant.id,
-      name: match.restaurant.name,
-      latitude: match.restaurant.latitude,
-      longitude: match.restaurant.longitude,
-      address: match.restaurant.address || reservation.address,
-      cuisine: match.restaurant.cuisine || null,
-    };
-  }
-
-  return {
-    id: reservation.restaurantId,
-    name: reservation.restaurantName,
-    latitude: reservation.latitude,
-    longitude: reservation.longitude,
-    address: reservation.address,
-  };
-}
-
-async function toReservationOnlyVisit(
-  reservation: ResyImportableReservation,
-  match: MichelinMatch | null,
-): Promise<ReservationOnlyVisitInput> {
-  const partyText = reservation.partySize ? `Party of ${reservation.partySize}` : null;
-  const suggestedRestaurantId = match?.restaurant.id ?? null;
-  return {
-    id: reservation.id,
-    sourceEventId: reservation.sourceEventId,
-    sourceName: "resy",
-    sourceTitle: reservation.restaurantName,
-    sourceLocation: reservation.address,
-    startTime: reservation.startTime,
-    endTime: reservation.endTime,
-    restaurant: getRestaurantInputForReservation(reservation, match),
-    suggestedRestaurantId,
-    suggestedRestaurantDistance: match?.distance ?? null,
-    awardAtVisit: await getAwardForReservationVisit(suggestedRestaurantId, reservation.startTime),
-    notes: partyText ? `Imported from Resy. ${partyText}.` : "Imported from Resy.",
   };
 }
 
@@ -511,35 +233,9 @@ export async function importResyVisitHistory(
   options: { onProgress?: (progress: ResyImportProgress) => void } = {},
 ): Promise<ResyImportResult> {
   const history = await fetchPastResyReservationHistory(authToken, options);
-  const michelinRestaurants = await getAllMichelinRestaurants();
-  const restaurantsByName = buildRestaurantsByNormalizedName(michelinRestaurants);
-  const matchesBySourceEventId = new Map<string, MichelinMatch | null>();
-
-  for (const reservation of history.reservations) {
-    matchesBySourceEventId.set(
-      reservation.sourceEventId,
-      findMichelinMatch(reservation, michelinRestaurants, restaurantsByName),
-    );
-  }
-
-  const visits = await Promise.all(
-    history.reservations.map((reservation) =>
-      toReservationOnlyVisit(reservation, matchesBySourceEventId.get(reservation.sourceEventId) ?? null),
-    ),
-  );
-  const deduped = dedupeReservationOnlyVisits(visits);
-  const importResult = await insertReservationOnlyVisits(deduped.visits);
-  const matchedMichelinCount = deduped.visits.filter((visit) => Boolean(visit.suggestedRestaurantId)).length;
-
-  return {
+  return importReservationVisitHistory(history.reservations, {
+    sourceDisplayName: "Resy",
     fetchedCount: history.fetchedCount,
-    importableCount: deduped.visits.length,
-    importedCount: importResult.insertedCount,
-    linkedExistingCount: importResult.linkedExistingCount,
-    confirmedExistingCount: importResult.confirmedExistingCount,
-    matchedMichelinCount,
-    skippedDuplicateCount: importResult.skippedDuplicateCount + deduped.duplicateCount,
-    skippedConflictCount: importResult.skippedConflictCount,
-    skippedInvalidCount: history.invalidCount,
-  };
+    invalidCount: history.invalidCount,
+  });
 }

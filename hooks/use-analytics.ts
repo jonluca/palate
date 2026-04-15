@@ -24,6 +24,7 @@ const getScreenName = (pathname: string, segments: string[]): string => {
     "/scan": "Scan",
     "/rescan": "Rescan",
     "/quick-actions": "Quick Actions",
+    "/settings-imports": "Reservation Imports",
     "/calendar-import": "Calendar Import",
   };
 
