@@ -72,6 +72,7 @@ export interface FoodDetectionResult {
 // Default food-related classification identifiers (used if no custom keywords provided)
 const DEFAULT_FOOD_IDENTIFIERS = new Set([
   "food",
+  "drink",
   "dish",
   "meal",
   "cuisine",
@@ -101,6 +102,8 @@ const DEFAULT_FOOD_IDENTIFIERS = new Set([
   "pie",
   "cookie",
   "ice_cream",
+  "spoon",
+  "cup",
   "chocolate",
   "candy",
   "beverage",

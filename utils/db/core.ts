@@ -9,6 +9,7 @@ export const DEBUG_TIMING = __DEV__;
 // Default food keywords - these will be prepopulated in the database
 const DEFAULT_FOOD_KEYWORDS = [
   "food",
+  "drink",
   "dish",
   "meal",
   "cuisine",
@@ -43,8 +44,10 @@ const DEFAULT_FOOD_KEYWORDS = [
   "baked_goods",
   "cookie",
   "ice_cream",
+  "spoon",
   "fork",
   "drinking_glass",
+  "cup",
   "chocolate",
   "candy",
   "beverage",
@@ -340,19 +343,17 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
     // Column already exists, ignore
   }
 
-  // Prepopulate food_keywords table with default keywords if empty
-  await prepopulateFoodKeywords(database);
+  // Ensure built-in food keywords include the current defaults
+  await syncDefaultFoodKeywords(database);
 }
 
 /**
- * Prepopulate the food_keywords table with default keywords if it's empty.
+ * Add any missing default food keywords.
+ *
+ * Existing rows keep their enabled state, but keywords that are now defaults
+ * are marked built-in so reset/remove behavior matches the current default set.
  */
-async function prepopulateFoodKeywords(database: SQLite.SQLiteDatabase): Promise<void> {
-  const count = await database.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM food_keywords`);
-  if (count && count.count > 0) {
-    return; // Already populated
-  }
-
+async function syncDefaultFoodKeywords(database: SQLite.SQLiteDatabase): Promise<void> {
   const now = Date.now();
   const batchSize = 50;
 
@@ -360,11 +361,13 @@ async function prepopulateFoodKeywords(database: SQLite.SQLiteDatabase): Promise
     const batch = DEFAULT_FOOD_KEYWORDS.slice(i, i + batchSize);
     const placeholders = batch.map(() => "(?, 1, 1, ?)").join(", ");
     const values = batch.flatMap((keyword) => [keyword, now]);
+    const keywordPlaceholders = batch.map(() => "?").join(", ");
 
     await database.runAsync(
       `INSERT OR IGNORE INTO food_keywords (keyword, enabled, isBuiltIn, createdAt) VALUES ${placeholders}`,
       values,
     );
+    await database.runAsync(`UPDATE food_keywords SET isBuiltIn = 1 WHERE keyword IN (${keywordPlaceholders})`, batch);
   }
 }
 
