@@ -17,7 +17,7 @@ import type { GalleryProps, GalleryReactRef, ItemRef, RenderItem } from "./types
 
 export type { RenderItemInfo } from "./types";
 
-const GalleryComponent = <T = string>(
+const GalleryComponent = <T = string,>(
   {
     data,
     renderItem = DefaultImage as RenderItem<T>,

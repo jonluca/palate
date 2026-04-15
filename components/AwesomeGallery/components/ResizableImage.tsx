@@ -19,7 +19,7 @@ import { useVector } from "../hooks";
 import { RTL, TIMING_CONFIG } from "../constants";
 import type { ResizableImageProps, RenderItemInfo } from "../types";
 
-export const ResizableImage = <T = string>({
+export const ResizableImage = <T = string,>({
   item,
   translateX,
   index,
