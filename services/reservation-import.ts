@@ -10,7 +10,9 @@ import { searchPlaceByText } from "@/services/places";
 import {
   batchMergeSameRestaurantVisits,
   getAllMichelinRestaurants,
+  getConfirmedLinkedReservationSourceEventIds,
   getMergeableSameRestaurantVisitGroups,
+  getReservationOnlyVisitsMappedToConfirmedVisitSourceIds,
   insertReservationOnlyVisits,
   type MichelinRestaurantRecord,
   type ReservationOnlyRestaurantInput,
@@ -58,6 +60,18 @@ export interface ReservationImportResult {
   skippedDuplicateCount: number;
   skippedConflictCount: number;
   skippedInvalidCount: number;
+}
+
+export interface NormalizedReservationHistory {
+  reservations: ImportableReservation[];
+  fetchedCount: number;
+  invalidCount: number;
+}
+
+export interface ReservationReviewFilterResult {
+  reservations: ImportableReservation[];
+  skippedExistingConfirmedCount: number;
+  skippedDuplicateCount: number;
 }
 
 interface LocatedImportableReservation extends ImportableReservation {
@@ -127,6 +141,27 @@ async function mergeDuplicateVisitsAfterProviderImport(sourceDisplayName: string
     mergeCount,
   });
   return mergeCount;
+}
+
+function dedupeImportableReservationsBySourceEventId(reservations: ImportableReservation[]): {
+  reservations: ImportableReservation[];
+  duplicateCount: number;
+} {
+  const reservationsBySourceEventId = new Map<string, ImportableReservation>();
+  let duplicateCount = 0;
+
+  for (const reservation of reservations) {
+    if (reservationsBySourceEventId.has(reservation.sourceEventId)) {
+      duplicateCount += 1;
+      continue;
+    }
+    reservationsBySourceEventId.set(reservation.sourceEventId, reservation);
+  }
+
+  return {
+    reservations: Array.from(reservationsBySourceEventId.values()).sort((a, b) => b.startTime - a.startTime),
+    duplicateCount,
+  };
 }
 
 export function asRecord(value: unknown): JsonRecord | null {
@@ -531,4 +566,78 @@ export async function importReservationVisitHistory(
   });
 
   return result;
+}
+
+export async function filterProviderReservationReviewCandidates(
+  reservations: ImportableReservation[],
+  options: { sourceDisplayName: string },
+): Promise<ReservationReviewFilterResult> {
+  const deduped = dedupeImportableReservationsBySourceEventId(reservations);
+  if (deduped.reservations.length === 0) {
+    return {
+      reservations: [],
+      skippedExistingConfirmedCount: 0,
+      skippedDuplicateCount: deduped.duplicateCount,
+    };
+  }
+
+  const exactSourceEventIdsMappedToConfirmedVisits = await getConfirmedLinkedReservationSourceEventIds(
+    deduped.reservations.map((reservation) => reservation.sourceEventId),
+  );
+  const reservationsNeedingLocationCheck = deduped.reservations.filter(
+    (reservation) => !exactSourceEventIdsMappedToConfirmedVisits.has(reservation.sourceEventId),
+  );
+  const michelinRestaurants = await getAllMichelinRestaurants();
+  const restaurantsByName = buildRestaurantsByNormalizedName(michelinRestaurants);
+  const locatedReservations: LocatedImportableReservation[] = [];
+
+  for (const reservation of reservationsNeedingLocationCheck) {
+    const located = await resolveReservationLocation(reservation, restaurantsByName);
+    if (located) {
+      locatedReservations.push(located);
+    }
+  }
+
+  const matchesBySourceEventId = new Map<string, MichelinMatch | null>();
+  for (const reservation of locatedReservations) {
+    matchesBySourceEventId.set(
+      reservation.sourceEventId,
+      findMichelinMatch(reservation, michelinRestaurants, restaurantsByName),
+    );
+  }
+
+  const visits = await Promise.all(
+    locatedReservations.map((reservation) =>
+      toReservationOnlyVisit(
+        reservation,
+        matchesBySourceEventId.get(reservation.sourceEventId) ?? null,
+        options.sourceDisplayName,
+      ),
+    ),
+  );
+  const overlapSourceEventIdsMappedToConfirmedVisits =
+    await getReservationOnlyVisitsMappedToConfirmedVisitSourceIds(visits);
+  const sourceEventIdsMappedToConfirmedVisits = new Set([
+    ...exactSourceEventIdsMappedToConfirmedVisits,
+    ...overlapSourceEventIdsMappedToConfirmedVisits,
+  ]);
+  const reviewReservations = deduped.reservations.filter(
+    (reservation) => !sourceEventIdsMappedToConfirmedVisits.has(reservation.sourceEventId),
+  );
+
+  logReservationImport(options.sourceDisplayName, "Prepared provider review candidates", {
+    receivedReservations: reservations.length,
+    reviewReservations: reviewReservations.length,
+    skippedDuplicateCount: deduped.duplicateCount,
+    skippedExistingConfirmedCount: sourceEventIdsMappedToConfirmedVisits.size,
+    exactConfirmedLinkCount: exactSourceEventIdsMappedToConfirmedVisits.size,
+    overlapConfirmedVisitCount: overlapSourceEventIdsMappedToConfirmedVisits.size,
+    unresolvedLocationCount: reservationsNeedingLocationCheck.length - locatedReservations.length,
+  });
+
+  return {
+    reservations: reviewReservations,
+    skippedExistingConfirmedCount: sourceEventIdsMappedToConfirmedVisits.size,
+    skippedDuplicateCount: deduped.duplicateCount,
+  };
 }

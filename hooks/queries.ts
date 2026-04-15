@@ -90,6 +90,15 @@ function invalidateVisitQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
 }
 
+function invalidateReservationImportQueries(queryClient: QueryClient) {
+  invalidateVisitQueries(queryClient);
+  queryClient.invalidateQueries({ queryKey: queryKeys.visits("confirmed") });
+  queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+  queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+  queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
+  queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+}
+
 // ============================================================================
 // OPTIMISTIC UPDATE HELPERS
 // ============================================================================
@@ -150,8 +159,15 @@ import {
 import { hasMediaLibraryPermission, requestMediaLibraryPermission, getPhotoCount } from "@/services/scanner";
 import { exportToJSON, exportToCSV, shareExport, type ExportFormat, type ExportShareResult } from "@/services/export";
 import { importOpenTableVisitHistory } from "@/services/opentable";
-import { importResyVisitHistory, type ResyImportProgress } from "@/services/resy";
+import { fetchResyVisitHistory, importResyVisitHistory, type ResyImportProgress } from "@/services/resy";
 import { importTockVisitHistory } from "@/services/tock";
+import {
+  filterProviderReservationReviewCandidates,
+  importReservationVisitHistory,
+  type ImportableReservation,
+  type ReservationReviewFilterResult,
+  type ReservationImportResult,
+} from "@/services/reservation-import";
 import {
   isMapKitSearchAvailable,
   searchByText as mapKitSearchByText,
@@ -1043,6 +1059,44 @@ export function useDismissCalendarEvents() {
 }
 
 /**
+ * Fetch the user's full past Resy reservation history for manual review.
+ */
+export function useFetchResyVisitHistory(onProgress?: (progress: ResyImportProgress) => void) {
+  return useMutation({
+    mutationFn: (authToken: string) => fetchResyVisitHistory(authToken, { onProgress }),
+  });
+}
+
+/**
+ * Remove provider reservations that already map to confirmed visits before review.
+ */
+export function useFilterProviderReservationReviewCandidates(sourceDisplayName: string) {
+  return useMutation<ReservationReviewFilterResult, Error, ImportableReservation[]>({
+    mutationFn: (reservations: ImportableReservation[]) =>
+      filterProviderReservationReviewCandidates(reservations, { sourceDisplayName }),
+  });
+}
+
+/**
+ * Import manually approved provider reservations as confirmed visits.
+ */
+export function useImportProviderReservations(sourceDisplayName: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation<ReservationImportResult, Error, ImportableReservation[]>({
+    mutationFn: (reservations: ImportableReservation[]) =>
+      importReservationVisitHistory(reservations, {
+        sourceDisplayName,
+        fetchedCount: reservations.length,
+        invalidCount: 0,
+      }),
+    onSuccess: () => {
+      invalidateReservationImportQueries(queryClient);
+    },
+  });
+}
+
+/**
  * Import the user's full past Resy reservation history as confirmed visits.
  */
 export function useImportResyVisitHistory(onProgress?: (progress: ResyImportProgress) => void) {
@@ -1051,12 +1105,7 @@ export function useImportResyVisitHistory(onProgress?: (progress: ResyImportProg
   return useMutation({
     mutationFn: (authToken: string) => importResyVisitHistory(authToken, { onProgress }),
     onSuccess: () => {
-      invalidateVisitQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: queryKeys.visits("confirmed") });
-      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
-      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      invalidateReservationImportQueries(queryClient);
     },
   });
 }
@@ -1070,12 +1119,7 @@ export function useImportTockVisitHistory() {
   return useMutation({
     mutationFn: (payload: unknown) => importTockVisitHistory(payload),
     onSuccess: () => {
-      invalidateVisitQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: queryKeys.visits("confirmed") });
-      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
-      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      invalidateReservationImportQueries(queryClient);
     },
   });
 }
@@ -1089,12 +1133,7 @@ export function useImportOpenTableVisitHistory() {
   return useMutation({
     mutationFn: (payload: unknown) => importOpenTableVisitHistory(payload),
     onSuccess: () => {
-      invalidateVisitQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: queryKeys.visits("confirmed") });
-      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
-      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      invalidateReservationImportQueries(queryClient);
     },
   });
 }

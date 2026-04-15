@@ -1,6 +1,7 @@
 import React from "react";
 import { ReservationImportBrowserScreen } from "@/components/reservation-import-browser-screen";
-import { useImportTockVisitHistory } from "@/hooks/queries";
+import { useImportProviderReservations } from "@/hooks/queries";
+import { normalizeTockVisitHistory } from "@/services/tock";
 
 const TOCK_ACCOUNT_URL = "https://www.exploretock.com/profile/reservations/past";
 
@@ -195,7 +196,7 @@ const TOCK_HISTORY_BRIDGE_SCRIPT = `
 `;
 
 export default function TockImportScreen() {
-  const importMutation = useImportTockVisitHistory();
+  const importMutation = useImportProviderReservations("Tock");
 
   return (
     <ReservationImportBrowserScreen
@@ -205,6 +206,7 @@ export default function TockImportScreen() {
       displayName={"Tock"}
       brandColor={"#111827"}
       importMutation={importMutation}
+      normalizePayload={normalizeTockVisitHistory}
       instructions={"Sign in to Tock below. Palate will read your past reservation history from the signed-in page."}
     />
   );

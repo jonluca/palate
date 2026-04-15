@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
 import * as Haptics from "expo-haptics";
@@ -7,10 +7,20 @@ import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { useToast } from "@/components/ui/toast";
 import { IconSymbol } from "@/components/icon-symbol";
-import { useImportResyVisitHistory } from "@/hooks/queries";
-import type { ResyImportProgress, ResyImportResult } from "@/services/resy";
+import {
+  getReservationImportSummary,
+  ReservationImportReviewList,
+  useReservationImportReview,
+} from "@/components/reservation-import-review";
+import {
+  useFetchResyVisitHistory,
+  useFilterProviderReservationReviewCandidates,
+  useImportProviderReservations,
+} from "@/hooks/queries";
+import type { ResyImportProgress } from "@/services/resy";
 
 const RESY_ACCOUNT_URL = "https://resy.com/account/reservations";
+const RESY_BRAND_COLOR = "#ff462d";
 
 const RESY_AUTH_BRIDGE_SCRIPT = `
 (function () {
@@ -94,23 +104,19 @@ interface ResyBridgeMessage {
   token?: string | null;
 }
 
-function getImportSummary(result: ResyImportResult): string {
-  const importedPart = `Added ${result.importedCount.toLocaleString()} visit${result.importedCount === 1 ? "" : "s"}`;
-  const updatedPart =
-    result.linkedExistingCount > 0
-      ? `updated ${result.linkedExistingCount.toLocaleString()} existing visit${result.linkedExistingCount === 1 ? "" : "s"}`
-      : null;
-  const michelinPart =
-    result.matchedMichelinCount > 0
-      ? `${result.matchedMichelinCount.toLocaleString()} Michelin match${result.matchedMichelinCount === 1 ? "" : "es"}`
-      : null;
-  const skipped = result.skippedDuplicateCount + result.skippedInvalidCount + result.skippedConflictCount;
-  const skippedPart =
-    skipped > 0
-      ? `skipped ${skipped.toLocaleString()} duplicate or unreadable reservation${skipped === 1 ? "" : "s"}`
-      : null;
+function getFetchHistoryToast(reservationCount: number): { type: "success" | "error"; message: string } {
+  if (reservationCount === 0) {
+    return { type: "error", message: "No importable Resy reservations were found." };
+  }
 
-  return [importedPart, updatedPart, michelinPart, skippedPart].filter(Boolean).join(", ") + ".";
+  return {
+    type: "success",
+    message: `Found ${reservationCount.toLocaleString()} Resy reservation${reservationCount === 1 ? "" : "s"} to review.`,
+  };
+}
+
+function getErrorStatus(error: unknown): number | null {
+  return typeof error === "object" && error !== null && "status" in error ? Number(error.status) : null;
 }
 
 export default function ResyImportScreen() {
@@ -119,16 +125,23 @@ export default function ResyImportScreen() {
   const { showToast } = useToast();
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [progress, setProgress] = useState<ResyImportProgress | null>(null);
-  const [lastResult, setLastResult] = useState<ResyImportResult | null>(null);
+  const [invalidCount, setInvalidCount] = useState(0);
+  const [skippedExistingConfirmedCount, setSkippedExistingConfirmedCount] = useState(0);
+  const [reviewPrepared, setReviewPrepared] = useState(false);
   const webViewSource = useMemo(() => ({ uri: RESY_ACCOUNT_URL }), []);
 
-  const importMutation = useImportResyVisitHistory(
+  const fetchMutation = useFetchResyVisitHistory(
     useCallback((nextProgress: ResyImportProgress) => {
       setProgress(nextProgress);
     }, []),
   );
+  const filterReviewMutation = useFilterProviderReservationReviewCandidates("Resy");
+  const importMutation = useImportProviderReservations("Resy");
+  const review = useReservationImportReview({ displayName: "Resy", importMutation });
 
   const hasSession = Boolean(authToken);
+  const hasReview = review.reservations.length > 0 || reviewPrepared;
+  const pendingCount = review.reviewStats.pendingCount;
   const totalLabel =
     progress?.totalCount === null || progress?.totalCount === undefined ? "all" : progress.totalCount.toLocaleString();
   const progressRatio =
@@ -136,15 +149,40 @@ export default function ResyImportScreen() {
 
   const statusText = useMemo(() => {
     if (importMutation.isPending) {
-      return progress ? `Reading ${progress.fetchedCount.toLocaleString()} of ${totalLabel}` : "Starting import...";
+      return "Importing approved reservations...";
+    }
+
+    if (fetchMutation.isPending) {
+      return progress ? `Reading ${progress.fetchedCount.toLocaleString()} of ${totalLabel}` : "Reading history...";
+    }
+
+    if (filterReviewMutation.isPending) {
+      return "Preparing reservations for review...";
+    }
+
+    if (hasReview) {
+      if (pendingCount === 0) {
+        return `Reviewed ${review.reviewStats.capturedCount.toLocaleString()} captured reservation${review.reviewStats.capturedCount === 1 ? "" : "s"}.`;
+      }
+      return `Review ${pendingCount.toLocaleString()} captured reservation${pendingCount === 1 ? "" : "s"} before importing.`;
     }
 
     if (hasSession) {
-      return "Signed in. Ready to import your full past reservation history.";
+      return "Signed in. Fetch your past reservations to review them before importing.";
     }
 
     return "Sign in to Resy below. Palate will detect the session without saving your password.";
-  }, [hasSession, importMutation.isPending, progress, totalLabel]);
+  }, [
+    fetchMutation.isPending,
+    filterReviewMutation.isPending,
+    hasReview,
+    hasSession,
+    importMutation.isPending,
+    pendingCount,
+    progress,
+    review.reviewStats.capturedCount,
+    totalLabel,
+  ]);
 
   const injectBridge = useCallback(() => {
     webViewRef.current?.injectJavaScript(RESY_AUTH_BRIDGE_SCRIPT);
@@ -168,51 +206,50 @@ export default function ResyImportScreen() {
   }, []);
 
   const handleReload = useCallback(() => {
+    setProgress(null);
+    setInvalidCount(0);
+    setSkippedExistingConfirmedCount(0);
+    setReviewPrepared(false);
+    review.resetReview();
     webViewRef.current?.reload();
-  }, []);
+  }, [review]);
 
-  const runImport = useCallback(async () => {
+  const handleFetchHistory = useCallback(async () => {
     if (!authToken) {
       showToast({ type: "error", message: "Sign in to Resy first." });
       return;
     }
 
-    setLastResult(null);
     setProgress(null);
+    setInvalidCount(0);
+    setSkippedExistingConfirmedCount(0);
+    setReviewPrepared(false);
+    review.resetReview();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const result = await importMutation.mutateAsync(authToken);
-      setLastResult(result);
+      const history = await fetchMutation.mutateAsync(authToken);
+      const filterResult = await filterReviewMutation.mutateAsync(history.reservations);
+      const reservationCount = filterResult.reservations.length;
+      review.loadReservations(filterResult.reservations);
+      setInvalidCount(history.invalidCount);
+      setSkippedExistingConfirmedCount(filterResult.skippedExistingConfirmedCount);
+      setReviewPrepared(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showToast({ type: "success", message: getImportSummary(result) });
+      showToast(getFetchHistoryToast(reservationCount));
     } catch (error) {
-      console.error("Error importing Resy history:", error);
+      console.error("Error fetching Resy history:", error);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      const status = typeof error === "object" && error !== null && "status" in error ? Number(error.status) : null;
+      const status = getErrorStatus(error);
       showToast({
         type: "error",
         message:
           status === 401 || status === 419
             ? "Resy session expired. Sign in again and retry."
-            : "Failed to import Resy history.",
+            : "Failed to fetch Resy history.",
       });
     }
-  }, [authToken, importMutation, showToast]);
-
-  const handleImportPress = useCallback(() => {
-    Alert.alert(
-      "Import Resy History",
-      "This will import every past Resy reservation as a confirmed visit. Existing Resy imports will be skipped.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Import",
-          onPress: runImport,
-        },
-      ],
-    );
-  }, [runImport]);
+  }, [authToken, fetchMutation, filterReviewMutation, review, showToast]);
 
   return (
     <View className={"flex-1 bg-background"}>
@@ -226,19 +263,23 @@ export default function ResyImportScreen() {
           <View className={"p-4 gap-4"}>
             <View className={"flex-row items-center gap-3"}>
               <View className={"w-12 h-12 rounded-full bg-red-500/15 items-center justify-center"}>
-                <IconSymbol name={"fork.knife.circle.fill"} size={26} color={"#ff462d"} />
+                <IconSymbol name={"fork.knife.circle.fill"} size={26} color={RESY_BRAND_COLOR} />
               </View>
               <View className={"flex-1"}>
                 <View className={"flex-row items-center gap-2"}>
                   <ThemedText variant={"title4"} className={"font-semibold"}>
                     Resy
                   </ThemedText>
-                  <View className={`px-2 py-1 rounded-full ${hasSession ? "bg-green-500/15" : "bg-amber-500/15"}`}>
+                  <View
+                    className={`px-2 py-1 rounded-full ${
+                      hasReview || hasSession ? "bg-green-500/15" : "bg-amber-500/15"
+                    }`}
+                  >
                     <ThemedText
                       variant={"caption2"}
-                      className={`font-semibold ${hasSession ? "text-green-400" : "text-amber-400"}`}
+                      className={`font-semibold ${hasReview || hasSession ? "text-green-400" : "text-amber-400"}`}
                     >
-                      {hasSession ? "Signed in" : "Needs sign-in"}
+                      {hasReview ? "Ready to review" : hasSession ? "Signed in" : "Needs sign-in"}
                     </ThemedText>
                   </View>
                 </View>
@@ -255,14 +296,14 @@ export default function ResyImportScreen() {
               </Pressable>
             </View>
 
-            {progress && (
+            {(fetchMutation.isPending || progress) && !hasReview && (
               <View className={"gap-2"}>
                 <View className={"flex-row justify-between"}>
                   <ThemedText variant={"caption1"} color={"secondary"}>
                     Fetching history
                   </ThemedText>
                   <ThemedText variant={"caption1"} color={"secondary"}>
-                    {progress.fetchedCount.toLocaleString()} / {totalLabel}
+                    {progress?.fetchedCount.toLocaleString() ?? 0} / {totalLabel}
                   </ThemedText>
                 </View>
                 <View className={"h-1.5 rounded-full bg-red-500/15 overflow-hidden"}>
@@ -276,51 +317,117 @@ export default function ResyImportScreen() {
               </View>
             )}
 
-            {lastResult && (
+            {hasReview && (
+              <View className={"gap-2"}>
+                <View className={"flex-row justify-between"}>
+                  <ThemedText variant={"caption1"} color={"secondary"}>
+                    Pending approval
+                  </ThemedText>
+                  <ThemedText variant={"caption1"} color={"secondary"}>
+                    {pendingCount.toLocaleString()} / {review.reviewStats.capturedCount.toLocaleString()}
+                  </ThemedText>
+                </View>
+                <View className={"h-1.5 rounded-full bg-red-500/15 overflow-hidden"}>
+                  <View
+                    className={"h-full rounded-full bg-red-500"}
+                    style={{
+                      width: `${
+                        review.reviewStats.capturedCount > 0
+                          ? (pendingCount / review.reviewStats.capturedCount) * 100
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </View>
+                {invalidCount > 0 && (
+                  <ThemedText variant={"caption1"} color={"tertiary"}>
+                    {invalidCount.toLocaleString()} captured reservation{invalidCount === 1 ? " was" : "s were"}{" "}
+                    unreadable.
+                  </ThemedText>
+                )}
+                {skippedExistingConfirmedCount > 0 && (
+                  <ThemedText variant={"caption1"} color={"tertiary"}>
+                    {skippedExistingConfirmedCount.toLocaleString()} reservation
+                    {skippedExistingConfirmedCount === 1 ? " maps" : "s map"} to existing confirmed visits.
+                  </ThemedText>
+                )}
+              </View>
+            )}
+
+            {review.lastResult && (
               <View className={"bg-green-500/10 rounded-xl p-3 flex-row gap-2"}>
                 <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#22c55e"} />
                 <ThemedText variant={"footnote"} className={"text-green-400 flex-1"}>
-                  {getImportSummary(lastResult)}
+                  {getReservationImportSummary(review.lastResult)}
                 </ThemedText>
               </View>
             )}
 
             <Button
-              onPress={handleImportPress}
-              disabled={!hasSession || importMutation.isPending}
-              loading={importMutation.isPending}
+              onPress={hasReview ? review.importAllPendingReservations : handleFetchHistory}
+              disabled={
+                (!hasReview && !hasSession) ||
+                fetchMutation.isPending ||
+                filterReviewMutation.isPending ||
+                importMutation.isPending ||
+                (hasReview && pendingCount === 0)
+              }
+              loading={fetchMutation.isPending || filterReviewMutation.isPending || review.isImportingAll}
               className={"w-full"}
             >
-              <IconSymbol name={"tray.and.arrow.down.fill"} size={17} color={"#fff"} />
-              <ButtonText className={"ml-2"}>{hasSession ? "Import Full History" : "Sign In First"}</ButtonText>
+              <IconSymbol
+                name={hasReview ? "checkmark.circle.fill" : "list.bullet.rectangle"}
+                size={17}
+                color={"#fff"}
+              />
+              <ButtonText className={"ml-2"}>
+                {hasReview
+                  ? `Approve All (${pendingCount.toLocaleString()})`
+                  : hasSession
+                    ? "Review Reservation History"
+                    : "Sign In First"}
+              </ButtonText>
             </Button>
           </View>
         </Card>
       </View>
 
       <View className={"flex-1 px-4 pb-4"} style={{ paddingBottom: insets.bottom + 16 }}>
-        <View className={"flex-1 rounded-2xl overflow-hidden bg-card border border-white/10"}>
-          <WebView
-            ref={webViewRef}
-            source={webViewSource}
-            onMessage={handleMessage}
-            injectedJavaScriptBeforeContentLoaded={RESY_AUTH_BRIDGE_SCRIPT}
-            injectedJavaScript={RESY_AUTH_BRIDGE_SCRIPT}
-            onLoadEnd={injectBridge}
-            startInLoadingState
-            renderLoading={() => (
-              <View className={"absolute inset-0 items-center justify-center bg-card"}>
-                <ActivityIndicator size={"large"} color={"#ff462d"} />
-              </View>
-            )}
-            javaScriptEnabled
-            domStorageEnabled
-            sharedCookiesEnabled
-            thirdPartyCookiesEnabled
-            originWhitelist={["https://*", "http://*"]}
-            style={{ flex: 1, backgroundColor: "#0b0b0f" }}
+        {hasReview ? (
+          <ReservationImportReviewList
+            reservations={review.pendingReservations}
+            brandColor={RESY_BRAND_COLOR}
+            displayName={"Resy"}
+            importingReservationIds={review.importingReservationIds}
+            dismissingReservationIds={review.dismissingReservationIds}
+            onImport={review.importReservation}
+            onDismiss={review.dismissReservation}
+            contentBottomPadding={16}
           />
-        </View>
+        ) : (
+          <View className={"flex-1 rounded-2xl overflow-hidden bg-card border border-white/10"}>
+            <WebView
+              ref={webViewRef}
+              source={webViewSource}
+              onMessage={handleMessage}
+              injectedJavaScriptBeforeContentLoaded={RESY_AUTH_BRIDGE_SCRIPT}
+              injectedJavaScript={RESY_AUTH_BRIDGE_SCRIPT}
+              onLoadEnd={injectBridge}
+              startInLoadingState
+              renderLoading={() => (
+                <View className={"absolute inset-0 items-center justify-center bg-card"}>
+                  <ActivityIndicator size={"large"} color={RESY_BRAND_COLOR} />
+                </View>
+              )}
+              javaScriptEnabled
+              domStorageEnabled
+              sharedCookiesEnabled
+              thirdPartyCookiesEnabled
+              originWhitelist={["https://*", "http://*"]}
+              style={{ flex: 1, backgroundColor: "#0b0b0f" }}
+            />
+          </View>
+        )}
       </View>
     </View>
   );

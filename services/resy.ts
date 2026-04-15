@@ -220,6 +220,13 @@ async function fetchPastResyReservationHistory(
   };
 }
 
+export async function fetchResyVisitHistory(
+  authToken: string,
+  options: { onProgress?: (progress: ResyImportProgress) => void } = {},
+): Promise<{ reservations: ResyImportableReservation[]; fetchedCount: number; invalidCount: number }> {
+  return fetchPastResyReservationHistory(authToken, options);
+}
+
 export async function fetchAllPastResyReservations(
   authToken: string,
   options: { onProgress?: (progress: ResyImportProgress) => void } = {},

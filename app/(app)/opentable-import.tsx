@@ -1,6 +1,7 @@
 import React from "react";
 import { ReservationImportBrowserScreen } from "@/components/reservation-import-browser-screen";
-import { useImportOpenTableVisitHistory } from "@/hooks/queries";
+import { useImportProviderReservations } from "@/hooks/queries";
+import { normalizeOpenTableVisitHistory } from "@/services/opentable";
 
 const OPENTABLE_ACCOUNT_URL = "https://www.opentable.com/user/dining-dashboard";
 
@@ -511,7 +512,7 @@ const OPENTABLE_HISTORY_BRIDGE_SCRIPT = `
 `;
 
 export default function OpenTableImportScreen() {
-  const importMutation = useImportOpenTableVisitHistory();
+  const importMutation = useImportProviderReservations("OpenTable");
 
   return (
     <ReservationImportBrowserScreen
@@ -521,6 +522,7 @@ export default function OpenTableImportScreen() {
       displayName={"OpenTable"}
       brandColor={"#da3743"}
       importMutation={importMutation}
+      normalizePayload={normalizeOpenTableVisitHistory}
       instructions={
         "Sign in to OpenTable below. Palate will read your dining dashboard and booking details from the signed-in page."
       }

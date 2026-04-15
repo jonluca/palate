@@ -1,17 +1,25 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import WebView, { type WebViewMessageEvent } from "react-native-webview";
-import * as Haptics from "expo-haptics";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
-import { useToast } from "@/components/ui/toast";
 import { IconSymbol } from "@/components/icon-symbol";
-import type { ReservationImportResult } from "@/services/reservation-import";
+import {
+  getReservationImportSummary,
+  ReservationImportReviewList,
+  useReservationImportReview,
+} from "@/components/reservation-import-review";
+import { useFilterProviderReservationReviewCandidates } from "@/hooks/queries";
+import type {
+  ImportableReservation,
+  NormalizedReservationHistory,
+  ReservationImportResult,
+} from "@/services/reservation-import";
 
 interface ReservationBrowserImportMutation {
   isPending: boolean;
-  mutateAsync: (payload: unknown) => Promise<ReservationImportResult>;
+  mutateAsync: (reservations: ImportableReservation[]) => Promise<ReservationImportResult>;
 }
 
 interface ReservationBrowserImportScreenProps {
@@ -22,6 +30,7 @@ interface ReservationBrowserImportScreenProps {
   brandColor: string;
   importMutation: ReservationBrowserImportMutation;
   instructions: string;
+  normalizePayload: (payload: unknown) => NormalizedReservationHistory;
 }
 
 interface ReservationBridgeMessage {
@@ -33,40 +42,6 @@ interface ReservationBridgeMessage {
   error?: string | null;
   debugMessage?: string;
   debug?: unknown;
-}
-
-function getImportSummary(result: ReservationImportResult): string {
-  const importedPart = `Added ${result.importedCount.toLocaleString()} visit${result.importedCount === 1 ? "" : "s"}`;
-  const updatedPart =
-    result.linkedExistingCount > 0
-      ? `updated ${result.linkedExistingCount.toLocaleString()} existing visit${result.linkedExistingCount === 1 ? "" : "s"}`
-      : null;
-  const michelinPart =
-    result.matchedMichelinCount > 0
-      ? `${result.matchedMichelinCount.toLocaleString()} Michelin match${result.matchedMichelinCount === 1 ? "" : "es"}`
-      : null;
-  const mergedPart =
-    result.mergedDuplicateCount > 0
-      ? `merged ${result.mergedDuplicateCount.toLocaleString()} duplicate visit${result.mergedDuplicateCount === 1 ? "" : "s"}`
-      : null;
-  const duplicatePart =
-    result.skippedDuplicateCount > 0
-      ? `skipped ${result.skippedDuplicateCount.toLocaleString()} duplicate reservation${result.skippedDuplicateCount === 1 ? "" : "s"}`
-      : null;
-  const unreadablePart =
-    result.skippedInvalidCount > 0
-      ? `skipped ${result.skippedInvalidCount.toLocaleString()} unreadable reservation${result.skippedInvalidCount === 1 ? "" : "s"}`
-      : null;
-  const conflictPart =
-    result.skippedConflictCount > 0
-      ? `skipped ${result.skippedConflictCount.toLocaleString()} conflicting reservation${result.skippedConflictCount === 1 ? "" : "s"}`
-      : null;
-
-  return (
-    [importedPart, updatedPart, michelinPart, mergedPart, duplicatePart, unreadablePart, conflictPart]
-      .filter(Boolean)
-      .join(", ") + "."
-  );
 }
 
 function getPayloadCount(payload: unknown, fallbackCount?: number): number {
@@ -83,6 +58,9 @@ function getPayloadCount(payload: unknown, fallbackCount?: number): number {
     }
     if (Array.isArray(record.reservations)) {
       return record.reservations.length;
+    }
+    if (Array.isArray(record.purchases)) {
+      return record.purchases.length;
     }
   }
   return 0;
@@ -102,8 +80,10 @@ function describePayloadForLog(payload: unknown): Record<string, unknown> {
     type: "object",
     keys: Object.keys(record).slice(0, 12),
     reservationsLength: Array.isArray(record.reservations) ? record.reservations.length : null,
+    purchasesLength: Array.isArray(record.purchases) ? record.purchases.length : null,
     resultLength: Array.isArray(record.result) ? record.result.length : null,
     fetchedCount: typeof record.fetchedCount === "number" ? record.fetchedCount : null,
+    totalCount: typeof record.totalCount === "number" ? record.totalCount : null,
   };
 }
 
@@ -127,25 +107,36 @@ export function ReservationImportBrowserScreen({
   brandColor,
   importMutation,
   instructions,
+  normalizePayload,
 }: ReservationBrowserImportScreenProps) {
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
-  const { showToast } = useToast();
   const [hasSession, setHasSession] = useState(false);
-  const [capturedPayload, setCapturedPayload] = useState<unknown | null>(null);
-  const [reservationCount, setReservationCount] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
-  const [lastResult, setLastResult] = useState<ReservationImportResult | null>(null);
+  const [capturedFetchedCount, setCapturedFetchedCount] = useState(0);
+  const [capturedInvalidCount, setCapturedInvalidCount] = useState(0);
+  const [skippedExistingConfirmedCount, setSkippedExistingConfirmedCount] = useState(0);
+  const [reviewPrepared, setReviewPrepared] = useState(false);
   const webViewSource = useMemo(() => ({ uri: accountUrl }), [accountUrl]);
-  const hasHistory = capturedPayload !== null && reservationCount > 0;
+  const filterReviewMutation = useFilterProviderReservationReviewCandidates(displayName);
+  const review = useReservationImportReview({ displayName, importMutation });
+  const hasHistory = review.reservations.length > 0 || reviewPrepared;
+  const pendingCount = review.reviewStats.pendingCount;
 
   const statusText = useMemo(() => {
     if (importMutation.isPending) {
-      return "Importing captured reservations...";
+      return "Importing approved reservations...";
+    }
+
+    if (filterReviewMutation.isPending) {
+      return "Preparing reservations for review...";
     }
 
     if (hasHistory) {
-      return `Found ${reservationCount.toLocaleString()} reservation${reservationCount === 1 ? "" : "s"}. Ready to import past visits.`;
+      if (pendingCount === 0) {
+        return `Reviewed ${review.reviewStats.capturedCount.toLocaleString()} captured reservation${review.reviewStats.capturedCount === 1 ? "" : "s"}.`;
+      }
+      return `Review ${pendingCount.toLocaleString()} captured reservation${pendingCount === 1 ? "" : "s"} before importing.`;
     }
 
     if (lastError) {
@@ -157,7 +148,16 @@ export function ReservationImportBrowserScreen({
     }
 
     return instructions;
-  }, [hasHistory, hasSession, importMutation.isPending, instructions, lastError, reservationCount]);
+  }, [
+    hasHistory,
+    hasSession,
+    filterReviewMutation.isPending,
+    importMutation.isPending,
+    instructions,
+    lastError,
+    pendingCount,
+    review.reviewStats.capturedCount,
+  ]);
 
   const injectBridge = useCallback(() => {
     webViewRef.current?.injectJavaScript(bridgeScript);
@@ -192,57 +192,44 @@ export function ReservationImportBrowserScreen({
       setLastError(message.error ?? null);
 
       if (payload && count > 0) {
-        setCapturedPayload(payload);
-        setReservationCount(count);
+        const history = normalizePayload(payload);
+        setCapturedFetchedCount(history.fetchedCount);
+        setCapturedInvalidCount(history.invalidCount);
+        setSkippedExistingConfirmedCount(0);
+        setReviewPrepared(false);
+        filterReviewMutation
+          .mutateAsync(history.reservations)
+          .then((filterResult) => {
+            logImportDebug(displayName, "Prepared review reservations", {
+              fetchedCount: history.fetchedCount,
+              invalidCount: history.invalidCount,
+              importableCount: history.reservations.length,
+              reviewCount: filterResult.reservations.length,
+              skippedExistingConfirmedCount: filterResult.skippedExistingConfirmedCount,
+              skippedDuplicateCount: filterResult.skippedDuplicateCount,
+            });
+            review.loadReservations(filterResult.reservations);
+            setSkippedExistingConfirmedCount(filterResult.skippedExistingConfirmedCount);
+            setReviewPrepared(true);
+          })
+          .catch((error) => {
+            console.error(`Error preparing ${displayName} reservations for review:`, error);
+            setLastError(`Failed to prepare ${displayName} reservations for review.`);
+          });
       }
     },
-    [bridgeMessageType, displayName],
+    [bridgeMessageType, displayName, filterReviewMutation, normalizePayload, review],
   );
 
   const handleReload = useCallback(() => {
     setLastError(null);
+    setCapturedFetchedCount(0);
+    setCapturedInvalidCount(0);
+    setSkippedExistingConfirmedCount(0);
+    setReviewPrepared(false);
+    review.resetReview();
     webViewRef.current?.reload();
-  }, []);
-
-  const runImport = useCallback(async () => {
-    if (!capturedPayload) {
-      showToast({ type: "error", message: `Open ${displayName} reservation history first.` });
-      return;
-    }
-
-    setLastResult(null);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-    try {
-      logImportDebug(displayName, "Starting import", {
-        capturedCount: getPayloadCount(capturedPayload, reservationCount),
-        payload: describePayloadForLog(capturedPayload),
-      });
-      const result = await importMutation.mutateAsync(capturedPayload);
-      logImportDebug(displayName, "Import result", result);
-      setLastResult(result);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showToast({ type: "success", message: getImportSummary(result) });
-    } catch (error) {
-      console.error(`Error importing ${displayName} history:`, error);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      showToast({ type: "error", message: `Failed to import ${displayName} history.` });
-    }
-  }, [capturedPayload, displayName, importMutation, reservationCount, showToast]);
-
-  const handleImportPress = useCallback(() => {
-    Alert.alert(
-      `Import ${displayName} History`,
-      `This will import captured past ${displayName} reservations as confirmed visits. Existing imports and overlapping visits will be deduped.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Import",
-          onPress: runImport,
-        },
-      ],
-    );
-  }, [displayName, runImport]);
+  }, [review]);
 
   return (
     <View className={"flex-1 bg-background"}>
@@ -271,7 +258,7 @@ export function ReservationImportBrowserScreen({
                       variant={"caption2"}
                       className={`font-semibold ${hasHistory ? "text-green-400" : "text-amber-400"}`}
                     >
-                      {hasHistory ? "History found" : "Needs history"}
+                      {hasHistory ? "Ready to review" : "Needs history"}
                     </ThemedText>
                   </View>
                 </View>
@@ -292,36 +279,64 @@ export function ReservationImportBrowserScreen({
               <View className={"gap-2"}>
                 <View className={"flex-row justify-between"}>
                   <ThemedText variant={"caption1"} color={"secondary"}>
-                    Captured reservations
+                    Pending approval
                   </ThemedText>
                   <ThemedText variant={"caption1"} color={"secondary"}>
-                    {reservationCount.toLocaleString()}
+                    {pendingCount.toLocaleString()} / {review.reviewStats.capturedCount.toLocaleString()}
                   </ThemedText>
                 </View>
                 <View className={"h-1.5 rounded-full overflow-hidden"} style={{ backgroundColor: `${brandColor}24` }}>
-                  <View className={"h-full rounded-full"} style={{ width: "100%", backgroundColor: brandColor }} />
+                  <View
+                    className={"h-full rounded-full"}
+                    style={{
+                      width: `${review.reviewStats.capturedCount > 0 ? (pendingCount / review.reviewStats.capturedCount) * 100 : 0}%`,
+                      backgroundColor: brandColor,
+                    }}
+                  />
                 </View>
+                {capturedInvalidCount > 0 && (
+                  <ThemedText variant={"caption1"} color={"tertiary"}>
+                    {capturedInvalidCount.toLocaleString()} captured reservation
+                    {capturedInvalidCount === 1 ? " was" : "s were"} unreadable.
+                  </ThemedText>
+                )}
+                {skippedExistingConfirmedCount > 0 && (
+                  <ThemedText variant={"caption1"} color={"tertiary"}>
+                    {skippedExistingConfirmedCount.toLocaleString()} reservation
+                    {skippedExistingConfirmedCount === 1 ? " maps" : "s map"} to existing confirmed visits.
+                  </ThemedText>
+                )}
               </View>
             )}
 
-            {lastResult && (
+            {review.lastResult && (
               <View className={"bg-green-500/10 rounded-xl p-3 flex-row gap-2"}>
                 <IconSymbol name={"checkmark.circle.fill"} size={16} color={"#22c55e"} />
                 <ThemedText variant={"footnote"} className={"text-green-400 flex-1"}>
-                  {getImportSummary(lastResult)}
+                  {getReservationImportSummary(review.lastResult)}
                 </ThemedText>
               </View>
             )}
 
             <Button
-              onPress={handleImportPress}
-              disabled={!hasHistory || importMutation.isPending}
-              loading={importMutation.isPending}
+              onPress={hasHistory ? review.importAllPendingReservations : handleReload}
+              disabled={
+                (hasHistory && pendingCount === 0) || importMutation.isPending || filterReviewMutation.isPending
+              }
+              loading={review.isImportingAll || filterReviewMutation.isPending}
               className={"w-full"}
             >
-              <IconSymbol name={"tray.and.arrow.down.fill"} size={17} color={"#fff"} />
+              <IconSymbol
+                name={hasHistory ? "checkmark.circle.fill" : "list.bullet.rectangle"}
+                size={17}
+                color={"#fff"}
+              />
               <ButtonText className={"ml-2"}>
-                {hasHistory ? "Import Captured History" : "Open History First"}
+                {hasHistory
+                  ? `Approve All (${pendingCount.toLocaleString()})`
+                  : capturedFetchedCount > 0
+                    ? "Review Captured History"
+                    : "Open History First"}
               </ButtonText>
             </Button>
           </View>
@@ -329,28 +344,41 @@ export function ReservationImportBrowserScreen({
       </View>
 
       <View className={"flex-1 px-4 pb-4"} style={{ paddingBottom: insets.bottom + 16 }}>
-        <View className={"flex-1 rounded-2xl overflow-hidden bg-card border border-white/10"}>
-          <WebView
-            ref={webViewRef}
-            source={webViewSource}
-            onMessage={handleMessage}
-            injectedJavaScriptBeforeContentLoaded={bridgeScript}
-            injectedJavaScript={bridgeScript}
-            onLoadEnd={injectBridge}
-            startInLoadingState
-            renderLoading={() => (
-              <View className={"absolute inset-0 items-center justify-center bg-card"}>
-                <ActivityIndicator size={"large"} color={brandColor} />
-              </View>
-            )}
-            javaScriptEnabled
-            domStorageEnabled
-            sharedCookiesEnabled
-            thirdPartyCookiesEnabled
-            originWhitelist={["https://*", "http://*"]}
-            style={{ flex: 1, backgroundColor: "#0b0b0f" }}
+        {hasHistory ? (
+          <ReservationImportReviewList
+            reservations={review.pendingReservations}
+            brandColor={brandColor}
+            displayName={displayName}
+            importingReservationIds={review.importingReservationIds}
+            dismissingReservationIds={review.dismissingReservationIds}
+            onImport={review.importReservation}
+            onDismiss={review.dismissReservation}
+            contentBottomPadding={16}
           />
-        </View>
+        ) : (
+          <View className={"flex-1 rounded-2xl overflow-hidden bg-card border border-white/10"}>
+            <WebView
+              ref={webViewRef}
+              source={webViewSource}
+              onMessage={handleMessage}
+              injectedJavaScriptBeforeContentLoaded={bridgeScript}
+              injectedJavaScript={bridgeScript}
+              onLoadEnd={injectBridge}
+              startInLoadingState
+              renderLoading={() => (
+                <View className={"absolute inset-0 items-center justify-center bg-card"}>
+                  <ActivityIndicator size={"large"} color={brandColor} />
+                </View>
+              )}
+              javaScriptEnabled
+              domStorageEnabled
+              sharedCookiesEnabled
+              thirdPartyCookiesEnabled
+              originWhitelist={["https://*", "http://*"]}
+              style={{ flex: 1, backgroundColor: "#0b0b0f" }}
+            />
+          </View>
+        )}
       </View>
     </View>
   );

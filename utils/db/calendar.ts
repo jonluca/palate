@@ -532,6 +532,93 @@ export async function insertReservationOnlyVisits(
   };
 }
 
+export async function getConfirmedLinkedReservationSourceEventIds(sourceEventIds: string[]): Promise<Set<string>> {
+  const mappedSourceEventIds = new Set<string>();
+  if (sourceEventIds.length === 0) {
+    return mappedSourceEventIds;
+  }
+
+  const database = await getDatabase();
+  const batchSize = 1000;
+
+  for (let i = 0; i < sourceEventIds.length; i += batchSize) {
+    const batch = sourceEventIds.slice(i, i + batchSize);
+    const placeholders = batch.map(() => "?").join(", ");
+    const linkedRows = await database.getAllAsync<{ sourceEventId: string }>(
+      `SELECT ris.sourceEventId
+       FROM reservation_import_sources ris
+       JOIN visits v ON v.id = ris.visitId
+       WHERE ris.sourceEventId IN (${placeholders})
+         AND v.status = 'confirmed'`,
+      batch,
+    );
+    const legacyRows = await database.getAllAsync<{ calendarEventId: string }>(
+      `SELECT calendarEventId
+       FROM visits
+       WHERE calendarEventId IN (${placeholders})
+         AND status = 'confirmed'`,
+      batch,
+    );
+    for (const row of linkedRows) {
+      mappedSourceEventIds.add(row.sourceEventId);
+    }
+    for (const row of legacyRows) {
+      mappedSourceEventIds.add(row.calendarEventId);
+    }
+  }
+
+  return mappedSourceEventIds;
+}
+
+export async function getReservationOnlyVisitsMappedToConfirmedVisitSourceIds(
+  visits: ReservationOnlyVisitInput[],
+): Promise<Set<string>> {
+  if (visits.length === 0) {
+    return new Set();
+  }
+
+  const uniqueVisitsBySource = new Map<string, ReservationOnlyVisitInput>();
+  for (const visit of visits) {
+    if (!uniqueVisitsBySource.has(visit.sourceEventId)) {
+      uniqueVisitsBySource.set(visit.sourceEventId, visit);
+    }
+  }
+
+  const uniqueVisits = Array.from(uniqueVisitsBySource.values());
+  const sourceEventIds = uniqueVisits.map((visit) => visit.sourceEventId);
+  const mappedSourceEventIds = await getConfirmedLinkedReservationSourceEventIds(sourceEventIds);
+
+  const visitsNeedingOverlapCheck = uniqueVisits.filter((visit) => !mappedSourceEventIds.has(visit.sourceEventId));
+  if (visitsNeedingOverlapCheck.length === 0) {
+    return mappedSourceEventIds;
+  }
+
+  const database = await getDatabase();
+  const overlapBufferMs = 30 * 60 * 1000;
+  const minStartTime = Math.min(...visitsNeedingOverlapCheck.map((visit) => visit.startTime)) - overlapBufferMs;
+  const maxEndTime = Math.max(...visitsNeedingOverlapCheck.map((visit) => visit.endTime)) + overlapBufferMs;
+  const existingConfirmedVisits = await database.getAllAsync<VisitRecord>(
+    `SELECT * FROM visits
+     WHERE status = 'confirmed'
+       AND startTime < ?
+       AND endTime > ?
+     ORDER BY startTime ASC`,
+    [maxEndTime, minStartTime],
+  );
+
+  if (existingConfirmedVisits.length === 0) {
+    return mappedSourceEventIds;
+  }
+
+  for (const visit of visitsNeedingOverlapCheck) {
+    if (findBestReservationOverlap(visit, existingConfirmedVisits, overlapBufferMs)) {
+      mappedSourceEventIds.add(visit.sourceEventId);
+    }
+  }
+
+  return mappedSourceEventIds;
+}
+
 function findBestReservationOverlap(
   reservation: ReservationOnlyVisitInput,
   existingVisits: VisitRecord[],
