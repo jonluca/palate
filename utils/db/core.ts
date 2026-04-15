@@ -247,6 +247,17 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
 
     -- General time index for visits (getMergeableVisits, getWrappedStats)
     CREATE INDEX IF NOT EXISTS idx_visits_time ON visits(startTime);
+    CREATE INDEX IF NOT EXISTS idx_visits_calendar_event ON visits(calendarEventId);
+
+    -- Generic external reservation import sources (Resy, future importers)
+    CREATE TABLE IF NOT EXISTS reservation_import_sources (
+      sourceEventId TEXT PRIMARY KEY,
+      source TEXT NOT NULL,
+      visitId TEXT NOT NULL,
+      importedAt INTEGER NOT NULL,
+      FOREIGN KEY (visitId) REFERENCES visits(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_reservation_import_sources_visit ON reservation_import_sources(visitId);
 
     -- Dismissed calendar events (calendar events the user doesn't want to import)
     CREATE TABLE IF NOT EXISTS dismissed_calendar_events (

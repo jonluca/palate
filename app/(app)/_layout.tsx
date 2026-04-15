@@ -104,6 +104,13 @@ export default function RootLayoutNav() {
           headerLargeTitle: false,
         }}
       />
+      <Stack.Screen
+        name={"resy-import"}
+        options={{
+          title: "Import from Resy",
+          headerLargeTitle: false,
+        }}
+      />
     </Stack>
   );
 }

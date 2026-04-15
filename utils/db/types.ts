@@ -86,6 +86,40 @@ export interface RestaurantRecord {
   notes: string | null;
 }
 
+export interface ReservationOnlyRestaurantInput {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  address?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  cuisine?: string | null;
+}
+
+export interface ReservationOnlyVisitInput {
+  id: string;
+  sourceEventId: string;
+  sourceName: string;
+  sourceTitle: string;
+  sourceLocation: string | null;
+  startTime: number;
+  endTime: number;
+  restaurant: ReservationOnlyRestaurantInput;
+  suggestedRestaurantId?: string | null;
+  suggestedRestaurantDistance?: number | null;
+  awardAtVisit?: string | null;
+  notes?: string | null;
+}
+
+export interface ReservationOnlyVisitImportResult {
+  insertedCount: number;
+  linkedExistingCount: number;
+  confirmedExistingCount: number;
+  skippedDuplicateCount: number;
+  skippedConflictCount: number;
+}
+
 export interface VisitSuggestedRestaurant {
   visitId: string;
   restaurantId: string;

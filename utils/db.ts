@@ -15,6 +15,9 @@ export type {
   ReclassifyProgress,
   RemovePhotosResult,
   RestaurantRecord,
+  ReservationOnlyRestaurantInput,
+  ReservationOnlyVisitImportResult,
+  ReservationOnlyVisitInput,
   RestaurantWithVisits,
   UpdateRestaurantData,
   VisitForCalendarExport,
@@ -101,6 +104,7 @@ export {
   getVisitsWithExportedCalendarEvents,
   getVisitsWithoutCalendarData,
   insertCalendarOnlyVisits,
+  insertReservationOnlyVisits,
 } from "./db/calendar";
 
 export { getMichelinRestaurantsForStatsBucket, getStats, getWrappedStats } from "./db/stats";

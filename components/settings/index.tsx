@@ -724,6 +724,33 @@ export function QuickActionsCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Resy Import Card
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function ResyImportCard() {
+  return (
+    <Pressable onPress={() => router.push("/resy-import")}>
+      <Card animated={false}>
+        <View className={"p-4 flex-row items-center justify-between"}>
+          <View className={"flex-row items-center gap-3 flex-1"}>
+            <CardIcon name={"fork.knife.circle.fill"} color={"#ff462d"} bgColor={"bg-red-500/15"} />
+            <View className={"flex-1"}>
+              <ThemedText variant={"subhead"} className={"font-medium"}>
+                Import from Resy
+              </ThemedText>
+              <ThemedText variant={"footnote"} color={"secondary"}>
+                Add past reservations as confirmed visits
+              </ThemedText>
+            </View>
+          </View>
+          <IconSymbol name={"chevron.right"} size={16} color={"#9ca3af"} />
+        </View>
+      </Card>
+    </Pressable>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Undo Bar Card
 // ─────────────────────────────────────────────────────────────────────────────
 

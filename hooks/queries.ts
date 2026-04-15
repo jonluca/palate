@@ -149,6 +149,7 @@ import {
 } from "@/services/visit";
 import { hasMediaLibraryPermission, requestMediaLibraryPermission, getPhotoCount } from "@/services/scanner";
 import { exportToJSON, exportToCSV, shareExport, type ExportFormat, type ExportShareResult } from "@/services/export";
+import { importResyVisitHistory, type ResyImportProgress } from "@/services/resy";
 import {
   isMapKitSearchAvailable,
   searchByText as mapKitSearchByText,
@@ -1035,6 +1036,25 @@ export function useDismissCalendarEvents() {
       if (context?.previousEvents) {
         queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, context.previousEvents);
       }
+    },
+  });
+}
+
+/**
+ * Import the user's full past Resy reservation history as confirmed visits.
+ */
+export function useImportResyVisitHistory(onProgress?: (progress: ResyImportProgress) => void) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (authToken: string) => importResyVisitHistory(authToken, { onProgress }),
+    onSuccess: () => {
+      invalidateVisitQueries(queryClient);
+      queryClient.invalidateQueries({ queryKey: queryKeys.visits("confirmed") });
+      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
+      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
     },
   });
 }
