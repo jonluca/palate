@@ -151,6 +151,7 @@ import { hasMediaLibraryPermission, requestMediaLibraryPermission, getPhotoCount
 import { exportToJSON, exportToCSV, shareExport, type ExportFormat, type ExportShareResult } from "@/services/export";
 import {
   isMapKitSearchAvailable,
+  searchByText as mapKitSearchByText,
   searchNearbyRestaurants as mapKitSearchNearbyRestaurants,
   type MapKitSearchResult,
 } from "@/modules/mapkit-search";
@@ -715,6 +716,17 @@ export function useSearchNearbyRestaurants() {
   return useMutation({
     mutationFn: async ({ lat, lon, radius }: { lat: number; lon: number; radius?: number }) => {
       return searchRestaurantsForVisit(lat, lon, radius);
+    },
+  });
+}
+
+/**
+ * Search for restaurants by text via Apple MapKit.
+ */
+export function useSearchAppleRestaurants() {
+  return useMutation({
+    mutationFn: async ({ query, lat, lon, radius }: { query: string; lat: number; lon: number; radius?: number }) => {
+      return mapKitSearchByText(query, lat, lon, radius);
     },
   });
 }

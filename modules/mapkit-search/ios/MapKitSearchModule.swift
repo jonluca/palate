@@ -3,6 +3,8 @@ import MapKit
 import CoreLocation
 
 public class MapKitSearchModule: Module {
+  private let resultQueue = DispatchQueue(label: "com.mapkitsearch.results", qos: .userInitiated)
+
   public func definition() -> ModuleDefinition {
     Name("MapKitSearch")
 
@@ -41,27 +43,7 @@ public class MapKitSearchModule: Module {
     ])
 
     let search = MKLocalSearch(request: request)
-    search.start { response, error in
-      if let error = error {
-        DispatchQueue.main.async {
-          promise.reject("SEARCH_ERROR", error.localizedDescription)
-        }
-        return
-      }
-
-      guard let response = response else {
-        DispatchQueue.main.async {
-          promise.resolve([])
-        }
-        return
-      }
-
-      let results = self.mapItemsToResults(response.mapItems, userCoordinate: coordinate)
-
-      DispatchQueue.main.async {
-        promise.resolve(results)
-      }
-    }
+    resolveSearch(search, userCoordinate: coordinate, promise: promise)
   }
 
   // MARK: - Search for nearby POIs with custom categories
@@ -92,27 +74,7 @@ public class MapKitSearchModule: Module {
     request.pointOfInterestFilter = MKPointOfInterestFilter(including: categories)
 
     let search = MKLocalSearch(request: request)
-    search.start { response, error in
-      if let error = error {
-        DispatchQueue.main.async {
-          promise.reject("SEARCH_ERROR", error.localizedDescription)
-        }
-        return
-      }
-
-      guard let response = response else {
-        DispatchQueue.main.async {
-          promise.resolve([])
-        }
-        return
-      }
-
-      let results = self.mapItemsToResults(response.mapItems, userCoordinate: coordinate)
-
-      DispatchQueue.main.async {
-        promise.resolve(results)
-      }
-    }
+    resolveSearch(search, userCoordinate: coordinate, promise: promise)
   }
 
   // MARK: - Text-based search using MKLocalSearch
@@ -131,58 +93,60 @@ public class MapKitSearchModule: Module {
     request.resultTypes = .pointOfInterest
 
     let search = MKLocalSearch(request: request)
+    resolveSearch(search, userCoordinate: coordinate, promise: promise)
+  }
+
+  // MARK: - Helper methods
+
+  private func resolveSearch(_ search: MKLocalSearch, userCoordinate: CLLocationCoordinate2D, promise: Promise) {
     search.start { response, error in
       if let error = error {
-        DispatchQueue.main.async {
-          promise.reject("SEARCH_ERROR", error.localizedDescription)
-        }
+        promise.reject("SEARCH_ERROR", error.localizedDescription)
         return
       }
 
       guard let response = response else {
-        DispatchQueue.main.async {
-          promise.resolve([])
-        }
+        promise.resolve([])
         return
       }
 
-      let results = self.mapItemsToResults(response.mapItems, userCoordinate: coordinate)
-
-      DispatchQueue.main.async {
+      let mapItems = response.mapItems
+      self.resultQueue.async {
+        let results = self.mapItemsToResults(mapItems, userCoordinate: userCoordinate)
         promise.resolve(results)
       }
     }
   }
 
-  // MARK: - Helper methods
-
   private func mapItemsToResults(_ mapItems: [MKMapItem], userCoordinate: CLLocationCoordinate2D) -> [[String: Any?]] {
     let userLocation = CLLocation(latitude: userCoordinate.latitude, longitude: userCoordinate.longitude)
+    var results: [(distance: Double, item: [String: Any?])] = []
+    results.reserveCapacity(mapItems.count)
 
-    return mapItems.map { item -> [String: Any?] in
-      let itemLocation = CLLocation(
-        latitude: item.placemark.coordinate.latitude,
-        longitude: item.placemark.coordinate.longitude
-      )
+    for item in mapItems {
+      let latitude = item.placemark.coordinate.latitude
+      let longitude = item.placemark.coordinate.longitude
+      let itemLocation = CLLocation(latitude: latitude, longitude: longitude)
       let distance = userLocation.distance(from: itemLocation)
 
-      return [
-        "name": item.name,
-        "latitude": item.placemark.coordinate.latitude,
-        "longitude": item.placemark.coordinate.longitude,
-        "address": self.formatAddress(item.placemark),
-        "phoneNumber": item.phoneNumber,
-        "url": item.url?.absoluteString,
-        "category": item.pointOfInterestCategory?.rawValue,
-        "distance": distance,
-        "timeZone": item.timeZone?.identifier
-      ]
-    }.sorted { (a, b) -> Bool in
-      // Sort by distance
-      let distA = a["distance"] as? Double ?? Double.infinity
-      let distB = b["distance"] as? Double ?? Double.infinity
-      return distA < distB
+      results.append((
+        distance: distance,
+        item: [
+          "name": item.name,
+          "latitude": latitude,
+          "longitude": longitude,
+          "address": self.formatAddress(item.placemark),
+          "phoneNumber": item.phoneNumber,
+          "url": item.url?.absoluteString,
+          "category": item.pointOfInterestCategory?.rawValue,
+          "distance": distance,
+          "timeZone": item.timeZone?.identifier
+        ]
+      ))
     }
+
+    results.sort { $0.distance < $1.distance }
+    return results.map { $0.item }
   }
 
   private func formatAddress(_ placemark: MKPlacemark) -> String? {
@@ -267,7 +231,7 @@ public class MapKitSearchModule: Module {
       return .publicTransport
     case "store":
       return .store
-    case "fitnessCenter":
+    case "fitnesscenter":
       return .fitnessCenter
     case "stadium":
       return .stadium

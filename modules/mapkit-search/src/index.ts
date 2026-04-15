@@ -30,6 +30,7 @@ const MapKitSearchModule = Platform.OS === "ios" ? requireNativeModule("MapKitSe
 
 /** Cache for nearby restaurant searches */
 const nearbyCache = new Map<string, Promise<MapKitSearchResult[]>>();
+const textSearchCache = new Map<string, Promise<MapKitSearchResult[]>>();
 
 /**
  * Generate a cache key for nearby search
@@ -37,6 +38,10 @@ const nearbyCache = new Map<string, Promise<MapKitSearchResult[]>>();
  */
 function nearbyKey(lat: number, lon: number, radius: number): string {
   return `${lat.toFixed(4)}:${lon.toFixed(4)}:${radius}`;
+}
+
+function textSearchKey(query: string, lat: number, lon: number, radius: number): string {
+  return `${query.trim().toLowerCase()}:${nearbyKey(lat, lon, radius)}`;
 }
 
 // ============================================================================
@@ -86,6 +91,43 @@ export async function searchNearbyRestaurants(
   // If the promise rejects, remove it from cache so it can be retried
   promise.catch(() => {
     nearbyCache.delete(key);
+  });
+
+  return promise;
+}
+
+/**
+ * Search for places by text using Apple MapKit.
+ * Results are biased around the provided coordinate and sorted by distance.
+ */
+export async function searchByText(
+  query: string,
+  latitude: number,
+  longitude: number,
+  radiusMeters: number = 1000,
+): Promise<MapKitSearchResult[]> {
+  if (!MapKitSearchModule) {
+    throw new Error("MapKitSearch module is only available on iOS");
+  }
+
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    return [];
+  }
+
+  const key = textSearchKey(trimmedQuery, latitude, longitude, radiusMeters);
+  const cached = textSearchCache.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const promise = MapKitSearchModule.searchByText(trimmedQuery, latitude, longitude, radiusMeters) as Promise<
+    MapKitSearchResult[]
+  >;
+  textSearchCache.set(key, promise);
+
+  promise.catch(() => {
+    textSearchCache.delete(key);
   });
 
   return promise;

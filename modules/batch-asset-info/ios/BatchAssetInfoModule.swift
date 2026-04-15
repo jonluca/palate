@@ -3,11 +3,16 @@ import Photos
 import Vision
 
 public class BatchAssetInfoModule: Module {
-  // Concurrent queue for parallel image processing
   private let processingQueue = DispatchQueue(label: "com.batchassetinfo.processing", qos: .userInitiated, attributes: .concurrent)
+  private let assetInfoQueue = DispatchQueue(label: "com.batchassetinfo.metadata", qos: .userInitiated)
+  private let imageManager = PHCachingImageManager()
+  private let classificationTargetSize = CGSize(width: 299, height: 299)
 
-  // Limit concurrent operations to avoid memory pressure
-  private let semaphore = DispatchSemaphore(value: 8)
+  private let classificationSemaphore: DispatchSemaphore = {
+    let processorCount = ProcessInfo.processInfo.activeProcessorCount
+    let concurrency = min(max(processorCount - 1, 2), 6)
+    return DispatchSemaphore(value: concurrency)
+  }()
 
   public func definition() -> ModuleDefinition {
     Name("BatchAssetInfo")
@@ -30,7 +35,7 @@ public class BatchAssetInfoModule: Module {
   }
 
   private func fetchAssetInfoBatch(assetIds: [String], includeLocation: Bool = true, promise: Promise) {
-    DispatchQueue.global(qos: .userInitiated).async {
+    assetInfoQueue.async {
       let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: assetIds, options: nil)
 
       var results: [[String: Any?]] = []
@@ -66,10 +71,7 @@ public class BatchAssetInfoModule: Module {
         results.append(info)
       }
 
-      // Return results on main thread
-      DispatchQueue.main.async {
-        promise.resolve(results)
-      }
+      promise.resolve(results)
     }
   }
 
@@ -89,25 +91,28 @@ public class BatchAssetInfoModule: Module {
   // MARK: - Image Classification
 
   private func classifySingleImage(assetId: String, confidenceThreshold: Float, maxLabels: Int, promise: Promise) {
-    DispatchQueue.global(qos: .userInitiated).async {
+    processingQueue.async {
       let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil)
 
       guard let asset = fetchResult.firstObject else {
-        DispatchQueue.main.async {
-          promise.reject("ASSET_NOT_FOUND", "Asset with id \(assetId) not found")
-        }
+        promise.reject("ASSET_NOT_FOUND", "Asset with id \(assetId) not found")
         return
       }
 
-      self.loadAndClassifyImage(asset: asset, confidenceThreshold: confidenceThreshold, maxLabels: maxLabels) { result in
-        DispatchQueue.main.async {
-          switch result {
-          case .success(let classificationResult):
-            promise.resolve(classificationResult)
-          case .failure(let error):
-            promise.reject("CLASSIFICATION_FAILED", error.localizedDescription)
-          }
-        }
+      self.classificationSemaphore.wait()
+      defer {
+        self.classificationSemaphore.signal()
+      }
+
+      let result = autoreleasepool {
+        self.loadAndClassifyImageSync(asset: asset, confidenceThreshold: confidenceThreshold, maxLabels: maxLabels)
+      }
+
+      switch result {
+      case .success(let classificationResult):
+        promise.resolve(classificationResult)
+      case .failure(let error):
+        promise.reject("CLASSIFICATION_FAILED", error.localizedDescription)
       }
     }
   }
@@ -116,101 +121,130 @@ public class BatchAssetInfoModule: Module {
     processingQueue.async {
       let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: assetIds, options: nil)
 
-      // Pre-allocate results array with thread-safe access
-      var results: [[String: Any]] = []
-      let resultsLock = NSLock()
-      let group = DispatchGroup()
-
-      // Collect all assets first
-      var assets: [PHAsset] = []
-      assets.reserveCapacity(fetchResult.count)
-      fetchResult.enumerateObjects { asset, _, _ in
-        assets.append(asset)
+      var requestedIndexById: [String: Int] = [:]
+      requestedIndexById.reserveCapacity(assetIds.count)
+      for (index, assetId) in assetIds.enumerated() where requestedIndexById[assetId] == nil {
+        requestedIndexById[assetId] = index
       }
 
-      // Process assets concurrently
-      for asset in assets {
+      var indexedAssets: [(asset: PHAsset, index: Int)] = []
+      indexedAssets.reserveCapacity(fetchResult.count)
+      fetchResult.enumerateObjects { asset, _, _ in
+        guard let index = requestedIndexById[asset.localIdentifier] else {
+          return
+        }
+        indexedAssets.append((asset: asset, index: index))
+      }
+
+      if indexedAssets.isEmpty {
+        promise.resolve([])
+        return
+      }
+
+      var orderedResults = Array<[String: Any]?>(repeating: nil, count: assetIds.count)
+      let resultsLock = NSLock()
+      let group = DispatchGroup()
+      let assets = indexedAssets.map { $0.asset }
+      let cacheOptions = self.makeImageRequestOptions(isSynchronous: false)
+
+      self.imageManager.startCachingImages(
+        for: assets,
+        targetSize: self.classificationTargetSize,
+        contentMode: .aspectFit,
+        options: cacheOptions
+      )
+
+      for indexedAsset in indexedAssets {
         group.enter()
         self.processingQueue.async {
-          // Limit concurrent operations
-          self.semaphore.wait()
-          defer { self.semaphore.signal() }
-
-          self.loadAndClassifyImageSync(asset: asset, confidenceThreshold: confidenceThreshold, maxLabels: maxLabels) { result in
-            resultsLock.lock()
-            switch result {
-            case .success(let classificationResult):
-              results.append(classificationResult)
-            case .failure:
-              results.append([
-                "assetId": asset.localIdentifier,
-                "labels": [],
-                "error": "Classification failed"
-              ])
-            }
-            resultsLock.unlock()
+          self.classificationSemaphore.wait()
+          defer {
+            self.classificationSemaphore.signal()
             group.leave()
           }
+
+          let result = autoreleasepool {
+            self.loadAndClassifyImageSync(
+              asset: indexedAsset.asset,
+              confidenceThreshold: confidenceThreshold,
+              maxLabels: maxLabels
+            )
+          }
+
+          let classificationResult: [String: Any]
+          switch result {
+          case .success(let labels):
+            classificationResult = labels
+          case .failure:
+            classificationResult = [
+              "assetId": indexedAsset.asset.localIdentifier,
+              "labels": [],
+              "error": "Classification failed"
+            ]
+          }
+
+          resultsLock.lock()
+          orderedResults[indexedAsset.index] = classificationResult
+          resultsLock.unlock()
         }
       }
 
-      group.notify(queue: .main) {
+      group.notify(queue: self.processingQueue) {
+        self.imageManager.stopCachingImages(
+          for: assets,
+          targetSize: self.classificationTargetSize,
+          contentMode: .aspectFit,
+          options: cacheOptions
+        )
+        let results = orderedResults.compactMap { $0 }
         promise.resolve(results)
       }
     }
   }
 
-  // Synchronous image loading for parallel batch processing
-  private func loadAndClassifyImageSync(asset: PHAsset, confidenceThreshold: Float, maxLabels: Int, completion: @escaping (Result<[String: Any], Error>) -> Void) {
+  private func makeImageRequestOptions(isSynchronous: Bool) -> PHImageRequestOptions {
     let options = PHImageRequestOptions()
     options.deliveryMode = .fastFormat
     options.isNetworkAccessAllowed = true
-    options.isSynchronous = true
+    options.isSynchronous = isSynchronous
     options.resizeMode = .fast
+    return options
+  }
 
-    // Vision models work well at 299x299
-    let targetSize = CGSize(width: 299, height: 299)
+  private func loadAndClassifyImageSync(asset: PHAsset, confidenceThreshold: Float, maxLabels: Int) -> Result<[String: Any], Error> {
+    let options = makeImageRequestOptions(isSynchronous: true)
+    var result: Result<[String: Any], Error> = .failure(
+      NSError(domain: "BatchAssetInfo", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to load image"])
+    )
 
-    PHImageManager.default().requestImage(
+    imageManager.requestImage(
       for: asset,
-      targetSize: targetSize,
+      targetSize: classificationTargetSize,
       contentMode: .aspectFit,
       options: options
     ) { image, info in
-      guard let image = image, let cgImage = image.cgImage else {
-        completion(.failure(NSError(domain: "BatchAssetInfo", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to load image"])))
+      if let error = info?[PHImageErrorKey] as? Error {
+        result = .failure(error)
         return
       }
 
-      self.performClassification(cgImage: cgImage, assetId: asset.localIdentifier, confidenceThreshold: confidenceThreshold, maxLabels: maxLabels, completion: completion)
-    }
-  }
-
-  private func loadAndClassifyImage(asset: PHAsset, confidenceThreshold: Float, maxLabels: Int, completion: @escaping (Result<[String: Any], Error>) -> Void) {
-    let options = PHImageRequestOptions()
-    options.deliveryMode = .fastFormat
-    options.isNetworkAccessAllowed = true
-    options.isSynchronous = false
-    options.resizeMode = .fast
-
-    let targetSize = CGSize(width: 299, height: 299)
-
-    PHImageManager.default().requestImage(
-      for: asset,
-      targetSize: targetSize,
-      contentMode: .aspectFit,
-      options: options
-    ) { image, info in
       guard let image = image, let cgImage = image.cgImage else {
-        completion(.failure(NSError(domain: "BatchAssetInfo", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to load image"])))
+        result = .failure(NSError(domain: "BatchAssetInfo", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to load image"]))
         return
       }
 
-      self.performClassification(cgImage: cgImage, assetId: asset.localIdentifier, confidenceThreshold: confidenceThreshold, maxLabels: maxLabels, completion: completion)
+      result = self.performClassification(
+        cgImage: cgImage,
+        assetId: asset.localIdentifier,
+        confidenceThreshold: confidenceThreshold,
+        maxLabels: maxLabels
+      )
     }
+
+    return result
   }
 
-  private func performClassification(cgImage: CGImage, assetId: String, confidenceThreshold: Float, maxLabels: Int, completion: @escaping (Result<[String: Any], Error>) -> Void) {
+  private func performClassification(cgImage: CGImage, assetId: String, confidenceThreshold: Float, maxLabels: Int) -> Result<[String: Any], Error> {
     let request = VNClassifyImageRequest()
     let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
 
@@ -218,21 +252,24 @@ public class BatchAssetInfoModule: Module {
       try handler.perform([request])
 
       guard let observations = request.results as? [VNClassificationObservation] else {
-        completion(.failure(NSError(domain: "BatchAssetInfo", code: 2, userInfo: [NSLocalizedDescriptionKey: "No classification results"])))
-        return
+        return .failure(NSError(domain: "BatchAssetInfo", code: 2, userInfo: [NSLocalizedDescriptionKey: "No classification results"]))
       }
 
-      // Filter observations above threshold and limit count
-      let filteredObservations = observations
-        .filter { $0.confidence >= confidenceThreshold }
-        .prefix(maxLabels)
+      let labelLimit = max(0, maxLabels)
+      var labels: [[String: Any]] = []
+      labels.reserveCapacity(min(labelLimit, observations.count))
 
-      // Map to simple label/confidence pairs
-      let labels: [[String: Any]] = filteredObservations.map { observation in
-        [
-          "label": observation.identifier,
-          "confidence": observation.confidence
-        ]
+      if labelLimit > 0 {
+        for observation in observations where observation.confidence >= confidenceThreshold {
+          labels.append([
+            "label": observation.identifier,
+            "confidence": observation.confidence
+          ])
+
+          if labels.count == labelLimit {
+            break
+          }
+        }
       }
 
       let result: [String: Any] = [
@@ -240,9 +277,9 @@ public class BatchAssetInfoModule: Module {
         "labels": labels
       ]
 
-      completion(.success(result))
+      return .success(result)
     } catch {
-      completion(.failure(error))
+      return .failure(error)
     }
   }
 }
@@ -259,4 +296,3 @@ struct ClassificationOptions: Record {
   @Field
   var maxLabels: Int = 50
 }
-

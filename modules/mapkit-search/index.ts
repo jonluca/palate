@@ -1,2 +1,2 @@
 // Reexport the native module
-export { isMapKitSearchAvailable, searchNearbyRestaurants, type MapKitSearchResult } from "./src/index";
+export { isMapKitSearchAvailable, searchByText, searchNearbyRestaurants, type MapKitSearchResult } from "./src/index";
