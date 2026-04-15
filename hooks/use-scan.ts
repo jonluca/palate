@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import {
   usePermissions,
   usePhotoCount,
@@ -48,7 +48,15 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   const hasCompletedInitialScan = useHasCompletedInitialScan();
 
   // Zustand store for scan state
-  const { startScan, updateScanProgress, completeScan, failScan, scanProgress } = useAppStore();
+  const {
+    startScan,
+    updateScanProgress,
+    completeScan,
+    failScan,
+    scanProgress,
+    isScanning: isStoreScanning,
+  } = useAppStore();
+  const activeScanRef = useRef<"scan" | "deep-scan" | null>(null);
 
   // Worklet-based progress tracking for UI animations
   const { sharedValues, onProgress, start, complete, error } = useScanProgress();
@@ -106,16 +114,22 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   }, [autoDeepScanPhotoThreshold, cameraRollCount, hasCompletedInitialScan]);
 
   const scan = useCallback(async () => {
+    if (activeScanRef.current || isStoreScanning || scanMutation.isPending || deepScanMutation.isPending) {
+      return;
+    }
+
     if (!hasPermission) {
       requestPermission();
       return;
     }
 
-    start();
-    startScan();
-    logScanStarted();
+    activeScanRef.current = "scan";
 
     try {
+      start();
+      startScan();
+      logScanStarted();
+
       const result = await scanMutation.mutateAsync();
       if (await shouldAutoDeepScan()) {
         await deepScanMutation.mutateAsync(undefined);
@@ -129,9 +143,12 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
       const errorMessage = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
       error(errorMessage);
       failScan(errorMessage);
+    } finally {
+      activeScanRef.current = null;
     }
   }, [
     hasPermission,
+    isStoreScanning,
     requestPermission,
     start,
     startScan,
@@ -145,16 +162,22 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   ]);
 
   const deepScan = useCallback(async () => {
+    if (activeScanRef.current || isStoreScanning || scanMutation.isPending || deepScanMutation.isPending) {
+      return;
+    }
+
     if (!hasPermission) {
       requestPermission();
       return;
     }
 
-    start();
-    startScan();
-    logScanStarted();
+    activeScanRef.current = "deep-scan";
 
     try {
+      start();
+      startScan();
+      logScanStarted();
+
       const result = await deepScanMutation.mutateAsync(undefined);
       const message = `Done!`;
       complete(message);
@@ -166,8 +189,22 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
       const errorMessage = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
       error(errorMessage);
       failScan(errorMessage);
+    } finally {
+      activeScanRef.current = null;
     }
-  }, [hasPermission, requestPermission, start, startScan, deepScanMutation, complete, completeScan, error, failScan]);
+  }, [
+    hasPermission,
+    isStoreScanning,
+    requestPermission,
+    start,
+    startScan,
+    scanMutation,
+    deepScanMutation,
+    complete,
+    completeScan,
+    error,
+    failScan,
+  ]);
 
   return {
     // Permission state
@@ -177,13 +214,13 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
     isRequestingPermission: requestPermissionMutation.isPending,
 
     // Scan state
-    isScanning: scanMutation.isPending,
+    isScanning: scanMutation.isPending || (isStoreScanning && activeScanRef.current !== "deep-scan"),
     isComplete: scanProgress.phase === "complete",
     isError: scanProgress.phase === "error",
     isFirstScan: !hasCompletedInitialScan,
 
     // Deep scan state
-    isDeepScanning: deepScanMutation.isPending,
+    isDeepScanning: deepScanMutation.isPending || activeScanRef.current === "deep-scan",
 
     // Actions
     scan,

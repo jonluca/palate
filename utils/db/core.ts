@@ -81,12 +81,28 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
 
   // Start initialization and cache the promise
   dbInitPromise = (async () => {
-    const database = await SQLite.openDatabaseAsync(__DEV__ ? "photo_foodie_dev.db" : "photo_foodie.db");
-    await initializeDatabase(database);
-    // Auto-reject any pending visits within ignored locations on startup
-    await rejectVisitsInIgnoredLocationsInternal(database);
-    db = database;
-    return database;
+    let database: SQLite.SQLiteDatabase | null = null;
+
+    try {
+      database = await SQLite.openDatabaseAsync(__DEV__ ? "photo_foodie_dev.db" : "photo_foodie.db");
+      await initializeDatabase(database);
+      // Auto-reject any pending visits within ignored locations on startup
+      await rejectVisitsInIgnoredLocationsInternal(database);
+      db = database;
+      return database;
+    } catch (error) {
+      db = null;
+
+      try {
+        await database?.closeAsync();
+      } catch (closeError) {
+        console.warn("[DB] Failed to close database after initialization error:", closeError);
+      } finally {
+        dbInitPromise = null;
+      }
+
+      throw error;
+    }
   })();
 
   return dbInitPromise;

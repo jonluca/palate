@@ -4,7 +4,7 @@ import { AutoRestaurantSelector } from "@/components/restaurant-auto-selector";
 import { useConfirmVisit, useQuickUpdateVisitStatus, useUndoVisitAction } from "@/hooks/queries";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { Pressable, View } from "react-native";
 import tzLookup from "tz-lookup";
 import { PhotoPreview } from "./photo-preview";
@@ -14,20 +14,31 @@ import { useUnifiedNearbyRestaurants, type NearbyRestaurant } from "@/hooks";
 import type { ReviewModeProps, SuggestedRestaurant, LoadingAction } from "./types";
 
 export function ReviewModeCard({ visit, match, enableAppleMapsVerification = false }: ReviewModeProps) {
-  const [showSearch, setShowSearch] = useState(false);
-  const [selectedRestaurant, setSelectedRestaurant] = useState<NearbyRestaurant | null>(null);
+  const [showSearchState, setShowSearchState] = useState(() => ({ visitId: visit.id, value: false }));
+  const [selectedRestaurantState, setSelectedRestaurantState] = useState<{
+    visitId: string;
+    value: NearbyRestaurant | null;
+  }>(() => ({ visitId: visit.id, value: null }));
+  const showSearch = showSearchState.visitId === visit.id ? showSearchState.value : false;
+  const selectedRestaurant = selectedRestaurantState.visitId === visit.id ? selectedRestaurantState.value : null;
+  const setShowSearch = useCallback(
+    (value: boolean) => {
+      setShowSearchState({ visitId: visit.id, value });
+    },
+    [visit.id],
+  );
+  const setSelectedRestaurant = useCallback(
+    (value: NearbyRestaurant | null) => {
+      setSelectedRestaurantState({ visitId: visit.id, value });
+    },
+    [visit.id],
+  );
 
   // Mutations
   const confirmMutation = useConfirmVisit();
   const updateStatusMutation = useQuickUpdateVisitStatus();
   const undoMutation = useUndoVisitAction();
   const { showUndo } = useUndo();
-
-  // Reset state when card identity changes (handles FlashList recycling)
-  useEffect(() => {
-    setShowSearch(false);
-    setSelectedRestaurant(null);
-  }, [visit.id]);
 
   // Extract visit properties for easier access
   const { id, startTime, photoCount, previewPhotos = [], foodProbable = false, calendarEventTitle } = visit;
@@ -174,13 +185,14 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
       selectionResetKey={visit.id}
     >
       {({ displayRestaurants, onSelectRestaurant }) => {
-        const currentSelectedRestaurant =
-          selectedRestaurant ??
-          (visit.suggestedRestaurantId
-            ? (displayRestaurants.find((r) => r.id === visit.suggestedRestaurantId) ?? null)
-            : null) ??
-          displayRestaurants[0] ??
-          null;
+        let currentSelectedRestaurant = selectedRestaurant;
+        if (!currentSelectedRestaurant && visit.suggestedRestaurantId) {
+          currentSelectedRestaurant =
+            displayRestaurants.find((restaurant) => restaurant.id === visit.suggestedRestaurantId) ?? null;
+        }
+        if (!currentSelectedRestaurant) {
+          currentSelectedRestaurant = displayRestaurants[0] ?? null;
+        }
 
         const matchedRestaurant = hasMatch
           ? displayRestaurantsUnsorted.find((r) => r.id === match?.restaurantId)

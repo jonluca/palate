@@ -1466,33 +1466,51 @@ export async function searchRestaurantsForVisit(
   return searchNearbyRestaurants(centerLat, centerLon, radiusMeters);
 }
 
+interface ProcessPhotosProgress {
+  phase:
+    | "scanning"
+    | "grouping-visits"
+    | "calendar-events"
+    | "detecting-food"
+    | "recomputing-suggested-restaurants"
+    | "optimizing-database";
+  detail: string;
+  photosPerSecond?: number;
+  eta?: string;
+  /** Progress value 0-1 for the current phase */
+  progress?: number;
+}
+
+interface ProcessPhotosResult {
+  visitsCreated: number;
+  photosProcessed: number;
+  foodVisitsFound: number;
+  visitsWithCalendarEvents: number;
+}
+
+let processPhotosPromise: Promise<ProcessPhotosResult> | null = null;
+
 /**
  * Run scanning, grouping visits, calendar enrichment, calendar-only visits, and food detection in sequence.
  * Note: Restaurant confirmation is now a separate user-driven process.
  */
 export async function processPhotos(
-  scanProgress?: (progress: {
-    phase:
-      | "scanning"
-      | "grouping-visits"
-      | "calendar-events"
-      | "detecting-food"
-      | "recomputing-suggested-restaurants"
-      | "optimizing-database";
-    detail: string;
-    photosPerSecond?: number;
-    eta?: string;
-    /** Progress value 0-1 for the current phase */
-    progress?: number;
-  }) => void,
-): Promise<{
-  visitsCreated: number;
-  photosProcessed: number;
-  foodVisitsFound: number;
-  visitsWithCalendarEvents: number;
-}> {
-  // Import scanner dynamically to avoid circular deps
+  scanProgress?: (progress: ProcessPhotosProgress) => void,
+): Promise<ProcessPhotosResult> {
+  if (processPhotosPromise) {
+    return processPhotosPromise;
+  }
 
+  processPhotosPromise = runProcessPhotos(scanProgress).finally(() => {
+    processPhotosPromise = null;
+  });
+
+  return processPhotosPromise;
+}
+
+async function runProcessPhotos(
+  scanProgress?: (progress: ProcessPhotosProgress) => void,
+): Promise<ProcessPhotosResult> {
   // Phase 1: Scan photos
   scanProgress?.({ phase: "scanning", detail: "Scanning camera roll..." });
 

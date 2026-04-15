@@ -43,44 +43,60 @@ async function getMichelinDatabase(): Promise<SQLite.SQLiteDatabase> {
   }
 
   michelinDatabaseInitPromise = (async () => {
-    // Load the asset and get its local URI
-    const asset = Asset.fromModule(michelinDb);
-    await asset.downloadAsync();
+    let database: SQLite.SQLiteDatabase | null = null;
 
-    if (!asset.localUri) {
-      throw new Error("Could not load Michelin database asset");
+    try {
+      // Load the asset and get its local URI
+      const asset = Asset.fromModule(michelinDb);
+      await asset.downloadAsync();
+
+      if (!asset.localUri) {
+        throw new Error("Could not load Michelin database asset");
+      }
+
+      // Create destination file in document directory
+      const destFile = new File(Paths.document, "michelin_reference.db");
+
+      // Check if we need to copy
+      if (!destFile.exists) {
+        console.log("Copying Michelin database to document directory...");
+        // Create a source file reference from the asset URI
+        const sourceFile = new File(asset.localUri);
+        sourceFile.copy(destFile);
+      }
+
+      // Open the database read-only
+      database = await SQLite.openDatabaseAsync(
+        "michelin_reference.db",
+        {
+          enableChangeListener: false,
+        },
+        Paths.document.uri,
+      );
+
+      // Set read-only pragmas for performance
+      await database.execAsync(`
+        PRAGMA query_only = ON;
+        PRAGMA temp_store = MEMORY;
+        PRAGMA cache_size = -64000;
+        PRAGMA mmap_size = 134217728;
+      `);
+
+      michelinDatabase = database;
+      return database;
+    } catch (error) {
+      michelinDatabase = null;
+
+      try {
+        await database?.closeAsync();
+      } catch (closeError) {
+        console.warn("[MichelinDB] Failed to close database after initialization error:", closeError);
+      } finally {
+        michelinDatabaseInitPromise = null;
+      }
+
+      throw error;
     }
-
-    // Create destination file in document directory
-    const destFile = new File(Paths.document, "michelin_reference.db");
-
-    // Check if we need to copy
-    if (!destFile.exists) {
-      console.log("Copying Michelin database to document directory...");
-      // Create a source file reference from the asset URI
-      const sourceFile = new File(asset.localUri);
-      sourceFile.copy(destFile);
-    }
-
-    // Open the database read-only
-    const database = await SQLite.openDatabaseAsync(
-      "michelin_reference.db",
-      {
-        enableChangeListener: false,
-      },
-      Paths.document.uri,
-    );
-
-    // Set read-only pragmas for performance
-    await database.execAsync(`
-      PRAGMA query_only = ON;
-      PRAGMA temp_store = MEMORY;
-      PRAGMA cache_size = -64000;
-      PRAGMA mmap_size = 134217728;
-    `);
-
-    michelinDatabase = database;
-    return database;
   })();
 
   return michelinDatabaseInitPromise;
