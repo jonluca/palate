@@ -900,6 +900,10 @@ export function FastAnimationsCard() {
 // Merge Duplicates Section
 // ─────────────────────────────────────────────────────────────────────────────
 
+function getMergeableVisitGroupKey(group: MergeableVisitGroup) {
+  return `${group.restaurantId}:${group.visits.map((visit) => visit.id).join(":")}`;
+}
+
 export function MergeDuplicatesSection() {
   const { showToast } = useToast();
   const { data: mergeableGroups = [] } = useMergeableSameRestaurantVisits();
@@ -972,7 +976,7 @@ export function MergeDuplicatesSection() {
           <View className={"gap-2"}>
             {mergeableGroups.slice(0, 3).map((group: MergeableVisitGroup) => (
               <View
-                key={group.restaurantId}
+                key={getMergeableVisitGroupKey(group)}
                 className={"flex-row items-center gap-2 bg-background/50 rounded-lg px-3 py-2"}
               >
                 <IconSymbol name={"arrow.triangle.merge"} size={14} color={"#3b82f6"} />
