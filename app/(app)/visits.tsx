@@ -1,8 +1,7 @@
-import type { VisitStatus } from "@/components/visit-card";
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { FilterPills, NoVisitsEmpty, SkeletonVisitCard } from "@/components/ui";
-import { useStats, useVisits, useQuickUpdateVisitStatus, type VisitWithRestaurant } from "@/hooks/queries";
+import { useStats, useVisits, type VisitWithRestaurant } from "@/hooks/queries";
 import { useVisitsFilter, useSetVisitsFilter } from "@/store";
 import { FlashList } from "@shopify/flash-list";
 import { router, Stack, useIsFocused } from "expo-router";
@@ -37,9 +36,6 @@ export default function VisitsScreen() {
   const { data: stats } = useStats();
   const { data: visits = [], isLoading: visitsLoading } = useVisits(filter, { enabled: isFocused });
 
-  // Mutations
-  const updateStatusMutation = useQuickUpdateVisitStatus();
-
   const onRefresh = async () => {
     setRefreshing(true);
     await queryClient.invalidateQueries();
@@ -64,13 +60,6 @@ export default function VisitsScreen() {
     [stats],
   );
 
-  const handleStatusChange = useCallback(
-    (visitId: string, newStatus: VisitStatus) => {
-      updateStatusMutation.mutate({ visitId, newStatus });
-    },
-    [updateStatusMutation],
-  );
-
   const renderItem = useCallback(
     ({ item, index }: { item: VisitWithRestaurant; index: number }) => (
       <ListModeCard
@@ -89,11 +78,10 @@ export default function VisitsScreen() {
             ? router.push(`/visit/${item.id}?photo=${photoIndex}`)
             : router.push(`/visit/${item.id}`)
         }
-        onStatusChange={(newStatus) => handleStatusChange(item.id, newStatus)}
         enableAppleMapsVerification={index < 10}
       />
     ),
-    [handleStatusChange],
+    [],
   );
 
   const ListHeader = useCallback(

@@ -4,11 +4,10 @@ import { ThemedText } from "@/components/themed-text";
 import * as Haptics from "expo-haptics";
 import { Pressable, View } from "react-native";
 import Animated, { FadeOut } from "react-native-reanimated";
-import * as ContextMenu from "zeego/context-menu";
 import { PhotoPreview } from "./photo-preview";
 import { FoodBadge, CalendarBadge } from "./badges";
 import { formatDate, formatTime } from "./utils";
-import { statusColors, type ListModeProps, type VisitStatus } from "./types";
+import { statusColors, type ListModeProps } from "./types";
 
 export function ListModeCard({
   restaurantName,
@@ -20,22 +19,12 @@ export function ListModeCard({
   calendarEventTitle,
   calendarEventIsAllDay,
   onPress,
-  onStatusChange,
 }: ListModeProps) {
   const colors = statusColors[status];
 
   const handlePress = (photoIndex?: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress?.(photoIndex);
-  };
-
-  const handleStatusChange = (newStatus: VisitStatus) => {
-    if (newStatus === "confirmed") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else if (newStatus === "rejected") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    }
-    onStatusChange?.(newStatus);
   };
 
   const cardContent = (
@@ -82,53 +71,6 @@ export function ListModeCard({
     </View>
   );
 
-  // If status change is available, wrap with context menu
-  if (onStatusChange) {
-    return (
-      <Animated.View exiting={FadeOut.duration(200)}>
-        <ContextMenu.Root>
-          <ContextMenu.Trigger>
-            <Pressable onPress={() => handlePress()}>{cardContent}</Pressable>
-          </ContextMenu.Trigger>
-          <ContextMenu.Content>
-            <ContextMenu.Item key={"view"} onSelect={() => handlePress()}>
-              <ContextMenu.ItemTitle>View Details</ContextMenu.ItemTitle>
-              <ContextMenu.ItemIcon ios={{ name: "eye", pointSize: 18 }} />
-            </ContextMenu.Item>
-
-            {status === "pending" && (
-              <>
-                <ContextMenu.Item key={"confirm"} onSelect={() => handleStatusChange("confirmed")}>
-                  <ContextMenu.ItemTitle>Confirm Visit</ContextMenu.ItemTitle>
-                  <ContextMenu.ItemIcon ios={{ name: "checkmark.circle", pointSize: 18 }} />
-                </ContextMenu.Item>
-                <ContextMenu.Item key={"reject"} onSelect={() => handleStatusChange("rejected")} destructive>
-                  <ContextMenu.ItemTitle>Skip Visit</ContextMenu.ItemTitle>
-                  <ContextMenu.ItemIcon ios={{ name: "xmark.circle", pointSize: 18 }} />
-                </ContextMenu.Item>
-              </>
-            )}
-
-            {status === "confirmed" && (
-              <ContextMenu.Item key={"reset"} onSelect={() => handleStatusChange("pending")}>
-                <ContextMenu.ItemTitle>Reset to Pending</ContextMenu.ItemTitle>
-                <ContextMenu.ItemIcon ios={{ name: "arrow.counterclockwise", pointSize: 18 }} />
-              </ContextMenu.Item>
-            )}
-
-            {status === "rejected" && (
-              <ContextMenu.Item key={"restore"} onSelect={() => handleStatusChange("pending")}>
-                <ContextMenu.ItemTitle>Restore Visit</ContextMenu.ItemTitle>
-                <ContextMenu.ItemIcon ios={{ name: "arrow.counterclockwise", pointSize: 18 }} />
-              </ContextMenu.Item>
-            )}
-          </ContextMenu.Content>
-        </ContextMenu.Root>
-      </Animated.View>
-    );
-  }
-
-  // No context menu, just pressable
   return (
     <Animated.View exiting={FadeOut.duration(200)}>
       <Pressable onPress={() => handlePress()}>{cardContent}</Pressable>

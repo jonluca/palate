@@ -21,7 +21,6 @@ export type ListModeProps = BaseVisitCardProps & {
   mode?: "list"; // Optional for backwards compatibility
   restaurantName: string | null;
   status: VisitStatus;
-  onStatusChange?: (status: VisitStatus) => void;
 };
 
 // Suggested restaurant detail
