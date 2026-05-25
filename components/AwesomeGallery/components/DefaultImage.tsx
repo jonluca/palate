@@ -14,7 +14,7 @@ export const DefaultImage = ({ item, setImageDimensions }: RenderItemInfo<string
       }}
       source={item}
       contentFit={"contain"}
-      style={StyleSheet.absoluteFillObject}
+      style={StyleSheet.absoluteFill}
       cachePolicy={"memory-disk"}
       allowDownscaling={false}
       placeholderContentFit={"cover"}

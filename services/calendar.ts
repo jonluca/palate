@@ -1,4 +1,4 @@
-import * as Calendar from "expo-calendar";
+import * as Calendar from "expo-calendar/legacy";
 import { deburr } from "lodash-es";
 import { memoize } from "../utils/memoize";
 import { getSelectedCalendarIds } from "@/store";

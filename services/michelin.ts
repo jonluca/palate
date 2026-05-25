@@ -62,7 +62,7 @@ async function getMichelinDatabase(): Promise<SQLite.SQLiteDatabase> {
         console.log("Copying Michelin database to document directory...");
         // Create a source file reference from the asset URI
         const sourceFile = new File(asset.localUri);
-        sourceFile.copy(destFile);
+        await sourceFile.copy(destFile);
       }
 
       // Open the database read-only

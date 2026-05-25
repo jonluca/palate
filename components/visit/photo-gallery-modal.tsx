@@ -37,7 +37,7 @@ function VideoItem({ item, setImageDimensions }: RenderItemInfo<MediaWithLabels>
   }, [width, height, setImageDimensions]);
 
   return (
-    <View style={[StyleSheet.absoluteFillObject, { justifyContent: "center", alignItems: "center" }]}>
+    <View style={[StyleSheet.absoluteFill, { justifyContent: "center", alignItems: "center" }]}>
       <VideoView player={player} style={{ width, height: height * 0.8 }} contentFit={"contain"} nativeControls />
     </View>
   );
@@ -52,7 +52,7 @@ function ImageItem({ item, setImageDimensions }: RenderItemInfo<MediaWithLabels>
       }}
       source={item.uri}
       contentFit={"contain"}
-      style={StyleSheet.absoluteFillObject}
+      style={StyleSheet.absoluteFill}
       cachePolicy={"memory-disk"}
       allowDownscaling={false}
       placeholderContentFit={"cover"}

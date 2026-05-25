@@ -3,8 +3,8 @@
 A mobile app that automatically discovers your restaurant visits by analyzing your camera roll. It groups photos by location and time, detects food using on-device ML, and matches visits to restaurants — including 15,000+ Michelin-rated establishments worldwide.
 
 ![iOS](https://img.shields.io/badge/iOS-17+-000000?style=flat&logo=apple)
-![Expo](https://img.shields.io/badge/Expo-54-4630EB?style=flat&logo=expo)
-![React Native](https://img.shields.io/badge/React%20Native-0.81-61DAFB?style=flat&logo=react)
+![Expo](https://img.shields.io/badge/Expo-56-4630EB?style=flat&logo=expo)
+![React Native](https://img.shields.io/badge/React%20Native-0.85-61DAFB?style=flat&logo=react)
 
 ## Screenshots
 
@@ -29,7 +29,7 @@ A mobile app that automatically discovers your restaurant visits by analyzing yo
 
 - Node.js 24+
 - Yarn 4 (set via `packageManager` in package.json)
-- Xcode 15+ (for iOS)
+- Xcode 26.4+ (for iOS)
 - Android Studio (for Android)
 - A physical device recommended (iOS Simulator lacks photo library with location data)
 
@@ -92,7 +92,7 @@ Users review pending visits in the **Review** tab — confirm the suggested rest
 
 | Layer              | Technology                                                                              |
 | ------------------ | --------------------------------------------------------------------------------------- |
-| **Framework**      | [Expo SDK 54](https://expo.dev) + React Native 0.81                                     |
+| **Framework**      | [Expo SDK 56](https://expo.dev) + React Native 0.85                                     |
 | **Navigation**     | [Expo Router](https://docs.expo.dev/router/introduction/) with typed routes             |
 | **Database**       | [Expo SQLite](https://docs.expo.dev/versions/latest/sdk/sqlite/) (WAL mode)             |
 | **State**          | [Zustand](https://zustand-demo.pmnd.rs/) + [TanStack Query](https://tanstack.com/query) |

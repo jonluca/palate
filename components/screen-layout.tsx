@@ -1,5 +1,5 @@
 import { cn } from "@/utils/cn";
-import { useHeaderHeight } from "@react-navigation/elements";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import React from "react";
 import { Platform, RefreshControl, ScrollView, View, type ViewProps } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";

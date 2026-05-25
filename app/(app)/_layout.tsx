@@ -1,9 +1,8 @@
 import "@/globals.css";
-import { Redirect, Stack } from "expo-router";
+import { DarkTheme, Redirect, Stack } from "expo-router";
 import React from "react";
 import { Platform, View, ActivityIndicator } from "react-native";
 import { useHasCompletedInitialScan, useHasHydrated } from "@/store";
-import { DarkTheme } from "@react-navigation/native";
 
 export default function RootLayoutNav() {
   const navigationTheme = {

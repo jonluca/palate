@@ -1,4 +1,4 @@
-import * as MediaLibrary from "expo-media-library";
+import * as MediaLibrary from "expo-media-library/legacy";
 import * as Device from "expo-device";
 import pMap from "p-map";
 import { insertPhotos, type PhotoRecord } from "@/utils/db";

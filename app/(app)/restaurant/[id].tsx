@@ -15,7 +15,7 @@ import {
 import type { RestaurantRecord, RestaurantVisitWithPreview, UpdateRestaurantData } from "@/utils/db";
 import { logRestaurantViewed } from "@/services/analytics";
 import { FlashList } from "@shopify/flash-list";
-import { useHeaderHeight } from "@react-navigation/elements";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import { useLocalSearchParams, router, Stack } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { View, Pressable, Platform, type LayoutChangeEvent, ScrollView, Modal, TextInput } from "react-native";

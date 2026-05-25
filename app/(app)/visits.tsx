@@ -5,13 +5,12 @@ import { FilterPills, NoVisitsEmpty, SkeletonVisitCard } from "@/components/ui";
 import { useStats, useVisits, useQuickUpdateVisitStatus, type VisitWithRestaurant } from "@/hooks/queries";
 import { useVisitsFilter, useSetVisitsFilter } from "@/store";
 import { FlashList } from "@shopify/flash-list";
-import { router, Stack } from "expo-router";
+import { router, Stack, useIsFocused } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import { View, RefreshControl, Pressable } from "react-native";
 import Animated, { LinearTransition } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
-import { useIsFocused } from "@react-navigation/native";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ListModeCard } from "@/components/visit-card/list-mode-card";
 

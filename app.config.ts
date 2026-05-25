@@ -1,6 +1,6 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
-const VERSION = "1.1.1";
+const VERSION = "1.2.0";
 
 const getConfig = ({ config }: ConfigContext): ExpoConfig => {
   return {
@@ -98,6 +98,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
       ],
       "@react-native-firebase/app",
       "expo-router",
+      "expo-status-bar",
       "expo-maps",
       [
         "expo-splash-screen",
