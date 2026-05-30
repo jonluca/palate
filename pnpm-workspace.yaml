@@ -1,0 +1,17 @@
+nodeLinker: hoisted
+
+allowedDeprecatedVersions:
+  '@babel/plugin-proposal-private-methods': 7.18.6
+  uuid: 7.0.3
+
+allowBuilds:
+  '@firebase/util': true
+  '@shopify/react-native-skia': true
+  msgpackr-extract: true
+  protobufjs: true
+
+packageExtensions:
+  eslint-plugin-react-compiler@*:
+    peerDependenciesMeta:
+      eslint:
+        optional: true

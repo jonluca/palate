@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "clean": "rm -rf android ios .expo node_modules",
     "ios": "expo run:ios",
     "mobile:prepare": "expo prebuild --clean",
@@ -18,9 +18,9 @@
     "android": "expo run:android"
   },
   "dependencies": {
-    "@babel/core": "^7.29.0",
-    "@babel/runtime": "^7.29.2",
-    "@expo/metro-runtime": "~56.0.12",
+    "@babel/core": "^7.29.7",
+    "@babel/runtime": "^7.29.7",
+    "@expo/metro-runtime": "~56.0.13",
     "@expo/vector-icons": "15.1.1",
     "@react-native-firebase/analytics": "^24.0.0",
     "@react-native-firebase/app": "^24.0.0",
@@ -30,31 +30,31 @@
     "@tanstack/react-query": "^5.100.14",
     "@types/react": "~19.2.15",
     "@types/tz-lookup": "^6.1.2",
-    "babel-preset-expo": "~56.0.0",
+    "babel-preset-expo": "~56.0.14",
     "burnt": "^0.13.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
-    "expo": "^56.0.0",
-    "expo-asset": "~56.0.14",
+    "expo": "^56.0.8",
+    "expo-asset": "~56.0.15",
     "expo-blur": "~56.0.3",
-    "expo-build-properties": "~56.0.14",
+    "expo-build-properties": "~56.0.16",
     "expo-calendar": "~56.0.8",
-    "expo-constants": "~56.0.15",
-    "expo-dev-client": "~56.0.15",
+    "expo-constants": "~56.0.16",
+    "expo-dev-client": "~56.0.18",
     "expo-device": "~56.0.4",
     "expo-drizzle-studio-plugin": "^0.2.1",
     "expo-file-system": "~56.0.7",
     "expo-font": "~56.0.5",
     "expo-haptics": "~56.0.3",
     "expo-image": "~56.0.9",
-    "expo-image-picker": "~56.0.13",
+    "expo-image-picker": "~56.0.15",
     "expo-linear-gradient": "~56.0.4",
-    "expo-linking": "~56.0.11",
-    "expo-location": "~56.0.13",
+    "expo-linking": "~56.0.13",
+    "expo-location": "~56.0.15",
     "expo-maps": "~56.0.6",
     "expo-media-library": "~56.0.6",
-    "expo-router": "~56.2.6",
-    "expo-sharing": "~56.0.13",
+    "expo-router": "~56.2.8",
+    "expo-sharing": "~56.0.15",
     "expo-splash-screen": "~56.0.10",
     "expo-sqlite": "~56.0.4",
     "expo-status-bar": "~56.0.4",
@@ -68,7 +68,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
-    "react-native-gesture-handler": "~2.31.1",
+    "react-native-gesture-handler": "~2.31.2",
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
@@ -80,37 +80,21 @@
     "typescript": "~6.0.3",
     "tz-lookup": "^6.1.25",
     "uniwind": "^1.7.0",
-    "zustand": "^5.0.13"
+    "zustand": "^5.0.14"
   },
   "private": true,
-  "packageManager": "pnpm@10.33.4",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@firebase/util",
-      "@shopify/react-native-skia",
-      "msgpackr-extract",
-      "protobufjs"
-    ],
-    "packageExtensions": {
-      "eslint-plugin-react-compiler@*": {
-        "peerDependenciesMeta": {
-          "eslint": {
-            "optional": true
-          }
-        }
-      }
-    }
-  },
+  "packageManager": "pnpm@11.5.0",
   "devDependencies": {
     "@react-native/metro-config": "0.85.3",
-    "@types/babel__core": "^7",
-    "@types/lodash-es": "^4",
+    "@types/babel__core": "^7.20.5",
+    "@types/lodash-es": "^4.17.12",
     "@types/node": "^25.9.1",
     "@types/react-dom": "~19.2.3",
-    "@types/react-refresh": "^0",
-    "eslint-plugin-react-compiler": "^19.1.0-rc.2",
+    "@types/react-refresh": "^0.14.7",
+    "@typescript/native-preview": "7.0.0-dev.20260527.2",
+    "eslint-plugin-react-compiler": "19.1.0-rc.2",
     "knip": "^6.14.2",
-    "oxfmt": "^0.51.0",
-    "oxlint": "^1.66.0"
+    "oxfmt": "^0.52.0",
+    "oxlint": "^1.67.0"
   }
 }
