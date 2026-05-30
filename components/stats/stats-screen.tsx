@@ -1665,7 +1665,7 @@ function GreenStarSection({ greenStarVisits }: { greenStarVisits: number }) {
 
   return (
     <Animated.View entering={FadeInDown.delay(350).duration(400)}>
-      <View className={"bg-green-500/10 border-y border-green-500/30 py-4 flex-row items-center gap-4"}>
+      <View className={"bg-green-500/10 border-y border-green-500/30 p-4 flex-row items-center gap-4"}>
         <View className={"w-14 h-14 rounded-full bg-green-500/30 items-center justify-center"}>
           <IconSymbol name={"leaf.fill"} size={25} color={"#4ade80"} />
         </View>
