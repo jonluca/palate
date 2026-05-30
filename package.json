@@ -21,6 +21,7 @@
     "@babel/core": "^7.29.7",
     "@babel/runtime": "^7.29.7",
     "@expo/metro-runtime": "~56.0.13",
+    "@expo/ui": "~56.0.15",
     "@expo/vector-icons": "15.1.1",
     "@react-native-firebase/analytics": "^24.0.0",
     "@react-native-firebase/app": "^24.0.0",

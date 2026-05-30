@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Pressable } from "react-native";
+import { Platform, Pressable, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/icon-symbol";
@@ -39,9 +39,13 @@ export function NewPhotosCard() {
   const { newPhotosCount, hasPermission, isLoading } = useNewPhotosCount();
   const resetScan = useResetScan();
   const shouldShow = !isLoading && Boolean(hasPermission) && newPhotosCount > 0;
+  const formattedNewPhotosCount = newPhotosCount.toLocaleString();
+  const displayedNewPhotosCount = newPhotosCount > 999 ? "999+" : formattedNewPhotosCount;
 
   const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (Platform.OS === "ios") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
     resetScan();
     router.push("/rescan");
   };
@@ -52,41 +56,41 @@ export function NewPhotosCard() {
 
   return (
     <Animated.View entering={FadeIn.duration(200)} className={"rounded-2xl"}>
-      <Pressable onPress={handlePress}>
-        <View className={"p-4 flex-row items-center gap-3 bg-card border border-emerald-500/20 rounded-2xl"}>
-          <View
-            className={
-              "w-11 h-11 rounded-2xl bg-emerald-500/15 border border-emerald-500/20 items-center justify-center"
-            }
-          >
-            <IconSymbol name={"photo.badge.plus"} size={20} color={"#34d399"} />
+      <Pressable
+        onPress={handlePress}
+        accessibilityRole={"button"}
+        accessibilityLabel={`${formattedNewPhotosCount} new photos ready to scan`}
+        accessibilityHint={"Opens the scan screen to look for new restaurant visits"}
+        style={({ pressed }) => ({
+          borderCurve: "continuous",
+          opacity: pressed ? 0.7 : 1,
+        })}
+        className={"rounded-2xl border border-border bg-card"}
+      >
+        <View className={"p-4 flex-row items-center gap-3"}>
+          <View className={"size-11 rounded-xl bg-emerald-500/15 items-center justify-center"}>
+            <IconSymbol name={"camera.fill"} size={19} color={"#34d399"} />
           </View>
 
           <View className={"flex-1 gap-0.5"}>
-            <View className={"flex-row items-center gap-2"}>
-              <ThemedText variant={"heading"} className={"font-semibold"}>
-                New Photos
-              </ThemedText>
-              <View
-                className={
-                  "bg-emerald-500/15 border border-emerald-500/20 px-2 py-0.5 rounded-full min-w-[24px] items-center"
-                }
-              >
-                <ThemedText
-                  variant={"caption1"}
-                  className={"text-emerald-300 font-semibold"}
-                  style={{ fontVariant: ["tabular-nums"] }}
-                >
-                  {newPhotosCount > 999 ? "999+" : newPhotosCount}
-                </ThemedText>
-              </View>
-            </View>
+            <ThemedText variant={"heading"} className={"font-semibold"}>
+              New photos available
+            </ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              Tap to scan for restaurant visits
+              Scan for new restaurant visits
             </ThemedText>
           </View>
 
-          <View className={"w-8 h-8 rounded-full bg-secondary/80 items-center justify-center"}>
+          <View className={"flex-row items-center gap-2"}>
+            <View className={"min-w-6 h-6 px-1.5 rounded-full bg-emerald-500/15 items-center justify-center"}>
+              <ThemedText
+                variant={"caption1"}
+                className={"text-emerald-400 font-semibold"}
+                style={{ fontVariant: ["tabular-nums"] }}
+              >
+                {displayedNewPhotosCount}
+              </ThemedText>
+            </View>
             <IconSymbol name={"chevron.right"} size={13} color={"#8E8E93"} weight={"semibold"} />
           </View>
         </View>

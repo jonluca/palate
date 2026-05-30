@@ -11,6 +11,7 @@ import { useScanProgress, type ProgressSharedValues } from "./use-progress";
 import { useAppStore, useHasCompletedInitialScan } from "@/store/app-store";
 import { formatEta, getPhotoCount } from "@/services/scanner";
 import { logScanStarted, logScanCompleted } from "@/services/analytics";
+import { getUnanalyzedPhotoCount } from "@/utils/db";
 
 export interface UseScanReturn {
   // Permission state
@@ -38,10 +39,11 @@ export interface UseScanReturn {
 
 interface UseScanOptions {
   autoDeepScanPhotoThreshold?: number;
+  autoDeepScanRemainingPhotoThreshold?: number;
 }
 
 export function useScan(options: UseScanOptions = {}): UseScanReturn {
-  const { autoDeepScanPhotoThreshold } = options;
+  const { autoDeepScanPhotoThreshold, autoDeepScanRemainingPhotoThreshold } = options;
   const { data: hasPermission } = usePermissions();
   const { data: cameraRollCount } = usePhotoCount(hasPermission === true);
   const requestPermissionMutation = useRequestPermission();
@@ -105,13 +107,22 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   }, [requestPermissionMutation]);
 
   const shouldAutoDeepScan = useCallback(async () => {
+    if (autoDeepScanRemainingPhotoThreshold !== undefined) {
+      const remainingPhotoCount = await getUnanalyzedPhotoCount().catch(() => null);
+      return (
+        remainingPhotoCount !== null &&
+        remainingPhotoCount > 0 &&
+        remainingPhotoCount < autoDeepScanRemainingPhotoThreshold
+      );
+    }
+
     if (autoDeepScanPhotoThreshold === undefined || hasCompletedInitialScan) {
       return false;
     }
 
     const libraryPhotoCount = cameraRollCount ?? (await getPhotoCount().catch(() => null));
     return libraryPhotoCount !== null && libraryPhotoCount < autoDeepScanPhotoThreshold;
-  }, [autoDeepScanPhotoThreshold, cameraRollCount, hasCompletedInitialScan]);
+  }, [autoDeepScanPhotoThreshold, autoDeepScanRemainingPhotoThreshold, cameraRollCount, hasCompletedInitialScan]);
 
   const scan = useCallback(async () => {
     if (activeScanRef.current || isStoreScanning || scanMutation.isPending || deepScanMutation.isPending) {

@@ -7,6 +7,8 @@ import { useScan, useUnanalyzedPhotoCount } from "@/hooks";
 import { ScanHeader, PermissionCard, ScanCard } from "@/components/scan";
 import { Button, ButtonText } from "@/components/ui";
 
+const RESCAN_AUTO_DEEP_SCAN_REMAINING_PHOTO_THRESHOLD = 10_000;
+
 /**
  * Rescan screen - for users who have already completed initial setup.
  * Allows rescanning and deep scanning for new photos.
@@ -25,7 +27,7 @@ export default function RescanScreen() {
     scan,
     deepScan,
     sharedValues,
-  } = useScan();
+  } = useScan({ autoDeepScanRemainingPhotoThreshold: RESCAN_AUTO_DEEP_SCAN_REMAINING_PHOTO_THRESHOLD });
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
 
   const handleGoBack = () => {
