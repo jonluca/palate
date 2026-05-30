@@ -28,7 +28,7 @@ A mobile app that automatically discovers your restaurant visits by analyzing yo
 ## Prerequisites
 
 - Node.js 24+
-- Yarn 4 (set via `packageManager` in package.json)
+- pnpm 10 (set via `packageManager` in package.json)
 - Xcode 26.4+ (for iOS)
 - Android Studio (for Android)
 - A physical device recommended (iOS Simulator lacks photo library with location data)
@@ -40,17 +40,17 @@ A mobile app that automatically discovers your restaurant visits by analyzing yo
 ### 1. Install
 
 ```bash
-yarn install
+pnpm install
 ```
 
 ### 2. Build and Run
 
 ```bash
 # iOS
-yarn ios
+pnpm ios
 
 # Android
-yarn android
+pnpm android
 ```
 
 ### 3. Grant Permissions
@@ -135,12 +135,12 @@ Users review pending visits in the **Review** tab — confirm the suggested rest
 ## Scripts
 
 ```bash
-yarn start        # Start Expo dev server
-yarn ios          # Build and run on iOS
-yarn android      # Build and run on Android
-yarn typecheck    # Run TypeScript checks
-yarn lint         # Run ESLint
-yarn clean        # Remove build artifacts & node_modules
+pnpm start        # Start Expo dev server
+pnpm ios          # Build and run on iOS
+pnpm android      # Build and run on Android
+pnpm typecheck    # Run TypeScript checks
+pnpm lint         # Run ESLint
+pnpm clean        # Remove build artifacts & node_modules
 ```
 
 ## Thanks

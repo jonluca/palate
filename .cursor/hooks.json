@@ -1,6 +1,6 @@
 {
   "version": 1,
   "hooks": {
-    "afterFileEdit": [{ "command": "yarn lint:fix" }]
+    "afterFileEdit": [{ "command": "pnpm lint:fix" }]
   }
 }

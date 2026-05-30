@@ -7,5 +7,5 @@
   "trailingComma": "all",
   "singleQuote": false,
   "sortPackageJson": false,
-  "ignorePatterns": [".yarn", "uniwind.d.ts", "uniwind-types.d.ts"]
+  "ignorePatterns": ["uniwind.d.ts", "uniwind-types.d.ts"]
 }
