@@ -4,7 +4,7 @@ import { AutoRestaurantSelector } from "@/components/restaurant-auto-selector";
 import { useConfirmVisit, useQuickUpdateVisitStatus, useUndoVisitAction } from "@/hooks/queries";
 import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useRef } from "react";
 import { Pressable, View } from "react-native";
 import tzLookup from "tz-lookup";
 import { PhotoPreview } from "./photo-preview";
@@ -14,6 +14,7 @@ import { useUnifiedNearbyRestaurants, type NearbyRestaurant } from "@/hooks";
 import type { ReviewModeProps, SuggestedRestaurant, LoadingAction } from "./types";
 
 export function ReviewModeCard({ visit, match, enableAppleMapsVerification = false }: ReviewModeProps) {
+  const didSwipeCardRef = useRef(false);
   const [showSearchState, setShowSearchState] = useState(() => ({ visitId: visit.id, value: false }));
   const [selectedRestaurantState, setSelectedRestaurantState] = useState<{
     visitId: string;
@@ -42,7 +43,6 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
 
   // Extract visit properties for easier access
   const { id, startTime, photoCount, previewPhotos = [], foodProbable = false, calendarEventTitle } = visit;
-  const shouldRequireDeepScanBeforeSkip = !foodProbable && visit.hasUnanalyzedPhotos;
 
   // When we have an exact match, use that directly - no need for suggestions
   const hasMatch = Boolean(match);
@@ -204,7 +204,6 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
 
         const canConfirm = hasMatch || Boolean(displayRestaurants.length);
         const canSwipeConfirm = canConfirm;
-        const canSkip = !shouldRequireDeepScanBeforeSkip;
 
         const handleConfirmButton = () => {
           if (hasMatch) {
@@ -238,14 +237,28 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
           <>
             <SwipeableCard
               cardKey={id}
-              onSwipeLeft={canSkip ? handleReject : undefined}
+              onSwipeLeft={handleReject}
               onSwipeRight={canSwipeConfirm ? () => handleConfirmSuggestion(swipeRestaurant) : undefined}
               leftLabel={"Skip"}
               rightLabel={"Confirm"}
               enabled={!isAnyLoading}
+              onGestureStart={() => {
+                didSwipeCardRef.current = true;
+              }}
             >
               <View className={"mb-4"}>
-                <Pressable onPress={() => handleViewVisit()}>
+                <Pressable
+                  onPressIn={() => {
+                    didSwipeCardRef.current = false;
+                  }}
+                  onPress={() => {
+                    if (didSwipeCardRef.current) {
+                      didSwipeCardRef.current = false;
+                      return;
+                    }
+                    handleViewVisit();
+                  }}
+                >
                   <Card animated={false}>
                     <PhotoPreview photos={previewPhotos} onPhotoPress={handleViewVisit} />
 
@@ -279,7 +292,6 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
                         onFindRestaurant={() => setShowSearch(true)}
                         onNotThisRestaurant={() => setShowSearch(true)}
                         hasSuggestion={canConfirm}
-                        skipDisabled={!canSkip}
                         loadingAction={loadingAction}
                         variant={"pill"}
                       />
