@@ -7,12 +7,13 @@ license: MIT
 
 ## References
 
-- ./references/new-architecture.md -- SDK +53: New Architecture migration guide
 - ./references/react-19.md -- SDK +54: React 19 changes (useContext → use, Context.Provider → Context, forwardRef removal)
+- ./references/new-architecture.md -- SDK +53: New Architecture migration guide
 - ./references/react-compiler.md -- SDK +54: React Compiler setup and migration guide
 - ./references/native-tabs.md -- SDK +55: Native tabs changes (Icon/Label/Badge now accessed via NativeTabs.Trigger.\*)
-- ./references/expo-av-to-audio.md -- Migrate audio playback and recording from expo-av to expo-audio
-- ./references/expo-av-to-video.md -- Migrate video playback from expo-av to expo-video
+- ./references/expo-av-to-audio.md -- SDK +55: Migrate audio playback and recording from expo-av to expo-audio
+- ./references/expo-av-to-video.md -- SDK +55: Migrate video playback from expo-av to expo-video
+- ./references/react-navigation-to-expo-router.md -- SDK +56: Migrate `@react-navigation/*` imports to `expo-router` entry points (codemod + manual mapping)
 
 ## Beta/Preview Releases
 
@@ -53,6 +54,8 @@ watchman watch-del-all
 
 ## Prebuild for Native Changes
 
+**First check if `ios/` and `android/` directories exist in the project.** If neither directory exists, the project uses Continuous Native Generation (CNG) and native projects are regenerated at build time — skip this section and "Clear caches for bare workflow" entirely.
+
 If upgrading requires native changes:
 
 ```bash
@@ -62,6 +65,8 @@ npx expo prebuild --clean
 This regenerates the `ios` and `android` directories. Ensure the project is not a bare workflow app before running this command.
 
 ## Clear caches for bare workflow
+
+These steps only apply when `ios/` and/or `android/` directories exist in the project:
 
 - Clear the cocoapods cache for iOS: `cd ios && pod install --repo-update`
 - Clear derived data for Xcode: `npx expo run:ios --no-build-cache`
@@ -120,6 +125,10 @@ Remove redundant metro config options:
 - `EXPO_USE_FAST_RESOLVER=1` is removed in SDK +54.
 - cjs and mjs extensions are supported by default in SDK +50.
 - Expo webpack is deprecated, migrate to [Expo Router and Metro web](https://docs.expo.dev/router/migrate/from-expo-webpack/).
+
+## Hermes engine v1
+
+Since SDK 55, users can opt-in to use Hermes engine v1 for improved runtime performance. This requires setting `useHermesV1: true` in the `expo-build-properties` config plugin, and may require a specific version of the `hermes-compiler` npm package. Hermes v1 will become a default in some future SDK release.
 
 ## New Architecture
 

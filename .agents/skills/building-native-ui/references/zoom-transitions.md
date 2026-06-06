@@ -41,7 +41,7 @@ Wrap only the element that should animate. Siblings outside `Link.AppleZoom` are
 
 ## Destination Target
 
-Use `Link.AppleZoom.Target` on the destination screen to align the zoom animation to a specific element:
+Use `Link.AppleZoomTarget` on the destination screen to align the zoom animation to a specific element:
 
 ```tsx
 // Destination screen (e.g., app/photo.tsx)
@@ -50,9 +50,9 @@ import { Link } from "expo-router";
 export default function PhotoScreen() {
   return (
     <View style={{ flex: 1 }}>
-      <Link.AppleZoom.Target>
+      <Link.AppleZoomTarget>
         <Image source={{ uri: "https://example.com/full.jpg" }} style={{ width: "100%", aspectRatio: 4 / 3 }} />
-      </Link.AppleZoom.Target>
+      </Link.AppleZoomTarget>
       <Text>Photo details below</Text>
     </View>
   );
@@ -63,7 +63,7 @@ Without a target, the zoom animates to fill the entire destination screen.
 
 ## Custom Alignment Rectangle
 
-For manual control over where the zoom lands on the destination, use `alignmentRect` instead of `Link.AppleZoom.Target`:
+For manual control over where the zoom lands on the destination, use `alignmentRect` instead of `Link.AppleZoomTarget`:
 
 ```tsx
 <Link.AppleZoom alignmentRect={{ x: 0, y: 0, width: 200, height: 300 }}>
@@ -71,7 +71,7 @@ For manual control over where the zoom lands on the destination, use `alignmentR
 </Link.AppleZoom>
 ```
 
-Coordinates are in the destination screen's coordinate space. Prefer `Link.AppleZoom.Target` when possible — use `alignmentRect` only when the target element isn't available as a React component.
+Coordinates are in the destination screen's coordinate space. Prefer `Link.AppleZoomTarget` when possible — use `alignmentRect` only when the target element isn't available as a React component.
 
 ## Controlling Dismissal
 
