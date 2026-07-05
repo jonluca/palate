@@ -6,7 +6,6 @@ import Animated, {
   FadeOut,
   LinearTransition,
   useAnimatedReaction,
-  runOnJS,
   useSharedValue,
   withRepeat,
   withSequence,
@@ -14,6 +13,7 @@ import Animated, {
   Easing,
   type SharedValue,
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { cn } from "@/utils/cn";
 import { ThemedText } from "../themed-text";
 import { IconSymbol } from "../icon-symbol";
@@ -70,7 +70,7 @@ function AnimatedStatusText({ value, isComplete = false }: { value: SharedValue<
     () => value.value,
     (current, previous) => {
       if (current !== previous) {
-        runOnJS(setText)(current);
+        scheduleOnRN(setText, current);
       }
     },
     [value],
@@ -100,7 +100,7 @@ function AnimatedSpeedText({ value }: { value: SharedValue<number> }) {
     () => value.value,
     (current, previous) => {
       if (current !== previous) {
-        runOnJS(setSpeed)(current);
+        scheduleOnRN(setSpeed, current);
       }
     },
     [value],
@@ -128,7 +128,7 @@ function AnimatedEtaText({ value }: { value: SharedValue<string> }) {
     () => value.value,
     (current, previous) => {
       if (current !== previous) {
-        runOnJS(setEta)(current);
+        scheduleOnRN(setEta, current);
       }
     },
     [value],
@@ -202,9 +202,9 @@ export function AnimatedProgressCard({ sharedValues }: AnimatedProgressCardProps
   useAnimatedReaction(
     () => status.value,
     (current) => {
-      runOnJS(setVisible)(current.length > 0);
+      scheduleOnRN(setVisible, current.length > 0);
       // Check if message indicates completion
-      runOnJS(setIsComplete)(current.toLowerCase().includes("done"));
+      scheduleOnRN(setIsComplete, current.toLowerCase().includes("done"));
     },
     [status],
   );
@@ -213,7 +213,7 @@ export function AnimatedProgressCard({ sharedValues }: AnimatedProgressCardProps
   useAnimatedReaction(
     () => isActive.value,
     (current) => {
-      runOnJS(setShowStats)(current);
+      scheduleOnRN(setShowStats, current);
     },
     [isActive],
   );

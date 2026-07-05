@@ -6,10 +6,10 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   withSpring,
-  runOnJS,
   SlideInDown,
   SlideOutDown,
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedText } from "@/components/themed-text";
@@ -95,7 +95,7 @@ function UndoBanner({
 
       if (shouldDismiss) {
         translateY.value = withTiming(200, { duration: 150 }, () => {
-          runOnJS(onDismiss)();
+          scheduleOnRN(onDismiss);
         });
       } else {
         translateY.value = withSpring(0, { damping: 20, stiffness: 300 });

@@ -5,10 +5,10 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  runOnJS,
   interpolate,
   Extrapolation,
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import * as Haptics from "expo-haptics";
@@ -93,7 +93,7 @@ export function SwipeableCard({
     .onStart(() => {
       contextX.value = translateX.value;
       if (onGestureStart) {
-        runOnJS(onGestureStart)();
+        scheduleOnRN(onGestureStart);
       }
     })
     .onUpdate((event) => {
@@ -111,9 +111,9 @@ export function SwipeableCard({
 
       // Trigger haptic when threshold is reached
       if (Math.abs(newX) >= threshold) {
-        runOnJS(handleThresholdReached)();
+        scheduleOnRN(handleThresholdReached);
       } else {
-        runOnJS(resetHaptic)();
+        scheduleOnRN(resetHaptic);
       }
     })
     .onEnd((event) => {
@@ -122,7 +122,7 @@ export function SwipeableCard({
 
       if (shouldTriggerLeft) {
         // Trigger action immediately - don't wait for animation
-        runOnJS(handleSwipeComplete)("left");
+        scheduleOnRN(handleSwipeComplete, "left");
         // Animate off-screen with spring for snappy feel (uses velocity)
         translateX.value = withSpring(-SCREEN_WIDTH, {
           velocity: event.velocityX,
@@ -131,7 +131,7 @@ export function SwipeableCard({
         });
       } else if (shouldTriggerRight) {
         // Trigger action immediately - don't wait for animation
-        runOnJS(handleSwipeComplete)("right");
+        scheduleOnRN(handleSwipeComplete, "right");
         // Animate off-screen with spring for snappy feel (uses velocity)
         translateX.value = withSpring(SCREEN_WIDTH, {
           velocity: event.velocityX,
@@ -148,9 +148,9 @@ export function SwipeableCard({
         });
       }
 
-      runOnJS(resetHaptic)();
+      scheduleOnRN(resetHaptic);
       if (onGestureEnd) {
-        runOnJS(onGestureEnd)();
+        scheduleOnRN(onGestureEnd);
       }
     });
 

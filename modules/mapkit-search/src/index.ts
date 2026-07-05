@@ -1,4 +1,5 @@
-import { requireNativeModule, Platform } from "expo-modules-core";
+import { requireNativeModule } from "expo";
+import { Platform } from "react-native";
 
 export interface MapKitSearchResult {
   /** Name of the place */

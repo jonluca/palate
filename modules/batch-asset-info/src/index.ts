@@ -1,4 +1,5 @@
-import { requireNativeModule, Platform } from "expo-modules-core";
+import { requireNativeModule } from "expo";
+import { Platform } from "react-native";
 
 interface AssetLocation {
   latitude: number;

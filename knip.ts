@@ -8,7 +8,7 @@ const config = async (): Promise<KnipConfig> => {
       entry: ["**/*.{ios,android,web,native}.{ts,tsx,js,json}"],
     },
     expo: true,
-    ignore: ["babel.config.js", "app.config.ts", "metro.config.js"],
+    ignore: ["app.config.ts"],
     ignoreBinaries: ["eas"],
   } satisfies KnipConfig;
 };

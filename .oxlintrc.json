@@ -23,7 +23,6 @@
     "ios/**/*",
     "metro.config.cjs",
     "metro.config.js",
-    "babel.config.js",
     "uniwind.d.ts",
     "uniwind-types.d.ts",
     ".expo/",

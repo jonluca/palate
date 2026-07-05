@@ -3,13 +3,8 @@
 import React, { useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { StyleSheet, useWindowDimensions } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import Animated, {
-  runOnJS,
-  useAnimatedReaction,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from "react-native-reanimated";
+import Animated, { useAnimatedReaction, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 
 import { RTL, SPACE_BETWEEN_IMAGES, DOUBLE_TAP_SCALE, MAX_SCALE, TIMING_CONFIG } from "./constants";
 import { ResizableImage, DefaultImage } from "./components";
@@ -76,7 +71,7 @@ const GalleryComponent = <T = string,>(
 
   useAnimatedReaction(
     () => currentIndex.value,
-    (newIndex) => runOnJS(changeIndex)(newIndex),
+    (newIndex) => scheduleOnRN(changeIndex, newIndex),
     [currentIndex, changeIndex],
   );
 

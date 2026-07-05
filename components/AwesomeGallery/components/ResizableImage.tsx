@@ -6,7 +6,6 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import type { SharedValue } from "react-native-reanimated";
 import Animated, {
   cancelAnimation,
-  runOnJS,
   useAnimatedReaction,
   useAnimatedStyle,
   useDerivedValue,
@@ -14,6 +13,7 @@ import Animated, {
   withDecay,
   withTiming,
 } from "react-native-reanimated";
+import { scheduleOnRN } from "react-native-worklets";
 import { clamp, snapPoint, withDecaySpring, withRubberBandClamp, resizeImage } from "../utils";
 import { useVector } from "../hooks";
 import { RTL, TIMING_CONFIG } from "../constants";
@@ -77,12 +77,12 @@ export const ResizableImage = <T = string,>({
       }
 
       if (!onScaleChangeRange) {
-        runOnJS(onScaleChange)(scaleReaction);
+        scheduleOnRN(onScaleChange, scaleReaction);
         return;
       }
 
       if (scaleReaction > onScaleChangeRange.start && scaleReaction < onScaleChangeRange.end) {
-        runOnJS(onScaleChange)(scaleReaction);
+        scheduleOnRN(onScaleChange, scaleReaction);
       }
     },
   );
@@ -245,7 +245,7 @@ export const ResizableImage = <T = string,>({
         return;
       }
       if (onScaleStart) {
-        runOnJS(onScaleStart)(scale.value);
+        scheduleOnRN(onScaleStart, scale.value);
       }
 
       onStart();
@@ -276,7 +276,7 @@ export const ResizableImage = <T = string,>({
         return;
       }
       if (onScaleEnd) {
-        runOnJS(onScaleEnd)(scale.value);
+        scheduleOnRN(onScaleEnd, scale.value);
       }
       if (scale.value < 1) {
         resetValues();
@@ -399,7 +399,7 @@ export const ResizableImage = <T = string,>({
       }
 
       if (onPanStart) {
-        runOnJS(onPanStart)();
+        scheduleOnRN(onPanStart);
       }
 
       onStart();
@@ -552,7 +552,7 @@ export const ResizableImage = <T = string,>({
         offset.y.value = withDecay({
           velocity: velocityY,
         });
-        runOnJS(onSwipeToClose)();
+        scheduleOnRN(onSwipeToClose);
         return;
       }
 
@@ -600,7 +600,7 @@ export const ResizableImage = <T = string,>({
         return;
       }
       if (onTap && !interruptedScroll.value) {
-        runOnJS(onTap)();
+        scheduleOnRN(onTap);
       }
       interruptedScroll.value = false;
     });
@@ -621,12 +621,12 @@ export const ResizableImage = <T = string,>({
       if (onTap && interruptedScroll.value) {
         interruptedScroll.value = false;
         if (onTap) {
-          runOnJS(onTap)();
+          scheduleOnRN(onTap);
         }
         return;
       }
       if (onDoubleTap) {
-        runOnJS(onDoubleTap)(scale.value === 1 ? doubleTapScale : 1);
+        scheduleOnRN(onDoubleTap, scale.value === 1 ? doubleTapScale : 1);
       }
 
       if (scale.value === 1) {
@@ -658,7 +658,7 @@ export const ResizableImage = <T = string,>({
         return;
       }
       if (onLongPress) {
-        runOnJS(onLongPress)();
+        scheduleOnRN(onLongPress);
       }
     });
 

@@ -15,39 +15,3 @@ packageExtensions:
     peerDependenciesMeta:
       eslint:
         optional: true
-
-minimumReleaseAgeExclude:
-  - "@expo/cli@56.1.14"
-  - "@expo/fingerprint@0.19.4"
-  - "@expo/inline-modules@0.0.11"
-  - "@expo/metro-runtime@56.0.14"
-  - "@expo/prebuild-config@56.0.15"
-  - "@expo/router-server@56.0.13"
-  - "@expo/ui@56.0.16"
-  - "@types/node@25.9.2"
-  - "@types/react@19.2.17"
-  - "@typescript/native-preview-darwin-arm64@7.0.0-dev.20260606.1"
-  - "@typescript/native-preview-darwin-x64@7.0.0-dev.20260606.1"
-  - "@typescript/native-preview-linux-arm64@7.0.0-dev.20260606.1"
-  - "@typescript/native-preview-linux-arm@7.0.0-dev.20260606.1"
-  - "@typescript/native-preview-linux-x64@7.0.0-dev.20260606.1"
-  - "@typescript/native-preview-win32-arm64@7.0.0-dev.20260606.1"
-  - "@typescript/native-preview-win32-x64@7.0.0-dev.20260606.1"
-  - "@typescript/native-preview@7.0.0-dev.20260606.1"
-  - expo-asset@56.0.16
-  - expo-build-properties@56.0.17
-  - expo-constants@56.0.17
-  - expo-dev-client@56.0.19
-  - expo-dev-launcher@56.0.19
-  - expo-image-picker@56.0.16
-  - expo-image@56.0.10
-  - expo-location@56.0.16
-  - expo-modules-autolinking@56.0.15
-  - expo-modules-core@56.0.15
-  - expo-modules-jsi@56.0.8
-  - expo-router@56.2.9
-  - expo-server@56.0.5
-  - expo-sharing@56.0.16
-  - expo-symbols@56.0.6
-  - expo@56.0.9
-  - knip@6.16.1

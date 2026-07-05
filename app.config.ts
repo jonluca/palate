@@ -92,7 +92,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
         {
           ios: {
             useFrameworks: "static",
-            forceStaticLinking: ["RNFBApp", "RNFBAuth", "RNFBDatabase", "RNFBStorage", "RNFBAnalytics"],
+            forceStaticLinking: ["RNFBApp", "RNFBAnalytics"],
           },
         },
       ],
