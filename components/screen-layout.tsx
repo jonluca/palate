@@ -2,7 +2,6 @@ import { cn } from "@/utils/cn";
 import { useHeaderHeight } from "expo-router/react-navigation";
 import React from "react";
 import { Platform, RefreshControl, ScrollView, View, type ViewProps } from "react-native";
-import Animated, { FadeIn } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type ScreenLayoutProps = ViewProps & {
@@ -50,18 +49,14 @@ export function ScreenLayout({
         }
         {...props}
       >
-        <Animated.View entering={FadeIn.duration(400)} className={"gap-3"}>
-          {children}
-        </Animated.View>
+        <View className={"gap-3"}>{children}</View>
       </ScrollView>
     );
   }
 
   return (
     <View className={cn("flex-1 bg-background p-4", className)} style={contentStyle} {...props}>
-      <Animated.View entering={FadeIn.duration(400)} className={"flex-1 gap-3"}>
-        {children}
-      </Animated.View>
+      <View className={"flex-1 gap-3"}>{children}</View>
     </View>
   );
 }
