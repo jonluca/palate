@@ -1,6 +1,7 @@
-@testable import BatchAssetInfoCore
 import Foundation
 import Testing
+
+@testable import BatchAssetInfoCore
 
 @Suite("Photo asset thumbnail core")
 struct PhotoAssetThumbnailCoreTests {
@@ -87,7 +88,8 @@ struct PhotoAssetThumbnailCoreTests {
   @Test("Equivalent request keys address the same bounded-cache entry")
   func cacheKeyEquality() throws {
     let target = try PhotoAssetThumbnailTarget(pixelWidth: 320, pixelHeight: 240)
-    let requestKey = try PhotoAssetThumbnailRequestKey(assetIdentifier: "opaque/L0/001", target: target)
+    let requestKey = try PhotoAssetThumbnailRequestKey(
+      assetIdentifier: "opaque/L0/001", target: target)
     let cache = NSCache<PhotoAssetThumbnailCacheKey, NSString>()
     cache.setObject("cached", forKey: PhotoAssetThumbnailCacheKey(requestKey))
 
@@ -97,7 +99,8 @@ struct PhotoAssetThumbnailCoreTests {
   @Test("Cancellation before the batch flush suppresses all delivery")
   func cancellationBeforeFlush() async throws {
     let target = try PhotoAssetThumbnailTarget(pixelWidth: 120, pixelHeight: 120)
-    let key = try PhotoAssetThumbnailRequestKey(assetIdentifier: "cancel-before-flush", target: target)
+    let key = try PhotoAssetThumbnailRequestKey(
+      assetIdentifier: "cancel-before-flush", target: target)
     let state = CancellationState()
     let store = PhotoAssetThumbnailStore(batchDelay: 0.05)
 
@@ -124,6 +127,26 @@ struct PhotoAssetThumbnailCoreTests {
 
     #expect(entry.acceptsImageResult(from: currentId))
     #expect(!entry.acceptsImageResult(from: staleId))
+  }
+
+  @Test("Automatic retry is transient-only and bounded to one attempt")
+  func automaticRetryPolicy() {
+    var policy = PhotoAssetThumbnailRetryPolicy()
+
+    let retriesCacheClear = policy.consumeRetry(for: .cacheCleared)
+    let retriesMissingAsset = policy.consumeRetry(for: .assetNotFound("missing"))
+    let retriesUnavailableImage = policy.consumeRetry(for: .imageUnavailable("transient"))
+    let retriesAfterExhaustion = policy.consumeRetry(
+      for: .photoKitFailure(assetIdentifier: "transient", message: "retry exhausted")
+    )
+    #expect(!retriesCacheClear)
+    #expect(!retriesMissingAsset)
+    #expect(retriesUnavailableImage)
+    #expect(!retriesAfterExhaustion)
+
+    policy.reset()
+    let retriesCancellationAfterReset = policy.consumeRetry(for: .requestCancelled("transient"))
+    #expect(retriesCancellationAfterReset)
   }
 }
 

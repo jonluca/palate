@@ -6,6 +6,7 @@ import {
   MICHELIN_SUGGESTION_RADIUS_METERS,
 } from "./michelin-index";
 import type { MichelinRestaurantRecord, VisitSuggestedRestaurant } from "./types";
+import { getImportedMichelinDatasetVersion } from "./michelin";
 
 const MICHELIN_SUGGESTION_VERSION_KEY = "michelin_suggestion_version";
 const MICHELIN_MATCHING_ALGORITHM_VERSION = `geodesic-v1-r${MICHELIN_PRIMARY_MATCH_RADIUS_METERS}-r${MICHELIN_SUGGESTION_RADIUS_METERS}-l${MICHELIN_SUGGESTION_LIMIT}`;
@@ -228,6 +229,15 @@ export async function recomputeSuggestedRestaurantsIfNeeded(
 
   const promise = (async () => {
     const database = await getDatabase();
+
+    // Never compute or stamp suggestions for a guide version that failed to
+    // import. Otherwise an older active index could be mislabeled as current,
+    // preventing a later successful import from refreshing pending visits.
+    const activeDatasetVersion = await getImportedMichelinDatasetVersion();
+    if (activeDatasetVersion !== datasetVersion) {
+      return { refreshed: false, visitsUpdated: 0 };
+    }
+
     const importedVersion = await database.getFirstAsync<{ value: string }>(
       `SELECT value FROM app_metadata WHERE key = ?`,
       [MICHELIN_SUGGESTION_VERSION_KEY],

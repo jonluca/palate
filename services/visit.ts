@@ -166,8 +166,7 @@ async function initializeMichelinDataInternal(
   });
 
   if (michelinData.length === 0) {
-    console.warn("No Michelin data loaded");
-    return { loaded: 0, skipped: false };
+    throw new Error("The bundled Michelin database did not contain any valid restaurant locations");
   }
 
   onProgress(

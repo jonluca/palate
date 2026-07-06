@@ -181,6 +181,11 @@ function parseNonNegativeInteger(option: string, value: string): number {
 function parseConfiguration(arguments_: readonly string[]): Configuration | null {
   const values = { ...DEFAULT_CONFIGURATION };
   for (const argument of arguments_) {
+    // pnpm versions differ in whether `pnpm script -- --flag` preserves the
+    // separator. Accept both invocation styles without weakening option checks.
+    if (argument === "--") {
+      continue;
+    }
     if (argument === "--help" || argument === "-h") {
       return null;
     }

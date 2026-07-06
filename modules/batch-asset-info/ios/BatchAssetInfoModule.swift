@@ -26,7 +26,7 @@ public class BatchAssetInfoModule: Module {
       self.assetInfoQueue.async {
         self.assetScanSessions.removeAll()
       }
-      PhotoAssetThumbnailStore.shared.clearCaches()
+      PhotoAssetThumbnailStore.shared.clearCaches(notifyMountedViews: false)
     }
 
     View(PhotoAssetThumbnailView.self) {

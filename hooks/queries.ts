@@ -92,13 +92,17 @@ function invalidateVisitQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
 }
 
+function invalidateMichelinRestaurantSearch(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ["michelinRestaurantSearch"] });
+}
+
 /** Invalidate data derived from confirmed visit statuses. */
 function invalidateVisitStatusQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["visits", "restaurantVisits"] });
   queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
   queryClient.invalidateQueries({ queryKey: queryKeys.stats });
   queryClient.invalidateQueries({ queryKey: ["wrapped"] });
-  queryClient.invalidateQueries({ queryKey: ["michelinRestaurantSearch"] });
+  invalidateMichelinRestaurantSearch(queryClient);
 }
 
 function invalidateReservationImportQueries(queryClient: QueryClient) {
@@ -108,6 +112,7 @@ function invalidateReservationImportQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: queryKeys.stats });
   queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
   queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+  invalidateMichelinRestaurantSearch(queryClient);
 }
 
 // ============================================================================
@@ -845,6 +850,7 @@ export function useConfirmVisit() {
     onSuccess: (_data, variables) => {
       // Only invalidate confirmed restaurants list, not pending reviews (handled optimistically)
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      invalidateMichelinRestaurantSearch(queryClient);
       // Track analytics
       logVisitConfirmed(parseInt(variables.visitId, 10) || 0);
     },
@@ -950,6 +956,7 @@ export function useBatchConfirmVisits() {
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
       queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      invalidateMichelinRestaurantSearch(queryClient);
     },
   });
 }
@@ -1063,6 +1070,9 @@ export function useImportCalendarEvents() {
       if (context?.previousEvents) {
         queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, context.previousEvents);
       }
+    },
+    onSuccess: () => {
+      invalidateReservationImportQueries(queryClient);
     },
   });
 }
@@ -1299,6 +1309,7 @@ export function useQuickUpdateVisitStatus() {
       // Only invalidate confirmed restaurants list if confirming, not pending reviews (handled optimistically)
       if (newStatus === "confirmed") {
         queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+        invalidateMichelinRestaurantSearch(queryClient);
         logVisitConfirmed(parseInt(visitId, 10) || 0);
       } else if (newStatus === "rejected") {
         logVisitRejected(parseInt(visitId, 10) || 0);
@@ -1368,6 +1379,7 @@ export function useBatchUpdateVisitStatus() {
       // Only invalidate confirmed restaurants list if confirming, not pending reviews (handled optimistically)
       if (newStatus === "confirmed") {
         queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+        invalidateMichelinRestaurantSearch(queryClient);
       }
     },
   });
@@ -1401,6 +1413,7 @@ export function useMergeVisits() {
     },
     onSuccess: ({ targetVisitId }) => {
       invalidateVisitQueries(queryClient);
+      invalidateVisitStatusQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(targetVisitId) });
     },
   });
@@ -1431,6 +1444,7 @@ export function useBatchMergeSameRestaurantVisits() {
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
       queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      invalidateMichelinRestaurantSearch(queryClient);
     },
   });
 }
@@ -1470,6 +1484,7 @@ export function useCreateManualVisit() {
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       // Invalidate wrapped stats (invalidates all years)
       queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      invalidateMichelinRestaurantSearch(queryClient);
     },
   });
 }

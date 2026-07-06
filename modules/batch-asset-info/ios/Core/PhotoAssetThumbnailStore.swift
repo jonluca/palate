@@ -1,8 +1,18 @@
 import Foundation
 @preconcurrency import Photos
 
-public final class PhotoAssetThumbnailStore: @unchecked Sendable {
-  public static let shared = PhotoAssetThumbnailStore()
+public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObserver,
+  @unchecked Sendable
+{
+  public static let cacheInvalidatedNotification = Notification.Name(
+    "com.jonluca.palate.photo-thumbnails.cache-invalidated"
+  )
+
+  public static let shared: PhotoAssetThumbnailStore = {
+    let store = PhotoAssetThumbnailStore()
+    store.startObservingPhotoLibraryChanges()
+    return store
+  }()
 
   public static let defaultBatchDelay: TimeInterval = 0.002
   public static let defaultFinalImageCacheByteLimit = 32 * 1_024 * 1_024
@@ -13,8 +23,11 @@ public final class PhotoAssetThumbnailStore: @unchecked Sendable {
   private let stateQueue: DispatchQueue
   private let assetFetchQueue: DispatchQueue
   private let callbackQueue: DispatchQueue
+  private let callbacksRunOnMainQueue: Bool
   private let batchDelay: TimeInterval
-  private let finalImageCache = NSCache<PhotoAssetThumbnailCacheKey, PhotoAssetThumbnailCachedImage>()
+  private let finalImageCache = NSCache<
+    PhotoAssetThumbnailCacheKey, PhotoAssetThumbnailCachedImage
+  >()
   private let assetCache = NSCache<NSString, PHAsset>()
 
   private var entries: [PhotoAssetThumbnailRequestKey: PhotoAssetThumbnailRequestEntry] = [:]
@@ -23,6 +36,7 @@ public final class PhotoAssetThumbnailStore: @unchecked Sendable {
   private var waitingKeysByAssetIdentifier: [String: Set<PhotoAssetThumbnailRequestKey>] = [:]
   private var assetIdentifiersBeingFetched: Set<String> = []
   private var cacheGeneration: UInt64 = 0
+  private var observesPhotoLibraryChanges = false
 
   public init(
     callbackQueue: DispatchQueue = .main,
@@ -32,13 +46,28 @@ public final class PhotoAssetThumbnailStore: @unchecked Sendable {
     assetCacheCountLimit: Int = PhotoAssetThumbnailStore.defaultAssetCacheCountLimit
   ) {
     self.callbackQueue = callbackQueue
+    callbacksRunOnMainQueue = callbackQueue === DispatchQueue.main
     self.batchDelay = max(0, batchDelay)
     imageManager = PHCachingImageManager()
-    stateQueue = DispatchQueue(label: "com.jonluca.palate.photo-thumbnails.state", qos: .userInitiated)
-    assetFetchQueue = DispatchQueue(label: "com.jonluca.palate.photo-thumbnails.assets", qos: .userInitiated)
+    stateQueue = DispatchQueue(
+      label: "com.jonluca.palate.photo-thumbnails.state", qos: .userInitiated)
+    assetFetchQueue = DispatchQueue(
+      label: "com.jonluca.palate.photo-thumbnails.assets", qos: .userInitiated)
+    super.init()
     finalImageCache.totalCostLimit = max(1, finalImageCacheByteLimit)
     finalImageCache.countLimit = max(1, finalImageCacheCountLimit)
     assetCache.countLimit = max(1, assetCacheCountLimit)
+  }
+
+  deinit {
+    if observesPhotoLibraryChanges {
+      PHPhotoLibrary.shared().unregisterChangeObserver(self)
+    }
+  }
+
+  public func photoLibraryDidChange(_ changeInstance: PHChange) {
+    _ = changeInstance
+    clearCaches(notifyMountedViews: true, completion: nil)
   }
 
   @discardableResult
@@ -69,8 +98,9 @@ public final class PhotoAssetThumbnailStore: @unchecked Sendable {
     for key: PhotoAssetThumbnailRequestKey,
     completion: @escaping @MainActor @Sendable (PhotoAssetThumbnailEvent) -> Void
   ) -> PhotoAssetThumbnailRequestToken {
-    requestThumbnail(for: key) { event in
-      if Thread.isMainThread {
+    let callbacksRunOnMainQueue = callbacksRunOnMainQueue
+    return requestThumbnail(for: key) { event in
+      if callbacksRunOnMainQueue {
         MainActor.assumeIsolated {
           completion(event)
         }
@@ -83,6 +113,13 @@ public final class PhotoAssetThumbnailStore: @unchecked Sendable {
   }
 
   public func clearCaches(completion: (@MainActor @Sendable () -> Void)? = nil) {
+    clearCaches(notifyMountedViews: true, completion: completion)
+  }
+
+  func clearCaches(
+    notifyMountedViews: Bool,
+    completion: (@MainActor @Sendable () -> Void)? = nil
+  ) {
     stateQueue.async { [weak self] in
       guard let self else {
         DispatchQueue.main.async {
@@ -110,9 +147,23 @@ public final class PhotoAssetThumbnailStore: @unchecked Sendable {
       imageManager.stopCachingImagesForAllAssets()
 
       DispatchQueue.main.async {
+        if notifyMountedViews {
+          NotificationCenter.default.post(
+            name: Self.cacheInvalidatedNotification,
+            object: self
+          )
+        }
         completion?()
       }
     }
+  }
+
+  private func startObservingPhotoLibraryChanges() {
+    guard !observesPhotoLibraryChanges else {
+      return
+    }
+    observesPhotoLibraryChanges = true
+    PHPhotoLibrary.shared().register(self)
   }
 
   private func enqueue(
@@ -186,7 +237,7 @@ public final class PhotoAssetThumbnailStore: @unchecked Sendable {
       waitingKeysByAssetIdentifier[key.assetIdentifier, default: []].insert(key)
 
       if !assetIdentifiersBeingFetched.contains(key.assetIdentifier),
-         newlyQueuedIdentifiers.insert(key.assetIdentifier).inserted
+        newlyQueuedIdentifiers.insert(key.assetIdentifier).inserted
       {
         assetIdentifiersBeingFetched.insert(key.assetIdentifier)
         identifiersToFetch.append(key.assetIdentifier)
@@ -211,7 +262,9 @@ public final class PhotoAssetThumbnailStore: @unchecked Sendable {
     }
   }
 
-  private static func fetchAssets(withIdentifiers identifiers: [String]) -> PhotoAssetThumbnailAssetFetchResult {
+  private static func fetchAssets(withIdentifiers identifiers: [String])
+    -> PhotoAssetThumbnailAssetFetchResult
+  {
     let authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     guard authorizationStatus == .authorized || authorizationStatus == .limited else {
       return .failure(.photoLibraryAccessRequired(status: authorizationStatus.rawValue))
@@ -305,8 +358,8 @@ public final class PhotoAssetThumbnailStore: @unchecked Sendable {
     }
 
     guard var currentEntry = entries[key],
-          currentEntry.id == entryId,
-          currentEntry.phase == .requesting
+      currentEntry.id == entryId,
+      currentEntry.phase == .requesting
     else {
       imageManager.cancelImageRequest(requestId)
       return

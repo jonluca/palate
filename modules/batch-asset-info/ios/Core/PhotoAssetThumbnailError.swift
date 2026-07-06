@@ -43,13 +43,17 @@ public enum PhotoAssetThumbnailError: Error, Equatable, LocalizedError, Sendable
     case .invalidAssetIdentifier:
       return "The photo thumbnail asset identifier must not be empty."
     case .invalidTarget(let width, let height, let scale):
-      return "Photo thumbnail dimensions and scale must be finite and greater than zero (width: \(width), height: \(height), scale: \(scale))."
+      return
+        "Photo thumbnail dimensions and scale must be finite and greater than zero (width: \(width), height: \(height), scale: \(scale))."
     case .targetTooLarge(let width, let height, let maximumDimension):
-      return "Photo thumbnail target \(width)x\(height) exceeds the maximum dimension of \(maximumDimension) pixels."
+      return
+        "Photo thumbnail target \(width)x\(height) exceeds the maximum dimension of \(maximumDimension) pixels."
     case .targetPixelCountTooLarge(let width, let height, let maximumPixelCount):
-      return "Photo thumbnail target \(width)x\(height) exceeds the maximum decoded pixel count of \(maximumPixelCount)."
+      return
+        "Photo thumbnail target \(width)x\(height) exceeds the maximum decoded pixel count of \(maximumPixelCount)."
     case .photoLibraryAccessRequired(let status):
-      return "Photo library read access is required to load thumbnails (authorization status: \(status))."
+      return
+        "Photo library read access is required to load thumbnails (authorization status: \(status))."
     case .assetNotFound(let assetIdentifier):
       return "Photo asset \(assetIdentifier) was not found or is no longer accessible."
     case .requestCancelled(let assetIdentifier):
@@ -60,6 +64,40 @@ public enum PhotoAssetThumbnailError: Error, Equatable, LocalizedError, Sendable
       return "PhotoKit failed to load thumbnail \(assetIdentifier): \(message)"
     case .cacheCleared:
       return "The photo thumbnail cache was cleared while the request was active."
+    }
+  }
+}
+
+struct PhotoAssetThumbnailRetryPolicy: Sendable {
+  static let maximumAutomaticRetries = 1
+
+  private(set) var automaticRetriesUsed = 0
+
+  mutating func consumeRetry(for error: PhotoAssetThumbnailError) -> Bool {
+    guard error.isAutomaticallyRetryable,
+      automaticRetriesUsed < Self.maximumAutomaticRetries
+    else {
+      return false
+    }
+
+    automaticRetriesUsed += 1
+    return true
+  }
+
+  mutating func reset() {
+    automaticRetriesUsed = 0
+  }
+}
+
+extension PhotoAssetThumbnailError {
+  fileprivate var isAutomaticallyRetryable: Bool {
+    switch self {
+    case .requestCancelled, .imageUnavailable, .photoKitFailure:
+      return true
+    case .invalidURI, .invalidAssetIdentifier, .invalidTarget, .targetTooLarge,
+      .targetPixelCountTooLarge, .photoLibraryAccessRequired, .assetNotFound,
+      .cacheCleared:
+      return false
     }
   }
 }

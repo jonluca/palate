@@ -133,10 +133,37 @@ function timeQueries(
   return elapsedMs;
 }
 
-const queryCountArgument = process.argv.find((argument) => argument.startsWith("--queries="));
-const queryCount = queryCountArgument ? Number(queryCountArgument.split("=")[1]) : 5000;
-if (!Number.isInteger(queryCount) || queryCount <= 0) {
-  throw new RangeError(`--queries must be a positive integer; received ${queryCount}`);
+function parseQueryCount(arguments_: readonly string[]): number | null {
+  let queryCount = 5000;
+  for (const argument of arguments_) {
+    // Accept the separator retained by some pnpm versions while rejecting
+    // every other unknown argument so benchmark typos cannot silently run.
+    if (argument === "--") {
+      continue;
+    }
+    if (argument === "--help" || argument === "-h") {
+      return null;
+    }
+    if (!argument.startsWith("--queries=")) {
+      throw new Error(`Unknown argument: ${argument}`);
+    }
+
+    const value = argument.slice("--queries=".length);
+    if (!/^\d+$/.test(value)) {
+      throw new RangeError(`--queries must be a positive integer; received ${value}`);
+    }
+    queryCount = Number(value);
+    if (!Number.isSafeInteger(queryCount) || queryCount <= 0) {
+      throw new RangeError(`--queries must be a positive safe integer; received ${value}`);
+    }
+  }
+  return queryCount;
+}
+
+const queryCount = parseQueryCount(process.argv.slice(2));
+if (queryCount === null) {
+  console.log("Usage: pnpm profile:location [--queries=5000]");
+  process.exit(0);
 }
 
 const database = new DatabaseSync(fileURLToPath(new URL("../assets/michelin.db", import.meta.url)), { readOnly: true });
@@ -163,7 +190,8 @@ const restaurants = rows
       latitude <= 90 &&
       Number.isFinite(longitude) &&
       longitude >= -180 &&
-      longitude <= 180,
+      longitude <= 180 &&
+      !(latitude === 0 && longitude === 0),
   );
 
 const buildStartedAt = performance.now();

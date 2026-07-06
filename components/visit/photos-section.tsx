@@ -51,7 +51,6 @@ function PhotoItem({
   isSelectionMode?: boolean;
   isSelected?: boolean;
 }) {
-  const [isLoading, setIsLoading] = useState(true);
   const isVideo = photo.mediaType === "video";
 
   return (
@@ -61,11 +60,9 @@ function PhotoItem({
           className={"rounded-lg overflow-hidden bg-muted"}
           style={{ width: size, height: size, borderCurve: "continuous" }}
         >
-          {isLoading && <View className={"absolute inset-0 bg-muted"} style={{ width: size, height: size }} />}
           <PhotoAssetThumbnail
             uri={photo.uri}
             style={{ width: size, height: size, opacity: isSelectionMode && !isSelected ? 0.5 : 1 }}
-            onLoad={() => setIsLoading(false)}
           />
           {/* Video indicator */}
           {isVideo && (

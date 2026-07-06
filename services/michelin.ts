@@ -230,7 +230,7 @@ export async function loadMichelinRestaurants(
     return restaurants;
   } catch (error) {
     console.error("Error loading Michelin data:", error);
-    return [];
+    throw error;
   }
 }
 

@@ -35,7 +35,7 @@ Profile initial native preview-image loading without running the metadata or Vis
 
 ```sh
 pnpm profile:initial-images
-pnpm profile:initial-images -- --image-counts 9,24 --image-width 384 --image-height 480 --image-iterations 4
+pnpm profile:initial-images --image-counts 9,24 --image-width 384 --image-height 480 --image-iterations 4
 ```
 
 This mode uses globally disjoint recent-image samples and counterbalances both recency and execution order. It compares the current per-image `PHAsset` refetch plus high-quality `PHImageManager.default()` path with the app's shared, batched, coalesced, opportunistic `PhotoAssetThumbnailStore`. The JSON report includes first renderable/degraded/final latency, all-visible final latency, per-image final p50/p95/max, failures and timeouts, decoded dimensions, identifier digests, and candidate speedups for each visible-image count. Raw Photos identifiers are never emitted.
@@ -46,7 +46,7 @@ Test and profile the Michelin location index without building the app:
 
 ```sh
 pnpm test:location
-pnpm profile:location -- --queries=5000
+pnpm profile:location --queries=5000
 ```
 
 The location profile validates every indexed result against an equivalent geodesic brute-force search before timing. It reports the one-time index build, the prior approximate linear implementation, equivalent geodesic brute force, indexed geodesic lookup, and both speedup ratios.
@@ -55,10 +55,10 @@ Test and profile the initial home preview-photo SQL without building the app:
 
 ```sh
 pnpm profile:home-previews
-pnpm profile:home-previews -- --restaurants=1500 --photos-per-visit=32 --samples=9
+pnpm profile:home-previews --restaurants=1500 --photos-per-visit=32 --samples=9
 ```
 
-This harness builds a deterministic in-memory SQLite database, checks the current global `ROW_NUMBER` preview query against an indexed correlated top-3 query on both edge-case and scaled datasets, and fails before timing if any restaurant's preview URI order differs. It emits JSON containing dataset sizes, correctness coverage, individual samples, median and p95 query times, and the correlated-query speedup. It uses Node's built-in SQLite module and does not need Photos permission or a React Native build.
+This harness builds a deterministic in-memory SQLite database, checks the prior global `ROW_NUMBER` preview-query baseline against the current indexed correlated top-3 query on both edge-case and scaled datasets, and fails before timing if any restaurant's preview URI order differs. It emits JSON containing dataset sizes, correctness coverage, individual samples, median and p95 query times, and the correlated-query speedup. It uses Node's built-in SQLite module and does not need Photos permission or a React Native build.
 
 Compile the complete app for the macOS “Designed for iPhone/iPad” destination without launching it:
 
