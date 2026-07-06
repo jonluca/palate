@@ -20,6 +20,7 @@ export type {
   ReservationOnlyVisitInput,
   RestaurantWithVisits,
   UpdateRestaurantData,
+  UnvisitedPhotoRecord,
   VisitForCalendarExport,
   VisitRecord,
   VisitSuggestedRestaurant,
@@ -68,6 +69,7 @@ export {
   getSuggestedRestaurantsForVisits,
   insertVisitSuggestedRestaurants,
   recomputeSuggestedRestaurants,
+  recomputeSuggestedRestaurantsIfNeeded,
 } from "./db/visit-suggestions";
 
 export {
@@ -80,9 +82,11 @@ export {
 
 export {
   getAllMichelinRestaurants,
+  getImportedMichelinDatasetVersion,
   getMichelinRestaurantById,
   getMichelinRestaurantCount,
   insertMichelinRestaurants,
+  searchUnvisitedMichelinRestaurantsByName,
 } from "./db/michelin";
 
 export {

@@ -4,8 +4,7 @@ import { ThemedText } from "@/components/themed-text";
 import { Card } from "@/components/ui";
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import { Image } from "expo-image";
-import Animated, { FadeIn } from "react-native-reanimated";
+import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
 
 interface PhotoData {
   id: string;
@@ -40,7 +39,6 @@ function formatDuration(seconds: number): string {
 function PhotoItem({
   photo,
   size,
-  index,
   onPress,
   onLongPress,
   isSelectionMode,
@@ -48,7 +46,6 @@ function PhotoItem({
 }: {
   photo: PhotoData;
   size: number;
-  index: number;
   onPress: () => void;
   onLongPress?: () => void;
   isSelectionMode?: boolean;
@@ -58,19 +55,16 @@ function PhotoItem({
   const isVideo = photo.mediaType === "video";
 
   return (
-    <Animated.View entering={FadeIn.delay(Math.min(index * 30, 300)).duration(300)} style={{ marginBottom: GAP }}>
+    <View style={{ marginBottom: GAP }}>
       <Pressable onPress={onPress} onLongPress={onLongPress} delayLongPress={300}>
         <View
           className={"rounded-lg overflow-hidden bg-muted"}
           style={{ width: size, height: size, borderCurve: "continuous" }}
         >
           {isLoading && <View className={"absolute inset-0 bg-muted"} style={{ width: size, height: size }} />}
-          <Image
-            source={{ uri: photo.uri }}
+          <PhotoAssetThumbnail
+            uri={photo.uri}
             style={{ width: size, height: size, opacity: isSelectionMode && !isSelected ? 0.5 : 1 }}
-            contentFit={"cover"}
-            transition={200}
-            recyclingKey={photo.id}
             onLoad={() => setIsLoading(false)}
           />
           {/* Video indicator */}
@@ -99,7 +93,7 @@ function PhotoItem({
           )}
         </View>
       </Pressable>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -196,7 +190,6 @@ export function PhotosSection({
       <PhotoItem
         photo={item}
         size={photoSize}
-        index={index}
         onPress={() => handlePhotoPress(index, item.id)}
         onLongPress={onRemovePhotos ? () => handleLongPress(item.id) : undefined}
         isSelectionMode={isSelectionMode}

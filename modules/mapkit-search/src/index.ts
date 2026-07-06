@@ -29,9 +29,50 @@ const MapKitSearchModule = Platform.OS === "ios" ? requireNativeModule("MapKitSe
 // CACHING LAYER
 // ============================================================================
 
-/** Cache for nearby restaurant searches */
-const nearbyCache = new Map<string, Promise<MapKitSearchResult[]>>();
-const textSearchCache = new Map<string, Promise<MapKitSearchResult[]>>();
+const CACHE_TTL_MS = 15 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 128;
+
+interface SearchCacheEntry {
+  readonly promise: Promise<MapKitSearchResult[]>;
+  readonly expiresAt: number;
+}
+
+/** Bounded caches also coalesce identical searches that are currently in flight. */
+const nearbyCache = new Map<string, SearchCacheEntry>();
+const textSearchCache = new Map<string, SearchCacheEntry>();
+
+function getCachedSearch(cache: Map<string, SearchCacheEntry>, key: string): Promise<MapKitSearchResult[]> | null {
+  const entry = cache.get(key);
+  if (!entry) {
+    return null;
+  }
+  if (entry.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+
+  // Refresh insertion order so the first key remains the least recently used.
+  cache.delete(key);
+  cache.set(key, entry);
+  return entry.promise;
+}
+
+function cacheSearch(cache: Map<string, SearchCacheEntry>, key: string, promise: Promise<MapKitSearchResult[]>): void {
+  cache.set(key, { promise, expiresAt: Date.now() + CACHE_TTL_MS });
+  while (cache.size > MAX_CACHE_ENTRIES) {
+    const leastRecentlyUsedKey = cache.keys().next().value;
+    if (leastRecentlyUsedKey === undefined) {
+      break;
+    }
+    cache.delete(leastRecentlyUsedKey);
+  }
+
+  promise.catch(() => {
+    if (cache.get(key)?.promise === promise) {
+      cache.delete(key);
+    }
+  });
+}
 
 /**
  * Generate a cache key for nearby search
@@ -43,6 +84,18 @@ function nearbyKey(lat: number, lon: number, radius: number): string {
 
 function textSearchKey(query: string, lat: number, lon: number, radius: number): string {
   return `${query.trim().toLowerCase()}:${nearbyKey(lat, lon, radius)}`;
+}
+
+function assertSearchRegion(latitude: number, longitude: number, radiusMeters: number): void {
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    throw new RangeError(`Latitude must be a finite number between -90 and 90; received ${latitude}`);
+  }
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    throw new RangeError(`Longitude must be a finite number between -180 and 180; received ${longitude}`);
+  }
+  if (!Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+    throw new RangeError(`Radius must be a positive finite number; received ${radiusMeters}`);
+  }
 }
 
 // ============================================================================
@@ -59,7 +112,7 @@ export function isMapKitSearchAvailable(): boolean {
 /**
  * Search for nearby restaurants using MapKit's native POI search.
  * Uses MKLocalPointsOfInterestRequest with food-related categories.
- * Results are cached indefinitely based on location and radius.
+ * Results are cached for 15 minutes based on location and radius.
  *
  * @param latitude - Latitude of the search center
  * @param longitude - Longitude of the search center
@@ -74,11 +127,12 @@ export async function searchNearbyRestaurants(
   if (!MapKitSearchModule) {
     throw new Error("MapKitSearch module is only available on iOS");
   }
+  assertSearchRegion(latitude, longitude, radiusMeters);
 
   const key = nearbyKey(latitude, longitude, radiusMeters);
 
   // Return cached promise if available
-  const cached = nearbyCache.get(key);
+  const cached = getCachedSearch(nearbyCache, key);
   if (cached) {
     return cached;
   }
@@ -87,12 +141,7 @@ export async function searchNearbyRestaurants(
   const promise = MapKitSearchModule.searchNearbyRestaurants(latitude, longitude, radiusMeters) as Promise<
     MapKitSearchResult[]
   >;
-  nearbyCache.set(key, promise);
-
-  // If the promise rejects, remove it from cache so it can be retried
-  promise.catch(() => {
-    nearbyCache.delete(key);
-  });
+  cacheSearch(nearbyCache, key, promise);
 
   return promise;
 }
@@ -115,9 +164,10 @@ export async function searchByText(
   if (!trimmedQuery) {
     return [];
   }
+  assertSearchRegion(latitude, longitude, radiusMeters);
 
   const key = textSearchKey(trimmedQuery, latitude, longitude, radiusMeters);
-  const cached = textSearchCache.get(key);
+  const cached = getCachedSearch(textSearchCache, key);
   if (cached) {
     return cached;
   }
@@ -125,11 +175,7 @@ export async function searchByText(
   const promise = MapKitSearchModule.searchByText(trimmedQuery, latitude, longitude, radiusMeters) as Promise<
     MapKitSearchResult[]
   >;
-  textSearchCache.set(key, promise);
-
-  promise.catch(() => {
-    textSearchCache.delete(key);
-  });
+  cacheSearch(textSearchCache, key, promise);
 
   return promise;
 }

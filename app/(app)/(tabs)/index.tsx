@@ -3,17 +3,17 @@ import { ThemedText } from "@/components/themed-text";
 import { Card, SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills } from "@/components/ui";
 import { HomeHeader, NewPhotosCard } from "@/components/home";
 import { MichelinRestaurantCard } from "@/components/restaurants/michelin-restaurant-card";
-import { useConfirmedRestaurants, useMichelinRestaurants, type RestaurantWithVisits } from "@/hooks/queries";
+import { useConfirmedRestaurants, useMichelinRestaurantSearch, type RestaurantWithVisits } from "@/hooks/queries";
 import type { MichelinRestaurantRecord } from "@/utils/db";
 import { FlashList } from "@shopify/flash-list";
 import { router } from "expo-router";
 import React, { useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { View, RefreshControl, Pressable, TextInput } from "react-native";
-import Animated, { FadeInDown, FadeIn, FadeOut } from "react-native-reanimated";
+import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconSymbol } from "@/components/icon-symbol";
-import { Image } from "expo-image";
+import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
 import * as Haptics from "expo-haptics";
 import { cn } from "@/utils/cn";
 
@@ -94,14 +94,14 @@ function PhotoPreview({ photos }: { photos: string[] }) {
     <View className={"flex-row h-32 overflow-hidden border-b border-border"}>
       {photos.slice(0, 3).map((uri) => (
         <View key={uri} className={"flex-1"}>
-          <Image recyclingKey={uri} source={{ uri }} style={{ width: "100%", height: 128 }} contentFit={"cover"} />
+          <PhotoAssetThumbnail uri={uri} style={{ width: "100%", height: 128 }} />
         </View>
       ))}
     </View>
   );
 }
 
-function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisits; index?: number }) {
+function RestaurantCard({ restaurant }: { restaurant: RestaurantWithVisits }) {
   const handlePress = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(`/restaurant/${restaurant.id}`);
@@ -111,7 +111,7 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
   const currentAwardDisplay = formatAward(restaurant.currentAward);
   const visitedAwardDisplay = formatAward(restaurant.visitedAward);
 
-  const content = (
+  return (
     <Pressable onPress={handlePress} className={"rounded-2xl"}>
       <Card animated={false}>
         <PhotoPreview photos={restaurant.previewPhotos} />
@@ -164,12 +164,6 @@ function RestaurantCard({ restaurant, index }: { restaurant: RestaurantWithVisit
       </Card>
     </Pressable>
   );
-
-  if (typeof index !== "number") {
-    return content;
-  }
-
-  return <Animated.View entering={FadeInDown.delay(index * 50).duration(150)}>{content}</Animated.View>;
 }
 
 function LoadingState() {
@@ -264,7 +258,10 @@ export default function RestaurantsScreen() {
   const listRef = useRef<any>(null);
 
   const { data: restaurants = [], isLoading } = useConfirmedRestaurants();
-  const { data: michelinRestaurants = [] } = useMichelinRestaurants();
+  const { data: michelinRestaurants = [], isFetching: isMichelinSearchLoading } = useMichelinRestaurantSearch(
+    searchQuery,
+    starFilter === "all",
+  );
 
   const scrollToTop = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -342,8 +339,7 @@ export default function RestaurantsScreen() {
     if (isSearching && michelinRestaurants.length > 0 && starFilter === "all") {
       const unvisitedMichelin = michelinRestaurants
         .filter((r) => !visitedRestaurantIds.has(r.id) && r.name.toLowerCase().includes(query))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .slice(0, 50); // Limit to 50 results for performance
+        .slice(0, 50); // The SQL query is also capped before rows cross the JS bridge.
 
       if (unvisitedMichelin.length > 0) {
         items.push({ type: "section-header", title: `All Restaurants (${unvisitedMichelin.length})` });
@@ -401,11 +397,11 @@ export default function RestaurantsScreen() {
     if (item.type === "michelin") {
       return <MichelinRestaurantCard restaurant={item.data} index={index < 8 ? index : undefined} />;
     }
-    return <RestaurantCard restaurant={item.data} index={index < 8 ? index : undefined} />;
+    return <RestaurantCard restaurant={item.data} />;
   }, []);
 
   const ListEmpty = useCallback(() => {
-    if (isLoading) {
+    if (isLoading || isMichelinSearchLoading) {
       return <LoadingState />;
     }
 
@@ -439,7 +435,7 @@ export default function RestaurantsScreen() {
     }
 
     return <NoRestaurantsEmpty onPress={() => router.push("/review")} />;
-  }, [isLoading, restaurants.length, listItems.length, searchQuery, starFilter]);
+  }, [isLoading, isMichelinSearchLoading, restaurants.length, listItems.length, searchQuery, starFilter]);
 
   const ItemSeparator = useCallback(() => <View style={{ height: 16 }} />, []);
 

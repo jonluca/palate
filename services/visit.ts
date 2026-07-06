@@ -17,20 +17,28 @@ import {
   getUnanalyzedPhotoIds,
   getSuggestedRestaurantsForVisits,
   batchUpdateVisitSuggestedRestaurants,
-  recomputeSuggestedRestaurants,
+  recomputeSuggestedRestaurantsIfNeeded,
   getLinkedCalendarEventIds,
   getDismissedCalendarEventIds,
   insertCalendarOnlyVisits,
   performDatabaseMaintenance,
   getConfirmedVisitsWithMichelinIds,
   getEnabledFoodKeywords,
-  type PhotoRecord,
+  getDatabase,
+  getImportedMichelinDatasetVersion,
+  type UnvisitedPhotoRecord,
   type VisitRecord,
   type VisitSuggestedRestaurant,
   type FoodLabel,
   type MichelinRestaurantRecord,
   type CalendarEventUpdate,
 } from "@/utils/db";
+import {
+  ensureRestaurantLocationIndex,
+  MICHELIN_PRIMARY_MATCH_RADIUS_METERS,
+  MICHELIN_SUGGESTION_LIMIT,
+  MICHELIN_SUGGESTION_RADIUS_METERS,
+} from "@/utils/db/michelin-index";
 import {
   hasCalendarPermission,
   requestCalendarPermission,
@@ -43,48 +51,10 @@ import {
   type CalendarEventInfo,
   stripComparisonAffixes,
 } from "./calendar";
-import { loadMichelinRestaurants } from "./michelin";
+import { getMichelinDatasetVersion, loadMichelinRestaurants } from "./michelin";
 import { searchNearbyRestaurants, isGoogleMapsConfigured, type PlaceResult } from "./places";
 import { isBatchAssetInfoAvailable, detectFoodInImageBatch } from "@/modules/batch-asset-info";
 import { scanCameraRoll, formatEta } from "./scanner";
-
-/**
- * Find restaurants near a given location.
- * Optimized with bounding box pre-filtering before distance calculation.
- */
-function findNearbyRestaurants(
-  lat: number,
-  lon: number,
-  restaurants: MichelinRestaurantRecord[],
-  maxDistanceMeters: number,
-  limit: number,
-): Array<MichelinRestaurantRecord & { distance: number }> {
-  // Pre-compute bounding box for quick rejection
-  // 1 degree latitude ≈ 111km, so for maxDistance meters:
-  const latThreshold = maxDistanceMeters / 111000;
-  // Longitude varies by latitude, use conservative estimate (at equator)
-  const lonThreshold = maxDistanceMeters / 80000; // Conservative for mid-latitudes
-
-  const nearby: Array<MichelinRestaurantRecord & { distance: number }> = [];
-
-  for (const restaurant of restaurants) {
-    // Quick bounding box rejection
-    const latDiff = restaurant.latitude - lat;
-    const lonDiff = restaurant.longitude - lon;
-    if (latDiff > latThreshold || latDiff < -latThreshold || lonDiff > lonThreshold || lonDiff < -lonThreshold) {
-      continue;
-    }
-
-    // Use fast distance for nearby candidates
-    const distance = fastDistanceMeters(lat, lon, restaurant.latitude, restaurant.longitude);
-    if (distance <= maxDistanceMeters) {
-      nearby.push({ ...restaurant, distance });
-    }
-  }
-
-  // Sort by distance and limit
-  return nearby.sort((a, b) => a.distance - b.distance).slice(0, limit);
-}
 
 // ============================================================================
 // PARALLEL PROCESSING UTILITIES
@@ -151,6 +121,7 @@ interface FoodDetectionProgress {
   processedVisits: number;
   totalSamples: number;
   processedSamples: number;
+  retryableFailures: number;
   foodVisitsFound: number;
   isComplete: boolean;
   elapsedMs: number;
@@ -162,29 +133,36 @@ interface AnalyzingVisitsOptions {
   timeGapThreshold?: number;
   distanceThreshold?: number;
   restaurantMatchThreshold?: number;
+  restaurantSearchRadius?: number;
   onProgress?: (progress: AnalyzingVisitsProgress) => void;
 }
 
 const DEFAULT_TIME_GAP_MS = 3 * 60 * 60 * 1000; // 3 hours
-const DEFAULT_DISTANCE_THRESHOLD = 100; // 200 meters
-const DEFAULT_RESTAURANT_MATCH_THRESHOLD = 250; // within 250 meters of the visit centroid1
-/**
- * Initialize Michelin restaurant reference data in the database
- * This is separate from user's confirmed restaurants
- */
-export async function initializeMichelinData(
-  onProgress?: (message: string) => void,
-): Promise<{ loaded: number; skipped: boolean }> {
-  const existingCount = await getMichelinRestaurantCount();
+const DEFAULT_DISTANCE_THRESHOLD = 100;
+let michelinInitializationPromise: Promise<{ loaded: number; skipped: boolean }> | null = null;
+const michelinInitializationProgressListeners = new Set<(message: string) => void>();
 
-  onProgress?.(
+async function initializeMichelinDataInternal(
+  onProgress: (message: string) => void,
+): Promise<{ loaded: number; skipped: boolean }> {
+  const bundledDatasetVersion = getMichelinDatasetVersion();
+  const [existingCount, importedDatasetVersion] = await Promise.all([
+    getMichelinRestaurantCount(bundledDatasetVersion),
+    getImportedMichelinDatasetVersion(),
+  ]);
+
+  if (existingCount > 100 && importedDatasetVersion === bundledDatasetVersion) {
+    return { loaded: 0, skipped: true };
+  }
+
+  onProgress(
     existingCount > 100
       ? "Refreshing Michelin restaurant data with latest award years..."
       : "Loading Michelin restaurant data...",
   );
 
   const michelinData = await loadMichelinRestaurants((loaded, total) => {
-    onProgress?.(`Parsing restaurants: ${loaded.toLocaleString()} / ${total.toLocaleString()}`);
+    onProgress(`Parsing restaurants: ${loaded.toLocaleString()} / ${total.toLocaleString()}`);
   });
 
   if (michelinData.length === 0) {
@@ -192,15 +170,49 @@ export async function initializeMichelinData(
     return { loaded: 0, skipped: false };
   }
 
-  onProgress?.(
+  onProgress(
     `${existingCount > 100 ? "Refreshing" : "Saving"} ${michelinData.length.toLocaleString()} Michelin restaurants to database...`,
   );
 
-  // Convert to MichelinRestaurantRecords and insert
-  await insertMichelinRestaurants(michelinData);
+  await insertMichelinRestaurants(michelinData, bundledDatasetVersion);
 
   console.log(`Initialized ${michelinData.length} Michelin restaurants`);
   return { loaded: michelinData.length, skipped: false };
+}
+
+/**
+ * Initialize Michelin restaurant reference data in the database
+ * This is separate from user's confirmed restaurants
+ */
+export async function initializeMichelinData(
+  onProgress?: (message: string) => void,
+): Promise<{ loaded: number; skipped: boolean }> {
+  if (onProgress) {
+    michelinInitializationProgressListeners.add(onProgress);
+  }
+
+  if (!michelinInitializationPromise) {
+    const emitProgress = (message: string) => {
+      for (const listener of michelinInitializationProgressListeners) {
+        listener(message);
+      }
+    };
+    const initialization = initializeMichelinDataInternal(emitProgress);
+    const trackedInitialization = initialization.finally(() => {
+      if (michelinInitializationPromise === trackedInitialization) {
+        michelinInitializationPromise = null;
+      }
+    });
+    michelinInitializationPromise = trackedInitialization;
+  }
+
+  try {
+    return await michelinInitializationPromise!;
+  } finally {
+    if (onProgress) {
+      michelinInitializationProgressListeners.delete(onProgress);
+    }
+  }
 }
 
 /**
@@ -221,22 +233,20 @@ function generateVisitHash(startTime: number, endTime: number, centerLat: number
 /**
  * Calculate the centroid (center point) of a group of photos
  */
-function calculateCentroid(photos: PhotoRecord[]): {
+function calculateCentroid(photos: UnvisitedPhotoRecord[]): {
   lat: number;
   lon: number;
 } {
-  const validPhotos = photos.filter((p) => p.latitude !== null && p.longitude !== null);
-
-  if (validPhotos.length === 0) {
+  if (photos.length === 0) {
     return { lat: 0, lon: 0 };
   }
 
-  const sumLat = validPhotos.reduce((sum, p) => sum + (p.latitude ?? 0), 0);
-  const sumLon = validPhotos.reduce((sum, p) => sum + (p.longitude ?? 0), 0);
+  const sumLat = photos.reduce((sum, photo) => sum + photo.latitude, 0);
+  const sumLon = photos.reduce((sum, photo) => sum + photo.longitude, 0);
 
   return {
-    lat: sumLat / validPhotos.length,
-    lon: sumLon / validPhotos.length,
+    lat: sumLat / photos.length,
+    lon: sumLon / photos.length,
   };
 }
 
@@ -272,16 +282,11 @@ function fastDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: numb
  * Check if two photos are within the distance threshold.
  * Optimized with quick bounding box rejection before computing distance.
  */
-function arePhotosNearby(photo1: PhotoRecord, photo2: PhotoRecord, threshold: number): boolean {
+function arePhotosNearby(photo1: UnvisitedPhotoRecord, photo2: UnvisitedPhotoRecord, threshold: number): boolean {
   const lat1 = photo1.latitude;
   const lon1 = photo1.longitude;
   const lat2 = photo2.latitude;
   const lon2 = photo2.longitude;
-
-  // Null check
-  if (lat1 === null || lon1 === null || lat2 === null || lon2 === null) {
-    return false;
-  }
 
   // Quick bounding box rejection - very fast, catches most far-apart photos
   const latDiff = lat2 - lat1;
@@ -301,7 +306,7 @@ function arePhotosNearby(photo1: PhotoRecord, photo2: PhotoRecord, threshold: nu
 
 // Visit group structure for batch processing
 interface VisitGroup {
-  photos: PhotoRecord[];
+  photos: UnvisitedPhotoRecord[];
   centroid: { lat: number; lon: number };
   startTime: number;
   endTime: number;
@@ -326,9 +331,9 @@ const FOOD_DETECTION_BATCH_SIZE = 50;
  * 4. Suggest nearest Michelin restaurant (if within threshold) - does NOT auto-confirm
  * 5. Generate deterministic hash and save to database
  *
- * OPTIMIZED IMPLEMENTATION using parallelization and spatial indexing:
- * - Uses spatial index for O(1) restaurant lookups instead of O(n)
- * - Processes visit groups in parallel chunks
+ * OPTIMIZED IMPLEMENTATION using chunking and spatial indexing:
+ * - Uses a shared spatial index for geodesic restaurant lookups instead of O(n) scans
+ * - Processes visit groups in bounded chunks
  * - Keeps SQLite writes sequential to avoid statement finalization lock errors
  * - Yields to event loop to prevent UI blocking
  */
@@ -336,18 +341,20 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
   const {
     timeGapThreshold = DEFAULT_TIME_GAP_MS,
     distanceThreshold = DEFAULT_DISTANCE_THRESHOLD,
-    restaurantMatchThreshold = DEFAULT_RESTAURANT_MATCH_THRESHOLD,
+    restaurantMatchThreshold = MICHELIN_PRIMARY_MATCH_RADIUS_METERS,
+    restaurantSearchRadius = MICHELIN_SUGGESTION_RADIUS_METERS,
     onProgress,
   } = options;
 
   const startTime = Date.now();
 
   await initializeMichelinData();
-  // Initialize Michelin reference data if needed (runs in parallel with photo fetch)
-  const [photoCounts, photos, michelinRestaurants] = await Promise.all([
+  await recomputeSuggestedRestaurantsIfNeeded(getMichelinDatasetVersion());
+  const database = await getDatabase();
+  const [photoCounts, photos, restaurantLocationIndex] = await Promise.all([
     getVisitablePhotoCounts(),
     getUnvisitedPhotos(),
-    getAllMichelinRestaurants(),
+    ensureRestaurantLocationIndex(database, __DEV__),
   ]);
 
   const previouslyVisitedPhotos = photoCounts.visited;
@@ -376,8 +383,8 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
   // Phase 1: Group photos into visits with chunked processing
   // This is inherently sequential (comparing consecutive photos) but we yield periodically
   onProgress?.(progress);
-  const photoGroups: PhotoRecord[][] = [];
-  let currentGroup: PhotoRecord[] = [photos[0]];
+  const photoGroups: UnvisitedPhotoRecord[][] = [];
+  let currentGroup: UnvisitedPhotoRecord[] = [photos[0]];
 
   const GROUPING_CHUNK_SIZE = 1000; // Yield every 1000 photos
 
@@ -412,20 +419,20 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
     return progress;
   }
 
-  // Phase 2: Process visits in parallel batches with progress reporting
+  // Phase 2: Process visits in batches with progress reporting
   progress.phase = "saving-visits";
   progress.elapsedMs = Date.now() - startTime;
   onProgress?.(progress);
 
   const totalGroups = photoGroups.length;
   const VISIT_BATCH_SIZE = 200; // Increased batch size for better throughput
-  const PARALLEL_CHUNK_SIZE = 50; // Process 50 groups in parallel within each batch
+  const GROUP_PROCESSING_CHUNK_SIZE = 50;
 
   for (let batchStart = 0; batchStart < totalGroups; batchStart += VISIT_BATCH_SIZE) {
     const batchEnd = Math.min(batchStart + VISIT_BATCH_SIZE, totalGroups);
     const batchPhotoGroups = photoGroups.slice(batchStart, batchEnd);
 
-    // Process visit groups in parallel chunks using spatial index for fast lookups
+    // Process visit groups in chunks using the shared spatial index for fast lookups
     const batchVisitGroups = await processInChunks(
       batchPhotoGroups,
       (groupPhotos) => {
@@ -433,20 +440,21 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
         const visitStartTime = groupPhotos[0].creationTime;
         const visitEndTime = groupPhotos[groupPhotos.length - 1].creationTime;
 
-        // Find nearby restaurants
-        const nearbyRestaurants = findNearbyRestaurants(
-          centroid.lat,
-          centroid.lon,
-          michelinRestaurants,
-          restaurantMatchThreshold * 2,
-          5, // limit to 5 suggestions
-        );
+        const nearbyRestaurants =
+          restaurantLocationIndex?.findNearby({
+            latitude: centroid.lat,
+            longitude: centroid.lon,
+            radiusMeters: Math.max(restaurantMatchThreshold, restaurantSearchRadius),
+            limit: MICHELIN_SUGGESTION_LIMIT,
+          }) ?? [];
 
         // Generate hash
         const hash = generateVisitHash(visitStartTime, visitEndTime, centroid.lat, centroid.lon);
 
         // The closest restaurant within the stricter threshold becomes the primary suggestion
-        const primarySuggestion = nearbyRestaurants.find((r) => r.distance <= restaurantMatchThreshold);
+        const primarySuggestion = nearbyRestaurants.find(
+          ({ distanceMeters }) => distanceMeters <= restaurantMatchThreshold,
+        );
 
         return {
           photos: groupPhotos,
@@ -454,17 +462,17 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
           startTime: visitStartTime,
           endTime: visitEndTime,
           hash,
-          suggestedRestaurantId: primarySuggestion?.id ?? null,
-          suggestedRestaurants: nearbyRestaurants.map((r) => ({
-            id: r.id,
-            distance: r.distance,
+          suggestedRestaurantId: primarySuggestion?.restaurant.id ?? null,
+          suggestedRestaurants: nearbyRestaurants.map(({ restaurant, distanceMeters }) => ({
+            id: restaurant.id,
+            distance: distanceMeters,
           })),
         } as VisitGroup;
       },
-      PARALLEL_CHUNK_SIZE,
+      GROUP_PROCESSING_CHUNK_SIZE,
     );
 
-    // Prepare all data structures in parallel
+    // Prepare the batch's data structures
     const visitRecords: Omit<VisitRecord, "photoCount" | "foodProbable">[] = batchVisitGroups.map((group) => ({
       id: group.hash,
       restaurantId: null,
@@ -550,6 +558,7 @@ async function detectFoodInVisits(options: DetectFoodOptions = {}): Promise<Food
     processedVisits: 0,
     totalSamples: 0,
     processedSamples: 0,
+    retryableFailures: 0,
     foodVisitsFound: 0,
     isComplete: false,
     elapsedMs: 0,
@@ -587,8 +596,9 @@ async function detectFoodInVisits(options: DetectFoodOptions = {}): Promise<Food
   const { results } = await processFoodDetectionBatches(
     allSamples.map((s) => ({ id: s.photoId, visitId: s.visitId })),
     confidenceThreshold,
-    (processed) => {
+    (processed, _foodFound, retryableFailures) => {
       progress.processedSamples = processed;
+      progress.retryableFailures = retryableFailures;
       progress.foodVisitsFound = visitFoodResults.size;
       const stats = tracker.update(processed, allSamples.length);
       progress.elapsedMs = stats.elapsedMs;
@@ -654,12 +664,14 @@ interface FoodBatchResult {
 async function processFoodDetectionBatches<T extends FoodBatchItem>(
   items: T[],
   confidenceThreshold: number,
-  onBatchComplete?: (processed: number, foodFound: number) => void,
+  onBatchComplete?: (processed: number, foodFound: number, retryableFailures: number) => void,
   foodKeywords?: string[],
   onBatchResults?: (batchResults: FoodBatchResult[]) => void | Promise<void>,
-): Promise<{ results: FoodBatchResult[]; foodFoundCount: number }> {
+  collectResults: boolean = true,
+): Promise<{ results: FoodBatchResult[]; foodFoundCount: number; failedCount: number }> {
   const results: FoodBatchResult[] = [];
   let foodFoundCount = 0;
+  let failedCount = 0;
 
   // Fetch enabled food keywords from database if not provided
   const keywords = foodKeywords ?? (await getEnabledFoodKeywords());
@@ -668,59 +680,58 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
     const batch = items.slice(i, i + FOOD_DETECTION_BATCH_SIZE);
     const itemMap = new Map(batch.map((item) => [item.id, item]));
 
-    try {
-      const detectionResults = await detectFoodInImageBatch(
-        batch.map((b) => b.id),
-        { confidenceThreshold, foodKeywords: keywords },
-      );
+    const detectionResults = await detectFoodInImageBatch(
+      batch.map((item) => item.id),
+      { confidenceThreshold, foodKeywords: keywords },
+    );
 
-      const batchResults: FoodBatchResult[] = [];
-      const resultAssetIds = new Set<string>();
-      for (const result of detectionResults) {
-        if (!itemMap.has(result.assetId)) {
-          continue;
-        }
-        resultAssetIds.add(result.assetId);
-        const record: FoodBatchResult = {
-          photoId: result.assetId,
-          foodDetected: result.containsFood,
-          foodLabels: result.foodLabels as FoodLabel[],
-          foodConfidence: result.foodConfidence,
-          allLabels: result.labels as FoodLabel[], // Store all labels from classifier
-        };
+    const batchResults: FoodBatchResult[] = [];
+    const returnedAssetIds = new Set<string>();
+    for (const result of detectionResults) {
+      // Never turn a PhotoKit/Vision failure into a permanent "not food" result.
+      // Failed or missing assets remain unanalyzed and can be retried later.
+      if (!itemMap.has(result.assetId)) {
+        continue;
+      }
+      returnedAssetIds.add(result.assetId);
+      if (result.error) {
+        failedCount++;
+        continue;
+      }
+
+      const record: FoodBatchResult = {
+        photoId: result.assetId,
+        foodDetected: result.containsFood,
+        foodLabels: result.foodLabels as FoodLabel[],
+        foodConfidence: result.foodConfidence,
+        allLabels: result.labels as FoodLabel[], // Store all labels from classifier
+      };
+
+      if (collectResults) {
         results.push(record);
-        batchResults.push(record);
-        if (result.containsFood) {
-          foodFoundCount++;
-        }
       }
-      // Ensure every batch item gets an update (detector may skip assets not found on device)
-      for (const item of batch) {
-        if (!resultAssetIds.has(item.id)) {
-          const record: FoodBatchResult = {
-            photoId: item.id,
-            foodDetected: false,
-          };
-          results.push(record);
-          batchResults.push(record);
-        }
+      batchResults.push(record);
+      if (result.containsFood) {
+        foodFoundCount++;
       }
-
-      if (batchResults.length > 0) {
-        try {
-          await onBatchResults?.(batchResults);
-        } catch (error) {
-          console.warn("Food detection batch save failed:", error);
-        }
-      }
-    } catch (error) {
-      console.warn("Food detection batch failed:", error);
     }
 
-    onBatchComplete?.(Math.min(i + FOOD_DETECTION_BATCH_SIZE, items.length), foodFoundCount);
+    for (const item of batch) {
+      if (!returnedAssetIds.has(item.id)) {
+        failedCount++;
+      }
+    }
+
+    if (batchResults.length > 0) {
+      // Persistence errors must abort the scan. Continuing would report completion
+      // while silently leaving a processed batch unsaved.
+      await onBatchResults?.(batchResults);
+    }
+
+    onBatchComplete?.(Math.min(i + FOOD_DETECTION_BATCH_SIZE, items.length), foodFoundCount, failedCount);
   }
 
-  return { results, foodFoundCount };
+  return { results, foodFoundCount, failedCount };
 }
 
 /**
@@ -1305,6 +1316,7 @@ export interface DeepScanProgress {
   totalPhotos: number;
   processedPhotos: number;
   foodPhotosFound: number;
+  retryableFailures: number;
   isComplete: boolean;
   // Speed and ETA tracking
   elapsedMs: number;
@@ -1330,6 +1342,7 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
     totalPhotos: 0,
     processedPhotos: 0,
     foodPhotosFound: 0,
+    retryableFailures: 0,
     isComplete: false,
     elapsedMs: 0,
     photosPerSecond: 0,
@@ -1355,12 +1368,13 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
 
   const tracker = createProgressTracker();
 
-  const { results, foodFoundCount } = await processFoodDetectionBatches(
+  const { foodFoundCount, failedCount } = await processFoodDetectionBatches(
     photosToScan,
     confidenceThreshold,
-    (processed, foodFound) => {
+    (processed, foodFound, retryableFailures) => {
       progress.processedPhotos = processed;
       progress.foodPhotosFound = foodFound;
+      progress.retryableFailures = retryableFailures;
       const stats = tracker.update(processed, photosToScan.length);
       progress.elapsedMs = stats.elapsedMs;
       progress.photosPerSecond = stats.perSecond;
@@ -1372,13 +1386,13 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
     async (batchResults) => {
       await batchUpdatePhotosFoodDetected(batchResults);
     },
+    false,
   );
 
-  // Final reconciliation in case a per-batch write failed.
-  await batchUpdatePhotosFoodDetected(results);
   await syncAllVisitsFoodProbable();
 
   progress.foodPhotosFound = foodFoundCount;
+  progress.retryableFailures = failedCount;
   progress.isComplete = true;
   progress.etaMs = 0;
   onProgress?.({ ...progress });
@@ -1390,6 +1404,7 @@ export interface VisitFoodScanProgress {
   totalPhotos: number;
   processedPhotos: number;
   foodPhotosFound: number;
+  retryableFailures: number;
   isComplete: boolean;
   elapsedMs: number;
   photosPerSecond: number;
@@ -1414,6 +1429,7 @@ export async function scanVisitPhotosForFood(
     totalPhotos: photos.length,
     processedPhotos: 0,
     foodPhotosFound: 0,
+    retryableFailures: 0,
     isComplete: false,
     elapsedMs: 0,
     photosPerSecond: 0,
@@ -1428,13 +1444,18 @@ export async function scanVisitPhotosForFood(
   onProgress?.(progress);
   const tracker = createProgressTracker();
 
-  const { results, foodFoundCount } = await processFoodDetectionBatches(photos, confidenceThreshold, (processed) => {
-    progress.processedPhotos = processed;
-    const stats = tracker.update(processed, photos.length);
-    progress.elapsedMs = stats.elapsedMs;
-    progress.photosPerSecond = stats.perSecond;
-    onProgress?.(progress);
-  });
+  const { results, foodFoundCount, failedCount } = await processFoodDetectionBatches(
+    photos,
+    confidenceThreshold,
+    (processed, _foodFound, retryableFailures) => {
+      progress.processedPhotos = processed;
+      progress.retryableFailures = retryableFailures;
+      const stats = tracker.update(processed, photos.length);
+      progress.elapsedMs = stats.elapsedMs;
+      progress.photosPerSecond = stats.perSecond;
+      onProgress?.(progress);
+    },
+  );
 
   if (results.length > 0) {
     await batchUpdatePhotosFoodDetected(results);
@@ -1442,6 +1463,7 @@ export async function scanVisitPhotosForFood(
   await syncAllVisitsFoodProbable();
 
   progress.foodPhotosFound = foodFoundCount;
+  progress.retryableFailures = failedCount;
   progress.isComplete = true;
   onProgress?.(progress);
 
@@ -1466,13 +1488,7 @@ export async function searchRestaurantsForVisit(
 }
 
 interface ProcessPhotosProgress {
-  phase:
-    | "scanning"
-    | "grouping-visits"
-    | "calendar-events"
-    | "detecting-food"
-    | "recomputing-suggested-restaurants"
-    | "optimizing-database";
+  phase: "scanning" | "grouping-visits" | "calendar-events" | "detecting-food" | "optimizing-database";
   detail: string;
   photosPerSecond?: number;
   eta?: string;
@@ -1596,14 +1612,7 @@ async function runProcessPhotos(
     },
   });
 
-  scanProgress?.({
-    phase: "recomputing-suggested-restaurants",
-    detail: "Recomputing suggested restaurants...",
-  });
-
-  await recomputeSuggestedRestaurants();
-
-  // Phase 6: Database maintenance (VACUUM, ANALYZE, WAL checkpoint)
+  // Phase 5: Database maintenance (ANALYZE and WAL checkpoint)
   scanProgress?.({
     phase: "optimizing-database",
     detail: "Optimizing database...",

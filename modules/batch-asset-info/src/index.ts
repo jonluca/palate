@@ -21,6 +21,56 @@ export interface BatchAssetInfo {
   location: AssetLocation | null;
 }
 
+/** Describes a retained asset scan created by {@link beginAssetScan}. */
+export interface AssetScanSession {
+  /** Opaque identifier used by {@link getAssetScanPage} and {@link endAssetScan}. */
+  readonly sessionId: string;
+  /** Number of image and video assets in the stable scan snapshot. */
+  readonly totalCount: number;
+  /** Largest page size accepted by {@link getAssetScanPage}. */
+  readonly maxPageSize: number;
+}
+
+/** Options for reading a page from an {@link AssetScanSession}. */
+export interface AssetScanPageOptions {
+  /** Zero-based index in the retained snapshot. */
+  readonly offset: number;
+  /** Number of assets to return; must not exceed the session's `maxPageSize`. */
+  readonly limit: number;
+}
+
+/** Minimal photo-library metadata returned by {@link getAssetScanPage}. */
+export interface AssetScanRecord {
+  /** Stable local photo-library identifier. */
+  readonly id: string;
+  /** URI suitable for rendering the local photo-library asset. */
+  readonly uri: string;
+  /** Creation time in Unix milliseconds, or `null` when unavailable. */
+  readonly creationTime: number | null;
+  /** Valid latitude, including zero, or `null` when no valid location exists. */
+  readonly latitude: number | null;
+  /** Valid longitude, including zero, or `null` when no valid location exists. */
+  readonly longitude: number | null;
+  /** Media kind included in the scan. */
+  readonly mediaType: "photo" | "video";
+  /** Video duration in seconds, or `null` for photos. */
+  readonly duration: number | null;
+}
+
+/** A stable, retryable page returned by {@link getAssetScanPage}. */
+export interface AssetScanPage {
+  /** Assets beginning at the requested offset. */
+  readonly assets: AssetScanRecord[];
+  /** Zero-based offset used to produce this page. */
+  readonly offset: number;
+  /** Offset for the next page, or `null` when this is the final page. */
+  readonly nextOffset: number | null;
+  /** Number of assets in the retained snapshot. */
+  readonly totalCount: number;
+  /** Whether another page exists after this one. */
+  readonly hasNextPage: boolean;
+}
+
 interface ClassificationOptions {
   /**
    * Minimum confidence threshold for classification (0-1).
@@ -56,6 +106,16 @@ interface ClassificationResult {
   assetId: string;
   labels: ClassificationLabel[];
   error?: string;
+}
+
+interface NativeBatchAssetInfoModule {
+  readonly supportsPhotoAssetThumbnailView?: boolean;
+  getAssetInfoBatch(assetIds: string[]): Promise<BatchAssetInfo[]>;
+  classifyImageBatch(assetIds: string[], options: Required<ClassificationOptions>): Promise<ClassificationResult[]>;
+  beginAssetScan(): Promise<AssetScanSession>;
+  getAssetScanPage(sessionId: string, offset: number, limit: number): Promise<AssetScanPage>;
+  endAssetScan(sessionId: string): Promise<void>;
+  clearPhotoAssetThumbnailCache?(): Promise<void>;
 }
 
 export interface FoodDetectionResult {
@@ -158,13 +218,97 @@ function processForFoodDetection(
 }
 
 // Only available on iOS
-const BatchAssetInfoModule = Platform.OS === "ios" ? requireNativeModule("BatchAssetInfo") : null;
+const BatchAssetInfoModule =
+  Platform.OS === "ios" ? requireNativeModule<NativeBatchAssetInfoModule>("BatchAssetInfo") : null;
+
+function requireBatchAssetInfoModule(): NativeBatchAssetInfoModule {
+  if (!BatchAssetInfoModule) {
+    throw new Error("BatchAssetInfo module is only available on iOS");
+  }
+  return BatchAssetInfoModule;
+}
+
+function assertSessionId(sessionId: string): void {
+  if (sessionId.trim().length === 0) {
+    throw new TypeError("Asset scan session ID must be a non-empty string");
+  }
+}
+
+function assertPageOptions(options: AssetScanPageOptions): void {
+  if (!Number.isSafeInteger(options.offset) || options.offset < 0) {
+    throw new RangeError("Asset scan offset must be a non-negative safe integer");
+  }
+  if (!Number.isSafeInteger(options.limit) || options.limit <= 0) {
+    throw new RangeError("Asset scan limit must be a positive safe integer");
+  }
+}
 
 /**
  * Check if batch asset info is available (iOS only)
  */
 export function isBatchAssetInfoAvailable(): boolean {
   return BatchAssetInfoModule !== null;
+}
+
+/**
+ * Whether this native binary includes the retained PhotoKit scan-session API.
+ * This separate capability check keeps OTA updates compatible with older app binaries.
+ */
+export function isAssetScanAvailable(): boolean {
+  return (
+    typeof BatchAssetInfoModule?.beginAssetScan === "function" &&
+    typeof BatchAssetInfoModule.getAssetScanPage === "function" &&
+    typeof BatchAssetInfoModule.endAssetScan === "function"
+  );
+}
+
+/** Whether this native binary includes the native PhotoKit thumbnail view. */
+export function isPhotoAssetThumbnailAvailable(): boolean {
+  return BatchAssetInfoModule?.supportsPhotoAssetThumbnailView === true;
+}
+
+/** Clears the bounded native PhotoKit thumbnail and PHAsset caches when available. */
+export async function clearPhotoAssetThumbnailCache(): Promise<boolean> {
+  if (typeof BatchAssetInfoModule?.clearPhotoAssetThumbnailCache !== "function") {
+    return false;
+  }
+  await BatchAssetInfoModule.clearPhotoAssetThumbnailCache();
+  return true;
+}
+
+/**
+ * Creates a stable snapshot of image and video assets for offset-based paging.
+ * Call {@link endAssetScan} in a `finally` block after consuming the snapshot.
+ *
+ * @throws When photo-library access is unavailable.
+ * @platform ios
+ */
+export async function beginAssetScan(): Promise<AssetScanSession> {
+  return requireBatchAssetInfoModule().beginAssetScan();
+}
+
+/**
+ * Reads an idempotent page from a retained scan snapshot.
+ * Retrying the same session ID and offset returns the same slice while the session remains active.
+ *
+ * @throws When the session has ended or the requested bounds are invalid.
+ * @platform ios
+ */
+export async function getAssetScanPage(sessionId: string, options: AssetScanPageOptions): Promise<AssetScanPage> {
+  assertSessionId(sessionId);
+  assertPageOptions(options);
+  return requireBatchAssetInfoModule().getAssetScanPage(sessionId, options.offset, options.limit);
+}
+
+/**
+ * Releases a retained scan snapshot. Calling this with an unknown or already-ended session rejects.
+ *
+ * @throws When the session does not exist or has already ended.
+ * @platform ios
+ */
+export async function endAssetScan(sessionId: string): Promise<void> {
+  assertSessionId(sessionId);
+  await requireBatchAssetInfoModule().endAssetScan(sessionId);
 }
 
 /**

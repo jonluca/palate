@@ -20,6 +20,7 @@ function createInitialProgress(): DeepScanProgress {
     totalPhotos: 0,
     processedPhotos: 0,
     foodPhotosFound: 0,
+    retryableFailures: 0,
     isComplete: false,
     elapsedMs: 0,
     photosPerSecond: 0,
@@ -48,8 +49,8 @@ async function runDeepScan({
     setProgress(null);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     showToast({
-      type: "success",
-      message: `Found ${result.foodPhotosFound.toLocaleString()} food photo${result.foodPhotosFound === 1 ? "" : "s"} in ${result.processedPhotos.toLocaleString()} photos`,
+      type: result.retryableFailures > 0 ? "info" : "success",
+      message: `Found ${result.foodPhotosFound.toLocaleString()} food photo${result.foodPhotosFound === 1 ? "" : "s"} in ${result.processedPhotos.toLocaleString()} photos${result.retryableFailures > 0 ? `; ${result.retryableFailures.toLocaleString()} will retry` : ""}`,
     });
   } catch (error) {
     console.error("Deep scan error:", error);

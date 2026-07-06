@@ -20,7 +20,7 @@ import { useLocalSearchParams, router, Stack } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { View, Pressable, Platform, type LayoutChangeEvent, ScrollView, Modal, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Image } from "expo-image";
+import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
@@ -85,13 +85,7 @@ function VisitHistoryCard({ visit }: { visit: RestaurantVisitWithPreview }) {
                 const isVideo = photo.mediaType === "video";
                 return (
                   <View key={photo.id} className={"flex-1"}>
-                    <Image
-                      source={{ uri: photo.uri }}
-                      recyclingKey={photo.id}
-                      style={{ width: "100%", height: "100%" }}
-                      contentFit={"cover"}
-                      transition={300}
-                    />
+                    <PhotoAssetThumbnail uri={photo.uri} style={{ width: "100%", height: "100%" }} />
                     {isVideo && (
                       <View
                         className={
@@ -194,7 +188,7 @@ function RestaurantInfoCard({ restaurant, onEdit }: { restaurant: RestaurantReco
                   <ThemedText variant={"subhead"} color={"secondary"}>
                     {restaurant.cuisine}
                   </ThemedText>
-                  {restaurant.priceLevel && (
+                  {restaurant.priceLevel != null && restaurant.priceLevel > 0 && (
                     <ThemedText variant={"subhead"} color={"tertiary"}>
                       · {formatPriceLevel(restaurant.priceLevel)}
                     </ThemedText>

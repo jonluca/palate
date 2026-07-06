@@ -81,17 +81,19 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
       const progressValue = progress.totalPhotos > 0 ? progress.processedPhotos / progress.totalPhotos : 0;
       const percent = Math.round(progressValue * 100);
       const eta = progress.isComplete ? "Done" : formatEta(progress.etaMs);
+      const retryDetail =
+        progress.retryableFailures > 0 ? `; ${progress.retryableFailures.toLocaleString()} queued to retry` : "";
 
       onProgress({
         phase: "deep-scanning",
-        detail: `Scanned ${progress.processedPhotos.toLocaleString()} of ${progress.totalPhotos.toLocaleString()} photos (${percent.toLocaleString()}%)`,
+        detail: `Scanned ${progress.processedPhotos.toLocaleString()} of ${progress.totalPhotos.toLocaleString()} photos (${percent.toLocaleString()}%)${retryDetail}`,
         photosPerSecond: Math.round(progress.photosPerSecond),
         eta,
         progress: progressValue,
       });
       updateScanProgress({
         phase: "scanning",
-        detail: `Deep scanning: ${progress.processedPhotos.toLocaleString()} / ${progress.totalPhotos.toLocaleString()} (${percent.toLocaleString()}%)`,
+        detail: `Deep scanning: ${progress.processedPhotos.toLocaleString()} / ${progress.totalPhotos.toLocaleString()} (${percent.toLocaleString()}%)${retryDetail}`,
         photosPerSecond: Math.round(progress.photosPerSecond),
         eta,
       });

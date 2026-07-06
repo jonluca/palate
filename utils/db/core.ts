@@ -137,7 +137,13 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
       location TEXT NOT NULL DEFAULT '',
       cuisine TEXT NOT NULL DEFAULT '',
       latestAwardYear INTEGER,
-      award TEXT NOT NULL DEFAULT ''
+      award TEXT NOT NULL DEFAULT '',
+      datasetVersion TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS app_metadata (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
     );
     
     -- User's confirmed restaurants (only populated when user confirms a visit)
@@ -339,6 +345,13 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
   // Migration: Add latestAwardYear to Michelin reference rows so "current" award recency can be filtered locally
   try {
     await database.execAsync(`ALTER TABLE michelin_restaurants ADD COLUMN latestAwardYear INTEGER`);
+  } catch {
+    // Column already exists, ignore
+  }
+
+  // Tracks the bundled Michelin dataset imported into each reference row.
+  try {
+    await database.execAsync(`ALTER TABLE michelin_restaurants ADD COLUMN datasetVersion TEXT`);
   } catch {
     // Column already exists, ignore
   }

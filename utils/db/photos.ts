@@ -1,5 +1,5 @@
 import { getDatabase } from "./core";
-import type { FoodLabel, PhotoRecord } from "./types";
+import type { FoodLabel, PhotoRecord, UnvisitedPhotoRecord } from "./types";
 
 // Raw photo record as stored in database (foodLabels and allLabels are JSON strings)
 interface RawPhotoRecord extends Omit<PhotoRecord, "foodLabels" | "foodDetected" | "allLabels" | "mediaType"> {
@@ -41,13 +41,14 @@ function parsePhotoRecord(raw: RawPhotoRecord): PhotoRecord {
 // Photo operations
 export async function insertPhotos(
   photos: Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[],
-): Promise<void> {
+): Promise<number> {
   if (photos.length === 0) {
-    return;
+    return 0;
   }
 
   const database = await getDatabase();
   const batchSize = 1000;
+  let insertedCount = 0;
 
   for (let i = 0; i < photos.length; i += batchSize) {
     const batch = photos.slice(i, i + batchSize);
@@ -63,19 +64,24 @@ export async function insertPhotos(
     ]);
 
     // foodDetected is left as NULL (not set until food detection runs)
-    await database.runAsync(
+    const result = await database.runAsync(
       `INSERT OR IGNORE INTO photos (id, uri, creationTime, latitude, longitude, mediaType, duration) VALUES ${placeholders}`,
       values,
     );
+    insertedCount += result.changes;
   }
+
+  return insertedCount;
 }
 
-export async function getUnvisitedPhotos(): Promise<PhotoRecord[]> {
+export async function getUnvisitedPhotos(): Promise<UnvisitedPhotoRecord[]> {
   const database = await getDatabase();
-  const rawPhotos = await database.getAllAsync<RawPhotoRecord>(
-    `SELECT * FROM photos WHERE visitId IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL ORDER BY creationTime ASC`,
+  return database.getAllAsync<UnvisitedPhotoRecord>(
+    `SELECT id, creationTime, latitude, longitude
+     FROM photos
+     WHERE visitId IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL
+     ORDER BY creationTime ASC, id ASC`,
   );
-  return rawPhotos.map(parsePhotoRecord);
 }
 
 export async function getPhotosByVisitId(visitId: string): Promise<PhotoRecord[]> {
@@ -161,41 +167,44 @@ export async function batchUpdatePhotosFoodDetected(
     (u) => u.foodLabels === undefined && u.foodConfidence === undefined && u.allLabels === undefined,
   );
 
-  // Update photos with labels individually
-  for (const update of updatesWithLabels) {
-    await database.runAsync(
-      `UPDATE photos SET foodDetected = ?, foodLabels = ?, foodConfidence = ?, allLabels = ? WHERE id = ?`,
-      [
-        update.foodDetected ? 1 : 0,
-        update.foodLabels ? JSON.stringify(update.foodLabels) : null,
-        update.foodConfidence ?? null,
-        update.allLabels ? JSON.stringify(update.allLabels) : null,
-        update.photoId,
-      ],
-    );
-  }
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    if (updatesWithLabels.length > 0) {
+      const statement = await transaction.prepareAsync(
+        `UPDATE photos SET foodDetected = ?, foodLabels = ?, foodConfidence = ?, allLabels = ? WHERE id = ?`,
+      );
 
-  // For simple updates (no labels), batch by detected/not detected
-  if (simpleUpdates.length > 0) {
-    const detectedIds = simpleUpdates.filter((u) => u.foodDetected).map((u) => u.photoId);
-    const notDetectedIds = simpleUpdates.filter((u) => !u.foodDetected).map((u) => u.photoId);
+      try {
+        for (const update of updatesWithLabels) {
+          await statement.executeAsync([
+            update.foodDetected ? 1 : 0,
+            update.foodLabels ? JSON.stringify(update.foodLabels) : null,
+            update.foodConfidence ?? null,
+            update.allLabels ? JSON.stringify(update.allLabels) : null,
+            update.photoId,
+          ]);
+        }
+      } finally {
+        await statement.finalizeAsync();
+      }
+    }
 
+    // For simple updates (no labels), batch by detected/not detected.
+    const detectedIds = simpleUpdates.filter((update) => update.foodDetected).map((update) => update.photoId);
+    const notDetectedIds = simpleUpdates.filter((update) => !update.foodDetected).map((update) => update.photoId);
     const batchSize = 1000;
 
-    // Update detected photos
     for (let i = 0; i < detectedIds.length; i += batchSize) {
       const batch = detectedIds.slice(i, i + batchSize);
       const placeholders = batch.map(() => "?").join(", ");
-      await database.runAsync(`UPDATE photos SET foodDetected = 1 WHERE id IN (${placeholders})`, batch);
+      await transaction.runAsync(`UPDATE photos SET foodDetected = 1 WHERE id IN (${placeholders})`, batch);
     }
 
-    // Update not detected photos
     for (let i = 0; i < notDetectedIds.length; i += batchSize) {
       const batch = notDetectedIds.slice(i, i + batchSize);
       const placeholders = batch.map(() => "?").join(", ");
-      await database.runAsync(`UPDATE photos SET foodDetected = 0 WHERE id IN (${placeholders})`, batch);
+      await transaction.runAsync(`UPDATE photos SET foodDetected = 0 WHERE id IN (${placeholders})`, batch);
     }
-  }
+  });
 }
 
 /**

@@ -1,21 +1,51 @@
 import ExpoModulesCore
 import Photos
-import Vision
 
 public class BatchAssetInfoModule: Module {
   private let processingQueue = DispatchQueue(label: "com.batchassetinfo.processing", qos: .userInitiated, attributes: .concurrent)
   private let assetInfoQueue = DispatchQueue(label: "com.batchassetinfo.metadata", qos: .userInitiated)
-  private let imageManager = PHCachingImageManager()
-  private let classificationTargetSize = CGSize(width: 299, height: 299)
+  private let imageClassifier = PhotoAssetClassifier()
+  private var assetScanSessions: [String: PhotoAssetScanSession] = [:]
 
-  private let classificationSemaphore: DispatchSemaphore = {
-    let processorCount = ProcessInfo.processInfo.activeProcessorCount
-    let concurrency = min(max(processorCount - 1, 2), 6)
-    return DispatchSemaphore(value: concurrency)
+  private let classificationQueue: OperationQueue = {
+    let queue = OperationQueue()
+    queue.name = "com.batchassetinfo.classification"
+    queue.qualityOfService = .userInitiated
+    queue.maxConcurrentOperationCount = PhotoAssetClassifier.recommendedConcurrency
+    return queue
   }()
 
   public func definition() -> ModuleDefinition {
     Name("BatchAssetInfo")
+
+    Constant("supportsPhotoAssetThumbnailView") {
+      true
+    }
+
+    OnDestroy {
+      self.assetInfoQueue.async {
+        self.assetScanSessions.removeAll()
+      }
+      PhotoAssetThumbnailStore.shared.clearCaches()
+    }
+
+    View(PhotoAssetThumbnailView.self) {
+      Events("onLoad", "onError")
+
+      Prop("uri") { (view: PhotoAssetThumbnailView, uri: String?) in
+        view.uri = uri
+      }
+
+      OnViewDidUpdateProps { view in
+        view.applyChanges()
+      }
+    }
+
+    AsyncFunction("clearPhotoAssetThumbnailCache") { (promise: Promise) in
+      PhotoAssetThumbnailStore.shared.clearCaches {
+        promise.resolve(nil)
+      }
+    }
 
     AsyncFunction("getAssetInfoBatch") { (assetIds: [String], promise: Promise) in
       self.fetchAssetInfoBatch(assetIds: assetIds, promise: promise)
@@ -24,6 +54,39 @@ public class BatchAssetInfoModule: Module {
     AsyncFunction("getAssetInfoBatchWithOptions") { (assetIds: [String], options: GetAssetInfoOptions, promise: Promise) in
       self.fetchAssetInfoBatch(assetIds: assetIds, includeLocation: options.includeLocation, promise: promise)
     }
+
+    AsyncFunction("beginAssetScan") { () throws -> [String: Any] in
+      do {
+        let session = try PhotoAssetScanSession()
+        let sessionId = UUID().uuidString
+        self.assetScanSessions[sessionId] = session
+        return [
+          "sessionId": sessionId,
+          "totalCount": session.totalCount,
+          "maxPageSize": PhotoAssetScanSession.maximumPageSize
+        ]
+      } catch {
+        throw self.assetScanException(error)
+      }
+    }.runOnQueue(assetInfoQueue)
+
+    AsyncFunction("getAssetScanPage") { (sessionId: String, offset: Int, limit: Int) throws -> [String: Any?] in
+      guard let session = self.assetScanSessions[sessionId] else {
+        throw self.assetScanSessionNotFoundException(sessionId: sessionId)
+      }
+
+      do {
+        return self.assetScanPageDictionary(try session.page(offset: offset, limit: limit))
+      } catch {
+        throw self.assetScanException(error)
+      }
+    }.runOnQueue(assetInfoQueue)
+
+    AsyncFunction("endAssetScan") { (sessionId: String) throws -> Void in
+      guard self.assetScanSessions.removeValue(forKey: sessionId) != nil else {
+        throw self.assetScanSessionNotFoundException(sessionId: sessionId)
+      }
+    }.runOnQueue(assetInfoQueue)
 
     AsyncFunction("classifyImage") { (assetId: String, options: ClassificationOptions, promise: Promise) in
       self.classifySingleImage(assetId: assetId, confidenceThreshold: options.confidenceThreshold, maxLabels: options.maxLabels, promise: promise)
@@ -42,56 +105,105 @@ public class BatchAssetInfoModule: Module {
       results.reserveCapacity(assetIds.count)
 
       fetchResult.enumerateObjects { asset, _, _ in
-        var info: [String: Any?] = [
-          "id": asset.localIdentifier,
-          "creationTime": (asset.creationDate?.timeIntervalSince1970 ?? 0) * 1000,
-          "modificationTime": (asset.modificationDate?.timeIntervalSince1970 ?? 0) * 1000,
-          "width": asset.pixelWidth,
-          "height": asset.pixelHeight,
-          "mediaType": self.mediaTypeToString(asset.mediaType),
-          "duration": asset.duration,
-        ]
-
-        // Include location if available and requested
-        if includeLocation, let location = asset.location {
-          info["location"] = [
-            "latitude": location.coordinate.latitude,
-            "longitude": location.coordinate.longitude,
-            "altitude": location.altitude,
-            "speed": location.speed,
-            "heading": location.course,
-          ]
-        } else {
-          info["location"] = nil
-        }
-
-        // Get the local URI for the asset
-        info["uri"] = "ph://\(asset.localIdentifier)"
-
-        results.append(info)
+        let metadata = PhotoAssetMetadata(asset: asset)
+        results.append(self.legacyAssetInfoDictionary(metadata, includeLocation: includeLocation))
       }
 
       promise.resolve(results)
     }
   }
 
-  private func mediaTypeToString(_ mediaType: PHAssetMediaType) -> String {
-    switch mediaType {
-    case .image:
-      return "photo"
-    case .video:
-      return "video"
-    case .audio:
-      return "audio"
-    default:
-      return "unknown"
+  private func legacyAssetInfoDictionary(
+    _ metadata: PhotoAssetMetadata,
+    includeLocation: Bool
+  ) -> [String: Any?] {
+    var info: [String: Any?] = [
+      "id": metadata.id,
+      "uri": metadata.uri,
+      "creationTime": metadata.creationTime ?? 0,
+      "modificationTime": metadata.modificationTime ?? 0,
+      "width": metadata.width,
+      "height": metadata.height,
+      "mediaType": metadata.mediaType.rawValue,
+      "duration": metadata.duration
+    ]
+
+    if includeLocation, let location = metadata.location {
+      info["location"] = [
+        "latitude": location.latitude,
+        "longitude": location.longitude,
+        "altitude": location.altitude,
+        "speed": location.speed,
+        "heading": location.heading
+      ]
+    } else {
+      info["location"] = nil
     }
+
+    return info
+  }
+
+  private func assetScanPageDictionary(_ page: PhotoAssetScanPage) -> [String: Any?] {
+    let assets: [[String: Any?]] = page.assets.map { asset in
+      [
+        "id": asset.id,
+        "uri": asset.uri,
+        "creationTime": asset.creationTime,
+        "latitude": asset.latitude,
+        "longitude": asset.longitude,
+        "mediaType": asset.mediaType.rawValue,
+        "duration": asset.duration
+      ]
+    }
+
+    return [
+      "assets": assets,
+      "offset": page.offset,
+      "nextOffset": page.nextOffset,
+      "totalCount": page.totalCount,
+      "hasNextPage": page.hasNextPage
+    ]
+  }
+
+  private func assetScanException(_ error: Error) -> Exception {
+    guard let scanError = error as? PhotoAssetScanError else {
+      return Exception(
+        name: "AssetScanError",
+        description: error.localizedDescription,
+        code: "ERR_ASSET_SCAN_FAILED"
+      )
+    }
+
+    return Exception(
+      name: "AssetScanError",
+      description: scanError.localizedDescription,
+      code: scanError.code
+    )
+  }
+
+  private func assetScanSessionNotFoundException(sessionId: String) -> Exception {
+    Exception(
+      name: "AssetScanSessionNotFoundError",
+      description: "Asset scan session \(sessionId.isEmpty ? "<empty>" : sessionId) does not exist or has ended.",
+      code: "ERR_ASSET_SCAN_SESSION_NOT_FOUND"
+    )
   }
 
   // MARK: - Image Classification
 
   private func classifySingleImage(assetId: String, confidenceThreshold: Float, maxLabels: Int, promise: Promise) {
     processingQueue.async {
+      let classificationOptions: PhotoAssetClassificationOptions
+      do {
+        classificationOptions = try PhotoAssetClassificationOptions(
+          confidenceThreshold: confidenceThreshold,
+          maximumLabelCount: maxLabels
+        )
+      } catch {
+        promise.reject("INVALID_CLASSIFICATION_OPTIONS", error.localizedDescription)
+        return
+      }
+
       let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil)
 
       guard let asset = fetchResult.firstObject else {
@@ -99,26 +211,34 @@ public class BatchAssetInfoModule: Module {
         return
       }
 
-      self.classificationSemaphore.wait()
-      defer {
-        self.classificationSemaphore.signal()
-      }
+      self.classificationQueue.addOperation {
+        let result = autoreleasepool {
+          self.imageClassifier.classify(asset: asset, options: classificationOptions)
+        }
 
-      let result = autoreleasepool {
-        self.loadAndClassifyImageSync(asset: asset, confidenceThreshold: confidenceThreshold, maxLabels: maxLabels)
-      }
-
-      switch result {
-      case .success(let classificationResult):
-        promise.resolve(classificationResult)
-      case .failure(let error):
-        promise.reject("CLASSIFICATION_FAILED", error.localizedDescription)
+        switch result {
+        case .success(let classificationResult):
+          promise.resolve(self.classificationDictionary(classificationResult))
+        case .failure(let error):
+          promise.reject("CLASSIFICATION_FAILED", error.localizedDescription)
+        }
       }
     }
   }
 
   private func classifyImageBatch(assetIds: [String], confidenceThreshold: Float, maxLabels: Int, promise: Promise) {
     processingQueue.async {
+      let classificationOptions: PhotoAssetClassificationOptions
+      do {
+        classificationOptions = try PhotoAssetClassificationOptions(
+          confidenceThreshold: confidenceThreshold,
+          maximumLabelCount: maxLabels
+        )
+      } catch {
+        promise.reject("INVALID_CLASSIFICATION_OPTIONS", error.localizedDescription)
+        return
+      }
+
       let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: assetIds, options: nil)
 
       var requestedIndexById: [String: Int] = [:]
@@ -144,42 +264,26 @@ public class BatchAssetInfoModule: Module {
       var orderedResults = Array<[String: Any]?>(repeating: nil, count: assetIds.count)
       let resultsLock = NSLock()
       let group = DispatchGroup()
-      let assets = indexedAssets.map { $0.asset }
-      let cacheOptions = self.makeImageRequestOptions(isSynchronous: false)
-
-      self.imageManager.startCachingImages(
-        for: assets,
-        targetSize: self.classificationTargetSize,
-        contentMode: .aspectFit,
-        options: cacheOptions
-      )
-
       for indexedAsset in indexedAssets {
         group.enter()
-        self.processingQueue.async {
-          self.classificationSemaphore.wait()
+        self.classificationQueue.addOperation {
           defer {
-            self.classificationSemaphore.signal()
             group.leave()
           }
 
           let result = autoreleasepool {
-            self.loadAndClassifyImageSync(
-              asset: indexedAsset.asset,
-              confidenceThreshold: confidenceThreshold,
-              maxLabels: maxLabels
-            )
+            self.imageClassifier.classify(asset: indexedAsset.asset, options: classificationOptions)
           }
 
           let classificationResult: [String: Any]
           switch result {
-          case .success(let labels):
-            classificationResult = labels
-          case .failure:
+          case .success(let classification):
+            classificationResult = self.classificationDictionary(classification)
+          case .failure(let error):
             classificationResult = [
               "assetId": indexedAsset.asset.localIdentifier,
               "labels": [],
-              "error": "Classification failed"
+              "error": error.localizedDescription
             ]
           }
 
@@ -190,109 +294,21 @@ public class BatchAssetInfoModule: Module {
       }
 
       group.notify(queue: self.processingQueue) {
-        self.imageManager.stopCachingImages(
-          for: assets,
-          targetSize: self.classificationTargetSize,
-          contentMode: .aspectFit,
-          options: cacheOptions
-        )
         let results = orderedResults.compactMap { $0 }
         promise.resolve(results)
       }
     }
   }
 
-  private func makeImageRequestOptions(isSynchronous: Bool) -> PHImageRequestOptions {
-    let options = PHImageRequestOptions()
-    options.deliveryMode = .fastFormat
-    options.isNetworkAccessAllowed = true
-    options.isSynchronous = isSynchronous
-    options.resizeMode = .fast
-    return options
+  private func classificationDictionary(_ classification: PhotoAssetClassification) -> [String: Any] {
+    [
+      "assetId": classification.assetId,
+      "labels": classification.labels.map { label in
+        [
+          "label": label.identifier,
+          "confidence": label.confidence
+        ]
+      }
+    ]
   }
-
-  private func loadAndClassifyImageSync(asset: PHAsset, confidenceThreshold: Float, maxLabels: Int) -> Result<[String: Any], Error> {
-    let options = makeImageRequestOptions(isSynchronous: true)
-    var result: Result<[String: Any], Error> = .failure(
-      NSError(domain: "BatchAssetInfo", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to load image"])
-    )
-
-    imageManager.requestImage(
-      for: asset,
-      targetSize: classificationTargetSize,
-      contentMode: .aspectFit,
-      options: options
-    ) { image, info in
-      if let error = info?[PHImageErrorKey] as? Error {
-        result = .failure(error)
-        return
-      }
-
-      guard let image = image, let cgImage = image.cgImage else {
-        result = .failure(NSError(domain: "BatchAssetInfo", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to load image"]))
-        return
-      }
-
-      result = self.performClassification(
-        cgImage: cgImage,
-        assetId: asset.localIdentifier,
-        confidenceThreshold: confidenceThreshold,
-        maxLabels: maxLabels
-      )
-    }
-
-    return result
-  }
-
-  private func performClassification(cgImage: CGImage, assetId: String, confidenceThreshold: Float, maxLabels: Int) -> Result<[String: Any], Error> {
-    let request = VNClassifyImageRequest()
-    let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-
-    do {
-      try handler.perform([request])
-
-      guard let observations = request.results as? [VNClassificationObservation] else {
-        return .failure(NSError(domain: "BatchAssetInfo", code: 2, userInfo: [NSLocalizedDescriptionKey: "No classification results"]))
-      }
-
-      let labelLimit = max(0, maxLabels)
-      var labels: [[String: Any]] = []
-      labels.reserveCapacity(min(labelLimit, observations.count))
-
-      if labelLimit > 0 {
-        for observation in observations where observation.confidence >= confidenceThreshold {
-          labels.append([
-            "label": observation.identifier,
-            "confidence": observation.confidence
-          ])
-
-          if labels.count == labelLimit {
-            break
-          }
-        }
-      }
-
-      let result: [String: Any] = [
-        "assetId": assetId,
-        "labels": labels
-      ]
-
-      return .success(result)
-    } catch {
-      return .failure(error)
-    }
-  }
-}
-
-struct GetAssetInfoOptions: Record {
-  @Field
-  var includeLocation: Bool = true
-}
-
-struct ClassificationOptions: Record {
-  @Field
-  var confidenceThreshold: Float = 0.1
-
-  @Field
-  var maxLabels: Int = 50
 }

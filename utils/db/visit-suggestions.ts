@@ -1,13 +1,21 @@
-import * as geokdbush from "geokdbush";
-import { calculateDistanceMeters } from "@/data/restaurants";
 import { DEBUG_TIMING, getDatabase } from "./core";
-import { buildRestaurantSpatialIndex, getIndexedRestaurants, getRestaurantIndex } from "./michelin-index";
+import {
+  ensureRestaurantLocationIndex,
+  MICHELIN_PRIMARY_MATCH_RADIUS_METERS,
+  MICHELIN_SUGGESTION_LIMIT,
+  MICHELIN_SUGGESTION_RADIUS_METERS,
+} from "./michelin-index";
 import type { MichelinRestaurantRecord, VisitSuggestedRestaurant } from "./types";
 
-// Constants for restaurant matching (same as services/visit.ts)
-const RESTAURANT_MATCH_THRESHOLD = 100; // 100 meters for primary suggestion
-const RESTAURANT_SEARCH_RADIUS = 200; // 200 meters for multiple suggestions
-const RESTAURANT_SUGGESTION_LIMIT = 5;
+const MICHELIN_SUGGESTION_VERSION_KEY = "michelin_suggestion_version";
+const MICHELIN_MATCHING_ALGORITHM_VERSION = `geodesic-v1-r${MICHELIN_PRIMARY_MATCH_RADIUS_METERS}-r${MICHELIN_SUGGESTION_RADIUS_METERS}-l${MICHELIN_SUGGESTION_LIMIT}`;
+
+let activeConditionalRefresh:
+  | {
+      version: string;
+      promise: Promise<{ refreshed: boolean; visitsUpdated: number }>;
+    }
+  | undefined;
 
 // Visit suggested restaurants operations (multiple suggestions per visit)
 export async function insertVisitSuggestedRestaurants(suggestions: VisitSuggestedRestaurant[]): Promise<void> {
@@ -100,19 +108,8 @@ async function recomputeSuggestedRestaurantsInternal(
 ): Promise<number> {
   const start = DEBUG_TIMING ? performance.now() : 0;
 
-  // Build spatial index if needed (loads all restaurants into memory once)
-  if (!getRestaurantIndex()) {
-    const hasRestaurants = await buildRestaurantSpatialIndex(database, DEBUG_TIMING);
-    if (!hasRestaurants) {
-      // No Michelin data loaded yet, skip
-      return 0;
-    }
-  }
-
-  const restaurantIndex = getRestaurantIndex();
-  const indexedRestaurants = getIndexedRestaurants();
-
-  if (!restaurantIndex || indexedRestaurants.length === 0) {
+  const restaurantIndex = await ensureRestaurantLocationIndex(database, DEBUG_TIMING);
+  if (!restaurantIndex) {
     return 0;
   }
 
@@ -137,40 +134,25 @@ async function recomputeSuggestedRestaurantsInternal(
   const allSuggestions: VisitSuggestedRestaurant[] = [];
   const primarySuggestionUpdates: { visitId: string; suggestedRestaurantId: string }[] = [];
 
-  // Convert search radius to kilometers for geokdbush
-  const searchRadiusKm = RESTAURANT_SEARCH_RADIUS / 1000;
-
   for (const visit of pendingVisits) {
-    // geokdbush.around returns indices sorted by distance - O(log n + k)
-    // Much faster than DB query per visit
-    const nearbyIndices = geokdbush.around(
-      restaurantIndex,
-      visit.centerLon, // lon first
-      visit.centerLat,
-      RESTAURANT_SUGGESTION_LIMIT,
-      searchRadiusKm,
-    );
+    const nearbyRestaurants = restaurantIndex.findNearby({
+      latitude: visit.centerLat,
+      longitude: visit.centerLon,
+      radiusMeters: MICHELIN_SUGGESTION_RADIUS_METERS,
+      limit: MICHELIN_SUGGESTION_LIMIT,
+    });
 
     let hasPrimarySuggestion = false;
 
-    for (const idx of nearbyIndices) {
-      const restaurant = indexedRestaurants[idx];
-      // Calculate precise distance for storage
-      const distance = calculateDistanceMeters(
-        visit.centerLat,
-        visit.centerLon,
-        restaurant.latitude,
-        restaurant.longitude,
-      );
-
+    for (const { restaurant, distanceMeters } of nearbyRestaurants) {
       allSuggestions.push({
         visitId: visit.id,
         restaurantId: restaurant.id,
-        distance,
+        distance: distanceMeters,
       });
 
       // First result within threshold is primary suggestion (results are sorted by distance)
-      if (!hasPrimarySuggestion && distance <= RESTAURANT_MATCH_THRESHOLD) {
+      if (!hasPrimarySuggestion && distanceMeters <= MICHELIN_PRIMARY_MATCH_RADIUS_METERS) {
         primarySuggestionUpdates.push({
           visitId: visit.id,
           suggestedRestaurantId: restaurant.id,
@@ -229,4 +211,53 @@ async function recomputeSuggestedRestaurantsInternal(
 export async function recomputeSuggestedRestaurants(): Promise<number> {
   const database = await getDatabase();
   return recomputeSuggestedRestaurantsInternal(database);
+}
+
+/**
+ * Recompute existing pending visits only when the bundled guide or matching
+ * policy changes. New visits are indexed as they are created, so normal scans
+ * avoid the former redundant full-table recomputation.
+ */
+export async function recomputeSuggestedRestaurantsIfNeeded(
+  datasetVersion: string,
+): Promise<{ refreshed: boolean; visitsUpdated: number }> {
+  const targetVersion = `${datasetVersion}:${MICHELIN_MATCHING_ALGORITHM_VERSION}`;
+  if (activeConditionalRefresh?.version === targetVersion) {
+    return activeConditionalRefresh.promise;
+  }
+
+  const promise = (async () => {
+    const database = await getDatabase();
+    const importedVersion = await database.getFirstAsync<{ value: string }>(
+      `SELECT value FROM app_metadata WHERE key = ?`,
+      [MICHELIN_SUGGESTION_VERSION_KEY],
+    );
+    if (importedVersion?.value === targetVersion) {
+      return { refreshed: false, visitsUpdated: 0 };
+    }
+
+    // Do not mark a refresh complete when reference data is unavailable; a later
+    // scan should retry after Michelin initialization succeeds.
+    const restaurantIndex = await ensureRestaurantLocationIndex(database, DEBUG_TIMING);
+    if (!restaurantIndex) {
+      return { refreshed: false, visitsUpdated: 0 };
+    }
+
+    const visitsUpdated = await recomputeSuggestedRestaurantsInternal(database);
+    await database.runAsync(
+      `INSERT INTO app_metadata (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [MICHELIN_SUGGESTION_VERSION_KEY, targetVersion],
+    );
+    return { refreshed: true, visitsUpdated };
+  })();
+
+  activeConditionalRefresh = { version: targetVersion, promise };
+  try {
+    return await promise;
+  } finally {
+    if (activeConditionalRefresh?.promise === promise) {
+      activeConditionalRefresh = undefined;
+    }
+  }
 }

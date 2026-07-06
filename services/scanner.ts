@@ -2,16 +2,34 @@ import * as MediaLibrary from "expo-media-library/legacy";
 import * as Device from "expo-device";
 import pMap from "p-map";
 import { insertPhotos, type PhotoRecord } from "@/utils/db";
-import { isBatchAssetInfoAvailable, getAssetInfoBatch } from "@/modules/batch-asset-info";
+import {
+  beginAssetScan,
+  endAssetScan,
+  getAssetInfoBatch,
+  getAssetScanPage,
+  isAssetScanAvailable,
+  isBatchAssetInfoAvailable,
+  type AssetScanRecord,
+} from "@/modules/batch-asset-info";
+
+type PhotoInsertRecord = Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">;
+
+interface ProcessedAssetBatch {
+  photos: PhotoInsertRecord[];
+  photosWithLocation: number;
+  skippedAssets: number;
+}
 
 export interface ScanProgress {
   totalAssets: number;
   processedAssets: number;
   newPhotosAdded: number;
   photosWithLocation: number;
+  skippedAssets: number;
   isComplete: boolean;
   // Speed and ETA tracking
   elapsedMs: number;
+  /** Overall metadata scan throughput; retained name for API compatibility. */
   newPhotosPerSecond: number;
   etaMs: number | null;
   // Performance info
@@ -97,6 +115,53 @@ export function formatEta(ms: number | null): string {
 /** Check if native batch processing is available (iOS only) */
 const isNativeBatchAvailable = () => isBatchAssetInfoAvailable();
 
+function isValidLocation(location: { latitude: number; longitude: number } | null | undefined): boolean {
+  return (
+    location !== null &&
+    location !== undefined &&
+    Number.isFinite(location.latitude) &&
+    Number.isFinite(location.longitude) &&
+    location.latitude >= -90 &&
+    location.latitude <= 90 &&
+    location.longitude >= -180 &&
+    location.longitude <= 180
+  );
+}
+
+function processNativeScanPage(assets: AssetScanRecord[]): ProcessedAssetBatch {
+  const photos: PhotoInsertRecord[] = [];
+  let photosWithLocation = 0;
+  let skippedAssets = 0;
+
+  for (const asset of assets) {
+    if (asset.creationTime === null || !Number.isFinite(asset.creationTime)) {
+      skippedAssets++;
+      continue;
+    }
+
+    const location =
+      asset.latitude === null || asset.longitude === null
+        ? null
+        : { latitude: asset.latitude, longitude: asset.longitude };
+    const hasLocation = isValidLocation(location);
+    if (hasLocation) {
+      photosWithLocation++;
+    }
+
+    photos.push({
+      id: asset.id,
+      uri: asset.uri,
+      creationTime: asset.creationTime,
+      latitude: hasLocation ? asset.latitude : null,
+      longitude: hasLocation ? asset.longitude : null,
+      mediaType: asset.mediaType,
+      duration: asset.mediaType === "video" ? asset.duration : null,
+    });
+  }
+
+  return { photos, photosWithLocation, skippedAssets };
+}
+
 /**
  * Process assets using native batch API (iOS only)
  * Returns photo records ready for database insertion.
@@ -105,53 +170,43 @@ const isNativeBatchAvailable = () => isBatchAssetInfoAvailable();
  * Note: This function should only be called after checking isBatchAssetInfoAvailable().
  * On Android, this will throw an error.
  */
-async function processWithNativeBatch(
-  assetIds: string[],
-  onPhotosWithLocation: (count: number) => void,
-): Promise<Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[]> {
-  try {
-    const batchInfo = await getAssetInfoBatch(assetIds);
+async function processWithNativeBatch(assetIds: string[]): Promise<ProcessedAssetBatch> {
+  const batchInfo = await getAssetInfoBatch(assetIds);
 
-    const photos: Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[] = [];
-    let locCount = 0;
+  const photos: PhotoInsertRecord[] = [];
+  let photosWithLocation = 0;
 
-    // Note: batchInfo may have fewer items than assetIds if some photos were deleted
-    // The native module only returns info for photos that still exist
-    for (const asset of batchInfo) {
-      const hasLocation = asset.location && asset.location.latitude !== 0 && asset.location.longitude !== 0;
+  // batchInfo may have fewer items than assetIds if an asset was deleted
+  // between the MediaLibrary page and this legacy native refetch.
+  for (const asset of batchInfo) {
+    const hasLocation = isValidLocation(asset.location);
 
-      if (hasLocation) {
-        locCount++;
-      }
-
-      photos.push({
-        id: asset.id,
-        uri: asset.uri,
-        creationTime: asset.creationTime,
-        latitude: hasLocation ? asset.location!.latitude : null,
-        longitude: hasLocation ? asset.location!.longitude : null,
-        mediaType: asset.mediaType === "video" ? "video" : "photo",
-        duration: asset.mediaType === "video" ? asset.duration : null,
-      });
+    if (hasLocation) {
+      photosWithLocation++;
     }
 
-    onPhotosWithLocation(locCount);
-    return photos;
-  } catch (error) {
-    console.warn("Native batch processing failed, some photos may have been deleted:", error);
-    // Return empty array on error - caller will handle gracefully
-    return [];
+    photos.push({
+      id: asset.id,
+      uri: asset.uri,
+      creationTime: asset.creationTime,
+      latitude: hasLocation ? asset.location!.latitude : null,
+      longitude: hasLocation ? asset.location!.longitude : null,
+      mediaType: asset.mediaType === "video" ? "video" : "photo",
+      duration: asset.mediaType === "video" ? asset.duration : null,
+    });
   }
+
+  return {
+    photos,
+    photosWithLocation,
+    skippedAssets: Math.max(0, assetIds.length - batchInfo.length),
+  };
 }
 
 /**
  * Process assets using JS-based pMap (fallback for Android)
  */
-async function processWithPMap(
-  assets: MediaLibrary.Asset[],
-  concurrency: number,
-  onPhotosWithLocation: (count: number) => void,
-): Promise<Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[]> {
+async function processWithPMap(assets: MediaLibrary.Asset[], concurrency: number): Promise<ProcessedAssetBatch> {
   const assetsWithInfo = await pMap(
     assets,
     async (asset) => {
@@ -166,18 +221,18 @@ async function processWithPMap(
     { concurrency },
   );
 
-  const photos: Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[] = [];
-  let locCount = 0;
+  const photos: PhotoInsertRecord[] = [];
+  let photosWithLocation = 0;
 
   for (const asset of assetsWithInfo) {
     if (!asset) {
       continue;
     }
 
-    const hasLocation = asset.location && asset.location.latitude !== 0 && asset.location.longitude !== 0;
+    const hasLocation = isValidLocation(asset.location);
 
     if (hasLocation) {
-      locCount++;
+      photosWithLocation++;
     }
 
     const isVideo = asset.originalAsset.mediaType === MediaLibrary.MediaType.video;
@@ -192,18 +247,23 @@ async function processWithPMap(
     });
   }
 
-  onPhotosWithLocation(locCount);
-  return photos;
+  return {
+    photos,
+    photosWithLocation,
+    skippedAssets: Math.max(0, assets.length - photos.length),
+  };
 }
 
 /**
  * Scan camera roll and import photos into the database.
- * Uses native batch processing on iOS for maximum performance.
+ * Uses one retained native PhotoKit snapshot on current iOS builds.
+ * Older iOS binaries retain the legacy ID-refetch path for OTA compatibility.
  * Falls back to pMap-based processing on Android.
  * Automatically adjusts batch sizes based on device capabilities.
  */
 export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanProgress> {
   const useNativeBatch = isNativeBatchAvailable();
+  const useNativeScanSession = isAssetScanAvailable();
   const deviceTier = getDeviceTier();
 
   const {
@@ -212,19 +272,29 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     onProgress,
   } = options;
 
-  // First, get the total count (both photos and videos)
-  const totalAssetsResponse = await MediaLibrary.getAssetsAsync({
-    first: 1,
-    mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-  });
+  if (!Number.isSafeInteger(batchSize) || batchSize <= 0) {
+    throw new RangeError(`Scan batch size must be a positive safe integer; received ${batchSize}`);
+  }
+  if (!Number.isSafeInteger(concurrency) || concurrency <= 0) {
+    throw new RangeError(`Scan concurrency must be a positive safe integer; received ${concurrency}`);
+  }
 
-  const totalAssets = totalAssetsResponse.totalCount;
+  const nativeSession = useNativeScanSession ? await beginAssetScan() : null;
+  const totalAssets = nativeSession
+    ? nativeSession.totalCount
+    : (
+        await MediaLibrary.getAssetsAsync({
+          first: 1,
+          mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+        })
+      ).totalCount;
 
   const progress: ScanProgress = {
     totalAssets,
     processedAssets: 0,
     newPhotosAdded: 0,
     photosWithLocation: 0,
+    skippedAssets: 0,
     isComplete: false,
     elapsedMs: 0,
     newPhotosPerSecond: 0,
@@ -233,89 +303,123 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     deviceTier: deviceTier.tier,
   };
 
-  // Report initial progress
-  onProgress?.(progress);
-
-  let hasNextPage = true;
-  let endCursor: string | undefined;
   const startTime = Date.now();
+  let scanError: unknown | null = null;
 
-  while (hasNextPage) {
-    // Fetch batch of assets (just metadata, not full info) - both photos and videos
-    const response = await MediaLibrary.getAssetsAsync({
-      first: batchSize,
-      after: endCursor,
-      mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-      sortBy: [MediaLibrary.SortBy.creationTime],
-    });
-
-    if (response.assets.length > 0) {
-      let photosToInsert: Omit<
-        PhotoRecord,
-        "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels"
-      >[];
-
-      if (useNativeBatch) {
-        // Use native batch API (iOS) - much faster!
-        const assetIds = response.assets.map((a) => a.id);
-        photosToInsert = await processWithNativeBatch(assetIds, (count) => {
-          progress.photosWithLocation += count;
-        });
-      } else {
-        // Fallback to pMap-based processing (Android)
-        photosToInsert = await processWithPMap(response.assets, concurrency, (count) => {
-          progress.photosWithLocation += count;
-        });
-      }
-
-      // Bulk insert into database
-      if (photosToInsert.length > 0) {
-        await insertPhotos(photosToInsert);
-        progress.newPhotosAdded += photosToInsert.length;
-      }
-    }
-
-    progress.processedAssets += response.assets.length;
-    hasNextPage = response.hasNextPage;
-    endCursor = response.endCursor;
-
-    // Calculate speed and ETA based on total elapsed time (including fetching batches)
+  const updateProgress = () => {
     progress.elapsedMs = Date.now() - startTime;
-
     const elapsedSeconds = progress.elapsedMs / 1000;
+    const remainingAssets = Math.max(0, progress.totalAssets - progress.processedAssets);
+    const hasStableEstimate = elapsedSeconds >= 2 || remainingAssets === 0;
 
-    // Only calculate rate after we have enough data (at least 2 seconds of processing)
-    // to avoid wildly inaccurate early estimates from fast first batches
-    const MIN_SECONDS_FOR_ESTIMATE = 2;
-    const remainingPhotos = totalAssets - progress.newPhotosAdded;
-
-    if (elapsedSeconds >= MIN_SECONDS_FOR_ESTIMATE && progress.newPhotosAdded > 0) {
-      progress.newPhotosPerSecond = Math.round(progress.newPhotosAdded / elapsedSeconds);
-
-      // ETA: calculate based on remaining photos
-      if (remainingPhotos > 0) {
-        progress.etaMs = (remainingPhotos / progress.newPhotosPerSecond) * 1000;
-      } else {
-        progress.etaMs = 0;
-      }
-    } else if (remainingPhotos <= 0) {
-      // Already done
-      progress.newPhotosPerSecond = elapsedSeconds > 0 ? Math.round(progress.newPhotosAdded / elapsedSeconds) : 0;
-      progress.etaMs = 0;
+    if (hasStableEstimate && progress.processedAssets > 0 && elapsedSeconds > 0) {
+      progress.newPhotosPerSecond = Math.round(progress.processedAssets / elapsedSeconds);
+      progress.etaMs =
+        remainingAssets > 0 && progress.newPhotosPerSecond > 0
+          ? (remainingAssets / progress.newPhotosPerSecond) * 1000
+          : 0;
     } else {
-      // Not enough data yet - show "calculating..."
       progress.newPhotosPerSecond = 0;
       progress.etaMs = null;
     }
 
-    // Report progress after each batch
-    onProgress?.(progress);
+    onProgress?.({ ...progress });
+  };
+
+  const persistBatch = async (batch: ProcessedAssetBatch) => {
+    progress.photosWithLocation += batch.photosWithLocation;
+    progress.skippedAssets += batch.skippedAssets;
+    if (batch.photos.length > 0) {
+      progress.newPhotosAdded += await insertPhotos(batch.photos);
+    }
+  };
+
+  try {
+    onProgress?.({ ...progress });
+
+    if (nativeSession) {
+      const nativePageSize = Math.min(batchSize, nativeSession.maxPageSize);
+      let offset = 0;
+
+      while (offset < nativeSession.totalCount) {
+        const page = await getAssetScanPage(nativeSession.sessionId, { offset, limit: nativePageSize });
+        if (page.offset !== offset || page.totalCount !== nativeSession.totalCount) {
+          throw new Error(
+            `Native asset scan snapshot changed unexpectedly (offset ${page.offset}/${offset}, total ${page.totalCount}/${nativeSession.totalCount})`,
+          );
+        }
+        if (page.assets.length === 0) {
+          throw new Error(`Native asset scan returned an empty page before offset ${nativeSession.totalCount}`);
+        }
+
+        await persistBatch(processNativeScanPage(page.assets));
+        progress.processedAssets += page.assets.length;
+
+        if (!page.hasNextPage) {
+          offset = nativeSession.totalCount;
+        } else if (page.nextOffset !== null && page.nextOffset > offset) {
+          offset = page.nextOffset;
+        } else {
+          throw new Error(`Native asset scan did not advance past offset ${offset}`);
+        }
+
+        updateProgress();
+      }
+    } else {
+      let hasNextPage = true;
+      let endCursor: string | undefined;
+
+      while (hasNextPage) {
+        const response = await MediaLibrary.getAssetsAsync({
+          first: batchSize,
+          after: endCursor,
+          mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+          sortBy: [MediaLibrary.SortBy.creationTime],
+        });
+
+        if (response.assets.length > 0) {
+          const processedBatch = useNativeBatch
+            ? await processWithNativeBatch(response.assets.map((asset) => asset.id))
+            : await processWithPMap(response.assets, concurrency);
+          await persistBatch(processedBatch);
+        }
+
+        progress.processedAssets += response.assets.length;
+        hasNextPage = response.hasNextPage;
+        endCursor = response.endCursor;
+        updateProgress();
+      }
+    }
+  } catch (error) {
+    scanError = error;
+  }
+
+  if (nativeSession) {
+    try {
+      await endAssetScan(nativeSession.sessionId);
+    } catch (cleanupError) {
+      if (scanError === null) {
+        scanError = cleanupError;
+      } else {
+        console.error("Failed to release native asset scan after a scan error:", cleanupError);
+      }
+    }
+  }
+
+  if (scanError !== null) {
+    throw scanError;
   }
 
   progress.isComplete = true;
   progress.elapsedMs = Date.now() - startTime;
   progress.etaMs = 0;
-  onProgress?.(progress);
+  if (progress.totalAssets === 0) {
+    progress.newPhotosPerSecond = 0;
+  }
+  if (progress.skippedAssets > 0) {
+    console.warn(`Skipped ${progress.skippedAssets} inaccessible assets or assets without a creation date.`);
+  }
+  onProgress?.({ ...progress });
 
   return progress;
 }

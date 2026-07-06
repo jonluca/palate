@@ -18,6 +18,10 @@ next-env.d.ts
 # production
 /build
 
+# Swift Package Manager and native profiler output
+/.build/
+/.swiftpm/
+
 # misc
 .DS_Store
 *.pem

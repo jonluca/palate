@@ -1,51 +1,100 @@
-import KDBush from "kdbush";
 import type * as SQLite from "expo-sqlite";
+import { MichelinLocationIndex } from "../michelin-location-index";
 import type { MichelinRestaurantRecord } from "./types";
 
-let restaurantIndex: KDBush | null = null;
-let indexedRestaurants: MichelinRestaurantRecord[] = [];
+/** Maximum distance for the primary Michelin suggestion. */
+export const MICHELIN_PRIMARY_MATCH_RADIUS_METERS = 100;
 
-/**
- * Build or rebuild the spatial index for Michelin restaurants.
- * Uses kdbush for efficient nearest-neighbor queries.
- */
-export async function buildRestaurantSpatialIndex(
+/** Maximum distance for the list of nearby Michelin suggestions. */
+export const MICHELIN_SUGGESTION_RADIUS_METERS = 200;
+
+/** Maximum number of Michelin suggestions stored for one visit. */
+export const MICHELIN_SUGGESTION_LIMIT = 5;
+
+let restaurantLocationIndex: MichelinLocationIndex<MichelinRestaurantRecord> | null = null;
+let isRestaurantLocationIndexReady = false;
+let restaurantLocationIndexGeneration = 0;
+let activeBuild:
+  | {
+      generation: number;
+      promise: Promise<MichelinLocationIndex<MichelinRestaurantRecord> | null>;
+    }
+  | undefined;
+
+async function createRestaurantLocationIndex(
   database: SQLite.SQLiteDatabase,
   debugTiming: boolean,
-): Promise<boolean> {
-  indexedRestaurants = await database.getAllAsync<MichelinRestaurantRecord>(`SELECT * FROM michelin_restaurants`);
-
-  if (indexedRestaurants.length === 0) {
-    restaurantIndex = null;
-    return false;
-  }
-
-  // Build spatial index - O(n log n) once
-  restaurantIndex = new KDBush(indexedRestaurants.length);
-  for (const r of indexedRestaurants) {
-    restaurantIndex.add(r.longitude, r.latitude); // Note: lon, lat order for geokdbush
-  }
-  restaurantIndex.finish();
+): Promise<MichelinLocationIndex<MichelinRestaurantRecord> | null> {
+  const startedAt = debugTiming ? performance.now() : 0;
+  const restaurants = await database.getAllAsync<MichelinRestaurantRecord>(
+    `SELECT m.*
+     FROM michelin_restaurants m
+     JOIN app_metadata metadata
+       ON metadata.key = 'michelin_dataset_version'
+      AND m.datasetVersion = metadata.value`,
+  );
+  const index = restaurants.length > 0 ? new MichelinLocationIndex(restaurants) : null;
 
   if (debugTiming) {
-    console.log(`[DB] Built spatial index for ${indexedRestaurants.length} restaurants`);
+    console.log(
+      `[DB] Built Michelin location index for ${restaurants.length} restaurants in ${(performance.now() - startedAt).toFixed(2)}ms`,
+    );
   }
 
-  return true;
+  return index;
 }
 
 /**
- * Invalidate the restaurant spatial index (call when Michelin data changes).
+ * Returns the shared immutable Michelin index, building it from SQLite once when necessary.
+ * Concurrent callers share one build for the current restaurant-data generation.
  */
+export async function ensureRestaurantLocationIndex(
+  database: SQLite.SQLiteDatabase,
+  debugTiming: boolean,
+): Promise<MichelinLocationIndex<MichelinRestaurantRecord> | null> {
+  while (true) {
+    if (isRestaurantLocationIndexReady) {
+      return restaurantLocationIndex;
+    }
+
+    const generation = restaurantLocationIndexGeneration;
+    let build = activeBuild;
+    if (!build || build.generation !== generation) {
+      build = {
+        generation,
+        promise: createRestaurantLocationIndex(database, debugTiming),
+      };
+      activeBuild = build;
+    }
+
+    try {
+      const index = await build.promise;
+      if (generation !== restaurantLocationIndexGeneration) {
+        continue;
+      }
+
+      restaurantLocationIndex = index;
+      isRestaurantLocationIndexReady = true;
+      if (activeBuild === build) {
+        activeBuild = undefined;
+      }
+      return index;
+    } catch (error) {
+      if (activeBuild === build) {
+        activeBuild = undefined;
+      }
+      if (generation !== restaurantLocationIndexGeneration) {
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+/** Invalidates the shared index after Michelin reference data changes. */
 export function invalidateRestaurantIndex(): void {
-  restaurantIndex = null;
-  indexedRestaurants = [];
-}
-
-export function getRestaurantIndex(): KDBush | null {
-  return restaurantIndex;
-}
-
-export function getIndexedRestaurants(): MichelinRestaurantRecord[] {
-  return indexedRestaurants;
+  restaurantLocationIndexGeneration += 1;
+  restaurantLocationIndex = null;
+  isRestaurantLocationIndexReady = false;
+  activeBuild = undefined;
 }

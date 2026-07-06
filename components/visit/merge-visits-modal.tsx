@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Pressable, Modal, ScrollView, ActivityIndicator, Image, Alert } from "react-native";
+import { View, Pressable, Modal, ScrollView, ActivityIndicator, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui";
 import { statusVariant, formatDate } from "./utils";
 import type { VisitWithRestaurant } from "@/hooks/queries";
 import * as Haptics from "expo-haptics";
+import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
 
 interface MergeVisitsModalProps {
   visible: boolean;
@@ -89,10 +90,9 @@ export function MergeVisitsModal({ visible, isLoading, visits, onMerge, onClose 
                     {/* Preview Photos */}
                     {mergeVisit.previewPhotos.length > 0 && (
                       <View className={"w-16 h-16 rounded-lg overflow-hidden bg-gray-500/20"}>
-                        <Image
-                          source={{ uri: mergeVisit.previewPhotos[0] }}
+                        <PhotoAssetThumbnail
+                          uri={mergeVisit.previewPhotos[0]}
                           style={{ width: "100%", height: "100%" }}
-                          resizeMode={"cover"}
                         />
                       </View>
                     )}

@@ -21,6 +21,14 @@ export interface PhotoRecord {
   duration: number | null;
 }
 
+/** Minimal located-photo row used while grouping previously unvisited photos. */
+export interface UnvisitedPhotoRecord {
+  id: string;
+  creationTime: number;
+  latitude: number;
+  longitude: number;
+}
+
 export interface VisitRecord {
   id: string;
   restaurantId: string | null;

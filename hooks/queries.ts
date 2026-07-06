@@ -15,6 +15,7 @@ import {
   batchConfirmVisits,
   confirmVisit,
   getAllMichelinRestaurants,
+  searchUnvisitedMichelinRestaurantsByName,
   getMichelinRestaurantById,
   getRestaurantById,
   getRestaurantDisplayById,
@@ -89,6 +90,15 @@ import { compareSameNameMichelinFirst, normalizeRestaurantNameForPriority } from
 function invalidateVisitQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
   queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
+}
+
+/** Invalidate data derived from confirmed visit statuses. */
+function invalidateVisitStatusQueries(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ["visits", "restaurantVisits"] });
+  queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+  queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+  queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+  queryClient.invalidateQueries({ queryKey: ["michelinRestaurantSearch"] });
 }
 
 function invalidateReservationImportQueries(queryClient: QueryClient) {
@@ -195,6 +205,17 @@ export interface Stats {
 
 export type FilterType = "all" | "pending" | "confirmed" | "rejected" | "food";
 
+function isValidCoordinatePair(latitude: number, longitude: number): boolean {
+  return (
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
+  );
+}
+
 // Query Keys
 export const queryKeys = {
   stats: ["stats"] as const,
@@ -213,9 +234,11 @@ export const queryKeys = {
   restaurantDetail: (restaurantId: string) => ["restaurants", "detail", restaurantId] as const,
   pendingReview: ["visits", "pendingReview"] as const,
   michelinRestaurants: ["static", "michelinRestaurants"] as const,
+  michelinRestaurantSearch: (query: string) => ["michelinRestaurantSearch", query] as const,
   michelinRestaurantDetail: (michelinId: string) => ["static", "michelinRestaurants", "detail", michelinId] as const,
   nearbyMichelin: (lat: number, lon: number) => ["static", "nearbyMichelin", lat, lon] as const,
-  mapKitNearby: (lat: number, lon: number) => ["static", "mapKitNearby", lat.toFixed(4), lon.toFixed(4)] as const,
+  mapKitNearby: (lat: number, lon: number, radius: number) =>
+    ["static", "mapKitNearby", lat.toFixed(4), lon.toFixed(4), radius] as const,
   wrapped: (year?: number | null) => {
     if (year) {
       return ["wrapped", year] as const;
@@ -440,18 +463,29 @@ export function useMichelinRestaurants() {
   return useQuery({
     queryKey: queryKeys.michelinRestaurants,
     queryFn: async () => {
-      const restaurants = await getAllMichelinRestaurants();
-      const hasAnyLatestAwardYear = restaurants.some((restaurant) => typeof restaurant.latestAwardYear === "number");
-
-      if (restaurants.length > 0 && hasAnyLatestAwardYear) {
-        return restaurants;
-      }
-
-      // Self-heal older local DBs (or empty Michelin DB) by re-running Michelin initialization/backfill.
+      // The version check is cheap after the first import and prevents an app
+      // update from caching the previous bundled guide for this whole process.
       await initializeMichelinData();
       return getAllMichelinRestaurants();
     },
     staleTime: Infinity, // This data doesn't change
+  });
+}
+
+/**
+ * Search unvisited restaurants in the active Michelin dataset.
+ * The query remains disabled until the user enters non-whitespace text.
+ */
+export function useMichelinRestaurantSearch(query: string, enabled: boolean = true) {
+  const normalizedQuery = query.trim().toLowerCase();
+
+  return useQuery({
+    queryKey: queryKeys.michelinRestaurantSearch(normalizedQuery),
+    queryFn: async () => {
+      await initializeMichelinData();
+      return searchUnvisitedMichelinRestaurantsByName(normalizedQuery);
+    },
+    enabled: enabled && normalizedQuery.length > 0,
   });
 }
 
@@ -481,19 +515,23 @@ function useMapKitNearbyRestaurants(
   enabled: boolean = true,
 ) {
   return useQuery({
-    queryKey: queryKeys.mapKitNearby(lat ?? 0, lon ?? 0),
+    queryKey: queryKeys.mapKitNearby(lat ?? 0, lon ?? 0, radiusMeters),
     queryFn: async (): Promise<MapKitSearchResult[]> => {
-      if (!lat || !lon || !isMapKitSearchAvailable()) {
+      if (lat === undefined || lon === undefined || !isValidCoordinatePair(lat, lon) || !isMapKitSearchAvailable()) {
         return [];
       }
       try {
         return await mapKitSearchNearbyRestaurants(lat, lon, radiusMeters);
       } catch (error) {
         console.warn("MapKit search failed:", error);
-        return [];
+        throw error;
       }
     },
-    enabled: enabled && !!lat && !!lon && isMapKitSearchAvailable(),
+    enabled:
+      enabled && lat !== undefined && lon !== undefined && isValidCoordinatePair(lat, lon) && isMapKitSearchAvailable(),
+    retry: 2,
+    retryDelay: (attemptIndex) => Math.min(500 * 2 ** attemptIndex, 2000),
+    refetchOnMount: true,
     staleTime: 1000 * 60 * 15, // Cache for 15 minutes
   });
 }
@@ -615,7 +653,7 @@ export function useUnifiedNearbyRestaurants(visit: VisitWithSuggestedRestaurants
   const lon = visit?.centerLon;
 
   // Only fetch MapKit if enabled and we have coordinates
-  const shouldFetchMapKit = enabled && Boolean(lat) && Boolean(lon);
+  const shouldFetchMapKit = enabled && lat !== undefined && lon !== undefined && isValidCoordinatePair(lat, lon);
 
   // Fetch MapKit restaurants
   const { data: mapKitResults = [], isLoading: mapKitLoading } = useMapKitNearbyRestaurants(
@@ -674,8 +712,7 @@ export interface ScanProgress {
     | "calendar-events"
     | "calendar-only-visits"
     | "detecting-food"
-    | "optimizing-database"
-    | "recomputing-suggested-restaurants";
+    | "optimizing-database";
   detail: string;
   photosPerSecond?: number;
   eta?: string;
@@ -1189,6 +1226,7 @@ export function useUpdateVisitStatus(visitId: string | undefined) {
         old ? { ...old, visit: { ...old.visit, status: newStatus } } : old,
       );
       invalidateVisitQueries(queryClient);
+      invalidateVisitStatusQueries(queryClient);
       // Track analytics
       if (newStatus === "confirmed" && visitId) {
         logVisitConfirmed(parseInt(visitId, 10) || 0);
@@ -1284,9 +1322,7 @@ export function useUndoVisitAction() {
     onSuccess: () => {
       // Refetch the pending review list to restore the visit
       queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
-      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      invalidateVisitStatusQueries(queryClient);
     },
   });
 }
@@ -1602,7 +1638,7 @@ export function useReverseGeocode(lat: number | undefined, lon: number | undefin
   return useQuery({
     queryKey: queryKeys.reverseGeocode(lat ?? 0, lon ?? 0),
     queryFn: async (): Promise<string | null> => {
-      if (!lat || !lon) {
+      if (lat === undefined || lon === undefined || !isValidCoordinatePair(lat, lon)) {
         return null;
       }
 
@@ -1642,10 +1678,12 @@ export function useReverseGeocode(lat: number | undefined, lon: number | undefin
         return parts.join(", ");
       } catch (error) {
         console.warn("Reverse geocoding failed:", error);
-        return null;
+        throw error;
       }
     },
-    enabled: enabled && lat !== undefined && lon !== undefined,
+    enabled: enabled && lat !== undefined && lon !== undefined && isValidCoordinatePair(lat, lon),
+    retry: 2,
+    retryDelay: (attemptIndex) => Math.min(500 * 2 ** attemptIndex, 2000),
     staleTime: Infinity, // Location names don't change - cache forever
     gcTime: 1000 * 60 * 60 * 24, // Keep in cache for 24 hours
   });
