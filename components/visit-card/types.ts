@@ -44,6 +44,8 @@ export interface ReviewModeProps {
   match?: ExactCalendarMatch;
   /** Whether to perform Apple Maps verification searches (expensive, use sparingly) */
   enableAppleMapsVerification?: boolean;
+  /** Prepare the parent list before this visit is removed from the review queue. */
+  onBeforeRemove?: () => void;
 }
 
 // Visit actions props

@@ -13,7 +13,7 @@ import { VisitMetaHeader, BadgesRow, ExactMatchCard } from "./review-mode-compon
 import { useUnifiedNearbyRestaurants, type NearbyRestaurant } from "@/hooks";
 import type { ReviewModeProps, SuggestedRestaurant, LoadingAction } from "./types";
 
-export function ReviewModeCard({ visit, match, enableAppleMapsVerification = false }: ReviewModeProps) {
+export function ReviewModeCard({ visit, match, enableAppleMapsVerification = false, onBeforeRemove }: ReviewModeProps) {
   const didSwipeCardRef = useRef(false);
   const [showSearchState, setShowSearchState] = useState(() => ({ visitId: visit.id, value: false }));
   const [selectedRestaurantState, setSelectedRestaurantState] = useState<{
@@ -114,6 +114,7 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
         return;
       }
 
+      onBeforeRemove?.();
       await confirmMutation.mutateAsync({
         visitId: id,
         restaurantId: restaurantToConfirm.id,
@@ -133,10 +134,11 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
         },
       });
     },
-    [match, id, startTime, confirmMutation, showUndo, undoMutation],
+    [match, id, startTime, confirmMutation, showUndo, undoMutation, onBeforeRemove],
   );
 
   const handleReject = useCallback(async () => {
+    onBeforeRemove?.();
     await updateStatusMutation.mutateAsync({ visitId: id, newStatus: "rejected" });
 
     // Show undo banner
@@ -148,11 +150,12 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
         await undoMutation.mutateAsync({ visitId: id });
       },
     });
-  }, [id, updateStatusMutation, showUndo, undoMutation]);
+  }, [id, updateStatusMutation, showUndo, undoMutation, onBeforeRemove]);
 
   const handleSelectRestaurantFromModal = useCallback(
     async (restaurant: RestaurantOption) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onBeforeRemove?.();
       await confirmMutation.mutateAsync({
         visitId: id,
         restaurantId: restaurant.id,
@@ -172,7 +175,7 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
         },
       });
     },
-    [id, startTime, confirmMutation, showUndo, undoMutation],
+    [id, startTime, confirmMutation, showUndo, undoMutation, onBeforeRemove],
   );
 
   return (

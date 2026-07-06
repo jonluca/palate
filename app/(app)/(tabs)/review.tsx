@@ -1,6 +1,5 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
-import { AnimatedListItem } from "@/components/review";
 import { DeepScanCard } from "@/components/settings/deep-scan-card";
 import { SkeletonVisitCard, Button, ButtonText, Card, useUndo } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
@@ -11,14 +10,14 @@ import {
   type PendingVisitForReview,
   type ExactCalendarMatch,
 } from "@/hooks/queries";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, RefreshControl, Alert, Pressable } from "react-native";
+import { View, RefreshControl, Alert, Pressable, type ViewProps } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import { useToast } from "@/components/ui/toast";
-import Animated, { LinearTransition } from "react-native-reanimated";
+import Animated, { FadeOut, LinearTransition } from "react-native-reanimated";
 import { router } from "expo-router";
 import {
   useReviewFoodFilter,
@@ -45,6 +44,26 @@ type ReviewListItem =
       visit: PendingVisitForReview;
       manualIndex: number;
     };
+
+type ReviewCellRendererProps = ViewProps & { index?: number };
+
+const ReviewCellRenderer = React.forwardRef<View, ReviewCellRendererProps>(function ReviewCellRenderer(
+  { index: _index, ...props },
+  ref,
+) {
+  return (
+    <Animated.View
+      {...props}
+      ref={ref}
+      collapsable={false}
+      exiting={FadeOut.duration(160)}
+      layout={LinearTransition.duration(200)}
+    />
+  );
+});
+
+const reviewMaintainVisibleContentPosition = { disabled: true } as const;
+const getReviewItemType = (item: ReviewListItem) => item.type;
 
 function LoadingState() {
   return (
@@ -84,11 +103,13 @@ function ReviewCompletionCard() {
 async function approveAllExactMatches({
   exactMatches,
   batchConfirm,
+  onBeforeRemove,
   setIsApproving,
   showToast,
 }: {
   exactMatches: ExactCalendarMatch[];
   batchConfirm: (matches: ExactCalendarMatch[]) => Promise<unknown>;
+  onBeforeRemove: () => void;
   setIsApproving: React.Dispatch<React.SetStateAction<boolean>>;
   showToast: ReturnType<typeof useToast>["showToast"];
 }) {
@@ -96,6 +117,7 @@ async function approveAllExactMatches({
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
   try {
+    onBeforeRemove();
     await batchConfirm(exactMatches);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     showToast({
@@ -129,15 +151,18 @@ export default function ReviewScreen() {
   const { showToast } = useToast();
   const { setOnUndoComplete } = useUndo();
 
-  // FlashList refs for scrolling back after undo
-  // oxlint-disable-next-line @typescript-eslint/no-explicit-any
-  const reviewListRef = useRef<any>(null);
+  // FlashList ref coordinates removal animations and post-exact-match scrolling.
+  const reviewListRef = useRef<FlashListRef<ReviewListItem>>(null);
 
   // Data queries
   const { data, isLoading } = usePendingReview();
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
   const pendingVisits = useMemo(() => data?.visits ?? [], [data?.visits]);
   const exactMatches = useMemo(() => data?.exactMatches ?? [], [data?.exactMatches]);
+
+  const prepareForReviewItemRemoval = useCallback(() => {
+    reviewListRef.current?.prepareForLayoutAnimationRender();
+  }, []);
 
   // Mutations
   const batchConfirmMutation = useBatchConfirmVisits();
@@ -261,6 +286,21 @@ export default function ReviewScreen() {
     (isAllCaughtUp ||
       (foodFilter === "on" && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable)));
 
+  const previousExactMatchCountRef = useRef(0);
+
+  useEffect(() => {
+    const previousExactMatchCount = previousExactMatchCountRef.current;
+    previousExactMatchCountRef.current = exactMatches.length;
+
+    if (previousExactMatchCount > 0 && exactMatches.length === 0) {
+      const frame = requestAnimationFrame(() => {
+        reviewListRef.current?.scrollToTop({ animated: true });
+      });
+
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [exactMatches.length]);
+
   // Register undo complete callback to scroll back to restored item
   useEffect(() => {
     setOnUndoComplete((visitId: string) => {
@@ -300,6 +340,7 @@ export default function ReviewScreen() {
             await approveAllExactMatches({
               exactMatches,
               batchConfirm: batchConfirmMutation.mutateAsync,
+              onBeforeRemove: prepareForReviewItemRemoval,
               setIsApproving,
               showToast,
             });
@@ -307,28 +348,32 @@ export default function ReviewScreen() {
         },
       ],
     );
-  }, [exactMatches, batchConfirmMutation, showToast]);
+  }, [exactMatches, batchConfirmMutation, prepareForReviewItemRemoval, showToast]);
 
   // Render functions
-  const renderReviewItem = useCallback(({ item }: { item: ReviewListItem; index: number }) => {
-    if (item.type === "exact") {
-      return (
-        <AnimatedListItem itemKey={item.match.visitId}>
+  const renderReviewItem = useCallback(
+    ({ item }: { item: ReviewListItem; index: number }) => {
+      if (item.type === "exact") {
+        return (
           <ReviewModeCard
             visit={item.match.visit}
             match={item.match}
             enableAppleMapsVerification={item.exactIndex < 3}
+            onBeforeRemove={prepareForReviewItemRemoval}
           />
-        </AnimatedListItem>
-      );
-    }
+        );
+      }
 
-    return (
-      <AnimatedListItem itemKey={item.visit.id}>
-        <ReviewModeCard visit={item.visit} enableAppleMapsVerification={item.manualIndex < 8} />
-      </AnimatedListItem>
-    );
-  }, []);
+      return (
+        <ReviewModeCard
+          visit={item.visit}
+          enableAppleMapsVerification={item.manualIndex < 8}
+          onBeforeRemove={prepareForReviewItemRemoval}
+        />
+      );
+    },
+    [prepareForReviewItemRemoval],
+  );
 
   // List headers
   const ReviewListHeader = useCallback(
@@ -438,6 +483,9 @@ export default function ReviewScreen() {
           data={mergedReviewItems}
           renderItem={renderReviewItem}
           keyExtractor={(item) => item.key}
+          getItemType={getReviewItemType}
+          CellRendererComponent={ReviewCellRenderer}
+          maintainVisibleContentPosition={reviewMaintainVisibleContentPosition}
           refreshControl={refreshControl}
           refreshing={refreshing}
           contentContainerStyle={listContentStyle}
