@@ -47,6 +47,17 @@ if [[ ! -s "$APP_PATH/Palate" ]]; then
   exit 1
 fi
 
+INFO_PLIST="$APP_PATH/Info.plist"
+if [[ ! -f "$INFO_PLIST" ]]; then
+  print -u2 "Built app is missing its Info.plist at $INFO_PLIST"
+  exit 1
+fi
+PHOTO_USAGE_DESCRIPTION="$(/usr/bin/plutil -extract NSPhotoLibraryUsageDescription raw -o - "$INFO_PLIST" 2>/dev/null || true)"
+if [[ -z "$PHOTO_USAGE_DESCRIPTION" ]]; then
+  print -u2 "Built app is missing NSPhotoLibraryUsageDescription"
+  exit 1
+fi
+
 if [[ "$CODE_SIGNING_ALLOWED" == "YES" ]]; then
   /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 fi

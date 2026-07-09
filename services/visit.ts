@@ -43,6 +43,8 @@ import {
   hasCalendarPermission,
   requestCalendarPermission,
   batchFindCandidateEventsForVisits,
+  isNativeCalendarMatchingAvailable,
+  matchCalendarEventsForVisitsNatively,
   cleanCalendarEventTitle,
   compareRestaurantAndCalendarTitle,
   isFuzzyRestaurantMatch,
@@ -785,74 +787,127 @@ async function enrichVisitsWithCalendarEvents(
     suggestedRestaurantId: string;
   }[] = [];
 
-  for (let i = 0; i < visitsToProcess.length; i += BATCH_SIZE) {
-    const batch = visitsToProcess.slice(i, i + BATCH_SIZE);
-    const batchVisitIds = batch.map((v) => v.id);
+  const recordMatch = (visitId: string, event: CalendarEventInfo, suggestedRestaurantId: string | null | undefined) => {
+    calendarUpdates.push({
+      visitId,
+      calendarEventId: event.id,
+      calendarEventTitle: event.title,
+      calendarEventLocation: event.location,
+      calendarEventIsAllDay: event.isAllDay,
+    });
+    progress.visitsWithEvents++;
 
-    const [candidateEventMap, suggestedRestaurantsMap] = await Promise.all([
-      batchFindCandidateEventsForVisits(batch),
-      getSuggestedRestaurantsForVisits(batchVisitIds),
-    ]);
-
-    for (const visit of batch) {
-      const candidateEvents = candidateEventMap.get(visit.id) ?? [];
-      if (candidateEvents.length === 0) {
-        continue;
-      }
-
-      const suggestedRestaurants = suggestedRestaurantsMap.get(visit.id) ?? [];
-      let matchedRestaurant: (typeof suggestedRestaurants)[number] | undefined;
-      let event = candidateEvents[0]!;
-
-      if (suggestedRestaurants.length > 0) {
-        for (const useFuzzyMatching of [false, true]) {
-          for (const candidate of candidateEvents) {
-            const cleanedTitle = cleanCalendarEventTitle(candidate.title);
-            if (cleanedTitle.length < 3) {
-              continue;
-            }
-
-            const match = suggestedRestaurants.find(
-              (r) =>
-                compareRestaurantAndCalendarTitle(candidate.title, r.name) ||
-                (useFuzzyMatching && isFuzzyRestaurantMatch(cleanedTitle, r.name)),
-            );
-            if (match) {
-              event = candidate;
-              matchedRestaurant = match;
-              break;
-            }
-          }
-
-          if (matchedRestaurant) {
-            break;
-          }
-        }
-      }
-
-      calendarUpdates.push({
-        visitId: visit.id,
-        calendarEventId: event.id,
-        calendarEventTitle: event.title,
-        calendarEventLocation: event.location,
-        calendarEventIsAllDay: event.isAllDay,
-      });
-      progress.visitsWithEvents++;
-
-      if (matchedRestaurant) {
-        restaurantSuggestionUpdates.push({
-          visitId: visit.id,
-          suggestedRestaurantId: matchedRestaurant.id,
-        });
-      }
+    if (suggestedRestaurantId) {
+      restaurantSuggestionUpdates.push({ visitId, suggestedRestaurantId });
     }
+  };
 
-    progress.processedVisits = Math.min(i + BATCH_SIZE, visitsToProcess.length);
+  const updateProgress = (processedVisits: number) => {
+    progress.processedVisits = Math.min(processedVisits, visitsToProcess.length);
     const stats = tracker.update(progress.processedVisits, progress.totalVisits);
     progress.elapsedMs = stats.elapsedMs;
     progress.visitsPerSecond = stats.perSecond;
     progress.etaMs = stats.etaMs;
     emitProgress();
+  };
+
+  type SuggestedRestaurant = MichelinRestaurantRecord & { distance: number };
+  type SuggestedRestaurantMap = Map<string, SuggestedRestaurant[]>;
+  let preloadedSuggestedRestaurants: SuggestedRestaurantMap | null = null;
+  let nativeMatches: Awaited<ReturnType<typeof matchCalendarEventsForVisitsNatively>> = null;
+
+  if (isNativeCalendarMatchingAvailable()) {
+    preloadedSuggestedRestaurants = new Map();
+    for (let i = 0; i < visitsToProcess.length; i += BATCH_SIZE) {
+      const batchIds = visitsToProcess.slice(i, i + BATCH_SIZE).map((visit) => visit.id);
+      const batchSuggestions = await getSuggestedRestaurantsForVisits(batchIds);
+      for (const [visitId, restaurants] of batchSuggestions) {
+        preloadedSuggestedRestaurants.set(visitId, restaurants);
+      }
+    }
+
+    nativeMatches = await matchCalendarEventsForVisitsNatively(
+      visitsToProcess.map((visit) => ({
+        ...visit,
+        suggestedRestaurants: (preloadedSuggestedRestaurants?.get(visit.id) ?? []).map((restaurant) => ({
+          id: restaurant.id,
+          name: restaurant.name,
+        })),
+      })),
+    );
+  }
+
+  if (nativeMatches !== null) {
+    const nativeMatchesByVisitId = new Map(nativeMatches.map((match) => [match.visitId, match]));
+
+    for (let i = 0; i < visitsToProcess.length; i += BATCH_SIZE) {
+      const batch = visitsToProcess.slice(i, i + BATCH_SIZE);
+      for (const visit of batch) {
+        const match = nativeMatchesByVisitId.get(visit.id);
+        if (match) {
+          recordMatch(visit.id, match, match.suggestedRestaurantId);
+        }
+      }
+
+      updateProgress(i + BATCH_SIZE);
+    }
+  } else {
+    for (let i = 0; i < visitsToProcess.length; i += BATCH_SIZE) {
+      const batch = visitsToProcess.slice(i, i + BATCH_SIZE);
+      const batchIds = batch.map((visit) => visit.id);
+      let candidateEventMap: Map<string, CalendarEventInfo[]>;
+      let suggestedRestaurantsMap: SuggestedRestaurantMap;
+      if (preloadedSuggestedRestaurants) {
+        candidateEventMap = await batchFindCandidateEventsForVisits(batch);
+        suggestedRestaurantsMap = preloadedSuggestedRestaurants;
+      } else {
+        [candidateEventMap, suggestedRestaurantsMap] = await Promise.all([
+          batchFindCandidateEventsForVisits(batch),
+          getSuggestedRestaurantsForVisits(batchIds),
+        ]);
+      }
+
+      for (const visit of batch) {
+        const candidateEvents = candidateEventMap.get(visit.id) ?? [];
+        if (candidateEvents.length === 0) {
+          continue;
+        }
+
+        const suggestedRestaurants = suggestedRestaurantsMap.get(visit.id) ?? [];
+        let matchedRestaurant: (typeof suggestedRestaurants)[number] | undefined;
+        let event = candidateEvents[0]!;
+
+        if (suggestedRestaurants.length > 0) {
+          for (const useFuzzyMatching of [false, true]) {
+            for (const candidate of candidateEvents) {
+              const cleanedTitle = cleanCalendarEventTitle(candidate.title);
+              if (cleanedTitle.length < 3) {
+                continue;
+              }
+
+              const match = suggestedRestaurants.find(
+                (restaurant) =>
+                  compareRestaurantAndCalendarTitle(candidate.title, restaurant.name) ||
+                  (useFuzzyMatching && isFuzzyRestaurantMatch(cleanedTitle, restaurant.name)),
+              );
+              if (match) {
+                event = candidate;
+                matchedRestaurant = match;
+                break;
+              }
+            }
+
+            if (matchedRestaurant) {
+              break;
+            }
+          }
+        }
+
+        recordMatch(visit.id, event, matchedRestaurant?.id);
+      }
+
+      updateProgress(i + BATCH_SIZE);
+    }
   }
 
   if (calendarUpdates.length > 0) {

@@ -2,6 +2,13 @@ import * as Calendar from "expo-calendar/legacy";
 import { deburr } from "lodash-es";
 import { memoize } from "../utils/memoize";
 import { getSelectedCalendarIds } from "@/store";
+import {
+  getEvents as getNativeCalendarEvents,
+  isCalendarMatchingAvailable,
+  matchVisits as matchNativeCalendarVisits,
+  type CalendarVisit as NativeCalendarVisit,
+  type CalendarVisitMatch as NativeCalendarVisitMatch,
+} from "@/modules/calendar-matching";
 
 /** Syncable calendar info for selection UI */
 export interface SyncableCalendar {
@@ -69,7 +76,7 @@ async function getCalendars(): Promise<Calendar.Calendar[]> {
 
     // Filter by selected calendars if the user has made a selection
     const selectedIds = getSelectedCalendarIds();
-    if (selectedIds !== null && selectedIds.length > 0) {
+    if (selectedIds !== null) {
       const selectedSet = new Set(selectedIds);
       return nonSystemCalendars.filter((cal) => selectedSet.has(cal.id));
     }
@@ -85,6 +92,14 @@ async function getCalendars(): Promise<Calendar.Calendar[]> {
 async function getEventsInRange(startDate: number, endDate: number): Promise<CalendarEventInfo[]> {
   if (!(await hasCalendarPermission())) {
     return [];
+  }
+
+  if (isCalendarMatchingAvailable()) {
+    try {
+      return await getNativeCalendarEvents(startDate, endDate, getSelectedCalendarIds());
+    } catch (error) {
+      console.warn("Native calendar event fetch failed; falling back to expo-calendar:", error);
+    }
   }
 
   const calendars = await getCalendars();
@@ -123,6 +138,31 @@ async function getEventsInRange(startDate: number, endDate: number): Promise<Cal
     console.warn("Failed to fetch calendar events:", error);
     return [];
   }
+}
+
+/**
+ * Match visits to EventKit events in one native batch.
+ * Returns `null` when this binary has no native implementation or it fails, so callers can use the JS fallback.
+ */
+export async function matchCalendarEventsForVisitsNatively(
+  visits: NativeCalendarVisit[],
+  bufferMinutes: number = 30,
+): Promise<NativeCalendarVisitMatch[] | null> {
+  if (!isCalendarMatchingAvailable()) {
+    return null;
+  }
+
+  try {
+    return await matchNativeCalendarVisits(visits, getSelectedCalendarIds(), bufferMinutes);
+  } catch (error) {
+    console.warn("Native calendar matching failed; falling back to JavaScript:", error);
+    return null;
+  }
+}
+
+/** Whether the current platform and binary can run the all-native matching path. */
+export function isNativeCalendarMatchingAvailable(): boolean {
+  return isCalendarMatchingAvailable();
 }
 
 const NON_RESTAURANT_TITLE_PATTERNS: RegExp[] = [
@@ -769,14 +809,11 @@ function _isFuzzyRestaurantMatch(a: string, b: string, threshold: number = 3): b
   return false;
 }
 export const isFuzzyRestaurantMatch = memoize(_isFuzzyRestaurantMatch);
-/**
- * Get calendar events that look like restaurant reservations within a date range.
- * Filters to timed (non-all-day) events that match reservation patterns.
- */
+/** Get eligible timed calendar events for later restaurant-name matching. */
 export async function getReservationEvents(startDate: number, endDate: number): Promise<CalendarEventInfo[]> {
   const events = await getEventsInRange(startDate, endDate);
 
-  // Filter to timed events that look like reservations
+  // Exact restaurant names often contain no reservation keyword, so title matching happens downstream.
   return events.filter((event) => hasValidEventTitle(event.title) && !isLikelyNonReservationTitle(event.title));
 }
 

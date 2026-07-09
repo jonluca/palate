@@ -7,6 +7,9 @@ final class PhotoAssetThumbnailView: ExpoView {
   let onLoad = EventDispatcher()
   let onError = EventDispatcher()
 
+  // Fabric can mask direct UIImageView children before they have bounds, producing a zero-path
+  // mask that permanently hides loaded pixels. Keep the image one private view deeper.
+  private let imageContainer = UIView()
   private let imageView = UIImageView()
   private let store = PhotoAssetThumbnailStore.shared
   private var requestedURI: String?
@@ -16,6 +19,8 @@ final class PhotoAssetThumbnailView: ExpoView {
   private var retryKey: PhotoAssetThumbnailRequestKey?
   private var retryPolicy = PhotoAssetThumbnailRetryPolicy()
   private var retryWorkItem: DispatchWorkItem?
+  private var retryScheduleGeneration: UInt64 = 0
+  private var terminalFailureKey: PhotoAssetThumbnailRequestKey?
 
   var uri: String? {
     didSet {
@@ -27,11 +32,14 @@ final class PhotoAssetThumbnailView: ExpoView {
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
-    clipsToBounds = true
+    imageContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    imageContainer.isUserInteractionEnabled = false
     imageView.clipsToBounds = true
     imageView.contentMode = .scaleAspectFill
+    imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
     imageView.isUserInteractionEnabled = false
-    addSubview(imageView)
+    imageContainer.addSubview(imageView)
+    addSubview(imageContainer)
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(thumbnailCacheDidInvalidate(_:)),
@@ -48,7 +56,8 @@ final class PhotoAssetThumbnailView: ExpoView {
 
   override func layoutSubviews() {
     super.layoutSubviews()
-    imageView.frame = bounds
+    imageContainer.frame = bounds
+    imageView.frame = imageContainer.bounds
     applyChanges()
   }
 
@@ -93,12 +102,14 @@ final class PhotoAssetThumbnailView: ExpoView {
     if retryKey != key {
       resetAutomaticRetryState(for: key)
     }
+    guard terminalFailureKey != key else {
+      return
+    }
     guard key != currentKey || uri != requestedURI else {
       return
     }
 
-    retryWorkItem?.cancel()
-    retryWorkItem = nil
+    cancelScheduledRetry()
     requestToken?.cancel()
     requestGeneration &+= 1
     let generation = requestGeneration
@@ -131,6 +142,7 @@ final class PhotoAssetThumbnailView: ExpoView {
       imageView.image = image
       if !isDegraded {
         retryPolicy.reset()
+        terminalFailureKey = nil
       }
       let pixelSize = photoAssetThumbnailPixelSize(image)
       onLoad([
@@ -148,6 +160,7 @@ final class PhotoAssetThumbnailView: ExpoView {
       if scheduleAutomaticRetry(for: key, uri: uri, after: error) {
         return
       }
+      terminalFailureKey = key
       emitError(error, uri: uri)
     }
   }
@@ -167,8 +180,13 @@ final class PhotoAssetThumbnailView: ExpoView {
       return false
     }
 
+    retryScheduleGeneration &+= 1
+    let scheduleGeneration = retryScheduleGeneration
     let workItem = DispatchWorkItem { [weak self] in
       guard let self else {
+        return
+      }
+      guard retryScheduleGeneration == scheduleGeneration else {
         return
       }
       retryWorkItem = nil
@@ -186,15 +204,20 @@ final class PhotoAssetThumbnailView: ExpoView {
   }
 
   private func resetAutomaticRetryState(for key: PhotoAssetThumbnailRequestKey? = nil) {
-    retryWorkItem?.cancel()
-    retryWorkItem = nil
+    cancelScheduledRetry()
     retryKey = key
     retryPolicy.reset()
+    terminalFailureKey = nil
+  }
+
+  private func cancelScheduledRetry() {
+    retryWorkItem?.cancel()
+    retryWorkItem = nil
+    retryScheduleGeneration &+= 1
   }
 
   private func cancelCurrentRequest(clearImage: Bool, resetAutomaticRetry: Bool = false) {
-    retryWorkItem?.cancel()
-    retryWorkItem = nil
+    cancelScheduledRetry()
     requestToken?.cancel()
     requestToken = nil
     currentKey = nil
@@ -206,6 +229,7 @@ final class PhotoAssetThumbnailView: ExpoView {
     if resetAutomaticRetry {
       retryKey = nil
       retryPolicy.reset()
+      terminalFailureKey = nil
     }
   }
 

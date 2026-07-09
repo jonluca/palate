@@ -10,7 +10,9 @@ let package = Package(
   ],
   products: [
     .library(name: "BatchAssetInfoCore", targets: ["BatchAssetInfoCore"]),
+    .library(name: "CalendarMatchingCore", targets: ["CalendarMatchingCore"]),
     .library(name: "PhotosProfilerSupport", targets: ["PhotosProfilerSupport"]),
+    .executable(name: "PalateCalendarProfiler", targets: ["PalateCalendarProfiler"]),
     .executable(name: "PalatePhotosProfiler", targets: ["PalatePhotosProfiler"]),
   ],
   targets: [
@@ -19,12 +21,21 @@ let package = Package(
       path: "modules/batch-asset-info/ios/Core"
     ),
     .target(
+      name: "CalendarMatchingCore",
+      path: "modules/calendar-matching/ios/Core"
+    ),
+    .target(
       name: "PhotosProfilerSupport",
       dependencies: ["BatchAssetInfoCore"],
       path: "NativeProfiler/Sources/PhotosProfilerSupport",
       linkerSettings: [
-        .linkedFramework("Photos"),
+        .linkedFramework("Photos")
       ]
+    ),
+    .executableTarget(
+      name: "PalateCalendarProfiler",
+      dependencies: ["CalendarMatchingCore"],
+      path: "NativeProfiler/Sources/PalateCalendarProfiler"
     ),
     .executableTarget(
       name: "PalatePhotosProfiler",
@@ -39,6 +50,11 @@ let package = Package(
       name: "PhotosProfilerSupportTests",
       dependencies: ["BatchAssetInfoCore", "PhotosProfilerSupport"],
       path: "NativeProfiler/Tests/PhotosProfilerSupportTests"
+    ),
+    .testTarget(
+      name: "CalendarMatchingCoreTests",
+      dependencies: ["CalendarMatchingCore"],
+      path: "NativeProfiler/Tests/CalendarMatchingCoreTests"
     ),
   ]
 )

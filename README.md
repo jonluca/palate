@@ -82,7 +82,7 @@ For each cluster, the app suggests nearby Michelin restaurants (within 100m). Th
 
 ### 5. Calendar Enrichment
 
-The app matches visits to calendar events and can create visits directly from restaurant reservations in your calendar.
+The app fetches and matches calendar events in one native EventKit batch, then can create visits directly from restaurant reservations in your calendar.
 
 ### 6. Review & Confirm
 
@@ -118,6 +118,7 @@ Users review pending visits in the **Review** tab — confirm the suggested rest
 ├── hooks/                    # React hooks & queries
 ├── modules/                  # Native Expo modules
 │   ├── batch-asset-info/     # iOS Swift module for photo processing & food detection
+│   ├── calendar-matching/     # EventKit fetching and native visit matching
 │   └── mapkit-search/        # iOS Swift module for Apple Maps search
 ├── services/                 # Business logic
 │   ├── scanner.ts            # Photo scanning
@@ -140,6 +141,8 @@ pnpm ios          # Build and run on iOS
 pnpm android      # Build and run on Android
 pnpm typecheck    # Run TypeScript checks
 pnpm lint         # Run ESLint
+pnpm test:calendar # Run the isolated native calendar matcher tests
+pnpm profile:calendar # Validate and benchmark native calendar matching
 pnpm clean        # Remove build artifacts & node_modules
 ```
 

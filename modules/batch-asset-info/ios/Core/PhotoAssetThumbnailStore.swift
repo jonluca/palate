@@ -67,7 +67,7 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
 
   public func photoLibraryDidChange(_ changeInstance: PHChange) {
     _ = changeInstance
-    clearCaches(notifyMountedViews: true, completion: nil)
+    clearCaches()
   }
 
   @discardableResult
@@ -113,13 +113,6 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
   }
 
   public func clearCaches(completion: (@MainActor @Sendable () -> Void)? = nil) {
-    clearCaches(notifyMountedViews: true, completion: completion)
-  }
-
-  func clearCaches(
-    notifyMountedViews: Bool,
-    completion: (@MainActor @Sendable () -> Void)? = nil
-  ) {
     stateQueue.async { [weak self] in
       guard let self else {
         DispatchQueue.main.async {
@@ -147,12 +140,10 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
       imageManager.stopCachingImagesForAllAssets()
 
       DispatchQueue.main.async {
-        if notifyMountedViews {
-          NotificationCenter.default.post(
-            name: Self.cacheInvalidatedNotification,
-            object: self
-          )
-        }
+        NotificationCenter.default.post(
+          name: Self.cacheInvalidatedNotification,
+          object: self
+        )
         completion?()
       }
     }

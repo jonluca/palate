@@ -26,7 +26,9 @@ public class BatchAssetInfoModule: Module {
       self.assetInfoQueue.async {
         self.assetScanSessions.removeAll()
       }
-      PhotoAssetThumbnailStore.shared.clearCaches(notifyMountedViews: false)
+      // The bounded thumbnail store is process-wide and can still serve views owned by a newer
+      // AppContext during a bridge reload. Clearing it here can cancel those views without a
+      // matching lifecycle update, leaving every thumbnail blank.
     }
 
     View(PhotoAssetThumbnailView.self) {

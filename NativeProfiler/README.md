@@ -1,12 +1,25 @@
-# Native Photos profiler
+# Native profilers
 
-This Swift package exercises the same Expo-independent photo metadata core used by the app without building React Native.
+This Swift package exercises the Expo-independent calendar and photo cores used by the app without building React Native.
 
-Run permission-free unit tests:
+Run all permission-free native tests, or one subsystem in isolation:
 
 ```sh
-zsh scripts/test-native-core.sh
+pnpm test:native
+pnpm test:calendar
+pnpm test:photos
 ```
+
+Profile calendar matching without EventKit, Photos, React Native, or SQLite:
+
+```sh
+pnpm profile:calendar
+pnpm profile:calendar --visits 2000 --events 20000 --iterations 7 --warmup 2
+```
+
+The seeded synthetic harness validates the indexed native matcher against an exhaustive reference before recording any timing. Its JSON report includes the input sizes, match checksum, individual samples, median and p95 durations, and speedup. The fixture exercises strict overlap boundaries, stable relevance ordering, and a realistic mix in which only some visits have nearby restaurant suggestions; the focused calendar tests cover title cleaning, exact-before-fuzzy selection, accents, emoji, apostrophes, ampersands, and ECMAScript whitespace parity separately.
+
+The production Expo module also avoids the legacy calendar bridge: one JavaScript call queries EventKit in bounded native windows when needed, filters and deduplicates full native event objects, runs this core on its serial queue, and returns only the selected minimal records. The synthetic profiler measures the shared matching core; the complete EventKit and Expo bridge are compile-tested by the app build below.
 
 Build and ad-hoc-sign the macOS profiler app without launching it:
 
@@ -66,7 +79,7 @@ Compile the complete app for the macOS “Designed for iPhone/iPad” destinatio
 zsh scripts/build-macos-designed-app.sh
 ```
 
-The script verifies the output executable, prints its path, and deliberately defaults to `CODE_SIGNING_ALLOWED=NO`. A signed integration build can opt in after the local Apple Development certificate is valid:
+The script verifies the output executable and `NSPhotoLibraryUsageDescription`, prints its path, and deliberately defaults to `CODE_SIGNING_ALLOWED=NO`. A signed integration build can opt in after the local Apple Development certificate is valid:
 
 ```sh
 PALATE_CODE_SIGNING_ALLOWED=YES \
