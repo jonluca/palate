@@ -1,4 +1,9 @@
 import { getDatabase } from "./core";
+import {
+  buildPhotoVisitAssociationStatement,
+  flattenPhotoVisitAssociations,
+  PHOTO_VISIT_ASSOCIATION_BATCH_SIZE,
+} from "./photo-association-core";
 import type { MovePhotosResult, RemovePhotosResult } from "./types";
 
 async function updateVisitsFoodProbable(database: Awaited<ReturnType<typeof getDatabase>>, visitIds: string[]) {
@@ -22,35 +27,20 @@ export async function batchUpdatePhotoVisits(updates: { photoIds: string[]; visi
     return;
   }
 
-  const database = await getDatabase();
-
-  // Flatten all updates into a single query using CASE WHEN
-  const allPhotoIds: string[] = [];
-  const caseStatements: string[] = [];
-
-  for (const { photoIds, visitId } of updates) {
-    for (const photoId of photoIds) {
-      allPhotoIds.push(photoId);
-      caseStatements.push(`WHEN id = '${photoId.replace(/'/g, "''")}' THEN '${visitId.replace(/'/g, "''")}'`);
-    }
-  }
-
-  if (allPhotoIds.length === 0) {
+  const associations = flattenPhotoVisitAssociations(updates);
+  if (associations.length === 0) {
     return;
   }
 
-  // Process in batches to avoid SQLite limits
-  const batchSize = 1000;
-  for (let i = 0; i < allPhotoIds.length; i += batchSize) {
-    const batchPhotoIds = allPhotoIds.slice(i, i + batchSize);
-    const batchCases = caseStatements.slice(i, i + batchSize);
-    const placeholders = batchPhotoIds.map(() => "?").join(", ");
-
-    await database.runAsync(
-      `UPDATE photos SET visitId = CASE ${batchCases.join(" ")} END WHERE id IN (${placeholders})`,
-      batchPhotoIds,
-    );
-  }
+  const database = await getDatabase();
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    for (let i = 0; i < associations.length; i += PHOTO_VISIT_ASSOCIATION_BATCH_SIZE) {
+      const statement = buildPhotoVisitAssociationStatement(
+        associations.slice(i, i + PHOTO_VISIT_ASSOCIATION_BATCH_SIZE),
+      );
+      await transaction.runAsync(statement.sql, statement.parameters);
+    }
+  });
 }
 
 /**

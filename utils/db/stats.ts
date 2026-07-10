@@ -1,5 +1,15 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
 import type { MichelinStatsBucket, MichelinStatsRestaurantSummary, WrappedStats } from "./types";
+import {
+  buildWrappedStatsMichelinQuery,
+  parseWrappedStatsMichelinRows,
+  type WrappedStatsMichelinQueryRow,
+} from "./wrapped-stats-michelin-core";
+import {
+  parseWrappedStatsYearlyRows,
+  WRAPPED_STATS_YEARLY_SQL,
+  type WrappedStatsYearlyQueryRow,
+} from "./wrapped-stats-yearly-core";
 
 const MICHELIN_STATS_BUCKET_WHERE: Record<MichelinStatsBucket, string> = {
   "three-stars": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%3 star%'",
@@ -93,15 +103,13 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
   // Build year filter clause
   const yearFilter = year ? `AND strftime('%Y', datetime(startTime/1000, 'unixepoch')) = '${year}'` : "";
   const yearFilterForV = year ? `AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = '${year}'` : "";
+  const michelinQuery = buildWrappedStatsMichelinQuery(year);
 
   // Run all independent queries in parallel
   const [
-    yearlyData,
+    yearlyStatsRows,
     monthlyVisitsData,
-    michelinData,
-    distinctMichelinData,
-    distinctStarredResult,
-    distinctStarsResult,
+    michelinStatsRows,
     topCuisines,
     busiestMonth,
     busiestDayOfWeek,
@@ -114,7 +122,6 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     allLocationsData,
     topLocationsData,
     topMapPointsData,
-    greenStarResult,
     mealTimeData,
     weekendWeekdayData,
     peakHourData,
@@ -123,22 +130,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     diningStyleData,
   ] = await Promise.all([
     // Yearly stats (only for all-time view)
-    year
-      ? Promise.resolve([])
-      : database.getAllAsync<{
-          year: number;
-          totalVisits: number;
-          uniqueRestaurants: number;
-        }>(
-          `SELECT 
-          strftime('%Y', datetime(startTime/1000, 'unixepoch')) as year,
-          COUNT(*) as totalVisits,
-          COUNT(DISTINCT restaurantId) as uniqueRestaurants
-        FROM visits 
-        WHERE status = 'confirmed' AND restaurantId IS NOT NULL
-        GROUP BY year
-        ORDER BY year DESC`,
-        ),
+    year ? Promise.resolve([]) : database.getAllAsync<WrappedStatsYearlyQueryRow>(WRAPPED_STATS_YEARLY_SQL),
     // Monthly visits data for chart
     database.getAllAsync<{ month: number; year: number; visits: number }>(
       `SELECT 
@@ -150,48 +142,9 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       GROUP BY year, month
       ORDER BY year ASC, month ASC`,
     ),
-    // Michelin stats - uses awardAtVisit for historical accuracy, falls back to current award
-    database.getAllAsync<{ award: string; count: number }>(
-      `SELECT COALESCE(v.awardAtVisit, m.award) as award, COUNT(DISTINCT v.id) as count
-      FROM visits v
-      JOIN michelin_restaurants m ON v.restaurantId = m.id
-      WHERE v.status = 'confirmed' ${yearFilterForV}
-      GROUP BY COALESCE(v.awardAtVisit, m.award)`,
-    ),
-    // Distinct restaurant counts per award type - uses awardAtVisit or falls back to current award
-    database.getAllAsync<{ award: string; count: number }>(
-      `SELECT COALESCE(v.awardAtVisit, m.award) as award, COUNT(DISTINCT m.id) as count
-      FROM visits v
-      JOIN michelin_restaurants m ON v.restaurantId = m.id
-      WHERE v.status = 'confirmed' ${yearFilterForV}
-      GROUP BY COALESCE(v.awardAtVisit, m.award)`,
-    ),
-    // Distinct starred restaurants count - uses awardAtVisit or falls back to current award
-    database.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(DISTINCT m.id) as count
-      FROM visits v
-      JOIN michelin_restaurants m ON v.restaurantId = m.id
-      WHERE v.status = 'confirmed' ${yearFilterForV}
-        AND (COALESCE(v.awardAtVisit, m.award) LIKE '%star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%Star%')`,
-    ),
-    // Distinct stars (sum of star rating across unique starred restaurants at time of visit or current)
-    database.getFirstAsync<{ distinctStars: number | null }>(
-      `SELECT SUM(
-        CASE
-          WHEN lower(t.award) LIKE '%3 star%' THEN 3
-          WHEN lower(t.award) LIKE '%2 star%' THEN 2
-          WHEN lower(t.award) LIKE '%1 star%' THEN 1
-          ELSE 0
-        END
-      ) as distinctStars
-      FROM (
-        SELECT DISTINCT m.id, COALESCE(v.awardAtVisit, m.award) as award
-        FROM visits v
-        JOIN michelin_restaurants m ON v.restaurantId = m.id
-        WHERE v.status = 'confirmed' ${yearFilterForV}
-          AND (COALESCE(v.awardAtVisit, m.award) LIKE '%star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%Star%')
-      ) t`,
-    ),
+    // Michelin award stats share one filtered native query while preserving
+    // the historical-award fallback and legacy JavaScript categorization.
+    database.getAllAsync<WrappedStatsMichelinQueryRow>(michelinQuery.sql, michelinQuery.parameters),
     // Top cuisines
     database.getAllAsync<{ cuisine: string; count: number }>(
       `SELECT m.cuisine, COUNT(DISTINCT v.id) as count
@@ -297,14 +250,6 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       GROUP BY r.id
       ORDER BY visits DESC, r.name ASC`,
     ),
-    // Green star visits count
-    database.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(DISTINCT v.id) as count
-      FROM visits v
-      JOIN michelin_restaurants m ON v.restaurantId = m.id
-      WHERE v.status = 'confirmed' ${yearFilterForV}
-        AND (COALESCE(v.awardAtVisit, m.award) LIKE '%Green Star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%green star%')`,
-    ),
     // Meal time breakdown (using local time approximation)
     database.getAllAsync<{ mealTime: string; count: number }>(
       `SELECT 
@@ -379,89 +324,8 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     ),
   ]);
 
-  // Get top restaurant per year (parallelized)
-  const yearlyStats = await Promise.all(
-    yearlyData.map(async (yearData) => {
-      const topRestaurant = await database.getFirstAsync<{ name: string; visits: number }>(
-        `SELECT r.name, COUNT(*) as visits
-        FROM visits v
-        JOIN restaurants r ON v.restaurantId = r.id
-        WHERE v.status = 'confirmed' 
-          AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = ?
-        GROUP BY v.restaurantId
-        ORDER BY visits DESC
-        LIMIT 1`,
-        [yearData.year.toString()],
-      );
-      return {
-        year: Number(yearData.year),
-        totalVisits: yearData.totalVisits,
-        uniqueRestaurants: yearData.uniqueRestaurants,
-        topRestaurant: topRestaurant ?? null,
-      };
-    }),
-  );
-
-  // Process Michelin stats
-  const michelinStats = {
-    threeStars: 0,
-    twoStars: 0,
-    oneStars: 0,
-    bibGourmand: 0,
-    selected: 0,
-    distinctThreeStars: 0,
-    distinctTwoStars: 0,
-    distinctOneStars: 0,
-    distinctBibGourmand: 0,
-    distinctSelected: 0,
-    totalStarredVisits: 0,
-    distinctStarredRestaurants: distinctStarredResult?.count ?? 0,
-    totalAccumulatedStars: 0,
-    distinctStars: distinctStarsResult?.distinctStars ?? 0,
-    greenStarVisits: greenStarResult?.count ?? 0,
-  };
-
-  // Process visit counts per award type
-  for (const row of michelinData) {
-    if (!row.award) {
-      continue;
-    }
-    const award = row.award.toLowerCase();
-    if (award.includes("3 star")) {
-      michelinStats.threeStars += row.count;
-      michelinStats.totalAccumulatedStars += row.count * 3;
-    } else if (award.includes("2 star")) {
-      michelinStats.twoStars += row.count;
-      michelinStats.totalAccumulatedStars += row.count * 2;
-    } else if (award.includes("1 star")) {
-      michelinStats.oneStars += row.count;
-      michelinStats.totalAccumulatedStars += row.count * 1;
-    } else if (award.includes("bib")) {
-      michelinStats.bibGourmand += row.count;
-    } else if (award.includes("selected")) {
-      michelinStats.selected += row.count;
-    }
-    michelinStats.totalStarredVisits += row.count;
-  }
-
-  // Process distinct restaurant counts per award type
-  for (const row of distinctMichelinData) {
-    if (!row.award) {
-      continue;
-    }
-    const award = row.award.toLowerCase();
-    if (award.includes("3 star")) {
-      michelinStats.distinctThreeStars += row.count;
-    } else if (award.includes("2 star")) {
-      michelinStats.distinctTwoStars += row.count;
-    } else if (award.includes("1 star")) {
-      michelinStats.distinctOneStars += row.count;
-    } else if (award.includes("bib")) {
-      michelinStats.distinctBibGourmand += row.count;
-    } else if (award.includes("selected")) {
-      michelinStats.distinctSelected += row.count;
-    }
-  }
+  const yearlyStats = parseWrappedStatsYearlyRows(yearlyStatsRows);
+  const michelinStats = parseWrappedStatsMichelinRows(michelinStatsRows);
 
   // Calculate longest streak of consecutive dining days
   let longestStreak: { days: number; startDate: number; endDate: number } | null = null;

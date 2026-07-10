@@ -1,4 +1,16 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
+import {
+  buildVisitMergePlan,
+  VISIT_MERGE_COPY_SUGGESTIONS_SQL,
+  VISIT_MERGE_DELETE_SOURCE_SUGGESTIONS_SQL,
+  VISIT_MERGE_DELETE_SOURCE_VISITS_SQL,
+  VISIT_MERGE_MOVE_PHOTOS_SQL,
+  VISIT_MERGE_MOVE_RESERVATION_SOURCES_SQL,
+  VISIT_MERGE_PREFLIGHT_SQL,
+  VISIT_MERGE_UPDATE_TARGETS_SQL,
+  type VisitMergePreflightRow,
+} from "./visit-merge-core";
+import { runVisitMergeWithBusyRetry } from "./visit-merge-retry-core";
 import type { MergeableVisitGroup, VisitRecord, VisitWithDetails } from "./types";
 
 /**
@@ -189,7 +201,7 @@ export async function getMergeableSameRestaurantVisitGroups(): Promise<Mergeable
     FROM visits v
     JOIN restaurants r ON v.restaurantId = r.id
     WHERE v.status = 'confirmed' AND v.restaurantId IS NOT NULL
-    ORDER BY v.restaurantId, v.startTime ASC`,
+    ORDER BY v.restaurantId, v.startTime ASC, v.id ASC`,
   );
 
   if (visits.length === 0) {
@@ -290,30 +302,62 @@ function findTimeProximityGroups<T extends { startTime: number; endTime: number 
  */
 export async function batchMergeSameRestaurantVisits(groups: MergeableVisitGroup[]): Promise<number> {
   const start = DEBUG_TIMING ? performance.now() : 0;
-
-  let totalMerges = 0;
-
-  for (const group of groups) {
-    if (group.visits.length < 2) {
-      continue;
-    }
-
-    // First visit is the target (earliest by time)
-    const targetVisitId = group.visits[0].id;
-
-    // Merge all other visits into the target
-    for (let i = 1; i < group.visits.length; i++) {
-      const sourceVisitId = group.visits[i].id;
-      await mergeVisits(targetVisitId, sourceVisitId);
-      totalMerges++;
-    }
+  const plan = buildVisitMergePlan(groups);
+  if (plan.mergeCount === 0) {
+    return 0;
   }
+
+  const database = await getDatabase();
+  await runVisitMergeWithBusyRetry(
+    async (updatedAt) => {
+      await database.withExclusiveTransactionAsync(async (transaction) => {
+        const preflight = await transaction.getFirstAsync<VisitMergePreflightRow>(
+          VISIT_MERGE_PREFLIGHT_SQL,
+          plan.payload,
+        );
+        if (
+          !preflight ||
+          preflight.plannedVisitCount !== plan.referencedVisitCount ||
+          preflight.existingVisitCount !== plan.referencedVisitCount
+        ) {
+          throw new Error("One or more visits in the merge plan were not found");
+        }
+
+        await transaction.runAsync(VISIT_MERGE_MOVE_PHOTOS_SQL, plan.payload);
+        const targetUpdate = await transaction.runAsync(VISIT_MERGE_UPDATE_TARGETS_SQL, [plan.payload, updatedAt]);
+        if (targetUpdate.changes !== plan.targetVisitIds.length) {
+          throw new Error(
+            `Visit merge updated ${targetUpdate.changes} targets; expected ${plan.targetVisitIds.length}`,
+          );
+        }
+
+        await transaction.runAsync(VISIT_MERGE_COPY_SUGGESTIONS_SQL, plan.payload);
+        await transaction.runAsync(VISIT_MERGE_MOVE_RESERVATION_SOURCES_SQL, plan.payload);
+        await transaction.runAsync(VISIT_MERGE_DELETE_SOURCE_SUGGESTIONS_SQL, plan.payload);
+        const sourceDelete = await transaction.runAsync(VISIT_MERGE_DELETE_SOURCE_VISITS_SQL, plan.payload);
+        if (sourceDelete.changes !== plan.mergeCount) {
+          throw new Error(`Visit merge deleted ${sourceDelete.changes} sources; expected ${plan.mergeCount}`);
+        }
+      });
+    },
+    {
+      monotonicNow: () => performance.now(),
+      wallNow: () => Date.now(),
+      sleep: delayVisitMergeRetry,
+    },
+  );
 
   if (DEBUG_TIMING) {
     console.log(
-      `[DB] batchMergeSameRestaurantVisits: ${(performance.now() - start).toFixed(2)}ms (${totalMerges} merges)`,
+      `[DB] batchMergeSameRestaurantVisits: ${(performance.now() - start).toFixed(2)}ms (${plan.mergeCount} merges)`,
     );
   }
 
-  return totalMerges;
+  return plan.mergeCount;
+}
+
+// withExclusiveTransactionAsync opens a fresh Expo SQLite connection, so it
+// does not inherit the main connection's PRAGMA busy_timeout = 5000.
+async function delayVisitMergeRetry(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

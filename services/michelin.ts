@@ -191,7 +191,14 @@ export async function loadMichelinRestaurants(
       const longitude = parseFloat(row.longitude);
 
       // Skip invalid coordinates
-      if (isNaN(latitude) || isNaN(longitude)) {
+      if (
+        !Number.isFinite(latitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        !Number.isFinite(longitude) ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
         continue;
       }
       if (latitude === 0 && longitude === 0) {

@@ -2,6 +2,8 @@ import * as MediaLibrary from "expo-media-library/legacy";
 import * as Device from "expo-device";
 import pMap from "p-map";
 import { insertPhotos, type PhotoRecord } from "@/utils/db";
+import { getPhotoIngestionFlushCount } from "@/utils/db/photo-ingestion-core";
+import { getValidatedAssetScanNextOffset, getValidatedMediaLibraryPageState } from "@/utils/photo-scan-core";
 import {
   beginAssetScan,
   endAssetScan,
@@ -326,11 +328,30 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     onProgress?.({ ...progress });
   };
 
+  const pendingPhotos: PhotoInsertRecord[] = [];
+  let pendingInsertFailed = false;
+
+  const flushPendingPhotos = async (force: boolean) => {
+    let flushCount = getPhotoIngestionFlushCount(pendingPhotos.length, force);
+    while (flushCount > 0) {
+      const photos = pendingPhotos.slice(0, flushCount);
+      try {
+        progress.newPhotosAdded += await insertPhotos(photos);
+      } catch (error) {
+        pendingInsertFailed = true;
+        throw error;
+      }
+      pendingPhotos.splice(0, flushCount);
+      flushCount = getPhotoIngestionFlushCount(pendingPhotos.length, force);
+    }
+  };
+
   const persistBatch = async (batch: ProcessedAssetBatch) => {
     progress.photosWithLocation += batch.photosWithLocation;
     progress.skippedAssets += batch.skippedAssets;
     if (batch.photos.length > 0) {
-      progress.newPhotosAdded += await insertPhotos(batch.photos);
+      pendingPhotos.push(...batch.photos);
+      await flushPendingPhotos(false);
     }
   };
 
@@ -343,26 +364,17 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
 
       while (offset < nativeSession.totalCount) {
         const page = await getAssetScanPage(nativeSession.sessionId, { offset, limit: nativePageSize });
-        if (page.offset !== offset || page.totalCount !== nativeSession.totalCount) {
-          throw new Error(
-            `Native asset scan snapshot changed unexpectedly (offset ${page.offset}/${offset}, total ${page.totalCount}/${nativeSession.totalCount})`,
-          );
-        }
-        if (page.assets.length === 0) {
-          throw new Error(`Native asset scan returned an empty page before offset ${nativeSession.totalCount}`);
-        }
+        const nextOffset = getValidatedAssetScanNextOffset(offset, nativeSession.totalCount, {
+          offset: page.offset,
+          assetCount: page.assets.length,
+          nextOffset: page.nextOffset,
+          totalCount: page.totalCount,
+          hasNextPage: page.hasNextPage,
+        });
 
         await persistBatch(processNativeScanPage(page.assets));
         progress.processedAssets += page.assets.length;
-
-        if (!page.hasNextPage) {
-          offset = nativeSession.totalCount;
-        } else if (page.nextOffset !== null && page.nextOffset > offset) {
-          offset = page.nextOffset;
-        } else {
-          throw new Error(`Native asset scan did not advance past offset ${offset}`);
-        }
-
+        offset = nextOffset;
         updateProgress();
       }
     } else {
@@ -376,6 +388,12 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
           mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
           sortBy: [MediaLibrary.SortBy.creationTime],
         });
+        const pageState = getValidatedMediaLibraryPageState(endCursor, progress.processedAssets, progress.totalAssets, {
+          assetCount: response.assets.length,
+          endCursor: response.endCursor,
+          totalCount: response.totalCount,
+          hasNextPage: response.hasNextPage,
+        });
 
         if (response.assets.length > 0) {
           const processedBatch = useNativeBatch
@@ -384,14 +402,29 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
           await persistBatch(processedBatch);
         }
 
-        progress.processedAssets += response.assets.length;
+        progress.processedAssets = pageState.processedAssets;
+        progress.totalAssets = pageState.totalAssets;
         hasNextPage = response.hasNextPage;
-        endCursor = response.endCursor;
+        endCursor = pageState.nextCursor;
         updateProgress();
       }
     }
   } catch (error) {
     scanError = error;
+  }
+
+  // Preserve successfully fetched pages on a later PhotoKit failure, while
+  // avoiding an automatic retry when SQLite itself rejected the flush.
+  if (!pendingInsertFailed && pendingPhotos.length > 0) {
+    try {
+      await flushPendingPhotos(true);
+    } catch (flushError) {
+      if (scanError === null) {
+        scanError = flushError;
+      } else {
+        console.error("Failed to persist the final photo scan buffer after an earlier scan error:", flushError);
+      }
+    }
   }
 
   if (nativeSession) {
@@ -413,9 +446,11 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
   progress.isComplete = true;
   progress.elapsedMs = Date.now() - startTime;
   progress.etaMs = 0;
-  if (progress.totalAssets === 0) {
-    progress.newPhotosPerSecond = 0;
-  }
+  const finalElapsedSeconds = progress.elapsedMs / 1000;
+  progress.newPhotosPerSecond =
+    progress.processedAssets > 0 && finalElapsedSeconds > 0
+      ? Math.round(progress.processedAssets / finalElapsedSeconds)
+      : 0;
   if (progress.skippedAssets > 0) {
     console.warn(`Skipped ${progress.skippedAssets} inaccessible assets or assets without a creation date.`);
   }

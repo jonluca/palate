@@ -32,8 +32,10 @@ export { getDatabase, nukeDatabase, performDatabaseMaintenance, performFullMaint
 
 export {
   batchUpdatePhotosFoodDetected,
+  getExportPhotoCountsByVisitIds,
   getPhotosByAssetIds,
   getPhotosByVisitId,
+  getPhotosByVisitIdsPage,
   getTotalPhotoCount,
   getUnanalyzedPhotoCount,
   getUnanalyzedPhotoIds,
@@ -45,16 +47,16 @@ export {
 export { batchUpdatePhotoVisits, movePhotosToVisit, removePhotosFromVisit } from "./db/photo-association";
 
 export {
+  batchUpdateVisitStatuses,
   batchUpdateVisitPhotoCounts,
   batchConfirmVisits,
   confirmVisit,
   createManualVisit,
+  getFoodDetectionVisitSamplePlan,
   getVisitById,
-  getVisitPhotoSamples,
   getRestaurantVisitsWithPreviews,
   getVisits,
   getVisitsByRestaurantId,
-  getVisitsNeedingFoodDetection,
   getVisitsWithDetails,
   insertVisits,
   syncAllVisitsFoodProbable,
@@ -83,9 +85,11 @@ export {
 export {
   getAllMichelinRestaurants,
   getImportedMichelinDatasetVersion,
+  getMichelinRestaurantsForCalendarNormalizedNames,
   getMichelinRestaurantById,
   getMichelinRestaurantCount,
   insertMichelinRestaurants,
+  selectMichelinProviderSpatialCandidates,
   searchUnvisitedMichelinRestaurantsByName,
 } from "./db/michelin";
 

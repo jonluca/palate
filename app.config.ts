@@ -121,7 +121,12 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
       "expo-font",
       "expo-image",
       "expo-sharing",
-      "expo-sqlite",
+      [
+        "expo-sqlite",
+        {
+          customBuildFlags: "-DSQLITE_ENABLE_RTREE=1",
+        },
+      ],
       "expo-video",
       [
         "expo-calendar",

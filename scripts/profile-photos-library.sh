@@ -47,6 +47,8 @@ fi
 
 /usr/bin/plutil -convert json -o /dev/null "$STDOUT_FILE"
 REPORT_STATUS="$(/usr/bin/plutil -extract status raw -o - "$STDOUT_FILE")"
+VISION_SAMPLE_COUNT="$(/usr/bin/plutil -extract configuration.visionSampleCount raw -o - "$STDOUT_FILE")"
+VISION_PARITY="$(/usr/bin/plutil -extract vision.validation.exactOutcomeParity raw -o - "$STDOUT_FILE" 2>/dev/null || true)"
 RESULT_PATH="${PALATE_PHOTOS_PROFILE_RESULT:-$ROOT_DIR/.build/photos-profile-$(date -u +%Y%m%dT%H%M%SZ).json}"
 /usr/bin/install -d "$(dirname -- "$RESULT_PATH")"
 /bin/cp "$STDOUT_FILE" "$RESULT_PATH"
@@ -54,6 +56,10 @@ RESULT_PATH="${PALATE_PHOTOS_PROFILE_RESULT:-$ROOT_DIR/.build/photos-profile-$(d
 
 if [[ $OPEN_STATUS -ne 0 ]]; then
   exit "$OPEN_STATUS"
+fi
+if (( VISION_SAMPLE_COUNT > 0 )) && [[ "$VISION_PARITY" != "true" ]]; then
+  print -u2 "Vision baseline/pipeline outcome parity failed"
+  exit 1
 fi
 if [[ "$REPORT_STATUS" != "ok" ]]; then
   exit 1

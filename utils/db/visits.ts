@@ -1,4 +1,12 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
+import {
+  FOOD_DETECTION_VISIT_SAMPLES_SQL,
+  parseFoodDetectionVisitSampleRows,
+  type FoodDetectionVisitSamplePlan,
+  type FoodDetectionVisitSampleRow,
+} from "./visit-photo-sampling-core";
+import { buildVisitsWithDetailsQuery, parseVisitDetailsRows, type VisitDetailsQueryRow } from "./visit-details-core";
+import { buildVisitStatusBatchStatement, type VisitStatus } from "./visit-status-batch-core";
 import type { RestaurantVisitWithPreview, VisitPreviewPhoto, VisitRecord, VisitWithDetails } from "./types";
 
 // Visit operations
@@ -48,8 +56,10 @@ export async function batchUpdateVisitPhotoCounts(): Promise<void> {
   );
 }
 
-export async function syncAllVisitsFoodProbable(): Promise<void> {
-  const database = await getDatabase();
+export async function syncAllVisitsFoodProbable(
+  databaseOverride?: Awaited<ReturnType<typeof getDatabase>>,
+): Promise<void> {
+  const database = databaseOverride ?? (await getDatabase());
 
   // Update all visits' foodProbable based on whether any of their photos have foodDetected = true
   await database.runAsync(
@@ -60,8 +70,11 @@ export async function syncAllVisitsFoodProbable(): Promise<void> {
   );
 }
 
-export async function getVisits(filter?: "pending" | "confirmed" | "rejected" | "food"): Promise<VisitRecord[]> {
-  const database = await getDatabase();
+export async function getVisits(
+  filter?: "pending" | "confirmed" | "rejected" | "food",
+  databaseOverride?: Awaited<ReturnType<typeof getDatabase>>,
+): Promise<VisitRecord[]> {
+  const database = databaseOverride ?? (await getDatabase());
   if (filter === "food") {
     return database.getAllAsync<VisitRecord>(`SELECT * FROM visits WHERE foodProbable = 1 ORDER BY startTime DESC`);
   }
@@ -76,39 +89,10 @@ export async function getVisitsWithDetails(
 ): Promise<VisitWithDetails[]> {
   const start = DEBUG_TIMING ? performance.now() : 0;
   const database = await getDatabase();
+  const query = buildVisitsWithDetailsQuery(filter);
+  const rows = await database.getAllAsync<VisitDetailsQueryRow>(query.sql, query.parameters);
 
-  // Build WHERE clause based on filter
-  let whereClause = "";
-  const params: (string | number)[] = [];
-  if (filter === "food") {
-    whereClause = "WHERE c.foodProbable = 1";
-  } else if (filter) {
-    whereClause = "WHERE c.status = ?";
-    params.push(filter);
-  }
-
-  // Single query joining visits with both restaurants tables
-  // For confirmed visits, use awardAtVisit (historical) if available, otherwise fall back to current award
-  const visits = await database.getAllAsync<
-    VisitRecord & {
-      restaurantName: string | null;
-      suggestedRestaurantName: string | null;
-      suggestedRestaurantAward: string | null;
-    }
-  >(
-    `SELECT c.*, 
-            r.name as restaurantName,
-            m.name as suggestedRestaurantName,
-            COALESCE(c.awardAtVisit, m.award) as suggestedRestaurantAward
-     FROM visits c
-     LEFT JOIN restaurants r ON c.restaurantId = r.id
-     LEFT JOIN michelin_restaurants m ON c.suggestedRestaurantId = m.id
-     ${whereClause}
-     ORDER BY c.startTime DESC`,
-    params,
-  );
-
-  if (visits.length === 0) {
+  if (rows.length === 0) {
     if (DEBUG_TIMING) {
       console.log(
         `[DB] getVisitsWithDetails(${filter ?? "all"}): ${(performance.now() - start).toFixed(2)}ms (0 results)`,
@@ -117,43 +101,13 @@ export async function getVisitsWithDetails(
     return [];
   }
 
-  // Get preview photos for all visits in one query using a subquery to limit to 3 per visit
-  // Order by food detected first (food photos have priority), then by creation time
-  const visitIds = visits.map((c) => c.id);
-  const placeholders = visitIds.map(() => "?").join(", ");
-
-  const previewPhotos = await database.getAllAsync<{ visitId: string; uri: string }>(
-    `SELECT visitId, uri FROM (
-      SELECT visitId, uri, ROW_NUMBER() OVER (
-        PARTITION BY visitId 
-        ORDER BY CASE WHEN foodDetected = 1 THEN 0 WHEN foodDetected = 0 THEN 1 ELSE 2 END ASC, creationTime ASC
-      ) as rn
-      FROM photos
-      WHERE visitId IN (${placeholders})
-    ) WHERE rn <= 3
-    ORDER BY rn ASC`,
-    visitIds,
-  );
-
-  // Group photos by visitId
-  const photosByVisit = new Map<string, string[]>();
-  for (const photo of previewPhotos) {
-    const existing = photosByVisit.get(photo.visitId) ?? [];
-    existing.push(photo.uri);
-    photosByVisit.set(photo.visitId, existing);
-  }
-
   if (DEBUG_TIMING) {
     console.log(
-      `[DB] getVisitsWithDetails(${filter ?? "all"}): ${(performance.now() - start).toFixed(2)}ms (${visits.length} results)`,
+      `[DB] getVisitsWithDetails(${filter ?? "all"}): ${(performance.now() - start).toFixed(2)}ms (${rows.length} results)`,
     );
   }
 
-  // Combine results
-  return visits.map((visit) => ({
-    ...visit,
-    previewPhotos: photosByVisit.get(visit.id) ?? [],
-  }));
+  return parseVisitDetailsRows(rows);
 }
 
 export async function getVisitById(id: string): Promise<VisitRecord | null> {
@@ -167,57 +121,35 @@ export async function updateVisitStatus(id: string, status: "pending" | "confirm
   await database.runAsync(`UPDATE visits SET status = ?, updatedAt = ? WHERE id = ?`, [status, now, id]);
 }
 
+/** Update an arbitrary-size visit selection with one atomic SQLite statement. */
+export async function batchUpdateVisitStatuses(visitIds: readonly string[], status: VisitStatus): Promise<number> {
+  const statement = buildVisitStatusBatchStatement(visitIds, status, Date.now());
+  if (!statement) {
+    return 0;
+  }
+
+  const database = await getDatabase();
+  const result = await database.runAsync(statement.sql, statement.parameters);
+  return result.changes;
+}
+
 export async function updateVisitNotes(id: string, notes: string | null): Promise<void> {
   const database = await getDatabase();
   const now = Date.now();
   await database.runAsync(`UPDATE visits SET notes = ?, updatedAt = ? WHERE id = ?`, [notes, now, id]);
 }
 
-export async function getVisitsNeedingFoodDetection(): Promise<VisitRecord[]> {
-  const database = await getDatabase();
-  // Get visits that have any unanalyzed photos (foodDetected IS NULL)
-  // This includes both visits with no analyzed photos and visits with some unanalyzed photos
-  return database.getAllAsync<VisitRecord>(
-    `SELECT v.* FROM visits v
-     WHERE EXISTS (
-       SELECT 1 FROM photos p WHERE p.visitId = v.id AND p.foodDetected IS NULL
-     )
-     ORDER BY v.startTime DESC`,
-  );
-}
-
-export async function getVisitPhotoSamples(
-  visitIds: string[],
+export async function getFoodDetectionVisitSamplePlan(
   samplePercentage: number = 0.1,
-): Promise<{ visitId: string; photoId: string }[]> {
-  if (visitIds.length === 0) {
-    return [];
+): Promise<FoodDetectionVisitSamplePlan> {
+  if (!Number.isFinite(samplePercentage)) {
+    throw new RangeError(`Sample percentage must be finite; received ${samplePercentage}.`);
   }
-
   const database = await getDatabase();
-
-  // Get photo counts per visit and sample accordingly
-  const samples: { visitId: string; photoId: string }[] = [];
-
-  for (const visitId of visitIds) {
-    // Get deterministic sample of photos for this visit:
-    // - Only select photos that haven't been analyzed yet (foodDetected IS NULL)
-    // - Order by creationTime and id for deterministic selection
-    // - Sample based on percentage of total photos in the visit (including analyzed ones)
-    const photos = await database.getAllAsync<{ id: string }>(
-      `SELECT id FROM photos 
-       WHERE visitId = ? AND foodDetected IS NULL 
-       ORDER BY creationTime ASC, id ASC 
-       LIMIT MAX(1, CAST((SELECT COUNT(*) FROM photos WHERE visitId = ?) * ? AS INTEGER))`,
-      [visitId, visitId, samplePercentage],
-    );
-
-    for (const photo of photos) {
-      samples.push({ visitId, photoId: photo.id });
-    }
-  }
-
-  return samples;
+  const rows = await database.getAllAsync<FoodDetectionVisitSampleRow>(FOOD_DETECTION_VISIT_SAMPLES_SQL, [
+    samplePercentage,
+  ]);
+  return parseFoodDetectionVisitSampleRows(rows);
 }
 
 export async function getVisitsByRestaurantId(restaurantId: string): Promise<VisitRecord[]> {

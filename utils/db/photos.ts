@@ -1,4 +1,14 @@
 import { getDatabase } from "./core";
+import {
+  buildLabeledPhotoFoodDetectionStatement,
+  buildSimplePhotoFoodDetectionStatement,
+  coalescePhotoFoodDetectionUpdates,
+  LABELED_PHOTO_FOOD_DETECTION_BATCH_SIZE,
+  SIMPLE_PHOTO_FOOD_DETECTION_BATCH_SIZE,
+  type PhotoFoodDetectionUpdate,
+} from "./photo-food-detection-core";
+import { buildExportPhotoCountsQuery, buildExportPhotosQuery, type ExportPhotoCursor } from "./export-photos-core";
+import { buildPhotoIngestionStatement, PHOTO_INGESTION_FLUSH_SIZE } from "./photo-ingestion-core";
 import type { FoodLabel, PhotoRecord, UnvisitedPhotoRecord } from "./types";
 
 // Raw photo record as stored in database (foodLabels and allLabels are JSON strings)
@@ -47,30 +57,15 @@ export async function insertPhotos(
   }
 
   const database = await getDatabase();
-  const batchSize = 1000;
   let insertedCount = 0;
-
-  for (let i = 0; i < photos.length; i += batchSize) {
-    const batch = photos.slice(i, i + batchSize);
-    const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ");
-    const values = batch.flatMap((p) => [
-      p.id,
-      p.uri,
-      p.creationTime,
-      p.latitude,
-      p.longitude,
-      p.mediaType,
-      p.duration,
-    ]);
-
-    // foodDetected is left as NULL (not set until food detection runs)
-    const result = await database.runAsync(
-      `INSERT OR IGNORE INTO photos (id, uri, creationTime, latitude, longitude, mediaType, duration) VALUES ${placeholders}`,
-      values,
-    );
+  for (let offset = 0; offset < photos.length; offset += PHOTO_INGESTION_FLUSH_SIZE) {
+    const statement = buildPhotoIngestionStatement(photos.slice(offset, offset + PHOTO_INGESTION_FLUSH_SIZE));
+    if (!statement) {
+      continue;
+    }
+    const result = await database.runAsync(statement.sql, statement.parameters);
     insertedCount += result.changes;
   }
-
   return insertedCount;
 }
 
@@ -86,7 +81,7 @@ export async function getUnvisitedPhotos(): Promise<UnvisitedPhotoRecord[]> {
 
 export async function getPhotosByVisitId(visitId: string): Promise<PhotoRecord[]> {
   const database = await getDatabase();
-  // Order by food detected first (1 = food, 0 = no food, NULL = unknown), then by creation time
+  // Preserve the existing per-visit ordering contract for non-export consumers.
   const rawPhotos = await database.getAllAsync<RawPhotoRecord>(
     `SELECT * FROM photos WHERE visitId = ? ORDER BY 
       CASE WHEN foodDetected = 1 THEN 0 WHEN foodDetected = 0 THEN 1 ELSE 2 END ASC,
@@ -94,6 +89,70 @@ export async function getPhotosByVisitId(visitId: string): Promise<PhotoRecord[]
     [visitId],
   );
   return rawPhotos.map(parsePhotoRecord);
+}
+
+export interface ExportPhotosPage {
+  readonly photos: PhotoRecord[];
+  readonly nextCursor: ExportPhotoCursor | null;
+}
+
+/** Read exact per-visit counts on the caller's snapshot connection. */
+export async function getExportPhotoCountsByVisitIds(
+  visitIds: readonly string[],
+  databaseOverride?: Awaited<ReturnType<typeof getDatabase>>,
+): Promise<Map<string, number>> {
+  const query = buildExportPhotoCountsQuery(visitIds);
+  if (!query) {
+    return new Map();
+  }
+
+  const database = databaseOverride ?? (await getDatabase());
+  const rows = await database.getAllAsync<{ visitId: string; photoCount: number }>(query.sql, query.parameters);
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (typeof row.visitId !== "string" || !Number.isSafeInteger(row.photoCount) || row.photoCount < 0) {
+      throw new Error("Export photo count query returned an invalid row.");
+    }
+    counts.set(row.visitId, row.photoCount);
+  }
+  return counts;
+}
+
+/** Load one bounded, deterministically ordered page of export photos. */
+export async function getPhotosByVisitIdsPage(
+  visitIds: readonly string[],
+  cursor: ExportPhotoCursor | null = null,
+  databaseOverride?: Awaited<ReturnType<typeof getDatabase>>,
+  pageSize?: number,
+): Promise<ExportPhotosPage> {
+  const query = buildExportPhotosQuery(visitIds, cursor, pageSize);
+  if (!query) {
+    return { photos: [], nextCursor: null };
+  }
+
+  const database = databaseOverride ?? (await getDatabase());
+  const rawPhotos = await database.getAllAsync<RawPhotoRecord>(query.sql, query.parameters);
+  const hasNextPage = rawPhotos.length > query.pageSize;
+  const pageRows = hasNextPage ? rawPhotos.slice(0, query.pageSize) : rawPhotos;
+  let nextCursor: ExportPhotoCursor | null = null;
+
+  if (hasNextPage) {
+    const lastPhoto = pageRows[pageRows.length - 1];
+    if (!lastPhoto || lastPhoto.visitId === null) {
+      throw new Error("Export photo paging returned an invalid continuation row.");
+    }
+    nextCursor = {
+      visitId: lastPhoto.visitId,
+      foodRank: lastPhoto.foodDetected === 1 ? 0 : lastPhoto.foodDetected === 0 ? 1 : 2,
+      creationTime: lastPhoto.creationTime,
+      id: lastPhoto.id,
+    };
+  }
+
+  return {
+    photos: pageRows.map(parsePhotoRecord),
+    nextCursor,
+  };
 }
 
 /**
@@ -144,65 +203,49 @@ export async function getVisitablePhotoCounts(): Promise<{
   };
 }
 
-export async function batchUpdatePhotosFoodDetected(
-  updates: {
-    photoId: string;
-    foodDetected: boolean;
-    foodLabels?: FoodLabel[];
-    foodConfidence?: number;
-    allLabels?: FoodLabel[];
-  }[],
-): Promise<void> {
+export async function batchUpdatePhotosFoodDetected(updates: readonly PhotoFoodDetectionUpdate[]): Promise<void> {
   if (updates.length === 0) {
     return;
   }
 
   const database = await getDatabase();
-
-  // For updates with labels/confidence/allLabels, we need to update individually
-  const updatesWithLabels = updates.filter(
-    (u) => u.foodLabels !== undefined || u.foodConfidence !== undefined || u.allLabels !== undefined,
-  );
-  const simpleUpdates = updates.filter(
-    (u) => u.foodLabels === undefined && u.foodConfidence === undefined && u.allLabels === undefined,
-  );
+  const { labeledUpdates, simpleUpdates } = coalescePhotoFoodDetectionUpdates(updates);
 
   await database.withExclusiveTransactionAsync(async (transaction) => {
-    if (updatesWithLabels.length > 0) {
-      const statement = await transaction.prepareAsync(
-        `UPDATE photos SET foodDetected = ?, foodLabels = ?, foodConfidence = ?, allLabels = ? WHERE id = ?`,
-      );
-
-      try {
-        for (const update of updatesWithLabels) {
-          await statement.executeAsync([
-            update.foodDetected ? 1 : 0,
-            update.foodLabels ? JSON.stringify(update.foodLabels) : null,
-            update.foodConfidence ?? null,
-            update.allLabels ? JSON.stringify(update.allLabels) : null,
-            update.photoId,
-          ]);
+    let reusableLabeledStatement: Awaited<ReturnType<typeof transaction.prepareAsync>> | null = null;
+    let reusableSimpleStatement: Awaited<ReturnType<typeof transaction.prepareAsync>> | null = null;
+    try {
+      for (let offset = 0; offset < labeledUpdates.length; offset += LABELED_PHOTO_FOOD_DETECTION_BATCH_SIZE) {
+        const batch = labeledUpdates.slice(offset, offset + LABELED_PHOTO_FOOD_DETECTION_BATCH_SIZE);
+        const statement = buildLabeledPhotoFoodDetectionStatement(batch);
+        if (batch.length === LABELED_PHOTO_FOOD_DETECTION_BATCH_SIZE) {
+          await (reusableLabeledStatement ??= await transaction.prepareAsync(statement.sql)).executeAsync(
+            statement.parameters,
+          );
+        } else {
+          await transaction.runAsync(statement.sql, statement.parameters);
         }
-      } finally {
-        await statement.finalizeAsync();
       }
-    }
 
-    // For simple updates (no labels), batch by detected/not detected.
-    const detectedIds = simpleUpdates.filter((update) => update.foodDetected).map((update) => update.photoId);
-    const notDetectedIds = simpleUpdates.filter((update) => !update.foodDetected).map((update) => update.photoId);
-    const batchSize = 1000;
-
-    for (let i = 0; i < detectedIds.length; i += batchSize) {
-      const batch = detectedIds.slice(i, i + batchSize);
-      const placeholders = batch.map(() => "?").join(", ");
-      await transaction.runAsync(`UPDATE photos SET foodDetected = 1 WHERE id IN (${placeholders})`, batch);
-    }
-
-    for (let i = 0; i < notDetectedIds.length; i += batchSize) {
-      const batch = notDetectedIds.slice(i, i + batchSize);
-      const placeholders = batch.map(() => "?").join(", ");
-      await transaction.runAsync(`UPDATE photos SET foodDetected = 0 WHERE id IN (${placeholders})`, batch);
+      // Keep this phase after all labeled writes. It intentionally changes only
+      // foodDetected, preserving any payload written by the labeled phase.
+      for (let offset = 0; offset < simpleUpdates.length; offset += SIMPLE_PHOTO_FOOD_DETECTION_BATCH_SIZE) {
+        const batch = simpleUpdates.slice(offset, offset + SIMPLE_PHOTO_FOOD_DETECTION_BATCH_SIZE);
+        const statement = buildSimplePhotoFoodDetectionStatement(batch);
+        if (batch.length === SIMPLE_PHOTO_FOOD_DETECTION_BATCH_SIZE) {
+          await (reusableSimpleStatement ??= await transaction.prepareAsync(statement.sql)).executeAsync(
+            statement.parameters,
+          );
+        } else {
+          await transaction.runAsync(statement.sql, statement.parameters);
+        }
+      }
+    } finally {
+      try {
+        await reusableLabeledStatement?.finalizeAsync();
+      } finally {
+        await reusableSimpleStatement?.finalizeAsync();
+      }
     }
   });
 }

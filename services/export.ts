@@ -1,92 +1,25 @@
-import { Directory, File, Paths } from "expo-file-system";
+import { Directory, File, FileMode, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
+import { Platform } from "react-native";
 import {
-  getVisits,
-  getPhotosByVisitId,
   getAllRestaurants,
-  getRestaurantById,
-  type PhotoRecord,
-  type RestaurantRecord,
+  getDatabase,
+  getExportPhotoCountsByVisitIds,
+  getPhotosByVisitIdsPage,
+  getVisits,
 } from "@/utils/db";
-
-interface ExportData {
-  exportedAt: string;
-  stats: {
-    totalVisits: number;
-    confirmedVisits: number;
-    totalPhotos: number;
-    uniqueRestaurants: number;
-  };
-  visits: Array<{
-    visitId: string;
-    status: string;
-    suggestedRestaurantId: string | null;
-    restaurant: {
-      id: string;
-      name: string;
-      latitude: number;
-      longitude: number;
-      address: string | null;
-      phone: string | null;
-      website: string | null;
-      googlePlaceId: string | null;
-      cuisine: string | null;
-      priceLevel: number | null;
-      rating: number | null;
-      notes: string | null;
-    } | null;
-    visitDate: string;
-    startTime: string;
-    endTime: string;
-    duration: string;
-    startTimestamp: number;
-    endTimestamp: number;
-    location: {
-      latitude: number;
-      longitude: number;
-    };
-    photoCount: number;
-    foodProbable: boolean;
-    awardAtVisit: string | null;
-    notes: string | null;
-    calendarEvent: {
-      id: string | null;
-      title: string | null;
-      location: string | null;
-      isAllDay: boolean | null;
-    };
-    exportedToCalendarId: string | null;
-    updatedAt: string | null;
-    photos: Array<{
-      id: string;
-      uri: string;
-      createdAt: string;
-      latitude: number | null;
-      longitude: number | null;
-      mediaType: "photo" | "video";
-      duration: number | null;
-      foodDetected: boolean | null;
-      foodConfidence: number | null | undefined;
-      foodLabels: PhotoRecord["foodLabels"] | null | undefined;
-      allLabels: PhotoRecord["allLabels"] | null | undefined;
-    }>;
-  }>;
-  restaurants: Array<{
-    id: string;
-    name: string;
-    latitude: number;
-    longitude: number;
-    visitCount: number;
-    address: string | null;
-    phone: string | null;
-    website: string | null;
-    googlePlaceId: string | null;
-    cuisine: string | null;
-    priceLevel: number | null;
-    rating: number | null;
-    notes: string | null;
-  }>;
-}
+import type { ExportPhotoCursor } from "@/utils/db/export-photos-core";
+import {
+  buildExportDataFromVisits,
+  buildExportPhoto,
+  buildExportVisits,
+  exportDataToCSVString,
+  exportDataToJSONString,
+  type ExportData,
+  withExactExportPhotoCounts,
+} from "@/utils/export-core";
+import { BoundedUtf8BufferingSink } from "@/utils/export-stream-core";
+import { writeExportJsonSnapshot } from "@/utils/export-stream-snapshot";
 
 export type ExportFormat = "json" | "csv";
 
@@ -97,27 +30,7 @@ export interface ExportShareResult {
   shared: boolean;
 }
 
-function formatDate(timestamp: number): string {
-  return new Date(timestamp).toISOString().split("T")[0];
-}
-
-function formatTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatDuration(start: number, end: number): string {
-  const diffMs = end - start;
-  const diffMins = Math.round(diffMs / (1000 * 60));
-  if (diffMins < 60) {
-    return `${diffMins} minutes`;
-  }
-  const hours = Math.floor(diffMins / 60);
-  const mins = diffMins % 60;
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours} hours`;
-}
+const STALE_EXPORT_PART_MAX_AGE_MS = 24 * 60 * 60 * 1_000;
 
 function formatTimestampForFilename(date: Date): string {
   return date.toISOString().replace(/[:.]/g, "-").replace("T", "_").replace("Z", "");
@@ -129,130 +42,116 @@ function ensureExportDirectory(baseDir: Directory): Directory {
   return exportDir;
 }
 
+function cleanupStaleExportParts(exportDir: Directory): void {
+  try {
+    const cutoff = Date.now() - STALE_EXPORT_PART_MAX_AGE_MS;
+    for (const entry of exportDir.list()) {
+      if (!(entry instanceof File) || !entry.name.startsWith(".palate-export-") || !entry.name.endsWith(".json.part")) {
+        continue;
+      }
+      const modifiedAt = entry.lastModified ?? entry.creationTime;
+      if (modifiedAt !== null && modifiedAt <= cutoff) {
+        try {
+          entry.delete();
+        } catch {
+          // Stale cleanup is best-effort and must not prevent a new export.
+        }
+      }
+    }
+  } catch {
+    // Directory enumeration can fail transiently; the current .part is still cleaned below.
+  }
+}
+
+function downloadWebExport(data: string, format: ExportFormat): ExportShareResult {
+  if (typeof document === "undefined") {
+    throw new Error("Browser downloads require a DOM document.");
+  }
+  const timestamp = formatTimestampForFilename(new Date());
+  const fileName = `palate-export-${timestamp}.${format}`;
+  const mimeType = format === "json" ? "application/json" : "text/csv";
+  const objectUrl = URL.createObjectURL(new Blob([data], { type: `${mimeType};charset=utf-8` }));
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = fileName;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  try {
+    link.click();
+  } finally {
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  }
+  return { fileUri: null, fileName, savedToFile: true, shared: false };
+}
+
+type ExportStatusFilter = "all" | "confirmed" | "pending" | "rejected";
+type ExportDatabaseConnection = Awaited<ReturnType<typeof getDatabase>>;
+
+async function assembleExportData(
+  database: ExportDatabaseConnection,
+  includePhotos: boolean,
+  statusFilter: ExportStatusFilter,
+): Promise<ExportData> {
+  const visits = await getVisits(statusFilter === "all" ? undefined : statusFilter, database);
+  const restaurants = await getAllRestaurants(database);
+  let exportVisits = buildExportVisits({ visits, restaurants, photosByVisitId: new Map() });
+  const exportVisitsById = new Map(exportVisits.map((visit) => [visit.visitId, visit]));
+  const visitIds = visits.map((visit) => visit.id);
+  if (includePhotos && visitIds.length > 0) {
+    let cursor: ExportPhotoCursor | null = null;
+    do {
+      const page = await getPhotosByVisitIdsPage(visitIds, cursor, database);
+      for (const photo of page.photos) {
+        const exportVisit = photo.visitId === null ? null : exportVisitsById.get(photo.visitId);
+        if (!exportVisit) {
+          throw new Error(`Export photo ${photo.id} did not match a requested visit.`);
+        }
+        exportVisit.photos.push(buildExportPhoto(photo));
+      }
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+  }
+
+  const exactPhotoCounts = includePhotos
+    ? new Map(exportVisits.map((visit) => [visit.visitId, visit.photos.length]))
+    : await getExportPhotoCountsByVisitIds(visitIds, database);
+  exportVisits = withExactExportPhotoCounts(exportVisits, exactPhotoCounts);
+
+  return buildExportDataFromVisits({
+    visits: exportVisits,
+    restaurants,
+    exportedAt: new Date().toISOString(),
+  });
+}
+
 async function generateExportData(
   options: {
     includePhotos?: boolean;
-    statusFilter?: "all" | "confirmed" | "pending" | "rejected";
+    statusFilter?: ExportStatusFilter;
   } = {},
 ): Promise<ExportData> {
   const { includePhotos = true, statusFilter = "confirmed" } = options;
+  const database = await getDatabase();
 
-  // Get visits
-  const visitsEntries = await getVisits(statusFilter === "all" ? undefined : statusFilter);
+  // Expo SQLite cannot open the dedicated transaction connection on web. Keep
+  // that existing surface functional there; native builds use a pinned snapshot.
+  if (Platform.OS === "web") {
+    return assembleExportData(database, includePhotos, statusFilter);
+  }
 
-  // Get all restaurants
-  const allRestaurants = await getAllRestaurants();
-  const restaurantVisitCounts = new Map<string, number>();
+  let result: ExportData | null = null;
+  // The dedicated transaction connection pins one WAL read snapshot across all
+  // keyset pages, so concurrent classification/association writes cannot move a
+  // photo behind or ahead of the continuation cursor.
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    result = await assembleExportData(transaction, includePhotos, statusFilter);
+  });
 
-  // Build visits data
-  const visits = await Promise.all(
-    visitsEntries.map(async (visit) => {
-      let restaurant: RestaurantRecord | null = null;
-      if (visit.restaurantId) {
-        restaurant = await getRestaurantById(visit.restaurantId);
-        if (restaurant) {
-          restaurantVisitCounts.set(restaurant.id, (restaurantVisitCounts.get(restaurant.id) || 0) + 1);
-        }
-      }
-
-      let photos: PhotoRecord[] = [];
-      if (includePhotos) {
-        photos = await getPhotosByVisitId(visit.id);
-      }
-
-      return {
-        visitId: visit.id,
-        status: visit.status,
-        restaurant: restaurant
-          ? {
-              id: restaurant.id,
-              name: restaurant.name,
-              latitude: restaurant.latitude,
-              longitude: restaurant.longitude,
-              address: restaurant.address,
-              phone: restaurant.phone,
-              website: restaurant.website,
-              googlePlaceId: restaurant.googlePlaceId,
-              cuisine: restaurant.cuisine,
-              priceLevel: restaurant.priceLevel,
-              rating: restaurant.rating,
-              notes: restaurant.notes,
-            }
-          : null,
-        suggestedRestaurantId: visit.suggestedRestaurantId,
-        visitDate: formatDate(visit.startTime),
-        startTime: formatTime(visit.startTime),
-        endTime: formatTime(visit.endTime),
-        duration: formatDuration(visit.startTime, visit.endTime),
-        startTimestamp: visit.startTime,
-        endTimestamp: visit.endTime,
-        location: {
-          latitude: visit.centerLat,
-          longitude: visit.centerLon,
-        },
-        photoCount: visit.photoCount,
-        foodProbable: visit.foodProbable,
-        awardAtVisit: visit.awardAtVisit,
-        notes: visit.notes,
-        calendarEvent: {
-          id: visit.calendarEventId,
-          title: visit.calendarEventTitle,
-          location: visit.calendarEventLocation,
-          isAllDay: visit.calendarEventIsAllDay,
-        },
-        exportedToCalendarId: visit.exportedToCalendarId,
-        updatedAt: visit.updatedAt ? new Date(visit.updatedAt).toISOString() : null,
-        photos: photos.map((p) => ({
-          id: p.id,
-          uri: p.uri,
-          createdAt: new Date(p.creationTime).toISOString(),
-          latitude: p.latitude,
-          longitude: p.longitude,
-          mediaType: p.mediaType,
-          duration: p.duration,
-          foodDetected: p.foodDetected,
-          foodConfidence: p.foodConfidence,
-          foodLabels: p.foodLabels,
-          allLabels: p.allLabels,
-        })),
-      };
-    }),
-  );
-
-  // Build restaurants with visit counts
-  const visitedRestaurantIds = new Set(visits.map((c) => c.restaurant?.id).filter(Boolean));
-  const restaurants = allRestaurants
-    .filter((r) => visitedRestaurantIds.has(r.id))
-    .map((r) => ({
-      id: r.id,
-      name: r.name,
-      latitude: r.latitude,
-      longitude: r.longitude,
-      visitCount: restaurantVisitCounts.get(r.id) || 0,
-      address: r.address,
-      phone: r.phone,
-      website: r.website,
-      googlePlaceId: r.googlePlaceId,
-      cuisine: r.cuisine,
-      priceLevel: r.priceLevel,
-      rating: r.rating,
-      notes: r.notes,
-    }))
-    .sort((a, b) => b.visitCount - a.visitCount);
-
-  const totalPhotos = visits.reduce((sum, v) => sum + v.photoCount, 0);
-
-  return {
-    exportedAt: new Date().toISOString(),
-    stats: {
-      totalVisits: visits.length,
-      confirmedVisits: visits.filter((c) => c.status === "confirmed").length,
-      totalPhotos,
-      uniqueRestaurants: restaurants.length,
-    },
-    visits,
-    restaurants,
-  };
+  if (result === null) {
+    throw new Error("Export snapshot completed without producing data.");
+  }
+  return result;
 }
 
 async function generateJSONString(
@@ -262,7 +161,7 @@ async function generateJSONString(
   } = {},
 ): Promise<string> {
   const data = await generateExportData(options);
-  return JSON.stringify(data, null, 2);
+  return exportDataToJSONString(data);
 }
 
 async function generateCSVString(
@@ -271,37 +170,7 @@ async function generateCSVString(
   } = {},
 ): Promise<string> {
   const data = await generateExportData({ ...options, includePhotos: false });
-
-  // Build CSV
-  const headers = [
-    "Visit Date",
-    "Start Time",
-    "End Time",
-    "Duration",
-    "Restaurant Name",
-    "Restaurant ID",
-    "Status",
-    "Photo Count",
-    "Latitude",
-    "Longitude",
-    "Visit ID",
-  ];
-
-  const rows = data.visits.map((v) => [
-    v.visitDate,
-    v.startTime,
-    v.endTime,
-    v.duration,
-    v.restaurant?.name || "Unknown",
-    v.restaurant?.id || "",
-    v.status,
-    v.photoCount.toString(),
-    v.location.latitude.toFixed(6),
-    v.location.longitude.toFixed(6),
-    v.visitId,
-  ]);
-
-  return [headers.join(","), ...rows.map((r) => r.map((cell) => `"${cell}"`).join(","))].join("\n");
+  return exportDataToCSVString(data);
 }
 
 export async function exportToJSON(
@@ -321,13 +190,7 @@ export async function exportToCSV(
   return generateCSVString(options);
 }
 
-export async function shareExport(data: string, format: ExportFormat): Promise<ExportShareResult> {
-  const baseDir = Paths.document ?? Paths.cache;
-  const exportDir = ensureExportDirectory(baseDir);
-  const timestamp = formatTimestampForFilename(new Date());
-  const fileName = `palate-export-${timestamp}.${format}`;
-  const file = new File(exportDir, fileName);
-  file.write(data, { encoding: "utf8" });
+async function shareExportFile(file: File, fileName: string, format: ExportFormat): Promise<ExportShareResult> {
   const canShare = await Sharing.isAvailableAsync();
   let shared = false;
   if (canShare) {
@@ -347,4 +210,82 @@ export async function shareExport(data: string, format: ExportFormat): Promise<E
     savedToFile: true,
     shared,
   };
+}
+
+async function writeStreamedJSONExport(
+  options: { statusFilter?: ExportStatusFilter } = {},
+): Promise<{ file: File; fileName: string }> {
+  const { statusFilter = "confirmed" } = options;
+  const exportDir = ensureExportDirectory(Paths.document ?? Paths.cache);
+  cleanupStaleExportParts(exportDir);
+  const timestamp = formatTimestampForFilename(new Date());
+  const fileName = `palate-export-${timestamp}.json`;
+  const file = new File(exportDir, fileName);
+  const temporaryFile = new File(exportDir, `.${fileName}.part`);
+  let handle: ReturnType<File["open"]> | null = null;
+
+  try {
+    temporaryFile.create({ intermediates: true, overwrite: true });
+    handle = temporaryFile.open(FileMode.Truncate);
+    const bufferedSink = new BoundedUtf8BufferingSink((chunk) => handle!.writeBytes(chunk));
+    const database = await getDatabase();
+    await database.withExclusiveTransactionAsync(async (transaction) => {
+      const visits = await getVisits(statusFilter === "all" ? undefined : statusFilter, transaction);
+      const restaurants = await getAllRestaurants(transaction);
+      await writeExportJsonSnapshot({
+        visits,
+        restaurants,
+        exportedAt: new Date().toISOString(),
+        sink: bufferedSink.write,
+        loadPhotoCounts: (visitIds) => getExportPhotoCountsByVisitIds(visitIds, transaction),
+        loadPhotoPage: (visitIds, cursor, pageSize) => getPhotosByVisitIdsPage(visitIds, cursor, transaction, pageSize),
+      });
+      bufferedSink.close();
+    });
+    handle.close();
+    handle = null;
+    await temporaryFile.move(file, { overwrite: true });
+    return { file, fileName };
+  } catch (error) {
+    if (handle) {
+      try {
+        handle.close();
+      } catch {
+        // Preserve the original export failure.
+      }
+    }
+    try {
+      if (temporaryFile.exists) {
+        temporaryFile.delete();
+      }
+    } catch {
+      // Preserve the original export failure.
+    }
+    throw error;
+  }
+}
+
+/** Stream the app's JSON share path without materializing the full export string. */
+export async function exportAndShareJSON(
+  options: { statusFilter?: ExportStatusFilter } = {},
+): Promise<ExportShareResult> {
+  // Expo's dedicated SQLite connection and native FileHandle are unavailable on web.
+  if (Platform.OS === "web") {
+    return shareExport(await exportToJSON(options), "json");
+  }
+  const { file, fileName } = await writeStreamedJSONExport(options);
+  return shareExportFile(file, fileName, "json");
+}
+
+export async function shareExport(data: string, format: ExportFormat): Promise<ExportShareResult> {
+  if (Platform.OS === "web") {
+    return downloadWebExport(data, format);
+  }
+  const baseDir = Paths.document ?? Paths.cache;
+  const exportDir = ensureExportDirectory(baseDir);
+  const timestamp = formatTimestampForFilename(new Date());
+  const fileName = `palate-export-${timestamp}.${format}`;
+  const file = new File(exportDir, fileName);
+  file.write(data, { encoding: "utf8" });
+  return shareExportFile(file, fileName, format);
 }

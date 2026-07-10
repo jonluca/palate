@@ -2,74 +2,29 @@ import * as SQLite from "expo-sqlite";
 import { calculateDistanceMeters } from "@/data/restaurants";
 import type { IgnoredLocationRecord } from "./types";
 import { invalidateRestaurantIndex } from "./michelin-index";
+import { syncDefaultFoodKeywords } from "./food-keyword-sync-core";
+import {
+  ensureMichelinProviderSpatialIndex,
+  invalidateMichelinProviderSpatialIndex,
+  rebuildMichelinProviderSpatialIndex,
+  repairMichelinProviderSpatialIndexIfNeeded,
+} from "./michelin-provider-spatial-core";
 
 // Debug timing flag - set to true to enable query timing logs
 export const DEBUG_TIMING = __DEV__;
 
-// Default food keywords - these will be prepopulated in the database
-const DEFAULT_FOOD_KEYWORDS = [
-  "food",
-  "drink",
-  "dish",
-  "meal",
-  "cuisine",
-  "snack",
-  "breakfast",
-  "lunch",
-  "dinner",
-  "brunch",
-  "appetizer",
-  "dessert",
-  "tableware",
-  "utensil",
-  "salad",
-  "soup",
-  "sandwich",
-  "pizza",
-  "pasta",
-  "sushi",
-  "burger",
-  "steak",
-  "chicken",
-  "fish",
-  "seafood",
-  "meat",
-  "vegetable",
-  "fruit",
-  "bread",
-  "cake",
-  "pie",
-  "biscuit",
-  "chopsticks",
-  "baked_goods",
-  "cookie",
-  "ice_cream",
-  "spoon",
-  "fork",
-  "drinking_glass",
-  "cup",
-  "chocolate",
-  "candy",
-  "beverage",
-  "coffee",
-  "tea",
-  "wine",
-  "beer",
-  "cocktail",
-  "juice",
-  "smoothie",
-  "menu",
-  "plate",
-  "bowl",
-  "restaurant",
-  "cafe",
-  "dining",
-  "table_setting",
-  "cutlery",
-];
-
 let db: SQLite.SQLiteDatabase | null = null;
 let dbInitPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+
+const MAIN_DATABASE_OPTIONS: SQLite.SQLiteOpenOptions = {
+  // Expo SQLite's default close path walks sqlite3_next_stmt() and finalizes
+  // every statement it finds. R-Tree owns internal prepared statements that
+  // are included in that walk and then finalized again by rtreeDisconnect(),
+  // causing a native use-after-free. Let sqlite3_close() release its own
+  // internal statements instead. This option is inherited by the dedicated
+  // connections created by withExclusiveTransactionAsync().
+  finalizeUnusedStatementsBeforeClosing: false,
+};
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
   // Return cached instance if already initialized
@@ -87,7 +42,10 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
     let database: SQLite.SQLiteDatabase | null = null;
 
     try {
-      database = await SQLite.openDatabaseAsync(__DEV__ ? "photo_foodie_dev.db" : "photo_foodie.db");
+      database = await SQLite.openDatabaseAsync(
+        __DEV__ ? "photo_foodie_dev.db" : "photo_foodie.db",
+        MAIN_DATABASE_OPTIONS,
+      );
       await initializeDatabase(database);
       // Auto-reject any pending visits within ignored locations on startup
       await rejectVisitsInIgnoredLocationsInternal(database);
@@ -220,6 +178,14 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
     -- Optimized composite indexes for getPendingVisitsForReview query
     -- Covers the ranked_photos CTE: ORDER BY foodDetected, creationTime per visit
     CREATE INDEX IF NOT EXISTS idx_photos_visit_food_time ON photos(visitId, foodDetected, creationTime);
+
+    -- Covers deterministic top-three visit previews without a per-visit temporary sort.
+    CREATE INDEX IF NOT EXISTS idx_photos_visit_preview ON photos(
+      visitId,
+      (CASE WHEN foodDetected = 1 THEN 0 WHEN foodDetected = 0 THEN 1 ELSE 2 END),
+      creationTime,
+      id
+    );
     
     -- Covers pending visits filter + priority ordering
     CREATE INDEX IF NOT EXISTS idx_visits_pending_priority ON visits(status, foodProbable DESC, suggestedRestaurantId, startTime DESC);
@@ -356,32 +322,10 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
     // Column already exists, ignore
   }
 
+  await ensureMichelinProviderSpatialIndex(database);
+
   // Ensure built-in food keywords include the current defaults
   await syncDefaultFoodKeywords(database);
-}
-
-/**
- * Add any missing default food keywords.
- *
- * Existing rows keep their enabled state, but keywords that are now defaults
- * are marked built-in so reset/remove behavior matches the current default set.
- */
-async function syncDefaultFoodKeywords(database: SQLite.SQLiteDatabase): Promise<void> {
-  const now = Date.now();
-  const batchSize = 50;
-
-  for (let i = 0; i < DEFAULT_FOOD_KEYWORDS.length; i += batchSize) {
-    const batch = DEFAULT_FOOD_KEYWORDS.slice(i, i + batchSize);
-    const placeholders = batch.map(() => "(?, 1, 1, ?)").join(", ");
-    const values = batch.flatMap((keyword) => [keyword, now]);
-    const keywordPlaceholders = batch.map(() => "?").join(", ");
-
-    await database.runAsync(
-      `INSERT OR IGNORE INTO food_keywords (keyword, enabled, isBuiltIn, createdAt) VALUES ${placeholders}`,
-      values,
-    );
-    await database.runAsync(`UPDATE food_keywords SET isBuiltIn = 1 WHERE keyword IN (${keywordPlaceholders})`, batch);
-  }
 }
 
 /**
@@ -436,7 +380,8 @@ export async function nukeDatabase(): Promise<void> {
   // Drop all tables in correct order (respecting foreign keys)
   await database.execAsync(`
     PRAGMA foreign_keys = OFF;
-    
+
+    DROP TABLE IF EXISTS michelin_restaurant_spatial_index;
     DROP TABLE IF EXISTS visit_suggested_restaurants;
     DROP TABLE IF EXISTS photos;
     DROP TABLE IF EXISTS visits;
@@ -502,6 +447,12 @@ export async function performDatabaseMaintenance(): Promise<{
     console.warn("[DB] ANALYZE failed:", error);
   }
 
+  try {
+    await repairMichelinProviderSpatialIndexIfNeeded(database);
+  } catch (error) {
+    console.warn("[DB] Michelin provider spatial maintenance failed:", error);
+  }
+
   if (DEBUG_TIMING) {
     console.log(`[DB] performDatabaseMaintenance: ${(performance.now() - start).toFixed(2)}ms`);
   }
@@ -540,11 +491,25 @@ export async function performFullMaintenance(): Promise<{
     console.warn("[DB] WAL checkpoint failed:", error);
   }
 
+  // VACUUM can renumber rowids without firing table triggers. Mark the index
+  // unsafe first so a failed VACUUM or rebuild must pass deep validation before
+  // the next provider read in this process.
+  invalidateMichelinProviderSpatialIndex();
   try {
     await database.execAsync(`VACUUM;`);
     results.vacuum = true;
   } catch (error) {
     console.warn("[DB] VACUUM failed (this is expected if database is busy):", error);
+  }
+
+  if (results.vacuum) {
+    try {
+      await rebuildMichelinProviderSpatialIndex(database);
+    } catch (error) {
+      // The invalidation flag remains set. Provider selection will run the full
+      // health/repair path before it can query the rowid-backed R-Tree.
+      console.warn("[DB] VACUUM succeeded but Michelin provider spatial rebuild failed:", error);
+    }
   }
 
   try {

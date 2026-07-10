@@ -12,6 +12,7 @@ import {
   getConfirmedRestaurantsWithVisits,
   getRestaurantVisitsWithPreviews,
   getPendingVisitsForReview,
+  batchUpdateVisitStatuses,
   batchConfirmVisits,
   confirmVisit,
   getAllMichelinRestaurants,
@@ -81,6 +82,8 @@ import {
   type CalendarEventInfo,
 } from "@/services/calendar";
 import { compareSameNameMichelinFirst, normalizeRestaurantNameForPriority } from "@/utils/restaurant-priority";
+import { selectCalendarMutationSuccessfulItems } from "@/utils/calendar-batch-mutation-core";
+import { REVIEW_QUERY_MOUNT_POLICY, invalidatePendingReviewQuery, reviewQueryKeys } from "@/utils/review-query-policy";
 
 // ============================================================================
 // QUERY INVALIDATION HELPERS
@@ -92,13 +95,26 @@ function invalidateVisitQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
 }
 
+/** Reconcile every cache that can reflect incrementally persisted food results. */
+function invalidateFoodDetectionQueries(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ["visits"] });
+  queryClient.invalidateQueries({ queryKey: ["visitPhotos"] });
+  queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
+  queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+  queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+  queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+  queryClient.invalidateQueries({ queryKey: queryKeys.photosWithLabelsCount });
+}
+
 function invalidateMichelinRestaurantSearch(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["michelinRestaurantSearch"] });
 }
 
-/** Invalidate data derived from confirmed visit statuses. */
+/** Invalidate data derived from visit statuses. */
 function invalidateVisitStatusQueries(queryClient: QueryClient) {
-  queryClient.invalidateQueries({ queryKey: ["visits", "restaurantVisits"] });
+  // Every visit list, detail, review, and restaurant-visit key starts with
+  // `visits`; status changes can move rows between any of those views.
+  queryClient.invalidateQueries({ queryKey: ["visits"] });
   queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
   queryClient.invalidateQueries({ queryKey: queryKeys.stats });
   queryClient.invalidateQueries({ queryKey: ["wrapped"] });
@@ -107,12 +123,10 @@ function invalidateVisitStatusQueries(queryClient: QueryClient) {
 
 function invalidateReservationImportQueries(queryClient: QueryClient) {
   invalidateVisitQueries(queryClient);
-  queryClient.invalidateQueries({ queryKey: queryKeys.visits("confirmed") });
-  queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-  queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+  // Imports can auto-merge and delete source visits, so invalidate the whole
+  // visit-key family rather than only the confirmed list.
+  invalidateVisitStatusQueries(queryClient);
   queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
-  queryClient.invalidateQueries({ queryKey: ["wrapped"] });
-  invalidateMichelinRestaurantSearch(queryClient);
 }
 
 // ============================================================================
@@ -173,7 +187,13 @@ import {
   type ImportableCalendarEvent,
 } from "@/services/visit";
 import { hasMediaLibraryPermission, requestMediaLibraryPermission, getPhotoCount } from "@/services/scanner";
-import { exportToJSON, exportToCSV, shareExport, type ExportFormat, type ExportShareResult } from "@/services/export";
+import {
+  exportAndShareJSON,
+  exportToCSV,
+  shareExport,
+  type ExportFormat,
+  type ExportShareResult,
+} from "@/services/export";
 import { importOpenTableVisitHistory } from "@/services/opentable";
 import { fetchResyVisitHistory, importResyVisitHistory, type ResyImportProgress } from "@/services/resy";
 import { importTockVisitHistory } from "@/services/tock";
@@ -231,13 +251,13 @@ export const queryKeys = {
   permissions: ["permissions"] as const,
   calendarPermissions: ["calendarPermissions"] as const,
   photoCount: ["photoCount"] as const,
-  unanalyzedPhotoCount: ["unanalyzedPhotoCount"] as const,
+  unanalyzedPhotoCount: reviewQueryKeys.unanalyzedPhotoCount,
   placesConfigured: ["static", "placesConfigured"] as const,
   // Restaurant-centric keys
   confirmedRestaurants: ["confirmedRestaurants"] as const,
   restaurantVisits: (restaurantId: string) => ["visits", "restaurantVisits", restaurantId] as const,
   restaurantDetail: (restaurantId: string) => ["restaurants", "detail", restaurantId] as const,
-  pendingReview: ["visits", "pendingReview"] as const,
+  pendingReview: reviewQueryKeys.pendingReview,
   michelinRestaurants: ["static", "michelinRestaurants"] as const,
   michelinRestaurantSearch: (query: string) => ["michelinRestaurantSearch", query] as const,
   michelinRestaurantDetail: (michelinId: string) => ["static", "michelinRestaurants", "detail", michelinId] as const,
@@ -457,7 +477,7 @@ export function usePendingReview() {
       const exactMatches = getExactCalendarMatches(visits);
       return { visits, exactMatches };
     },
-    refetchOnMount: "always",
+    ...REVIEW_QUERY_MOUNT_POLICY,
   });
 }
 
@@ -764,8 +784,8 @@ export function useScanPhotos(onProgress?: (progress: ScanProgress) => void) {
 
   return useMutation({
     mutationFn: () => processPhotos(onProgress),
-    onSuccess: () => {
-      invalidateVisitQueries(queryClient);
+    onSettled: () => {
+      invalidateFoodDetectionQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits });
     },
   });
@@ -795,7 +815,7 @@ export function useSearchAppleRestaurants() {
 
 /**
  * Confirm a visit by linking visit to restaurant
- * Uses optimistic updates for instant UI feedback - no query invalidation needed for pending reviews
+ * Uses optimistic updates for instant UI feedback, then reconciles all status-derived caches.
  * Looks up and stores the historical Michelin award at the time of visit
  */
 export function useConfirmVisit() {
@@ -859,7 +879,7 @@ export function useConfirmVisit() {
 
 /**
  * Batch confirm multiple visits with their matched restaurants
- * Uses optimistic updates for instant UI feedback - no query invalidation needed for pending reviews
+ * Uses optimistic updates for instant UI feedback, then reconciles all status-derived caches.
  * Looks up and stores the historical Michelin award at the time of each visit
  */
 export function useBatchConfirmVisits() {
@@ -952,11 +972,8 @@ export function useBatchConfirmVisits() {
     onSuccess: () => {
       // Merging duplicates may affect confirmed visits, stats, and cleanup queries.
       invalidateVisitQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      invalidateVisitStatusQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
-      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
-      invalidateMichelinRestaurantSearch(queryClient);
     },
   });
 }
@@ -1206,10 +1223,10 @@ export type { ExportFormat };
 export function useExportData() {
   return useMutation<ExportShareResult, Error, ExportFormat>({
     mutationFn: async (format: ExportFormat) => {
-      const data =
-        format === "json"
-          ? await exportToJSON({ statusFilter: "confirmed" })
-          : await exportToCSV({ statusFilter: "confirmed" });
+      if (format === "json") {
+        return exportAndShareJSON({ statusFilter: "confirmed" });
+      }
+      const data = await exportToCSV({ statusFilter: "confirmed" });
       return shareExport(data, format);
     },
   });
@@ -1261,10 +1278,11 @@ export function useUpdateVisitNotes(visitId: string | undefined) {
       await updateVisitNotes(visitId, notes);
       return notes;
     },
-    onSuccess: (notes) => {
+    onSuccess: async (notes) => {
       queryClient.setQueryData<VisitDetail | null>(queryKeys.visitDetail(visitId ?? ""), (old) =>
         old ? { ...old, visit: { ...old.visit, notes } } : old,
       );
+      await invalidatePendingReviewQuery(queryClient);
     },
   });
 }
@@ -1347,8 +1365,9 @@ export function useBatchUpdateVisitStatus() {
 
   return useMutation({
     mutationFn: async ({ visitIds, newStatus }: { visitIds: string[]; newStatus: VisitStatus }) => {
-      await Promise.all(visitIds.map((visitId) => updateVisitStatus(visitId, newStatus)));
-      return { visitIds, newStatus };
+      const uniqueVisitIds = [...new Set(visitIds)];
+      await batchUpdateVisitStatuses(uniqueVisitIds, newStatus);
+      return { visitIds: uniqueVisitIds, newStatus };
     },
     onMutate: async ({ visitIds, newStatus }) => {
       await Promise.all([
@@ -1358,12 +1377,15 @@ export function useBatchUpdateVisitStatus() {
       const previousPending = queryClient.getQueryData<PendingReviewData>(queryKeys.pendingReview);
       const previousStats = queryClient.getQueryData<Stats>(queryKeys.stats);
 
-      optimisticallyRemoveVisitsFromPending(queryClient, visitIds);
-      const delta =
-        newStatus === "confirmed"
-          ? { pending: -visitIds.length, confirmed: visitIds.length }
-          : { pending: -visitIds.length };
-      optimisticallyUpdateStats(queryClient, delta);
+      if (newStatus !== "pending") {
+        const uniqueVisitCount = new Set(visitIds).size;
+        optimisticallyRemoveVisitsFromPending(queryClient, visitIds);
+        const delta =
+          newStatus === "confirmed"
+            ? { pending: -uniqueVisitCount, confirmed: uniqueVisitCount }
+            : { pending: -uniqueVisitCount };
+        optimisticallyUpdateStats(queryClient, delta);
+      }
 
       return { previousPending, previousStats };
     },
@@ -1375,12 +1397,10 @@ export function useBatchUpdateVisitStatus() {
         queryClient.setQueryData(queryKeys.stats, context.previousStats);
       }
     },
-    onSuccess: (_data, { newStatus }) => {
-      // Only invalidate confirmed restaurants list if confirming, not pending reviews (handled optimistically)
-      if (newStatus === "confirmed") {
-        queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-        invalidateMichelinRestaurantSearch(queryClient);
-      }
+    onSuccess: () => {
+      // Reconcile every status-derived cache with the atomic database result.
+      // This also handles duplicate/missing IDs after the optimistic update.
+      invalidateVisitStatusQueries(queryClient);
     },
   });
 }
@@ -1440,11 +1460,8 @@ export function useBatchMergeSameRestaurantVisits() {
     onSuccess: () => {
       // Invalidate all visit-related queries
       invalidateVisitQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
+      invalidateVisitStatusQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
-      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
-      invalidateMichelinRestaurantSearch(queryClient);
     },
   });
 }
@@ -1614,9 +1631,8 @@ export function useDeepScan(onProgress?: (progress: DeepScanProgress) => void) {
   return useMutation({
     mutationFn: (photos?: Array<{ id: string }>) =>
       deepScanAllPhotosForFood({ photos, onProgress: (p) => onProgressRef.current?.(p) }),
-    onSuccess: () => {
-      invalidateVisitQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
+    onSettled: () => {
+      invalidateFoodDetectionQueries(queryClient);
     },
   });
 }
@@ -1637,9 +1653,10 @@ export function useScanVisitForFood(
       }
       return scanVisitPhotosForFood(visitId, photos, { onProgress });
     },
-    onSuccess: () => {
-      invalidateVisitQueries(queryClient);
+    onSettled: () => {
+      invalidateFoodDetectionQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId ?? "") });
+      queryClient.invalidateQueries({ queryKey: queryKeys.visitPhotos(visitId ?? "") });
     },
   });
 }
@@ -1756,9 +1773,9 @@ export function useCreateCalendarEventsForVisits() {
       const results = await batchCreateCalendarEvents(visits, calendarId);
 
       // Update visits with the created event IDs and track which calendar we exported to
-      if (results.eventIds.size > 0) {
-        const updates = Array.from(results.eventIds.entries()).map(([visitId, eventId]) => {
-          const visit = visits.find((v) => v.id === visitId);
+      if (results.createdEvents.length > 0) {
+        const updates = results.createdEvents.map(({ inputIndex, visitId, eventId }) => {
+          const visit = visits[inputIndex];
           return {
             visitId,
             calendarEventId: eventId,
@@ -1806,8 +1823,9 @@ export function useDeleteExportedCalendarEvents() {
 
       // Clear the exported calendar event data from visits
       if (results.deleted > 0) {
-        const deletedEventIds = new Set(eventIds.slice(0, results.deleted));
-        const visitIdsToUpdate = events.filter((e) => deletedEventIds.has(e.calendarEventId)).map((e) => e.visitId);
+        const visitIdsToUpdate = selectCalendarMutationSuccessfulItems(events, results.successfulInputIndices).map(
+          (event) => event.visitId,
+        );
         await clearExportedCalendarEvents(visitIdsToUpdate);
       }
 

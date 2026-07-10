@@ -28,6 +28,7 @@ import {
   useSetReviewFiltersCollapsed,
 } from "@/store";
 import { ReviewModeCard } from "@/components/visit-card/review-mode-card";
+import { refreshReviewQueries } from "@/utils/review-query-policy";
 
 type ReviewListItem =
   | {
@@ -319,8 +320,11 @@ export default function ReviewScreen() {
   // Handlers
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await queryClient.refetchQueries();
-    setRefreshing(false);
+    try {
+      await refreshReviewQueries(queryClient);
+    } finally {
+      setRefreshing(false);
+    }
   }, [queryClient]);
 
   const handleApproveAllExactMatches = useCallback(() => {

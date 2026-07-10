@@ -3,6 +3,12 @@ import { ThemedText } from "@/components/themed-text";
 import { FilterPills } from "@/components/ui";
 import { useConfirmedRestaurants, useMichelinRestaurants } from "@/hooks/queries";
 import type { MichelinRestaurantRecord } from "@/utils/db";
+import {
+  clampRestaurantMapLatitude,
+  normalizeRestaurantMapLongitude,
+  RestaurantViewportIndex,
+  type RestaurantViewportEntry,
+} from "@/utils/restaurant-viewport-index";
 import { FlashList } from "@shopify/flash-list";
 import { AppleMaps, GoogleMaps, type CameraPosition } from "expo-maps";
 import { Stack, router } from "expo-router";
@@ -10,7 +16,6 @@ import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, PanResponder, Platform, Pressable, View, type LayoutChangeEvent } from "react-native";
 
-const MAX_RESTAURANTS_IN_VIEW = 500;
 const CURRENT_AWARD_LOOKBACK_YEARS = 2;
 const DEFAULT_CAMERA: CameraPosition = {
   coordinates: { latitude: 20, longitude: 0 },
@@ -29,124 +34,9 @@ type VisitStatusFilter = "visited" | "unvisited" | "all";
 type QuickAwardFilter = "all" | "1star" | "2star" | "3star" | "bib" | "selected" | "green";
 type ViewMode = "map" | "list";
 
-interface ViewportBounds {
-  minLatitude: number;
-  maxLatitude: number;
-  minLongitude: number;
-  maxLongitude: number;
-  wrapsDateLine: boolean;
-}
-
 type MapRestaurantPoint = MichelinRestaurantRecord & {
   visited: boolean;
 };
-
-function clampLatitude(latitude: number) {
-  return Math.max(-85.05112878, Math.min(85.05112878, latitude));
-}
-
-function normalizeLongitude(longitude: number) {
-  let normalized = ((((longitude + 180) % 360) + 360) % 360) - 180;
-  if (normalized === -180) {
-    normalized = 180;
-  }
-  return normalized;
-}
-
-function mercatorScale(zoom: number) {
-  return 256 * Math.pow(2, Math.max(0, zoom));
-}
-
-function longitudeToPixelX(longitude: number, zoom: number) {
-  const scale = mercatorScale(zoom);
-  return ((normalizeLongitude(longitude) + 180) / 360) * scale;
-}
-
-function latitudeToPixelY(latitude: number, zoom: number) {
-  const scale = mercatorScale(zoom);
-  const clamped = clampLatitude(latitude);
-  const sin = Math.sin((clamped * Math.PI) / 180);
-  const y = 0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI);
-  return y * scale;
-}
-
-function pixelXToLongitude(pixelX: number, zoom: number) {
-  const scale = mercatorScale(zoom);
-  return normalizeLongitude((pixelX / scale) * 360 - 180);
-}
-
-function pixelYToLatitude(pixelY: number, zoom: number) {
-  const scale = mercatorScale(zoom);
-  const n = Math.PI - (2 * Math.PI * pixelY) / scale;
-  return clampLatitude((180 / Math.PI) * Math.atan(Math.sinh(n)));
-}
-
-function getViewportBounds(camera: CameraSnapshot, width: number, height: number): ViewportBounds | null {
-  if (!width || !height) {
-    return null;
-  }
-
-  const zoom = Math.max(0, camera.zoom);
-  const centerX = longitudeToPixelX(camera.longitude, zoom);
-  const centerY = latitudeToPixelY(camera.latitude, zoom);
-  const halfWidth = width / 2;
-  const halfHeight = height / 2;
-  const scale = mercatorScale(zoom);
-
-  const minX = centerX - halfWidth;
-  const maxX = centerX + halfWidth;
-  const minY = centerY - halfHeight;
-  const maxY = centerY + halfHeight;
-
-  const latitudeCoversWholeWorld = height >= scale;
-  const longitudeCoversWholeWorld = width >= scale;
-
-  const minLatitude = latitudeCoversWholeWorld
-    ? -85.05112878
-    : pixelYToLatitude(Math.min(scale, Math.max(0, maxY)), zoom);
-  const maxLatitude = latitudeCoversWholeWorld
-    ? 85.05112878
-    : pixelYToLatitude(Math.min(scale, Math.max(0, minY)), zoom);
-  const minLongitude = longitudeCoversWholeWorld ? -180 : pixelXToLongitude(minX, zoom);
-  const maxLongitude = longitudeCoversWholeWorld ? 180 : pixelXToLongitude(maxX, zoom);
-
-  return {
-    minLatitude: Math.min(minLatitude, maxLatitude),
-    maxLatitude: Math.max(minLatitude, maxLatitude),
-    minLongitude,
-    maxLongitude,
-    wrapsDateLine: !longitudeCoversWholeWorld && minLongitude > maxLongitude,
-  };
-}
-
-function isRestaurantInBounds(restaurant: MichelinRestaurantRecord, bounds: ViewportBounds) {
-  const latitudeInRange = restaurant.latitude >= bounds.minLatitude && restaurant.latitude <= bounds.maxLatitude;
-  if (!latitudeInRange) {
-    return false;
-  }
-
-  if (!bounds.wrapsDateLine) {
-    return restaurant.longitude >= bounds.minLongitude && restaurant.longitude <= bounds.maxLongitude;
-  }
-
-  return restaurant.longitude >= bounds.minLongitude || restaurant.longitude <= bounds.maxLongitude;
-}
-
-function getCenterDistanceScore(restaurant: MichelinRestaurantRecord, camera: CameraSnapshot) {
-  const zoom = Math.max(0, camera.zoom);
-  const scale = mercatorScale(zoom);
-
-  const centerX = longitudeToPixelX(camera.longitude, zoom);
-  const centerY = latitudeToPixelY(camera.latitude, zoom);
-  const restaurantX = longitudeToPixelX(restaurant.longitude, zoom);
-  const restaurantY = latitudeToPixelY(restaurant.latitude, zoom);
-
-  let deltaX = Math.abs(restaurantX - centerX);
-  deltaX = Math.min(deltaX, scale - deltaX);
-  const deltaY = restaurantY - centerY;
-
-  return deltaX * deltaX + deltaY * deltaY;
-}
 
 function awardIncludesBib(award: string) {
   return award.toLowerCase().includes("bib gourmand");
@@ -193,29 +83,6 @@ function awardMatchesQuickFilter(award: string, filter: QuickAwardFilter) {
   }
 }
 
-function getAwardPriority(award: string) {
-  const lower = award.toLowerCase();
-  let score = 0;
-
-  if (lower.includes("3 stars") || lower.includes("3 star")) {
-    score += 300;
-  } else if (lower.includes("2 stars") || lower.includes("2 star")) {
-    score += 200;
-  } else if (lower.includes("1 star")) {
-    score += 100;
-  } else if (lower.includes("bib gourmand")) {
-    score += 60;
-  } else if (lower.includes("selected")) {
-    score += 30;
-  }
-
-  if (lower.includes("green star")) {
-    score += 10;
-  }
-
-  return score;
-}
-
 function getMinimumCurrentAwardYear(referenceDate: Date = new Date()) {
   return referenceDate.getFullYear() - (CURRENT_AWARD_LOOKBACK_YEARS - 1);
 }
@@ -233,8 +100,8 @@ function normalizeCameraEvent(
   const zoom = event.zoom ?? fallback.zoom;
 
   return {
-    latitude: clampLatitude(latitude),
-    longitude: normalizeLongitude(longitude),
+    latitude: clampRestaurantMapLatitude(latitude),
+    longitude: normalizeRestaurantMapLongitude(longitude),
     zoom: Math.max(0, zoom),
   };
 }
@@ -297,28 +164,35 @@ export default function RestaurantsMapScreen() {
     ];
   }, []);
 
-  const filteredRestaurants = useMemo(() => {
-    return michelinRestaurants.filter((restaurant) => {
+  const filteredRestaurantEntries = useMemo(() => {
+    const entries: RestaurantViewportEntry<MichelinRestaurantRecord>[] = [];
+    for (const restaurant of michelinRestaurants) {
       const isVisited = visitedRestaurantIds.has(restaurant.id);
 
       if (visitStatusFilter === "visited" && !isVisited) {
-        return false;
+        continue;
       }
       if (visitStatusFilter === "unvisited" && isVisited) {
-        return false;
+        continue;
       }
 
       if (!hasRecentAwardYear(restaurant.latestAwardYear, minimumCurrentAwardYear)) {
-        return false;
+        continue;
       }
 
       if (!awardMatchesQuickFilter(restaurant.award, quickAwardFilter)) {
-        return false;
+        continue;
       }
 
-      return true;
-    });
+      entries.push({ restaurant, visited: isVisited });
+    }
+    return entries;
   }, [michelinRestaurants, minimumCurrentAwardYear, quickAwardFilter, visitStatusFilter, visitedRestaurantIds]);
+
+  const viewportIndex = useMemo(
+    () => new RestaurantViewportIndex(filteredRestaurantEntries),
+    [filteredRestaurantEntries],
+  );
 
   const mostRecentConfirmedPin = useMemo(() => {
     let latestRestaurant: (typeof confirmedRestaurants)[number] | null = null;
@@ -342,8 +216,8 @@ export default function RestaurantsMapScreen() {
 
     return {
       coordinates: {
-        latitude: clampLatitude(mostRecentConfirmedPin.latitude),
-        longitude: normalizeLongitude(mostRecentConfirmedPin.longitude),
+        latitude: clampRestaurantMapLatitude(mostRecentConfirmedPin.latitude),
+        longitude: normalizeRestaurantMapLongitude(mostRecentConfirmedPin.longitude),
       },
       zoom: INITIAL_RECENT_PIN_ZOOM,
     };
@@ -359,58 +233,14 @@ export default function RestaurantsMapScreen() {
 
   const viewportCamera = hasUserMovedMapCamera ? camera : initialViewportCamera;
 
-  const viewportBounds = useMemo(() => {
-    return getViewportBounds(viewportCamera, mapSize.width, mapSize.height);
-  }, [mapSize.height, mapSize.width, viewportCamera]);
-
-  const { restaurantsInView } = useMemo(() => {
-    if (!viewportBounds) {
-      return {
-        restaurantsInView: [] as MapRestaurantPoint[],
-        totalInView: 0,
-      };
-    }
-
-    const candidates: Array<{ restaurant: MichelinRestaurantRecord; centerDistanceScore: number }> = [];
-    for (const restaurant of filteredRestaurants) {
-      if (isRestaurantInBounds(restaurant, viewportBounds)) {
-        candidates.push({
-          restaurant,
-          centerDistanceScore: getCenterDistanceScore(restaurant, viewportCamera),
-        });
-      }
-    }
-
-    candidates.sort((a, b) => {
-      const distanceDiff = a.centerDistanceScore - b.centerDistanceScore;
-      if (distanceDiff !== 0) {
-        return distanceDiff;
-      }
-
-      const awardPriorityDiff = getAwardPriority(b.restaurant.award) - getAwardPriority(a.restaurant.award);
-      if (awardPriorityDiff !== 0) {
-        return awardPriorityDiff;
-      }
-
-      const visitedDiff =
-        Number(visitedRestaurantIds.has(b.restaurant.id)) - Number(visitedRestaurantIds.has(a.restaurant.id));
-      if (visitedDiff !== 0) {
-        return visitedDiff;
-      }
-
-      return a.restaurant.name.localeCompare(b.restaurant.name);
+  const restaurantsInView = useMemo<MapRestaurantPoint[]>(() => {
+    const selection = viewportIndex.select({
+      camera: viewportCamera,
+      width: mapSize.width,
+      height: mapSize.height,
     });
-
-    const visible = candidates.slice(0, MAX_RESTAURANTS_IN_VIEW).map(({ restaurant }) => ({
-      ...restaurant,
-      visited: visitedRestaurantIds.has(restaurant.id),
-    }));
-
-    return {
-      restaurantsInView: visible,
-      totalInView: candidates.length,
-    };
-  }, [filteredRestaurants, viewportBounds, viewportCamera, visitedRestaurantIds]);
+    return selection.entries.map(({ restaurant, visited }) => ({ ...restaurant, visited }));
+  }, [mapSize.height, mapSize.width, viewportCamera, viewportIndex]);
 
   const handleMapLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -464,6 +294,9 @@ export default function RestaurantsMapScreen() {
   );
 
   const appleMarkers = useMemo<AppleMaps.Marker[]>(() => {
+    if (Platform.OS !== "ios") {
+      return [];
+    }
     return restaurantsInView.map((restaurant) => ({
       id: restaurant.id,
       coordinates: {
@@ -477,6 +310,9 @@ export default function RestaurantsMapScreen() {
   }, [restaurantsInView]);
 
   const googleMarkers = useMemo<GoogleMaps.Marker[]>(() => {
+    if (Platform.OS !== "android") {
+      return [];
+    }
     return restaurantsInView.map((restaurant) => ({
       id: restaurant.id,
       coordinates: {
@@ -490,6 +326,9 @@ export default function RestaurantsMapScreen() {
   }, [restaurantsInView]);
 
   const appleCircles = useMemo<NonNullable<React.ComponentProps<typeof AppleMaps.View>["circles"]>>(() => {
+    if (Platform.OS !== "ios") {
+      return [];
+    }
     return restaurantsInView.map((restaurant) => ({
       id: `circle-${restaurant.id}`,
       center: {
@@ -504,6 +343,9 @@ export default function RestaurantsMapScreen() {
   }, [restaurantsInView]);
 
   const googleCircles = useMemo<NonNullable<React.ComponentProps<typeof GoogleMaps.View>["circles"]>>(() => {
+    if (Platform.OS !== "android") {
+      return [];
+    }
     return restaurantsInView.map((restaurant) => ({
       id: `circle-${restaurant.id}`,
       center: {

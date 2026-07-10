@@ -1,5 +1,23 @@
 import { getDatabase } from "./core";
 import { invalidateRestaurantIndex } from "./michelin-index";
+import {
+  ACTIVE_MICHELIN_CALENDAR_HYDRATION_SQL,
+  ACTIVE_MICHELIN_CALENDAR_NAME_ROWS_SQL,
+  parseMichelinCalendarHydrationRows,
+  selectMichelinCalendarHydrationIds,
+  type MichelinCalendarHydrationRow,
+  type MichelinCalendarNameRow,
+} from "./michelin-calendar-match-core";
+import {
+  buildMichelinProviderSpatialQueryPlans,
+  ensureInvalidatedMichelinProviderSpatialIndex,
+  groupMichelinProviderSpatialCandidates,
+  isValidMichelinProviderSpatialCoordinate,
+  MICHELIN_PROVIDER_SPATIAL_HYDRATION_SQL,
+  type MichelinProviderSpatialCandidate,
+  type MichelinProviderSpatialCandidateRow,
+  type MichelinProviderSpatialInput,
+} from "./michelin-provider-spatial-core";
 import type { MichelinRestaurantRecord } from "./types";
 
 const MICHELIN_DATASET_VERSION_KEY = "michelin_dataset_version";
@@ -101,6 +119,141 @@ export async function getAllMichelinRestaurants(): Promise<MichelinRestaurantRec
      )`,
     [MICHELIN_DATASET_VERSION_KEY, MICHELIN_DATASET_VERSION_KEY],
   );
+}
+
+/**
+ * Loads only the guide rows that can satisfy located provider matching. Every
+ * candidate query and the unique-ID hydration share one dedicated deferred
+ * read snapshot so a concurrent guide refresh cannot mix dataset versions.
+ */
+export interface MichelinProviderSpatialSelection<Value> {
+  readonly restaurantId: string;
+  readonly value: Value;
+}
+
+export interface MichelinProviderHydratedSelection<Value> {
+  readonly restaurant: MichelinRestaurantRecord;
+  readonly value: Value;
+}
+
+export async function selectMichelinProviderSpatialCandidates<Value>(
+  inputs: readonly MichelinProviderSpatialInput[],
+  select: (
+    candidates: readonly MichelinProviderSpatialCandidate[],
+    inputIndex: number,
+  ) => MichelinProviderSpatialSelection<Value> | null,
+): Promise<Array<MichelinProviderHydratedSelection<Value> | null>> {
+  const output = Array.from({ length: inputs.length }, () => null as MichelinProviderHydratedSelection<Value> | null);
+  const validInputs: MichelinProviderSpatialInput[] = [];
+  const originalIndices: number[] = [];
+  for (let index = 0; index < inputs.length; index++) {
+    const input = inputs[index]!;
+    if (!isValidMichelinProviderSpatialCoordinate(input.latitude, input.longitude)) {
+      continue;
+    }
+    validInputs.push(input);
+    originalIndices.push(index);
+  }
+  if (validInputs.length === 0) {
+    return output;
+  }
+
+  const database = await getDatabase();
+  await ensureInvalidatedMichelinProviderSpatialIndex(database);
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const candidateRows: MichelinProviderSpatialCandidateRow[] = [];
+    for (const plan of buildMichelinProviderSpatialQueryPlans(validInputs)) {
+      candidateRows.push(
+        ...(await transaction.getAllAsync<MichelinProviderSpatialCandidateRow>(plan.sql, [...plan.parameters])),
+      );
+    }
+    const lightweightGroups = groupMichelinProviderSpatialCandidates(candidateRows, validInputs.length);
+    const selections = lightweightGroups.map((group, validIndex) => {
+      const selection = select(group, originalIndices[validIndex]!);
+      if (selection && !group.some(({ id }) => id === selection.restaurantId)) {
+        throw new Error(`Provider Michelin selector returned id ${selection.restaurantId} outside its candidate group`);
+      }
+      return selection;
+    });
+    const selectedIds = [...new Set(selections.flatMap((selection) => (selection ? [selection.restaurantId] : [])))];
+    if (selectedIds.length === 0) {
+      return;
+    }
+
+    const hydrated = await transaction.getAllAsync<MichelinRestaurantRecord>(MICHELIN_PROVIDER_SPATIAL_HYDRATION_SQL, [
+      JSON.stringify(selectedIds),
+      MICHELIN_DATASET_VERSION_KEY,
+      MICHELIN_DATASET_VERSION_KEY,
+    ]);
+    if (hydrated.length !== selectedIds.length) {
+      throw new Error(
+        `Provider Michelin hydration returned ${hydrated.length} of ${selectedIds.length} selected guide rows`,
+      );
+    }
+    const hydratedById = new Map(hydrated.map((restaurant) => [restaurant.id, restaurant]));
+    for (let validIndex = 0; validIndex < selections.length; validIndex++) {
+      const selection = selections[validIndex];
+      if (!selection) {
+        continue;
+      }
+      const restaurant = hydratedById.get(selection.restaurantId);
+      if (!restaurant) {
+        throw new Error(`Provider Michelin hydration omitted selected id ${selection.restaurantId}`);
+      }
+      output[originalIndices[validIndex]!] = { restaurant, value: selection.value };
+    }
+  });
+  return output;
+}
+
+/**
+ * Loads only active guide restaurants that can match one of the supplied
+ * normalized Calendar names. The name scan and selective hydration share one
+ * dedicated SQLite read transaction, so a concurrent guide refresh cannot mix
+ * rows from different dataset snapshots.
+ */
+export async function getMichelinRestaurantsForCalendarNormalizedNames(
+  requestedNormalizedNames: ReadonlySet<string>,
+  normalizeRestaurantName: (name: string) => string,
+): Promise<MichelinRestaurantRecord[]> {
+  if (requestedNormalizedNames.size === 0) {
+    return [];
+  }
+
+  const database = await getDatabase();
+  let restaurants: MichelinRestaurantRecord[] = [];
+
+  // Expo 57's dedicated transaction implementation issues a deferred `BEGIN`,
+  // not BEGIN IMMEDIATE/EXCLUSIVE. This SELECT-only callback therefore reserves
+  // no WAL writer; keep it short because its read snapshot can retain WAL frames
+  // until name normalization and selective hydration finish.
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    const nameRows = await transaction.getAllAsync<MichelinCalendarNameRow>(ACTIVE_MICHELIN_CALENDAR_NAME_ROWS_SQL, [
+      MICHELIN_DATASET_VERSION_KEY,
+      MICHELIN_DATASET_VERSION_KEY,
+    ]);
+    const hydrationIds = selectMichelinCalendarHydrationIds(
+      nameRows,
+      requestedNormalizedNames,
+      normalizeRestaurantName,
+    );
+    if (hydrationIds.length === 0) {
+      return;
+    }
+
+    const hydratedRows = await transaction.getAllAsync<MichelinCalendarHydrationRow>(
+      ACTIVE_MICHELIN_CALENDAR_HYDRATION_SQL,
+      [JSON.stringify(hydrationIds), MICHELIN_DATASET_VERSION_KEY, MICHELIN_DATASET_VERSION_KEY],
+    );
+    if (hydratedRows.length !== hydrationIds.length) {
+      throw new Error(
+        `Calendar Michelin hydration returned ${hydratedRows.length} of ${hydrationIds.length} active guide rows`,
+      );
+    }
+    restaurants = parseMichelinCalendarHydrationRows(hydratedRows);
+  });
+
+  return restaurants;
 }
 
 /**

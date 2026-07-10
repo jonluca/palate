@@ -1,5 +1,17 @@
 import { getDatabase } from "./core";
 import { calculateDistanceMeters } from "@/data/restaurants";
+import {
+  buildCalendarEventPersistenceStatement,
+  buildCalendarExportPersistenceStatement,
+  CALENDAR_PERSISTENCE_BATCH_SIZE,
+  coalesceCalendarEventUpdates,
+  coalesceCalendarExportUpdates,
+  type CalendarExportUpdate,
+} from "./calendar-persistence-core";
+import {
+  CALENDAR_EXPORTED_EVENT_CLEAR_BATCH_SIZE,
+  planCalendarExportClearStatements,
+} from "../calendar-batch-mutation-core";
 import type {
   CalendarEventUpdate,
   ConfirmedVisitForCalendarFilter,
@@ -81,25 +93,24 @@ export async function batchUpdateVisitsCalendarEvents(updates: CalendarEventUpda
   }
 
   const database = await getDatabase();
+  const coalescedUpdates = coalesceCalendarEventUpdates(updates);
 
-  // Update each visit individually since each has different calendar data
   await database.withExclusiveTransactionAsync(async (tx) => {
-    for (const update of updates) {
-      await tx.runAsync(
-        `UPDATE visits SET 
-          calendarEventId = ?, 
-          calendarEventTitle = ?, 
-          calendarEventLocation = ?, 
-          calendarEventIsAllDay = ? 
-        WHERE id = ?`,
-        [
-          update.calendarEventId,
-          update.calendarEventTitle,
-          update.calendarEventLocation,
-          update.calendarEventIsAllDay ? 1 : 0,
-          update.visitId,
-        ],
-      );
+    let reusableFullBatchStatement: Awaited<ReturnType<typeof tx.prepareAsync>> | null = null;
+    try {
+      for (let offset = 0; offset < coalescedUpdates.length; offset += CALENDAR_PERSISTENCE_BATCH_SIZE) {
+        const batch = coalescedUpdates.slice(offset, offset + CALENDAR_PERSISTENCE_BATCH_SIZE);
+        const statement = buildCalendarEventPersistenceStatement(batch);
+        if (batch.length === CALENDAR_PERSISTENCE_BATCH_SIZE) {
+          await (reusableFullBatchStatement ??= await tx.prepareAsync(statement.sql)).executeAsync(
+            statement.parameters,
+          );
+        } else {
+          await tx.runAsync(statement.sql, statement.parameters);
+        }
+      }
+    } finally {
+      await reusableFullBatchStatement?.finalizeAsync();
     }
   });
 }
@@ -1252,58 +1263,55 @@ export async function clearExportedCalendarEvents(visitIds: string[]): Promise<v
 
   const database = await getDatabase();
   const now = Date.now();
-  const placeholders = visitIds.map(() => "?").join(", ");
+  const statements = planCalendarExportClearStatements(visitIds, now);
 
-  await database.runAsync(
-    `UPDATE visits 
-     SET calendarEventId = NULL, 
-         calendarEventTitle = NULL, 
-         exportedToCalendarId = NULL, 
-         updatedAt = ? 
-     WHERE id IN (${placeholders})`,
-    [now, ...visitIds],
-  );
+  await database.withExclusiveTransactionAsync(async (tx) => {
+    let reusableFullBatchStatement: Awaited<ReturnType<typeof tx.prepareAsync>> | null = null;
+    try {
+      for (const statement of statements) {
+        if (statement.visitCount === CALENDAR_EXPORTED_EVENT_CLEAR_BATCH_SIZE) {
+          await (reusableFullBatchStatement ??= await tx.prepareAsync(statement.sql)).executeAsync(
+            statement.parameters,
+          );
+        } else {
+          await tx.runAsync(statement.sql, statement.parameters);
+        }
+      }
+    } finally {
+      await reusableFullBatchStatement?.finalizeAsync();
+    }
+  });
 }
 
 /**
  * Batch update visits with calendar event information.
  * When exportedToCalendarId is provided, it indicates we created this event (vs imported).
  */
-export async function batchUpdateVisitCalendarEvents(
-  updates: Array<{
-    visitId: string;
-    calendarEventId: string;
-    calendarEventTitle: string;
-    exportedToCalendarId?: string;
-  }>,
-): Promise<void> {
+export async function batchUpdateVisitCalendarEvents(updates: CalendarExportUpdate[]): Promise<void> {
   if (updates.length === 0) {
     return;
   }
 
   const database = await getDatabase();
   const now = Date.now();
+  const coalescedUpdates = coalesceCalendarExportUpdates(updates);
 
-  // Use a transaction for batch updates
   await database.withExclusiveTransactionAsync(async (tx) => {
-    for (const update of updates) {
-      if (update.exportedToCalendarId) {
-        // We created this event - track which calendar it's in
-        await tx.runAsync(
-          `UPDATE visits 
-           SET calendarEventId = ?, calendarEventTitle = ?, exportedToCalendarId = ?, updatedAt = ? 
-           WHERE id = ?`,
-          [update.calendarEventId, update.calendarEventTitle, update.exportedToCalendarId, now, update.visitId],
-        );
-      } else {
-        // Imported event - don't set exportedToCalendarId
-        await tx.runAsync(
-          `UPDATE visits 
-           SET calendarEventId = ?, calendarEventTitle = ?, updatedAt = ? 
-           WHERE id = ?`,
-          [update.calendarEventId, update.calendarEventTitle, now, update.visitId],
-        );
+    let reusableFullBatchStatement: Awaited<ReturnType<typeof tx.prepareAsync>> | null = null;
+    try {
+      for (let offset = 0; offset < coalescedUpdates.length; offset += CALENDAR_PERSISTENCE_BATCH_SIZE) {
+        const batch = coalescedUpdates.slice(offset, offset + CALENDAR_PERSISTENCE_BATCH_SIZE);
+        const statement = buildCalendarExportPersistenceStatement(batch, now);
+        if (batch.length === CALENDAR_PERSISTENCE_BATCH_SIZE) {
+          await (reusableFullBatchStatement ??= await tx.prepareAsync(statement.sql)).executeAsync(
+            statement.parameters,
+          );
+        } else {
+          await tx.runAsync(statement.sql, statement.parameters);
+        }
       }
+    } finally {
+      await reusableFullBatchStatement?.finalizeAsync();
     }
   });
 }

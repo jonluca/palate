@@ -3,12 +3,21 @@ import { deburr } from "lodash-es";
 import { memoize } from "../utils/memoize";
 import { getSelectedCalendarIds } from "@/store";
 import {
+  batchCreateExportEvents as batchCreateExportEventsNatively,
+  batchDeleteEvents as batchDeleteEventsNatively,
+  executeCalendarCreateMutations,
+  executeCalendarDeleteMutations,
   getEvents as getNativeCalendarEvents,
+  isCalendarBatchCreateAvailable,
+  isCalendarBatchDeleteAvailable,
   isCalendarMatchingAvailable,
   matchVisits as matchNativeCalendarVisits,
   type CalendarVisit as NativeCalendarVisit,
   type CalendarVisitMatch as NativeCalendarVisitMatch,
 } from "@/modules/calendar-matching";
+import type { VisitForCalendarExport } from "@/utils/db/types";
+
+export type { VisitForCalendarExport } from "@/utils/db/types";
 
 /** Syncable calendar info for selection UI */
 export interface SyncableCalendar {
@@ -861,118 +870,56 @@ export async function getWritableCalendars(): Promise<WritableCalendar[]> {
   }
 }
 
-interface CreateCalendarEventParams {
-  calendarId: string;
-  title: string;
-  startDate: Date;
-  endDate: Date;
-  location?: string | null;
-  notes?: string | null;
-}
-
-// App identifier for calendar events we create - allows us to identify and delete them later
-const PHOTO_FOODIE_EVENT_IDENTIFIER = "[Palate Export]";
-
-/** Build notes field with app identifier for tracking */
-function buildExportNotes(visitId: string, userNotes: string | null): string {
-  const identifier = `${PHOTO_FOODIE_EVENT_IDENTIFIER} Visit ID: ${visitId}`;
-  if (userNotes) {
-    return `${userNotes}\n\n${identifier}`;
-  }
-  return identifier;
-}
-
-/** Create a calendar event and return its ID */
-async function createCalendarEvent(params: CreateCalendarEventParams): Promise<string | null> {
-  if (!(await hasCalendarPermission())) {
-    return null;
-  }
-
-  try {
-    const eventId = await Calendar.createEventAsync(params.calendarId, {
-      title: params.title,
-      startDate: params.startDate,
-      endDate: params.endDate,
-      location: params.location ?? undefined,
-      notes: params.notes ?? undefined,
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    });
-
-    return eventId;
-  } catch (error) {
-    console.warn("Failed to create calendar event:", error);
-    return null;
-  }
-}
-
-export interface VisitForCalendarExport {
-  id: string;
-  restaurantName: string;
-  startTime: number;
-  endTime: number;
-  address: string | null;
-  notes: string | null;
+export interface CreatedCalendarEventResult {
+  inputIndex: number;
+  visitId: string;
+  eventId: string;
 }
 
 /** Batch create calendar events for multiple visits */
 export async function batchCreateCalendarEvents(
-  visits: VisitForCalendarExport[],
+  visits: readonly VisitForCalendarExport[],
   calendarId: string,
-): Promise<{ created: number; failed: number; eventIds: Map<string, string> }> {
-  const results = {
-    created: 0,
-    failed: 0,
-    eventIds: new Map<string, string>(),
+): Promise<{ created: number; failed: number; createdEvents: CreatedCalendarEventResult[] }> {
+  const execution = await executeCalendarCreateMutations(visits, calendarId, {
+    invokeNative: isCalendarBatchCreateAvailable()
+      ? (nativeCalendarId, timeZone, requests) => batchCreateExportEventsNatively(nativeCalendarId, timeZone, requests)
+      : undefined,
+    hasCalendarPermission,
+    getTimeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
+    createWithExpo: (expoCalendarId, timeZone, request) =>
+      Calendar.createEventAsync(expoCalendarId, {
+        title: request.title,
+        startDate: new Date(request.startMs),
+        endDate: new Date(request.endMs),
+        location: request.location ?? undefined,
+        notes: request.notes,
+        timeZone,
+      }),
+    onExpoError: (error) => console.warn("Failed to create calendar event:", error),
+  });
+
+  return {
+    created: execution.createdItems.length,
+    failed: execution.failedInputIndices.length,
+    createdEvents: execution.createdItems,
   };
-
-  for (const visit of visits) {
-    const eventId = await createCalendarEvent({
-      calendarId,
-      title: `${visit.restaurantName}`,
-      startDate: new Date(visit.startTime),
-      endDate: new Date(visit.endTime),
-      location: visit.address,
-      notes: buildExportNotes(visit.id, visit.notes),
-    });
-
-    if (eventId) {
-      results.created++;
-      results.eventIds.set(visit.id, eventId);
-    } else {
-      results.failed++;
-    }
-  }
-
-  return results;
-}
-
-/** Delete a calendar event by ID */
-async function deleteCalendarEvent(eventId: string): Promise<boolean> {
-  if (!(await hasCalendarPermission())) {
-    return false;
-  }
-
-  try {
-    await Calendar.deleteEventAsync(eventId);
-    return true;
-  } catch (error) {
-    console.warn("Failed to delete calendar event:", error);
-    return false;
-  }
 }
 
 /** Batch delete calendar events and return results */
-export async function batchDeleteCalendarEvents(eventIds: string[]): Promise<{ deleted: number; failed: number }> {
-  const results = { deleted: 0, failed: 0 };
+export async function batchDeleteCalendarEvents(
+  eventIds: readonly string[],
+): Promise<{ deleted: number; failed: number; successfulInputIndices: number[] }> {
+  const execution = await executeCalendarDeleteMutations(eventIds, {
+    invokeNative: isCalendarBatchDeleteAvailable() ? (requests) => batchDeleteEventsNatively(requests) : undefined,
+    hasCalendarPermission,
+    deleteWithExpo: (request) => Calendar.deleteEventAsync(request.eventId),
+    onExpoError: (error) => console.warn("Failed to delete calendar event:", error),
+  });
 
-  for (const eventId of eventIds) {
-    const success = await deleteCalendarEvent(eventId);
-    if (success) {
-      results.deleted++;
-    } else {
-      results.failed++;
-    }
-  }
-
-  return results;
+  return {
+    deleted: execution.successfulInputIndices.length,
+    failed: execution.failedInputIndices.length,
+    successfulInputIndices: execution.successfulInputIndices,
+  };
 }

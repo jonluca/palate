@@ -1,6 +1,12 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
+import {
+  buildFoodReclassificationBatches,
+  buildFoodReclassificationStatement,
+  FOOD_RECLASSIFICATION_BATCH_SIZE,
+  type FoodReclassificationSource,
+} from "./food-reclassification-core";
 import { syncAllVisitsFoodProbable } from "./visits";
-import type { FoodKeywordRecord, FoodLabel, ReclassifyProgress } from "./types";
+import type { FoodKeywordRecord, ReclassifyProgress } from "./types";
 
 // ============================================================================
 // FOOD KEYWORDS OPERATIONS
@@ -31,8 +37,10 @@ export async function getAllFoodKeywords(): Promise<FoodKeywordRecord[]> {
 /**
  * Get only enabled food keywords (for classification)
  */
-export async function getEnabledFoodKeywords(): Promise<string[]> {
-  const database = await getDatabase();
+export async function getEnabledFoodKeywords(
+  databaseOverride?: Awaited<ReturnType<typeof getDatabase>>,
+): Promise<string[]> {
+  const database = databaseOverride ?? (await getDatabase());
   const rows = await database.getAllAsync<{ keyword: string }>(
     `SELECT keyword FROM food_keywords WHERE enabled = 1 ORDER BY keyword ASC`,
   );
@@ -105,10 +113,12 @@ export async function resetFoodKeywordsToDefaults(): Promise<void> {
 /**
  * Get photos that have allLabels stored (for reclassification)
  */
-async function getPhotosWithAllLabels(): Promise<Array<{ id: string; visitId: string | null; allLabels: string }>> {
-  const database = await getDatabase();
-  return database.getAllAsync<{ id: string; visitId: string | null; allLabels: string }>(
-    `SELECT id, visitId, allLabels FROM photos WHERE allLabels IS NOT NULL`,
+async function getPhotosWithAllLabels(
+  databaseOverride?: Awaited<ReturnType<typeof getDatabase>>,
+): Promise<FoodReclassificationSource[]> {
+  const database = databaseOverride ?? (await getDatabase());
+  return database.getAllAsync<FoodReclassificationSource>(
+    `SELECT id AS photoId, allLabels AS allLabelsJson FROM photos WHERE allLabels IS NOT NULL`,
   );
 }
 
@@ -136,87 +146,51 @@ export async function reclassifyPhotosWithCurrentKeywords(
   const database = await getDatabase();
   const start = DEBUG_TIMING ? performance.now() : 0;
 
-  // Get enabled keywords as a Set for fast lookup
-  const enabledKeywords = new Set(await getEnabledFoodKeywords());
-
-  // Get all photos that have allLabels stored
-  const photosToProcess = await getPhotosWithAllLabels();
-
   const progress: ReclassifyProgress = {
-    total: photosToProcess.length,
+    total: 0,
     processed: 0,
     updated: 0,
     isComplete: false,
   };
 
-  if (photosToProcess.length === 0) {
-    progress.isComplete = true;
-    onProgress?.(progress);
-    return progress;
-  }
-
-  onProgress?.(progress);
-
-  const BATCH_SIZE = 500;
-  const updates: Array<{
-    photoId: string;
-    foodDetected: boolean;
-    foodLabels: FoodLabel[];
-    foodConfidence: number | null;
-  }> = [];
-
-  for (let i = 0; i < photosToProcess.length; i++) {
-    const photo = photosToProcess[i];
-
-    let allLabels: FoodLabel[];
-    try {
-      allLabels = JSON.parse(photo.allLabels) as FoodLabel[];
-    } catch {
-      continue; // Skip malformed JSON
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    // Keep the keyword and photo reads on the transaction connection so every
+    // write is derived from one consistent database snapshot.
+    const enabledKeywords = new Set(await getEnabledFoodKeywords(transaction));
+    const photosToProcess = await getPhotosWithAllLabels(transaction);
+    progress.total = photosToProcess.length;
+    if (photosToProcess.length === 0) {
+      return;
     }
 
-    // Filter labels that match enabled keywords
-    const matchedLabels = allLabels.filter((label) => {
-      const lowerLabel = label.label.trim().toLowerCase();
-      return enabledKeywords.has(lowerLabel);
-    });
-
-    const foodDetected = matchedLabels.length > 0;
-    const foodConfidence = matchedLabels.length > 0 ? Math.max(...matchedLabels.map((l) => l.confidence)) : null;
-
-    updates.push({
-      photoId: photo.id,
-      foodDetected,
-      foodLabels: matchedLabels,
-      foodConfidence,
-    });
-
-    progress.processed = i + 1;
-
-    // Process in batches
-    if (updates.length >= BATCH_SIZE || i === photosToProcess.length - 1) {
-      // Update photos in database
-      for (const update of updates) {
-        await database.runAsync(`UPDATE photos SET foodDetected = ?, foodLabels = ?, foodConfidence = ? WHERE id = ?`, [
-          update.foodDetected ? 1 : 0,
-          update.foodLabels.length > 0 ? JSON.stringify(update.foodLabels) : null,
-          update.foodConfidence,
-          update.photoId,
-        ]);
+    onProgress?.({ ...progress });
+    let reusableFullBatchStatement: Awaited<ReturnType<typeof transaction.prepareAsync>> | null = null;
+    try {
+      for (const batch of buildFoodReclassificationBatches(photosToProcess, enabledKeywords)) {
+        const statement = buildFoodReclassificationStatement(batch.updates);
+        const result =
+          batch.updates.length === FOOD_RECLASSIFICATION_BATCH_SIZE
+            ? await (reusableFullBatchStatement ??= await transaction.prepareAsync(statement.sql)).executeAsync(
+                statement.parameters,
+              )
+            : await transaction.runAsync(statement.sql, statement.parameters);
+        progress.processed = batch.processed;
+        progress.updated += result.changes;
+        onProgress?.({ ...progress });
       }
 
-      progress.updated += updates.length;
-      updates.length = 0; // Clear the array
-
-      onProgress?.(progress);
+      // Malformed rows are counted as processed even though they intentionally
+      // keep their previous classification. The batch generator still yields a
+      // partial valid batch when the final source row is malformed.
+      progress.processed = photosToProcess.length;
+      await syncAllVisitsFoodProbable(transaction);
+    } finally {
+      await reusableFullBatchStatement?.finalizeAsync();
     }
-  }
-
-  // Update visit food probable flags
-  await syncAllVisitsFoodProbable();
+  });
 
   progress.isComplete = true;
-  onProgress?.(progress);
+  onProgress?.({ ...progress });
 
   if (DEBUG_TIMING) {
     console.log(

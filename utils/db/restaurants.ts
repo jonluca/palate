@@ -2,8 +2,10 @@ import { DEBUG_TIMING, getDatabase } from "./core";
 import { getMichelinRestaurantById } from "./michelin";
 import type { RestaurantRecord, RestaurantWithVisits, UpdateRestaurantData } from "./types";
 
-export async function getAllRestaurants(): Promise<RestaurantRecord[]> {
-  const database = await getDatabase();
+export async function getAllRestaurants(
+  databaseOverride?: Awaited<ReturnType<typeof getDatabase>>,
+): Promise<RestaurantRecord[]> {
+  const database = databaseOverride ?? (await getDatabase());
   return database.getAllAsync<RestaurantRecord>(`SELECT * FROM restaurants`);
 }
 
