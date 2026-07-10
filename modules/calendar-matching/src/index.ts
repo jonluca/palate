@@ -1,5 +1,10 @@
 import { requireOptionalNativeModule } from "expo";
 import { Platform } from "react-native";
+import type {
+  NativeCalendarDeleteEventMutationRequest,
+  NativeCalendarExportEventMutationRequest,
+  NativeCalendarMutationResult,
+} from "../../../utils/calendar-batch-mutation-core";
 
 export interface CalendarEvent {
   id: string;
@@ -30,12 +35,20 @@ export interface CalendarVisitMatch extends CalendarEvent {
 }
 
 interface NativeCalendarMatchingModule {
+  readonly calendarQueryStrategy?: string;
+  readonly calendarQueryGapDays?: number;
   getEvents(startMs: number, endMs: number, selectedCalendarIds: string[] | null): Promise<CalendarEvent[]>;
   matchVisits(
     visits: CalendarVisit[],
     selectedCalendarIds: string[] | null,
     bufferMinutes: number,
   ): Promise<CalendarVisitMatch[]>;
+  batchCreateExportEvents?: (
+    calendarId: string,
+    timeZone: string,
+    requests: NativeCalendarExportEventMutationRequest[],
+  ) => Promise<NativeCalendarMutationResult[]>;
+  batchDeleteEvents?: (requests: NativeCalendarDeleteEventMutationRequest[]) => Promise<NativeCalendarMutationResult[]>;
 }
 
 const CalendarMatchingModule =
@@ -63,6 +76,44 @@ function copySelectedCalendarIds(selectedCalendarIds: readonly string[] | null):
 /** Whether this binary contains the Apple-native calendar matching module. */
 export function isCalendarMatchingAvailable(): boolean {
   return CalendarMatchingModule !== null;
+}
+
+/** Whether this binary contains the native EventKit batch-create method. */
+export function isCalendarBatchCreateAvailable(): boolean {
+  return typeof CalendarMatchingModule?.batchCreateExportEvents === "function";
+}
+
+/** Whether this binary contains the native EventKit batch-delete method. */
+export function isCalendarBatchDeleteAvailable(): boolean {
+  return typeof CalendarMatchingModule?.batchDeleteEvents === "function";
+}
+
+/** Invoke native batch creation. Call only after checking its independent capability. */
+export async function batchCreateExportEvents(
+  calendarId: string,
+  timeZone: string,
+  requests: readonly NativeCalendarExportEventMutationRequest[],
+): Promise<NativeCalendarMutationResult[]> {
+  const module = CalendarMatchingModule;
+  if (typeof module?.batchCreateExportEvents !== "function") {
+    throw new Error("Native calendar batch creation is unavailable on this platform or binary.");
+  }
+  return module.batchCreateExportEvents(
+    calendarId,
+    timeZone,
+    requests.map((request) => ({ ...request })),
+  );
+}
+
+/** Invoke native batch deletion. Call only after checking its independent capability. */
+export async function batchDeleteEvents(
+  requests: readonly NativeCalendarDeleteEventMutationRequest[],
+): Promise<NativeCalendarMutationResult[]> {
+  const module = CalendarMatchingModule;
+  if (typeof module?.batchDeleteEvents !== "function") {
+    throw new Error("Native calendar batch deletion is unavailable on this platform or binary.");
+  }
+  return module.batchDeleteEvents(requests.map((request) => ({ ...request })));
 }
 
 /**

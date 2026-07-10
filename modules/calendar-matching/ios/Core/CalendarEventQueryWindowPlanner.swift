@@ -9,17 +9,22 @@ internal enum CalendarMatchingTimestamp {
   }
 }
 
-internal struct CalendarEventQueryWindow: Equatable, Sendable {
-  let startDateMs: Double
-  let endDateMs: Double
+public struct CalendarEventQueryWindow: Equatable, Sendable {
+  public let startDateMs: Double
+  public let endDateMs: Double
+
+  public init(startDateMs: Double, endDateMs: Double) {
+    self.startDateMs = startDateMs
+    self.endDateMs = endDateMs
+  }
 }
 
 /// EventKit silently truncates predicates longer than four years to their first four years.
 /// Fixed three-year windows stay safely below that limit, including across leap years.
-internal enum CalendarEventQueryWindowPlanner {
-  static let maximumWindowMilliseconds = 3 * 365 * 24 * 60 * 60 * 1_000.0
+public enum CalendarEventQueryWindowPlanner {
+  public static let maximumWindowMilliseconds = 3 * 365 * 24 * 60 * 60 * 1_000.0
 
-  static func windows(startDateMs: Double, endDateMs: Double) -> [CalendarEventQueryWindow] {
+  public static func windows(startDateMs: Double, endDateMs: Double) -> [CalendarEventQueryWindow] {
     precondition(
       CalendarMatchingTimestamp.isSupported(startDateMs)
         && CalendarMatchingTimestamp.isSupported(endDateMs)

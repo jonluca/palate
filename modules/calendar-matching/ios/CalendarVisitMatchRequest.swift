@@ -40,4 +40,22 @@ struct CalendarVisitMatchRequest {
     self.searchStartMs = searchStartMs
     self.searchEndMs = searchEndMs
   }
+
+  func eventQueryWindows(
+    configuration: CalendarMatchingRuntimeConfiguration
+  ) throws -> [CalendarEventQueryWindow] {
+    switch configuration.queryStrategy {
+    case .broad:
+      return CalendarEventQueryWindowPlanner.windows(
+        startDateMs: searchStartMs,
+        endDateMs: searchEndMs
+      )
+    case .sparse:
+      return try CalendarVisitEventQueryWindowPlanner.windows(
+        visits: visits,
+        bufferMilliseconds: bufferMilliseconds,
+        coalescingGapMilliseconds: configuration.sparseCoalescingGapMilliseconds
+      )
+    }
+  }
 }

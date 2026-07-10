@@ -21,6 +21,39 @@ final class CalendarEventStore {
     else {
       throw CalendarMatchingModuleError.invalidDateRange(startMs: startMs, endMs: endMs)
     }
+    return try events(
+      windows: CalendarEventQueryWindowPlanner.windows(
+        startDateMs: startMs,
+        endDateMs: endMs
+      ),
+      selectedCalendarIds: selectedCalendarIds
+    )
+  }
+
+  func events(
+    windows: [CalendarEventQueryWindow],
+    selectedCalendarIds: [String]?
+  ) throws -> [CalendarEventRecord] {
+    guard
+      windows.allSatisfy({ window in
+        CalendarMatchingTimestamp.isSupported(window.startDateMs)
+          && CalendarMatchingTimestamp.isSupported(window.endDateMs)
+          && window.endDateMs >= window.startDateMs
+      })
+    else {
+      let invalidWindow = windows.first { window in
+        !CalendarMatchingTimestamp.isSupported(window.startDateMs)
+          || !CalendarMatchingTimestamp.isSupported(window.endDateMs)
+          || window.endDateMs < window.startDateMs
+      }
+      throw CalendarMatchingModuleError.invalidDateRange(
+        startMs: invalidWindow?.startDateMs ?? .nan,
+        endMs: invalidWindow?.endDateMs ?? .nan
+      )
+    }
+    guard !windows.isEmpty else {
+      return []
+    }
     try requireCalendarReadAccess()
 
     let calendars = selectedCalendars(selectedCalendarIds)
@@ -29,13 +62,9 @@ final class CalendarEventStore {
     }
 
     var seenEvents: Set<EventIdentity> = []
-    var indexedRecords: [(record: CalendarEventRecord, originalIndex: Int)] = []
-    var originalIndex = 0
+    var records: [CalendarEventRecord] = []
 
-    for window in CalendarEventQueryWindowPlanner.windows(
-      startDateMs: startMs,
-      endDateMs: endMs
-    ) {
+    for window in windows {
       let predicate = eventStore.predicateForEvents(
         withStart: Date(timeIntervalSince1970: window.startDateMs / 1_000),
         end: Date(timeIntervalSince1970: window.endDateMs / 1_000),
@@ -43,7 +72,6 @@ final class CalendarEventStore {
       )
 
       for event in eventStore.events(matching: predicate) {
-        defer { originalIndex += 1 }
         guard let record = CalendarEventRecord.initIfEligible(event: event) else {
           continue
         }
@@ -55,22 +83,21 @@ final class CalendarEventStore {
         guard seenEvents.insert(identity).inserted else {
           continue
         }
-        indexedRecords.append((record, originalIndex))
+        records.append(record)
       }
     }
 
     return
-      indexedRecords
+      records
       .sorted { lhs, rhs in
-        if lhs.record.startDate != rhs.record.startDate {
-          return lhs.record.startDate < rhs.record.startDate
+        if lhs.startDate != rhs.startDate {
+          return lhs.startDate < rhs.startDate
         }
-        if lhs.record.endDate != rhs.record.endDate {
-          return lhs.record.endDate < rhs.record.endDate
+        if lhs.endDate != rhs.endDate {
+          return lhs.endDate < rhs.endDate
         }
-        return lhs.originalIndex < rhs.originalIndex
+        return lhs.id < rhs.id
       }
-      .map(\.record)
   }
 
   private func requireCalendarReadAccess() throws {

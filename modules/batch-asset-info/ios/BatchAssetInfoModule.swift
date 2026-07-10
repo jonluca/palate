@@ -2,18 +2,36 @@ import ExpoModulesCore
 import Photos
 
 public class BatchAssetInfoModule: Module {
-  private let processingQueue = DispatchQueue(label: "com.batchassetinfo.processing", qos: .userInitiated, attributes: .concurrent)
-  private let assetInfoQueue = DispatchQueue(label: "com.batchassetinfo.metadata", qos: .userInitiated)
+  private static let visionClassificationStrategyEnvironmentKey =
+    "PALATE_VISION_CLASSIFICATION_STRATEGY"
+  private let processingQueue = DispatchQueue(
+    label: "com.batchassetinfo.processing", qos: .userInitiated, attributes: .concurrent)
+  private let assetInfoQueue = DispatchQueue(
+    label: "com.batchassetinfo.metadata", qos: .userInitiated)
   private let imageClassifier = PhotoAssetClassifier()
+  private let classificationLifecycle = PhotoAssetClassificationLifecycleGate()
   private var assetScanSessions: [String: PhotoAssetScanSession] = [:]
 
-  private let classificationQueue: OperationQueue = {
-    let queue = OperationQueue()
-    queue.name = "com.batchassetinfo.classification"
-    queue.qualityOfService = .userInitiated
-    queue.maxConcurrentOperationCount = PhotoAssetClassifier.recommendedConcurrency
-    return queue
-  }()
+  private let classificationResources:
+    (
+      configuration: PhotoAssetClassificationRuntimeConfiguration,
+      queue: OperationQueue,
+      pipeline: PhotoAssetClassificationPipeline
+    ) = {
+      let configuration = PhotoAssetClassificationRuntimeConfiguration.resolve()
+      let queue = OperationQueue()
+      queue.name = "com.batchassetinfo.classification"
+      queue.qualityOfService = .userInitiated
+      queue.maxConcurrentOperationCount = configuration.visionConcurrency
+      return (
+        configuration,
+        queue,
+        PhotoAssetClassificationPipeline(
+          maximumInFlight: configuration.pipelineMaximumInFlight,
+          visionQueue: queue
+        )
+      )
+    }()
 
   public func definition() -> ModuleDefinition {
     Name("BatchAssetInfo")
@@ -22,7 +40,14 @@ public class BatchAssetInfoModule: Module {
       true
     }
 
+    Constant("visionResultPageSize") {
+      PhotoAssetClassificationRuntimeConfiguration.resolve().resultPageSize
+    }
+
     OnDestroy {
+      self.classificationLifecycle.destroy()
+      self.classificationResources.pipeline.shutdown()
+      self.classificationResources.queue.cancelAllOperations()
       self.assetInfoQueue.async {
         self.assetScanSessions.removeAll()
       }
@@ -53,8 +78,10 @@ public class BatchAssetInfoModule: Module {
       self.fetchAssetInfoBatch(assetIds: assetIds, promise: promise)
     }
 
-    AsyncFunction("getAssetInfoBatchWithOptions") { (assetIds: [String], options: GetAssetInfoOptions, promise: Promise) in
-      self.fetchAssetInfoBatch(assetIds: assetIds, includeLocation: options.includeLocation, promise: promise)
+    AsyncFunction("getAssetInfoBatchWithOptions") {
+      (assetIds: [String], options: GetAssetInfoOptions, promise: Promise) in
+      self.fetchAssetInfoBatch(
+        assetIds: assetIds, includeLocation: options.includeLocation, promise: promise)
     }
 
     AsyncFunction("beginAssetScan") { () throws -> [String: Any] in
@@ -65,14 +92,15 @@ public class BatchAssetInfoModule: Module {
         return [
           "sessionId": sessionId,
           "totalCount": session.totalCount,
-          "maxPageSize": PhotoAssetScanSession.maximumPageSize
+          "maxPageSize": PhotoAssetScanSession.maximumPageSize,
         ]
       } catch {
         throw self.assetScanException(error)
       }
     }.runOnQueue(assetInfoQueue)
 
-    AsyncFunction("getAssetScanPage") { (sessionId: String, offset: Int, limit: Int) throws -> [String: Any?] in
+    AsyncFunction("getAssetScanPage") {
+      (sessionId: String, offset: Int, limit: Int) throws -> [String: Any?] in
       guard let session = self.assetScanSessions[sessionId] else {
         throw self.assetScanSessionNotFoundException(sessionId: sessionId)
       }
@@ -90,16 +118,24 @@ public class BatchAssetInfoModule: Module {
       }
     }.runOnQueue(assetInfoQueue)
 
-    AsyncFunction("classifyImage") { (assetId: String, options: ClassificationOptions, promise: Promise) in
-      self.classifySingleImage(assetId: assetId, confidenceThreshold: options.confidenceThreshold, maxLabels: options.maxLabels, promise: promise)
+    AsyncFunction("classifyImage") {
+      (assetId: String, options: ClassificationOptions, promise: Promise) in
+      self.classifySingleImage(
+        assetId: assetId, confidenceThreshold: options.confidenceThreshold,
+        maxLabels: options.maxLabels, promise: promise)
     }
 
-    AsyncFunction("classifyImageBatch") { (assetIds: [String], options: ClassificationOptions, promise: Promise) in
-      self.classifyImageBatch(assetIds: assetIds, confidenceThreshold: options.confidenceThreshold, maxLabels: options.maxLabels, promise: promise)
+    AsyncFunction("classifyImageBatch") {
+      (assetIds: [String], options: ClassificationOptions, promise: Promise) in
+      self.classifyImageBatch(
+        assetIds: assetIds, confidenceThreshold: options.confidenceThreshold,
+        maxLabels: options.maxLabels, promise: promise)
     }
   }
 
-  private func fetchAssetInfoBatch(assetIds: [String], includeLocation: Bool = true, promise: Promise) {
+  private func fetchAssetInfoBatch(
+    assetIds: [String], includeLocation: Bool = true, promise: Promise
+  ) {
     assetInfoQueue.async {
       let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: assetIds, options: nil)
 
@@ -127,7 +163,7 @@ public class BatchAssetInfoModule: Module {
       "width": metadata.width,
       "height": metadata.height,
       "mediaType": metadata.mediaType.rawValue,
-      "duration": metadata.duration
+      "duration": metadata.duration,
     ]
 
     if includeLocation, let location = metadata.location {
@@ -136,7 +172,7 @@ public class BatchAssetInfoModule: Module {
         "longitude": location.longitude,
         "altitude": location.altitude,
         "speed": location.speed,
-        "heading": location.heading
+        "heading": location.heading,
       ]
     } else {
       info["location"] = nil
@@ -154,7 +190,7 @@ public class BatchAssetInfoModule: Module {
         "latitude": asset.latitude,
         "longitude": asset.longitude,
         "mediaType": asset.mediaType.rawValue,
-        "duration": asset.duration
+        "duration": asset.duration,
       ]
     }
 
@@ -163,7 +199,7 @@ public class BatchAssetInfoModule: Module {
       "offset": page.offset,
       "nextOffset": page.nextOffset,
       "totalCount": page.totalCount,
-      "hasNextPage": page.hasNextPage
+      "hasNextPage": page.hasNextPage,
     ]
   }
 
@@ -186,15 +222,21 @@ public class BatchAssetInfoModule: Module {
   private func assetScanSessionNotFoundException(sessionId: String) -> Exception {
     Exception(
       name: "AssetScanSessionNotFoundError",
-      description: "Asset scan session \(sessionId.isEmpty ? "<empty>" : sessionId) does not exist or has ended.",
+      description:
+        "Asset scan session \(sessionId.isEmpty ? "<empty>" : sessionId) does not exist or has ended.",
       code: "ERR_ASSET_SCAN_SESSION_NOT_FOUND"
     )
   }
 
   // MARK: - Image Classification
 
-  private func classifySingleImage(assetId: String, confidenceThreshold: Float, maxLabels: Int, promise: Promise) {
+  private func classifySingleImage(
+    assetId: String, confidenceThreshold: Float, maxLabels: Int, promise: Promise
+  ) {
     processingQueue.async {
+      guard self.classificationLifecycle.admit() else {
+        return
+      }
       let classificationOptions: PhotoAssetClassificationOptions
       do {
         classificationOptions = try PhotoAssetClassificationOptions(
@@ -202,34 +244,54 @@ public class BatchAssetInfoModule: Module {
           maximumLabelCount: maxLabels
         )
       } catch {
-        promise.reject("INVALID_CLASSIFICATION_OPTIONS", error.localizedDescription)
+        self.classificationLifecycle.performIfActive {
+          promise.reject("INVALID_CLASSIFICATION_OPTIONS", error.localizedDescription)
+        }
         return
       }
 
+      guard self.classificationLifecycle.admit() else {
+        return
+      }
       let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil)
 
       guard let asset = fetchResult.firstObject else {
-        promise.reject("ASSET_NOT_FOUND", "Asset with id \(assetId) not found")
+        self.classificationLifecycle.performIfActive {
+          promise.reject("ASSET_NOT_FOUND", "Asset with id \(assetId) not found")
+        }
         return
       }
 
-      self.classificationQueue.addOperation {
+      let operation = BlockOperation {
+        guard self.classificationLifecycle.admit() else {
+          return
+        }
         let result = autoreleasepool {
           self.imageClassifier.classify(asset: asset, options: classificationOptions)
         }
 
-        switch result {
-        case .success(let classificationResult):
-          promise.resolve(self.classificationDictionary(classificationResult))
-        case .failure(let error):
-          promise.reject("CLASSIFICATION_FAILED", error.localizedDescription)
+        self.classificationLifecycle.performIfActive {
+          switch result {
+          case .success(let classificationResult):
+            promise.resolve(self.classificationDictionary(classificationResult))
+          case .failure(let error):
+            promise.reject("CLASSIFICATION_FAILED", error.localizedDescription)
+          }
         }
+      }
+      self.classificationLifecycle.performIfActive {
+        self.classificationResources.queue.addOperation(operation)
       }
     }
   }
 
-  private func classifyImageBatch(assetIds: [String], confidenceThreshold: Float, maxLabels: Int, promise: Promise) {
+  private func classifyImageBatch(
+    assetIds: [String], confidenceThreshold: Float, maxLabels: Int, promise: Promise
+  ) {
     processingQueue.async {
+      guard self.classificationLifecycle.admit() else {
+        return
+      }
       let classificationOptions: PhotoAssetClassificationOptions
       do {
         classificationOptions = try PhotoAssetClassificationOptions(
@@ -237,10 +299,15 @@ public class BatchAssetInfoModule: Module {
           maximumLabelCount: maxLabels
         )
       } catch {
-        promise.reject("INVALID_CLASSIFICATION_OPTIONS", error.localizedDescription)
+        self.classificationLifecycle.performIfActive {
+          promise.reject("INVALID_CLASSIFICATION_OPTIONS", error.localizedDescription)
+        }
         return
       }
 
+      guard self.classificationLifecycle.admit() else {
+        return
+      }
       let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: assetIds, options: nil)
 
       var requestedIndexById: [String: Int] = [:]
@@ -259,24 +326,87 @@ public class BatchAssetInfoModule: Module {
       }
 
       if indexedAssets.isEmpty {
-        promise.resolve([])
+        self.classificationLifecycle.performIfActive {
+          promise.resolve([])
+        }
         return
       }
 
-      var orderedResults = Array<[String: Any]?>(repeating: nil, count: assetIds.count)
+      if ProcessInfo.processInfo.environment[Self.visionClassificationStrategyEnvironmentKey]
+        == "baseline"
+      {
+        self.classifyImageBatchWithSynchronousBaseline(
+          indexedAssets: indexedAssets,
+          assetCount: assetIds.count,
+          options: classificationOptions,
+          promise: promise
+        )
+      } else {
+        self.classifyImageBatchWithPipeline(
+          indexedAssets: indexedAssets,
+          requestedIndexById: requestedIndexById,
+          assetCount: assetIds.count,
+          options: classificationOptions,
+          promise: promise
+        )
+      }
+    }
+  }
+
+  private func classifyImageBatchWithPipeline(
+    indexedAssets: [(asset: PHAsset, index: Int)],
+    requestedIndexById: [String: Int],
+    assetCount: Int,
+    options: PhotoAssetClassificationOptions,
+    promise: Promise
+  ) {
+    classificationLifecycle.performIfActive {
+      classificationResources.pipeline.classify(
+        assets: indexedAssets.map(\.asset),
+        options: options
+      ) { outcomes in
+        self.classificationLifecycle.performIfActive {
+          var orderedResults = [[String: Any]?](repeating: nil, count: assetCount)
+          for outcome in outcomes {
+            guard let index = requestedIndexById[outcome.assetId] else {
+              continue
+            }
+            switch outcome {
+            case .success(let classification):
+              orderedResults[index] = self.classificationDictionary(classification)
+            case .failure(let assetId, let message):
+              orderedResults[index] = [
+                "assetId": assetId,
+                "labels": [],
+                "error": message,
+              ]
+            }
+          }
+          promise.resolve(orderedResults.compactMap { $0 })
+        }
+      }
+    }
+  }
+
+  private func classifyImageBatchWithSynchronousBaseline(
+    indexedAssets: [(asset: PHAsset, index: Int)],
+    assetCount: Int,
+    options: PhotoAssetClassificationOptions,
+    promise: Promise
+  ) {
+    classificationLifecycle.performIfActive {
+      var orderedResults = [[String: Any]?](repeating: nil, count: assetCount)
       let resultsLock = NSLock()
       let group = DispatchGroup()
       for indexedAsset in indexedAssets {
         group.enter()
-        self.classificationQueue.addOperation {
-          defer {
-            group.leave()
+        let operation = BlockOperation {
+          guard self.classificationLifecycle.admit() else {
+            return
           }
-
           let result = autoreleasepool {
-            self.imageClassifier.classify(asset: indexedAsset.asset, options: classificationOptions)
+            self.imageClassifier.classify(asset: indexedAsset.asset, options: options)
           }
-
           let classificationResult: [String: Any]
           switch result {
           case .success(let classification):
@@ -285,32 +415,37 @@ public class BatchAssetInfoModule: Module {
             classificationResult = [
               "assetId": indexedAsset.asset.localIdentifier,
               "labels": [],
-              "error": error.localizedDescription
+              "error": error.localizedDescription,
             ]
           }
-
           resultsLock.lock()
           orderedResults[indexedAsset.index] = classificationResult
           resultsLock.unlock()
         }
+        operation.completionBlock = {
+          group.leave()
+        }
+        classificationResources.queue.addOperation(operation)
       }
-
-      group.notify(queue: self.processingQueue) {
-        let results = orderedResults.compactMap { $0 }
-        promise.resolve(results)
+      group.notify(queue: processingQueue) {
+        self.classificationLifecycle.performIfActive {
+          promise.resolve(orderedResults.compactMap { $0 })
+        }
       }
     }
   }
 
-  private func classificationDictionary(_ classification: PhotoAssetClassification) -> [String: Any] {
+  private func classificationDictionary(_ classification: PhotoAssetClassification) -> [String: Any]
+  {
     [
       "assetId": classification.assetId,
       "labels": classification.labels.map { label in
         [
           "label": label.identifier,
-          "confidence": label.confidence
+          "confidence": label.confidence,
         ]
-      }
+      },
     ]
   }
+
 }

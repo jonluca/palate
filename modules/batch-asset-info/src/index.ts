@@ -1,5 +1,6 @@
 import { requireNativeModule } from "expo";
 import { Platform } from "react-native";
+import { resolveVisionNativePageSize } from "../../../utils/food-detection-buffer-core";
 
 interface AssetLocation {
   latitude: number;
@@ -110,6 +111,7 @@ interface ClassificationResult {
 
 interface NativeBatchAssetInfoModule {
   readonly supportsPhotoAssetThumbnailView?: boolean;
+  readonly visionResultPageSize?: number;
   getAssetInfoBatch(assetIds: string[]): Promise<BatchAssetInfo[]>;
   classifyImageBatch(assetIds: string[], options: Required<ClassificationOptions>): Promise<ClassificationResult[]>;
   beginAssetScan(): Promise<AssetScanSession>;
@@ -248,6 +250,14 @@ function assertPageOptions(options: AssetScanPageOptions): void {
  */
 export function isBatchAssetInfoAvailable(): boolean {
   return BatchAssetInfoModule !== null;
+}
+
+/**
+ * Returns the bounded result page size advertised by this native binary.
+ * Older binaries omit the constant and use the JavaScript default.
+ */
+export function getVisionResultPageSize(): number {
+  return resolveVisionNativePageSize(BatchAssetInfoModule?.visionResultPageSize);
 }
 
 /**

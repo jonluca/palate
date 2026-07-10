@@ -45,7 +45,7 @@ public final class PhotoAssetClassifier: @unchecked Sendable {
         )
         return
       }
-      guard let input = image?.visionImageInput() else {
+      guard let image else {
         result = .failure(
           PhotoAssetClassificationError.imageUnavailable(assetId: asset.localIdentifier)
         )
@@ -53,13 +53,24 @@ public final class PhotoAssetClassifier: @unchecked Sendable {
       }
 
       result = self.classify(
-        input: input,
+        image: image,
         assetId: asset.localIdentifier,
         options: options
       )
     }
 
     return result
+  }
+
+  public func classify(
+    image: PhotoAssetThumbnailImage,
+    assetId: String,
+    options: PhotoAssetClassificationOptions
+  ) -> Result<PhotoAssetClassification, Error> {
+    guard let input = image.visionImageInput() else {
+      return .failure(PhotoAssetClassificationError.imageUnavailable(assetId: assetId))
+    }
+    return classify(input: input, assetId: assetId, options: options)
   }
 
   private func makeImageRequestOptions() -> PHImageRequestOptions {

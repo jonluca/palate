@@ -8,6 +8,7 @@ export {
   endAssetScan,
   getAssetInfoBatch,
   getAssetScanPage,
+  getVisionResultPageSize,
   isAssetScanAvailable,
   isBatchAssetInfoAvailable,
   isPhotoAssetThumbnailAvailable,
