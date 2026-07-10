@@ -18,6 +18,8 @@ public struct ProfilerArguments: Equatable, Sendable {
   public let maximumAssetCount: Int?
   public let visionSampleCount: Int
   public let visionConcurrency: Int
+  public let visionPipelineMaximumInFlight: Int
+  public let visionPipelineFirst: Bool
   public let initialImageCounts: [Int]
   public let initialImagePixelWidth: Int
   public let initialImagePixelHeight: Int
@@ -33,6 +35,8 @@ public struct ProfilerArguments: Equatable, Sendable {
     maximumAssetCount: Int? = nil,
     visionSampleCount: Int = 0,
     visionConcurrency: Int = PhotoAssetClassifier.recommendedConcurrency,
+    visionPipelineMaximumInFlight: Int = PhotoAssetClassificationPipeline.defaultMaximumInFlight,
+    visionPipelineFirst: Bool = false,
     initialImageCounts: [Int] = Self.defaultInitialImageCounts,
     initialImagePixelWidth: Int = Self.defaultInitialImagePixelWidth,
     initialImagePixelHeight: Int = Self.defaultInitialImagePixelHeight,
@@ -58,8 +62,14 @@ public struct ProfilerArguments: Equatable, Sendable {
     guard visionSampleCount >= 0 else {
       throw ProfilerArgumentsError.negativeValue(option: "--vision-sample")
     }
+    guard visionSampleCount == 0 || iterations.isMultiple(of: 2) else {
+      throw ProfilerArgumentsError.visionIterationsMustBeEven
+    }
     guard visionConcurrency > 0 else {
       throw ProfilerArgumentsError.nonPositiveValue(option: "--vision-concurrency")
+    }
+    guard visionPipelineMaximumInFlight > 0 else {
+      throw ProfilerArgumentsError.nonPositiveValue(option: "--vision-pipeline-depth")
     }
     guard !initialImageCounts.isEmpty else {
       throw ProfilerArgumentsError.emptyImageCounts
@@ -90,6 +100,8 @@ public struct ProfilerArguments: Equatable, Sendable {
     self.maximumAssetCount = maximumAssetCount
     self.visionSampleCount = visionSampleCount
     self.visionConcurrency = visionConcurrency
+    self.visionPipelineMaximumInFlight = visionPipelineMaximumInFlight
+    self.visionPipelineFirst = visionPipelineFirst
     self.initialImageCounts = Self.uniqued(initialImageCounts)
     self.initialImagePixelWidth = initialImagePixelWidth
     self.initialImagePixelHeight = initialImagePixelHeight
@@ -106,6 +118,8 @@ public struct ProfilerArguments: Equatable, Sendable {
     var maximumAssetCount: Int?
     var visionSampleCount = 0
     var visionConcurrency = PhotoAssetClassifier.recommendedConcurrency
+    var visionPipelineMaximumInFlight = PhotoAssetClassificationPipeline.defaultMaximumInFlight
+    var visionPipelineFirst = false
     var initialImageCounts = Self.defaultInitialImageCounts
     var initialImagePixelWidth = Self.defaultInitialImagePixelWidth
     var initialImagePixelHeight = Self.defaultInitialImagePixelHeight
@@ -141,6 +155,11 @@ public struct ProfilerArguments: Equatable, Sendable {
       case "--vision-concurrency":
         let value = try Self.value(after: option, at: &index, in: commandLineArguments)
         visionConcurrency = try Self.parseInteger(value, option: option)
+      case "--vision-pipeline-depth":
+        let value = try Self.value(after: option, at: &index, in: commandLineArguments)
+        visionPipelineMaximumInFlight = try Self.parseInteger(value, option: option)
+      case "--vision-pipeline-first":
+        visionPipelineFirst = true
       case "--image-counts":
         let value = try Self.value(after: option, at: &index, in: commandLineArguments)
         initialImageCounts = try Self.parseImageCounts(value)
@@ -172,6 +191,8 @@ public struct ProfilerArguments: Equatable, Sendable {
       maximumAssetCount: maximumAssetCount,
       visionSampleCount: visionSampleCount,
       visionConcurrency: visionConcurrency,
+      visionPipelineMaximumInFlight: visionPipelineMaximumInFlight,
+      visionPipelineFirst: visionPipelineFirst,
       initialImageCounts: initialImageCounts,
       initialImagePixelWidth: initialImagePixelWidth,
       initialImagePixelHeight: initialImagePixelHeight,
@@ -184,13 +205,15 @@ public struct ProfilerArguments: Equatable, Sendable {
   public static let usage = """
     Usage: PalatePhotosProfiler [options]
 
-      --mode MODE             photos or initial-images (default: photos)
+      --mode MODE             photos, vision, or initial-images (default: photos)
       --batch-sizes N,N,...  Batch/page sizes from 1 through 5000 (default: 2000,500,250)
-      --iterations N         Measured iterations per strategy and batch size (default: 5)
+      --iterations N         Measured iterations per strategy and batch size; Vision requires an even value (default: 5)
       --warmup N             Unmeasured warmup iterations (default: 1)
       --max-assets N         Profile at most the first N assets in the retained snapshot
       --vision-sample N      Classify N assets with the shared Vision core (default: 0)
       --vision-concurrency N Maximum parallel Vision classifications (default: \(PhotoAssetClassifier.recommendedConcurrency))
+      --vision-pipeline-depth N Maximum acquired/processing pipeline assets (default: \(PhotoAssetClassificationPipeline.defaultMaximumInFlight))
+      --vision-pipeline-first Run the pipelined strategy before the synchronous baseline
       --image-counts N,N,... Visible image counts (default: 9,24; maximum: \(maximumInitialImageCount))
       --image-width N        Thumbnail target width in pixels (default: \(defaultInitialImagePixelWidth))
       --image-height N       Thumbnail target height in pixels (default: \(defaultInitialImagePixelHeight))

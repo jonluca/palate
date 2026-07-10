@@ -17,9 +17,29 @@ public struct ProfilerReport: Encodable, Sendable {
     public let maximumAssetCount: Int?
     public let visionSampleCount: Int
     public let visionConcurrency: Int
+    public let visionPipelineMaximumInFlight: Int
+    public let visionPipelineFirst: Bool
   }
 
   public struct Vision: Encodable, Sendable {
+    public struct Strategy: Encodable, Sendable {
+      public let elapsedMilliseconds: Double
+      public let assetsPerSecond: Double
+      public let processedSampleCount: Int
+      public let failureCount: Int
+      public let totalLabelCount: Int
+      public let samplesMilliseconds: [Double]
+      public let medianMilliseconds: Double
+      public let p95Milliseconds: Double
+    }
+
+    public struct Validation: Encodable, Sendable {
+      public let exactOutcomeParity: Bool
+      public let mismatchCount: Int
+      public let comparedAssetCount: Int
+      public let comparisonRuns: Int
+    }
+
     public let status: String
     public let requestedSampleCount: Int
     public let processedSampleCount: Int
@@ -29,6 +49,17 @@ public struct ProfilerReport: Encodable, Sendable {
     public let elapsedMilliseconds: Double?
     public let assetsPerSecond: Double?
     public let details: String?
+    public let baseline: Strategy?
+    public let pipeline: Strategy?
+    public let validation: Validation?
+    public let pipelineMaximumInFlight: Int?
+    public let pipelineRanFirst: Bool?
+    public let measurementOrder: [String]?
+    public let availableAssetCount: Int?
+    public let requestedUniqueAssetCount: Int?
+    public let profiledUniqueAssetCount: Int?
+    public let comparisonWindowCount: Int?
+    public let unavailableAssetCount: Int?
 
     public init(
       status: String,
@@ -39,7 +70,18 @@ public struct ProfilerReport: Encodable, Sendable {
       concurrency: Int,
       elapsedMilliseconds: Double?,
       assetsPerSecond: Double?,
-      details: String?
+      details: String?,
+      baseline: Strategy? = nil,
+      pipeline: Strategy? = nil,
+      validation: Validation? = nil,
+      pipelineMaximumInFlight: Int? = nil,
+      pipelineRanFirst: Bool? = nil,
+      measurementOrder: [String]? = nil,
+      availableAssetCount: Int? = nil,
+      requestedUniqueAssetCount: Int? = nil,
+      profiledUniqueAssetCount: Int? = nil,
+      comparisonWindowCount: Int? = nil,
+      unavailableAssetCount: Int? = nil
     ) {
       self.status = status
       self.requestedSampleCount = requestedSampleCount
@@ -50,6 +92,17 @@ public struct ProfilerReport: Encodable, Sendable {
       self.elapsedMilliseconds = elapsedMilliseconds
       self.assetsPerSecond = assetsPerSecond
       self.details = details
+      self.baseline = baseline
+      self.pipeline = pipeline
+      self.validation = validation
+      self.pipelineMaximumInFlight = pipelineMaximumInFlight
+      self.pipelineRanFirst = pipelineRanFirst
+      self.measurementOrder = measurementOrder
+      self.availableAssetCount = availableAssetCount
+      self.requestedUniqueAssetCount = requestedUniqueAssetCount
+      self.profiledUniqueAssetCount = profiledUniqueAssetCount
+      self.comparisonWindowCount = comparisonWindowCount
+      self.unavailableAssetCount = unavailableAssetCount
     }
   }
 

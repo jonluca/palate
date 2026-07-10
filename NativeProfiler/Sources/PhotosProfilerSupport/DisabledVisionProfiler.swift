@@ -6,9 +6,20 @@ public struct DisabledVisionProfiler: VisionProfiling {
   public func profile(
     assetIdentifiers: [String],
     sampleCount: Int,
-    concurrency: Int
+    concurrency: Int,
+    pipelineMaximumInFlight: Int,
+    pipelineFirst: Bool,
+    iterations: Int,
+    warmupIterations: Int
   ) async throws -> ProfilerReport.Vision {
-    ProfilerReport.Vision(
+    _ = (
+      assetIdentifiers,
+      pipelineMaximumInFlight,
+      pipelineFirst,
+      iterations,
+      warmupIterations
+    )
+    return ProfilerReport.Vision(
       status: sampleCount == 0 ? "disabled" : "providerNotInstalled",
       requestedSampleCount: sampleCount,
       processedSampleCount: 0,

@@ -13,6 +13,7 @@ public enum ProfilerArgumentsError: Error, Equatable, Sendable {
   case imageCountOutOfRange(maximum: Int)
   case imageDimensionOutOfRange(maximum: Int)
   case imageIterationsMustBeEven
+  case visionIterationsMustBeEven
   case nonPositiveValue(option: String)
   case negativeValue(option: String)
 }
@@ -27,7 +28,7 @@ extension ProfilerArgumentsError: LocalizedError {
     case .invalidInteger(let option, let value):
       return "Invalid integer for \(option): \(value)"
     case .invalidMode(let value):
-      return "Invalid profiler mode: \(value). Expected photos or initial-images."
+      return "Invalid profiler mode: \(value). Expected photos, vision, or initial-images."
     case .invalidBatchSizes(let value):
       return "Invalid comma-separated batch sizes: \(value)"
     case .emptyBatchSizes:
@@ -45,6 +46,9 @@ extension ProfilerArgumentsError: LocalizedError {
     case .imageIterationsMustBeEven:
       return
         "--image-iterations must be even so baseline and candidate sample positions are counterbalanced"
+    case .visionIterationsMustBeEven:
+      return
+        "--iterations must be even when --vision-sample is enabled so baseline and pipeline execution order is counterbalanced"
     case .nonPositiveValue(let option):
       return "\(option) must be greater than zero"
     case .negativeValue(let option):

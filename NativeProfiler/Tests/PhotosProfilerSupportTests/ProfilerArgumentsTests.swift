@@ -16,6 +16,11 @@ struct ProfilerArgumentsTests {
     #expect(arguments.maximumAssetCount == nil)
     #expect(arguments.visionSampleCount == 0)
     #expect(arguments.visionConcurrency == PhotoAssetClassifier.recommendedConcurrency)
+    #expect(
+      arguments.visionPipelineMaximumInFlight
+        == PhotoAssetClassificationPipeline.defaultMaximumInFlight
+    )
+    #expect(!arguments.visionPipelineFirst)
     #expect(arguments.initialImageCounts == [9, 24])
     #expect(arguments.initialImagePixelWidth == 384)
     #expect(arguments.initialImagePixelHeight == 480)
@@ -42,23 +47,53 @@ struct ProfilerArgumentsTests {
     #expect(arguments.initialImageTimeoutMilliseconds == 12_000)
   }
 
+  @Test("Vision-only mode parses")
+  func visionMode() throws {
+    let arguments = try ProfilerArguments(commandLineArguments: [
+      "--mode", "vision",
+      "--iterations", "8",
+      "--vision-sample", "100",
+    ])
+
+    #expect(arguments.mode == .vision)
+    #expect(arguments.visionSampleCount == 100)
+  }
+
   @Test("Custom values parse and duplicate batch sizes are removed")
   func customValues() throws {
     let arguments = try ProfilerArguments(commandLineArguments: [
       "--batch-sizes", "100,500,100",
-      "--iterations", "7",
+      "--iterations", "8",
       "--warmup", "2",
       "--max-assets", "12000",
       "--vision-sample", "8",
       "--vision-concurrency", "3",
+      "--vision-pipeline-depth", "8",
+      "--vision-pipeline-first",
     ])
 
     #expect(arguments.batchSizes == [100, 500])
-    #expect(arguments.iterations == 7)
+    #expect(arguments.iterations == 8)
     #expect(arguments.warmupIterations == 2)
     #expect(arguments.maximumAssetCount == 12_000)
     #expect(arguments.visionSampleCount == 8)
     #expect(arguments.visionConcurrency == 3)
+    #expect(arguments.visionPipelineMaximumInFlight == 8)
+    #expect(arguments.visionPipelineFirst)
+  }
+
+  @Test("Vision measurements require an even iteration count")
+  func visionIterationsMustBeEven() throws {
+    #expect(throws: ProfilerArgumentsError.visionIterationsMustBeEven) {
+      try ProfilerArguments(commandLineArguments: [
+        "--iterations", "3",
+        "--vision-sample", "8",
+      ])
+    }
+
+    let metadataOnly = try ProfilerArguments(commandLineArguments: ["--iterations", "3"])
+    #expect(metadataOnly.iterations == 3)
+    #expect(metadataOnly.visionSampleCount == 0)
   }
 
   @Test("Invalid batch sizes fail before touching Photos")
