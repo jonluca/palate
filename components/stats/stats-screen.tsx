@@ -24,7 +24,7 @@ import {
   type WrappedStats,
 } from "@/hooks/queries";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, useIsFocused } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as Sharing from "expo-sharing";
 import { File, Paths } from "expo-file-system";
@@ -2255,16 +2255,20 @@ function YearSelector({
 
 export default function StatsScreen() {
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [isStoriesOpen, setIsStoriesOpen] = useState(false);
 
   // Fetch all-time stats to get available years
-  const { data: allTimeStats, isLoading: isLoadingAllTime } = useWrappedStats(null);
+  const { data: allTimeStats, isLoading: isLoadingAllTime } = useWrappedStats(null, { enabled: isFocused });
 
-  // Fetch stats for selected year (or all-time if null)
-  const { data: stats, isLoading: isLoadingYearStats } = useWrappedStats(selectedYear);
+  // Keep the selected-year observer dormant until it represents a distinct query.
+  const { data: selectedYearStats, isLoading: isLoadingYearStats } = useWrappedStats(selectedYear, {
+    enabled: isFocused && selectedYear !== null,
+  });
 
-  const isLoading = isLoadingAllTime || isLoadingYearStats;
+  const stats = selectedYear === null ? allTimeStats : selectedYearStats;
+  const isLoading = isLoadingAllTime || (selectedYear !== null && isLoadingYearStats);
   const availableYears = allTimeStats?.availableYears ?? [];
 
   const hasData = stats && stats.totalConfirmedVisits > 0;

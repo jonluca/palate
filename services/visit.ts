@@ -59,6 +59,7 @@ import { scanCameraRoll, formatEta } from "./scanner";
 import { DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE } from "@/utils/food-detection-buffer-core";
 import { runBufferedResultPersistence } from "@/utils/food-detection-persistence-core";
 import { createVisionResultPagePlan } from "@/utils/vision-result-page-plan";
+import { hasVisitPhotosForSpatialWork } from "@/utils/visit-photo-spatial-work";
 import {
   getCalendarGuideMatchesForEvent,
   loadCalendarGuideMatchingContext,
@@ -358,12 +359,7 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
 
   await initializeMichelinData();
   await recomputeSuggestedRestaurantsIfNeeded(getMichelinDatasetVersion());
-  const database = await getDatabase();
-  const [photoCounts, photos, restaurantLocationIndex] = await Promise.all([
-    getVisitablePhotoCounts(),
-    getUnvisitedPhotos(),
-    ensureRestaurantLocationIndex(database, __DEV__),
-  ]);
+  const [photoCounts, photos] = await Promise.all([getVisitablePhotoCounts(), getUnvisitedPhotos()]);
 
   const previouslyVisitedPhotos = photoCounts.visited;
   const isResuming = previouslyVisitedPhotos > 0;
@@ -381,12 +377,15 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
     phase: "grouping",
   };
 
-  if (photos.length === 0) {
+  if (!hasVisitPhotosForSpatialWork(photos.length)) {
     progress.isComplete = true;
     progress.phase = "complete";
     onProgress?.(progress);
     return progress;
   }
+
+  const database = await getDatabase();
+  const restaurantLocationIndex = await ensureRestaurantLocationIndex(database, __DEV__);
 
   // Phase 1: Group photos into visits with chunked processing
   // This is inherently sequential (comparing consecutive photos) but we yield periodically

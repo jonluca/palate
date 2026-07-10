@@ -1,25 +1,10 @@
 import { NativeTabs } from "expo-router/unstable-native-tabs";
-import React, { useEffect, useRef } from "react";
+import React from "react";
 import { Platform } from "react-native";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import { usePathname } from "expo-router";
-import { queryClient } from "@/app/_layout";
 
 export default function TabLayout() {
-  const pathname = usePathname();
-  const isInitialMount = useRef(true);
   const tabTintColor = "#0A84FF";
-
-  useEffect(() => {
-    // Skip the initial mount to avoid unnecessary refetch on app start
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-
-    // Keep tab switches responsive; mutations explicitly invalidate affected data.
-    queryClient.refetchQueries({ type: "active", stale: true });
-  }, [pathname]);
 
   return (
     <NativeTabs minimizeBehavior={"onScrollDown"} tintColor={tabTintColor} backgroundColor={"transparent"}>

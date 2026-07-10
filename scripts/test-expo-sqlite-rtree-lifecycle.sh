@@ -4,7 +4,13 @@ set -euo pipefail
 
 SCRIPT_DIRECTORY="${0:A:h}"
 ROOT_DIRECTORY="${SCRIPT_DIRECTORY:h}"
-SQLITE_DIRECTORY="$ROOT_DIRECTORY/node_modules/expo-sqlite/ios"
+EXPO_SQLITE_DIRECTORY="$ROOT_DIRECTORY/node_modules/expo-sqlite"
+SQLITE_DIRECTORY="$EXPO_SQLITE_DIRECTORY/ios"
+if [[ ! -f "$SQLITE_DIRECTORY/sqlite3.c" || ! -f "$SQLITE_DIRECTORY/sqlite3.h" ]]; then
+  # Expo's podspec copies the checked-in amalgamation into ios/ while CocoaPods
+  # evaluates it. Keep this isolated test runnable before that side effect.
+  SQLITE_DIRECTORY="$EXPO_SQLITE_DIRECTORY/vendor/sqlite3"
+fi
 SQLITE_DATABASE_SOURCE="$ROOT_DIRECTORY/node_modules/expo-sqlite/src/SQLiteDatabase.ts"
 PROBE_SOURCE="$SCRIPT_DIRECTORY/fixtures/expo-sqlite-rtree-close-probe.c"
 CORE_SOURCE="$ROOT_DIRECTORY/utils/db/core.ts"

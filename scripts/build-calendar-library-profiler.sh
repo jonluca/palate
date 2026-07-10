@@ -23,6 +23,7 @@ BIN_PATH="$("$SWIFT_BIN" build --package-path "$ROOT_DIR" --configuration releas
 PROFILER_BINARY="$BIN_PATH/PalateCalendarLibraryProfiler"
 APP_PATH="${PALATE_CALENDAR_PROFILER_APP:-$ROOT_DIR/.build/PalateCalendarLibraryProfiler.app}"
 BUNDLE_IDENTIFIER="com.jonluca.palate.calendar-library-profiler"
+CODE_SIGN_IDENTITY="${PALATE_CALENDAR_PROFILER_CODE_SIGN_IDENTITY:--}"
 
 if [[ ! -x "$PROFILER_BINARY" ]]; then
   print -u2 "Profiler binary was not produced at $PROFILER_BINARY"
@@ -58,7 +59,7 @@ INFO_PLIST="$APP_PATH/Contents/Info.plist"
 /usr/bin/codesign \
   --force \
   --deep \
-  --sign - \
+  --sign "$CODE_SIGN_IDENTITY" \
   --identifier "$BUNDLE_IDENTIFIER" \
   --timestamp=none \
   "$APP_PATH"

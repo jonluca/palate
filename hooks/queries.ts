@@ -84,6 +84,7 @@ import {
 import { compareSameNameMichelinFirst, normalizeRestaurantNameForPriority } from "@/utils/restaurant-priority";
 import { selectCalendarMutationSuccessfulItems } from "@/utils/calendar-batch-mutation-core";
 import { REVIEW_QUERY_MOUNT_POLICY, invalidatePendingReviewQuery, reviewQueryKeys } from "@/utils/review-query-policy";
+import { invalidateVisitStatusQueries, invalidateWrappedStatsQueries } from "@/utils/query-cache-policy";
 
 // ============================================================================
 // QUERY INVALIDATION HELPERS
@@ -108,17 +109,6 @@ function invalidateFoodDetectionQueries(queryClient: QueryClient) {
 
 function invalidateMichelinRestaurantSearch(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ["michelinRestaurantSearch"] });
-}
-
-/** Invalidate data derived from visit statuses. */
-function invalidateVisitStatusQueries(queryClient: QueryClient) {
-  // Every visit list, detail, review, and restaurant-visit key starts with
-  // `visits`; status changes can move rows between any of those views.
-  queryClient.invalidateQueries({ queryKey: ["visits"] });
-  queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-  queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-  queryClient.invalidateQueries({ queryKey: ["wrapped"] });
-  invalidateMichelinRestaurantSearch(queryClient);
 }
 
 function invalidateReservationImportQueries(queryClient: QueryClient) {
@@ -315,6 +305,9 @@ export function useWrappedStats(
   return useQuery({
     queryKey: queryKeys.wrapped(year),
     queryFn: () => getWrappedStats(year),
+    // These 19-20 query aggregates only change after an explicit local mutation.
+    // Invalidation remains authoritative and overrides this freshness window.
+    staleTime: Infinity,
     ...options,
   });
 }
@@ -868,9 +861,7 @@ export function useConfirmVisit() {
       }
     },
     onSuccess: (_data, variables) => {
-      // Only invalidate confirmed restaurants list, not pending reviews (handled optimistically)
-      queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-      invalidateMichelinRestaurantSearch(queryClient);
+      invalidateVisitStatusQueries(queryClient);
       // Track analytics
       logVisitConfirmed(parseInt(variables.visitId, 10) || 0);
     },
@@ -1324,10 +1315,8 @@ export function useQuickUpdateVisitStatus() {
       }
     },
     onSuccess: (_data, { visitId, newStatus }) => {
-      // Only invalidate confirmed restaurants list if confirming, not pending reviews (handled optimistically)
+      invalidateVisitStatusQueries(queryClient);
       if (newStatus === "confirmed") {
-        queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-        invalidateMichelinRestaurantSearch(queryClient);
         logVisitConfirmed(parseInt(visitId, 10) || 0);
       } else if (newStatus === "rejected") {
         logVisitRejected(parseInt(visitId, 10) || 0);
@@ -1544,7 +1533,7 @@ export function useIgnoreLocation() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ignoredLocations });
-      invalidateVisitQueries(queryClient);
+      invalidateVisitStatusQueries(queryClient);
     },
   });
 }
@@ -1612,6 +1601,11 @@ export function useUpdateRestaurant(restaurantId: string | undefined) {
     onSettled: () => {
       // Refetch to ensure consistency with server
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
+      if (restaurantId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.restaurantDetail(restaurantId) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.restaurantVisits(restaurantId) });
+      }
+      invalidateWrappedStatsQueries(queryClient);
     },
   });
 }

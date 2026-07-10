@@ -7,9 +7,9 @@
     "typecheck": "tsgo --noEmit",
     "clean": "rm -rf android ios .expo node_modules",
     "ios": "expo run:ios",
-    "mobile:prepare": "expo prebuild --clean",
+    "mobile:prepare": "expo prebuild --clean --platform ios",
     "mobile:dev": "expo run:ios --device",
-    "mobile:submit": "eas build --platform ios --auto-submit --non-interactive",
+    "mobile:submit": "pnpm dlx eas-cli@20.5.1 build --platform ios --profile production --auto-submit --non-interactive",
     "test:native": "zsh scripts/test-native-core.sh",
     "test:photos": "zsh scripts/test-photos-core.sh",
     "test:vision-pipeline": "zsh scripts/test-vision-pipeline.sh",
@@ -29,6 +29,8 @@
     "test:visit-merge": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-visit-merge.ts",
     "test:wrapped-stats": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-wrapped-stats-yearly.ts",
     "test:wrapped-stats-michelin": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-wrapped-stats-michelin.ts",
+    "test:tab-query-policy": "node --no-warnings --experimental-strip-types scripts/test-tab-query-refetch-policy.ts",
+    "test:visit-photo-spatial-work": "node --no-warnings --experimental-strip-types scripts/test-visit-photo-spatial-work.ts",
     "test:macos-visit-merge-harness": "zsh scripts/test-macos-visit-merge-harness.sh",
     "test:macos-wrapped-stats-harness": "zsh scripts/test-macos-wrapped-stats-harness.sh",
     "test:macos-build": "zsh scripts/test-macos-designed-app-build.sh",
@@ -61,6 +63,8 @@
     "profile:visit-merge": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/benchmark-visit-merge.ts",
     "profile:wrapped-stats": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/benchmark-wrapped-stats-yearly.ts",
     "profile:wrapped-stats-michelin": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/benchmark-wrapped-stats-michelin.ts",
+    "profile:tab-query-policy": "node --no-warnings --experimental-strip-types scripts/benchmark-tab-query-refetch-policy.ts",
+    "profile:visit-photo-spatial-work": "node --no-warnings --experimental-strip-types scripts/benchmark-visit-photo-spatial-work.ts",
     "profile:export-batching": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/benchmark-export-batching.ts",
     "profile:export-streaming": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/benchmark-export-streaming.ts",
     "profile:photo-ingestion": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/benchmark-photo-ingestion.ts",
@@ -169,6 +173,6 @@
     "knip": "^6.25.0",
     "oxfmt": "^0.58.0",
     "oxlint": "^1.73.0",
-    "typescript": "~7.0.2"
+    "typescript": "~6.0.3"
   }
 }
