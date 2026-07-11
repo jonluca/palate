@@ -43,6 +43,12 @@ simulate_palate() {
       print -r -- "$(date +%s.%N)" > "$visual_ready_path.tmp"
       mv -f -- "$visual_ready_path.tmp" "$visual_ready_path"
       ;;
+    mutate-spatial)
+      sqlite3 "${PALATE_WRAPPED_STATS_HARNESS_FAKE_DATABASE:?Missing fake database path}" \
+        "DELETE FROM michelin_restaurant_spatial_index WHERE restaurantRowId = (SELECT rowid FROM michelin_restaurants ORDER BY rowid LIMIT 1);"
+      print -r -- "$(date +%s.%N)" > "$visual_ready_path.tmp"
+      mv -f -- "$visual_ready_path.tmp" "$visual_ready_path"
+      ;;
     stale)
       awk -v trigger="$(< "$trigger_path")" 'BEGIN { printf "%.9f\n", trigger - 1 }' \
         > "$visual_ready_path.tmp"

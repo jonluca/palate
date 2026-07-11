@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
   useWindowDimensions,
+  type ViewToken,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { AppleMaps, GoogleMaps } from "expo-maps";
@@ -29,7 +30,22 @@ import * as Haptics from "expo-haptics";
 import * as Sharing from "expo-sharing";
 import { File, Paths } from "expo-file-system";
 import { makeImageFromView, ImageFormat } from "@shopify/react-native-skia";
+import { FlashList } from "@shopify/flash-list";
 import { logWrappedViewed } from "@/services/analytics";
+import {
+  VIRTUALIZED_WRAPPED_STATS_RENDER_STRATEGY,
+  buildWrappedStatsSectionPlan,
+  resolveWrappedStatsRenderStrategy,
+  retainWrappedStatsMapVisibility,
+  wrappedStatsVisibilityScopeKey,
+  type WrappedStatsSectionDescriptor,
+} from "@/utils/wrapped-stats-render-core";
+
+// Expo statically replaces EXPO_PUBLIC_* references while producing the JavaScript bundle.
+// The invalid/absent path deliberately retains the current eager screen until a signed A/B wins.
+const WRAPPED_STATS_RENDER_STRATEGY = resolveWrappedStatsRenderStrategy(
+  process.env.EXPO_PUBLIC_PALATE_STATS_RENDER_STRATEGY,
+);
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -1082,35 +1098,46 @@ function FunFactCard({
 function DiningMapSection({
   points,
   selectedYear,
+  nativeMapEnabled = true,
+  deferFullscreenMap = false,
 }: {
   points: WrappedStats["mapPoints"];
   selectedYear: number | null;
+  nativeMapEnabled?: boolean;
+  deferFullscreenMap?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
-  const cameraPosition = useMemo(() => getMapCameraPosition(points), [points]);
+  const cameraPosition = useMemo(
+    () => (nativeMapEnabled ? getMapCameraPosition(points) : null),
+    [nativeMapEnabled, points],
+  );
 
   const appleMarkers = useMemo<AppleMaps.Marker[]>(
     () =>
-      points.map((point) => ({
-        id: point.id,
-        coordinates: { latitude: point.latitude, longitude: point.longitude },
-        title: point.name,
-        tintColor: point.visits > 2 ? "#34d399" : "#f59e0b",
-        systemImage: point.visits > 2 ? "fork.knife.circle.fill" : "fork.knife",
-      })),
-    [points],
+      nativeMapEnabled
+        ? points.map((point) => ({
+            id: point.id,
+            coordinates: { latitude: point.latitude, longitude: point.longitude },
+            title: point.name,
+            tintColor: point.visits > 2 ? "#34d399" : "#f59e0b",
+            systemImage: point.visits > 2 ? "fork.knife.circle.fill" : "fork.knife",
+          }))
+        : [],
+    [nativeMapEnabled, points],
   );
 
   const googleMarkers = useMemo<GoogleMaps.Marker[]>(
     () =>
-      points.map((point) => ({
-        id: point.id,
-        coordinates: { latitude: point.latitude, longitude: point.longitude },
-        title: point.name,
-        snippet: `${point.visits.toLocaleString()} ${point.visits === 1 ? "visit" : "visits"}`,
-      })),
-    [points],
+      nativeMapEnabled
+        ? points.map((point) => ({
+            id: point.id,
+            coordinates: { latitude: point.latitude, longitude: point.longitude },
+            title: point.name,
+            snippet: `${point.visits.toLocaleString()} ${point.visits === 1 ? "visit" : "visits"}`,
+          }))
+        : [],
+    [nativeMapEnabled, points],
   );
 
   const openRestaurant = useCallback((restaurantId: string) => {
@@ -1134,6 +1161,17 @@ function DiningMapSection({
   }
 
   const renderMap = () => {
+    if (!nativeMapEnabled) {
+      return (
+        <View className={"flex-1 items-center justify-center px-6 bg-secondary/20"}>
+          <IconSymbol name={"map.fill"} size={22} color={"#6b7280"} />
+          <ThemedText variant={"caption2"} className={"text-muted-foreground text-center mt-2"}>
+            Map preview loads when this section is visible.
+          </ThemedText>
+        </View>
+      );
+    }
+
     if (!cameraPosition) {
       return (
         <View className={"flex-1 items-center justify-center px-6"}>
@@ -1224,37 +1262,41 @@ function DiningMapSection({
             }}
           >
             {renderMap()}
-            <View className={"absolute top-2.5 right-2.5"}>
-              <NativeStatsButton
-                label={"Expand map"}
-                systemImage={"arrow.up.left.and.arrow.down.right"}
-                iconOnly
-                size={"small"}
-                onPress={() => {
-                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setIsFullscreenOpen(true);
-                }}
-              />
-            </View>
+            {nativeMapEnabled && (
+              <View className={"absolute top-2.5 right-2.5"}>
+                <NativeStatsButton
+                  label={"Expand map"}
+                  systemImage={"arrow.up.left.and.arrow.down.right"}
+                  iconOnly
+                  size={"small"}
+                  onPress={() => {
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setIsFullscreenOpen(true);
+                  }}
+                />
+              </View>
+            )}
           </View>
         </View>
       </Animated.View>
 
-      <Modal animationType={"slide"} visible={isFullscreenOpen} onRequestClose={() => setIsFullscreenOpen(false)}>
-        <View className={"flex-1 bg-black"}>
-          <View className={"flex-1"}>{renderMap()}</View>
-          <View style={{ position: "absolute", top: insets.top + 10, right: 12 }}>
-            <NativeStatsButton
-              label={"Done"}
-              size={"small"}
-              onPress={() => {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setIsFullscreenOpen(false);
-              }}
-            />
+      {nativeMapEnabled && (!deferFullscreenMap || isFullscreenOpen) && (
+        <Modal animationType={"slide"} visible={isFullscreenOpen} onRequestClose={() => setIsFullscreenOpen(false)}>
+          <View className={"flex-1 bg-black"}>
+            <View className={"flex-1"}>{renderMap()}</View>
+            <View style={{ position: "absolute", top: insets.top + 10, right: 12 }}>
+              <NativeStatsButton
+                label={"Done"}
+                size={"small"}
+                onPress={() => {
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setIsFullscreenOpen(false);
+                }}
+              />
+            </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
+      )}
     </>
   );
 }
@@ -2004,162 +2046,186 @@ function StatsStoriesModal({
   );
 }
 
-function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selectedYear: number | null }) {
-  const hasMichelinData = stats.michelinStats.totalStarredVisits > 0;
-  const hasCuisineData = stats.topCuisines.length > 0;
-  const hasMonthlyData = stats.monthlyVisits.length > 0;
-  const hasLocationData = stats.topLocations.length > 0;
-  const hasMapData = stats.mapPoints.length > 0;
-  const hasPhotoData = stats.photoStats.totalPhotos > 0;
-  const hasMealTimeData =
-    stats.mealTimeBreakdown.breakfast +
+function FunFactsSection({ stats, selectedYear }: { stats: WrappedStats; selectedYear: number | null }) {
+  return (
+    <View className={"gap-4"}>
+      <SectionHeading title={"Fun Facts"} icon={"sparkles"} accentClass={"bg-amber-300"} />
+      <View className={"gap-3"}>
+        {stats.peakDiningHour && (
+          <FunFactCard
+            icon={"clock.fill"}
+            iconBg={"bg-cyan-500/30"}
+            title={"Peak Dining Hour"}
+            value={HOUR_LABELS[stats.peakDiningHour.hour]}
+            subtitle={`${stats.peakDiningHour.visits} visits at this time`}
+            delay={700}
+          />
+        )}
+
+        {stats.busiestMonth && (
+          <FunFactCard
+            icon={"flame.fill"}
+            iconBg={"bg-rose-500/30"}
+            title={"Busiest Month"}
+            value={`${MONTH_NAMES[stats.busiestMonth.month - 1]} ${stats.busiestMonth.year}`}
+            subtitle={`${stats.busiestMonth.visits.toLocaleString()} visits`}
+            delay={750}
+          />
+        )}
+
+        {stats.busiestDayOfWeek && (
+          <FunFactCard
+            icon={"calendar"}
+            iconBg={"bg-blue-500/30"}
+            title={"Favorite Day"}
+            value={DAY_NAMES[stats.busiestDayOfWeek.day]}
+            subtitle={`${stats.busiestDayOfWeek.visits.toLocaleString()} visits`}
+            delay={800}
+          />
+        )}
+
+        {stats.topCuisines[0] && (
+          <FunFactCard
+            icon={"fork.knife"}
+            iconBg={"bg-rose-500/30"}
+            title={"Signature Cuisine"}
+            value={stats.topCuisines[0].cuisine}
+            subtitle={`${stats.topCuisines[0].count.toLocaleString()} visits`}
+            delay={825}
+          />
+        )}
+
+        {stats.topLocations[0] && (
+          <FunFactCard
+            icon={"mappin"}
+            iconBg={"bg-emerald-500/30"}
+            title={"Top Dining City"}
+            value={stats.topLocations[0].city}
+            subtitle={`${stats.topLocations[0].visits.toLocaleString()} visits`}
+            delay={850}
+          />
+        )}
+
+        {stats.mostRevisitedRestaurant && (
+          <FunFactCard
+            icon={"heart.fill"}
+            iconBg={"bg-purple-500/30"}
+            title={"Your Favorite Spot"}
+            value={stats.mostRevisitedRestaurant.name}
+            subtitle={`${stats.mostRevisitedRestaurant.visits.toLocaleString()} visits`}
+            delay={875}
+          />
+        )}
+
+        {stats.longestStreak && stats.longestStreak.days >= 2 && (
+          <FunFactCard
+            icon={"flame.fill"}
+            iconBg={"bg-green-500/30"}
+            title={"Longest Streak"}
+            value={`${stats.longestStreak.days.toLocaleString()} consecutive days`}
+            subtitle={`${formatDateShort(stats.longestStreak.startDate)} - ${formatDateShort(stats.longestStreak.endDate)}`}
+            delay={900}
+          />
+        )}
+
+        {stats.firstVisitDate && (
+          <FunFactCard
+            icon={"star.fill"}
+            iconBg={"bg-amber-500/30"}
+            title={selectedYear ? "First Visit This Year" : "Foodie Journey Started"}
+            value={new Date(stats.firstVisitDate).toLocaleDateString(undefined, {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            })}
+            delay={950}
+          />
+        )}
+      </View>
+
+      <DeepDiveSection stats={stats} selectedYear={selectedYear} />
+    </View>
+  );
+}
+
+function getWrappedStatsSectionPlan(stats: WrappedStats, selectedYear: number | null) {
+  return buildWrappedStatsSectionPlan({
+    selectedYear,
+    totalStarredVisits: stats.michelinStats.totalStarredVisits,
+    greenStarVisits: stats.michelinStats.greenStarVisits,
+    cuisineCount: stats.topCuisines.length,
+    monthlyVisitCount: stats.monthlyVisits.length,
+    locationCount: stats.topLocations.length,
+    mapPointCount: stats.mapPoints.length,
+    totalPhotos: stats.photoStats.totalPhotos,
+    mealTimeVisitCount:
+      stats.mealTimeBreakdown.breakfast +
       stats.mealTimeBreakdown.lunch +
       stats.mealTimeBreakdown.dinner +
-      stats.mealTimeBreakdown.lateNight >
-    0;
-  const hasGreenStar = stats.michelinStats.greenStarVisits > 0;
-  const hasYearlyData = stats.yearlyStats.length > 0;
+      stats.mealTimeBreakdown.lateNight,
+    yearlyStatCount: stats.yearlyStats.length,
+  });
+}
 
+function WrappedStatsSection({
+  section,
+  stats,
+  selectedYear,
+  nativeMapEnabled = true,
+  deferFullscreenMap = false,
+}: {
+  section: WrappedStatsSectionDescriptor;
+  stats: WrappedStats;
+  selectedYear: number | null;
+  nativeMapEnabled?: boolean;
+  deferFullscreenMap?: boolean;
+}) {
+  switch (section.kind) {
+    case "michelin":
+      return <StarBreakdown stats={stats.michelinStats} selectedYear={selectedYear} interactive />;
+    case "green-star":
+      return <GreenStarSection greenStarVisits={stats.michelinStats.greenStarVisits} />;
+    case "editorial-overview":
+      return <EditorialOverview stats={stats} />;
+    case "monthly-visits":
+      return <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />;
+    case "dining-map":
+      return (
+        <DiningMapSection
+          points={stats.mapPoints}
+          selectedYear={selectedYear}
+          nativeMapEnabled={nativeMapEnabled}
+          deferFullscreenMap={deferFullscreenMap}
+        />
+      );
+    case "location-breakdown":
+      return <LocationBreakdown locations={stats.topLocations} />;
+    case "cuisine-cloud":
+      return <CuisineCloud cuisines={stats.topCuisines} />;
+    case "dining-time":
+      return <DiningTimeChart mealTimes={stats.mealTimeBreakdown} />;
+    case "weekend-weekday":
+      return <WeekendWeekdayChart weekendVsWeekday={stats.weekendVsWeekday} />;
+    case "photo-stats":
+      return <PhotoStatsSection photoStats={stats.photoStats} />;
+    case "seasonality":
+      return <SeasonalitySection monthlyVisits={stats.monthlyVisits} />;
+    case "yearly-highlights":
+      return <YearlyHighlights yearlyStats={stats.yearlyStats} />;
+    case "dining-style":
+      return <DiningStyleCard diningStyle={stats.diningStyle} totalVisits={stats.totalConfirmedVisits} />;
+    case "fun-facts":
+      return <FunFactsSection stats={stats} selectedYear={selectedYear} />;
+  }
+}
+
+function WrappedContent({ stats, selectedYear }: { stats: WrappedStats; selectedYear: number | null }) {
+  const sections = useMemo(() => getWrappedStatsSectionPlan(stats, selectedYear), [selectedYear, stats]);
   return (
     <View className={"gap-6"}>
-      {/* Michelin experiences lead the page when available. */}
-      {hasMichelinData && <StarBreakdown stats={stats.michelinStats} selectedYear={selectedYear} interactive />}
-
-      {/* Green Star Badge */}
-      {hasGreenStar && <GreenStarSection greenStarVisits={stats.michelinStats.greenStarVisits} />}
-
-      {/* Editorial overview */}
-      <EditorialOverview stats={stats} />
-
-      {/* Monthly Chart */}
-      {hasMonthlyData && <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />}
-
-      {/* Geographic Breakdown */}
-      {hasMapData && <DiningMapSection points={stats.mapPoints} selectedYear={selectedYear} />}
-
-      {/* Geographic Breakdown */}
-      {hasLocationData && <LocationBreakdown locations={stats.topLocations} />}
-
-      {/* Cuisine Breakdown */}
-      {hasCuisineData && <CuisineCloud cuisines={stats.topCuisines} />}
-
-      {/* Dining Time Patterns */}
-      {hasMealTimeData && <DiningTimeChart mealTimes={stats.mealTimeBreakdown} />}
-
-      {/* Weekend vs Weekday */}
-      <WeekendWeekdayChart weekendVsWeekday={stats.weekendVsWeekday} />
-
-      {/* Photo Stats */}
-      {hasPhotoData && <PhotoStatsSection photoStats={stats.photoStats} />}
-
-      {/* Seasonal Rhythm */}
-      {hasMonthlyData && <SeasonalitySection monthlyVisits={stats.monthlyVisits} />}
-
-      {/* Yearly Highlights (all-time only) */}
-      {selectedYear === null && hasYearlyData && <YearlyHighlights yearlyStats={stats.yearlyStats} />}
-
-      {/* Dining Style */}
-      <DiningStyleCard diningStyle={stats.diningStyle} totalVisits={stats.totalConfirmedVisits} />
-
-      {/* Fun Facts */}
-      <View className={"gap-4"}>
-        <SectionHeading title={"Fun Facts"} icon={"sparkles"} accentClass={"bg-amber-300"} />
-        <View className={"gap-3"}>
-          {stats.peakDiningHour && (
-            <FunFactCard
-              icon={"clock.fill"}
-              iconBg={"bg-cyan-500/30"}
-              title={"Peak Dining Hour"}
-              value={HOUR_LABELS[stats.peakDiningHour.hour]}
-              subtitle={`${stats.peakDiningHour.visits} visits at this time`}
-              delay={700}
-            />
-          )}
-
-          {stats.busiestMonth && (
-            <FunFactCard
-              icon={"flame.fill"}
-              iconBg={"bg-rose-500/30"}
-              title={"Busiest Month"}
-              value={`${MONTH_NAMES[stats.busiestMonth.month - 1]} ${stats.busiestMonth.year}`}
-              subtitle={`${stats.busiestMonth.visits.toLocaleString()} visits`}
-              delay={750}
-            />
-          )}
-
-          {stats.busiestDayOfWeek && (
-            <FunFactCard
-              icon={"calendar"}
-              iconBg={"bg-blue-500/30"}
-              title={"Favorite Day"}
-              value={DAY_NAMES[stats.busiestDayOfWeek.day]}
-              subtitle={`${stats.busiestDayOfWeek.visits.toLocaleString()} visits`}
-              delay={800}
-            />
-          )}
-
-          {stats.topCuisines[0] && (
-            <FunFactCard
-              icon={"fork.knife"}
-              iconBg={"bg-rose-500/30"}
-              title={"Signature Cuisine"}
-              value={stats.topCuisines[0].cuisine}
-              subtitle={`${stats.topCuisines[0].count.toLocaleString()} visits`}
-              delay={825}
-            />
-          )}
-
-          {stats.topLocations[0] && (
-            <FunFactCard
-              icon={"mappin"}
-              iconBg={"bg-emerald-500/30"}
-              title={"Top Dining City"}
-              value={stats.topLocations[0].city}
-              subtitle={`${stats.topLocations[0].visits.toLocaleString()} visits`}
-              delay={850}
-            />
-          )}
-
-          {stats.mostRevisitedRestaurant && (
-            <FunFactCard
-              icon={"heart.fill"}
-              iconBg={"bg-purple-500/30"}
-              title={"Your Favorite Spot"}
-              value={stats.mostRevisitedRestaurant.name}
-              subtitle={`${stats.mostRevisitedRestaurant.visits.toLocaleString()} visits`}
-              delay={875}
-            />
-          )}
-
-          {stats.longestStreak && stats.longestStreak.days >= 2 && (
-            <FunFactCard
-              icon={"flame.fill"}
-              iconBg={"bg-green-500/30"}
-              title={"Longest Streak"}
-              value={`${stats.longestStreak.days.toLocaleString()} consecutive days`}
-              subtitle={`${formatDateShort(stats.longestStreak.startDate)} - ${formatDateShort(stats.longestStreak.endDate)}`}
-              delay={900}
-            />
-          )}
-
-          {stats.firstVisitDate && (
-            <FunFactCard
-              icon={"star.fill"}
-              iconBg={"bg-amber-500/30"}
-              title={selectedYear ? "First Visit This Year" : "Foodie Journey Started"}
-              value={new Date(stats.firstVisitDate).toLocaleDateString(undefined, {
-                month: "long",
-                day: "numeric",
-                year: "numeric",
-              })}
-              delay={950}
-            />
-          )}
-        </View>
-
-        {/* Deep Dive Insights */}
-        <DeepDiveSection stats={stats} selectedYear={selectedYear} />
-      </View>
+      {sections.map((section) => (
+        <WrappedStatsSection key={section.key} section={section} stats={stats} selectedYear={selectedYear} />
+      ))}
     </View>
   );
 }
@@ -2196,7 +2262,7 @@ function YearSelector({
   selectedYear,
   onSelectYear,
 }: {
-  availableYears: number[];
+  availableYears: readonly number[];
   selectedYear: number | null;
   onSelectYear: (year: number | null) => void;
 }) {
@@ -2253,58 +2319,36 @@ function YearSelector({
   );
 }
 
-export default function StatsScreen() {
-  const insets = useSafeAreaInsets();
-  const isFocused = useIsFocused();
-  const [selectedYear, setSelectedYear] = useState<number | null>(null);
-  const [isStoriesOpen, setIsStoriesOpen] = useState(false);
+const WRAPPED_STATS_VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 10 } as const;
+const EMPTY_WRAPPED_STATS_SECTIONS: readonly WrappedStatsSectionDescriptor[] = [];
+const getWrappedStatsSectionType = (section: WrappedStatsSectionDescriptor) => section.kind;
 
-  // Fetch all-time stats to get available years
-  const { data: allTimeStats, isLoading: isLoadingAllTime } = useWrappedStats(null, { enabled: isFocused });
+interface StatsScreenLayoutProps {
+  readonly availableYears: readonly number[];
+  readonly hasData: boolean;
+  readonly insetsBottom: number;
+  readonly isLoading: boolean;
+  readonly isStoriesOpen: boolean;
+  readonly onCloseStories: () => void;
+  readonly onOpenStories: () => void;
+  readonly onSelectYear: (year: number | null) => void;
+  readonly selectedYear: number | null;
+  readonly stats: WrappedStats | undefined;
+}
 
-  // Keep the selected-year observer dormant until it represents a distinct query.
-  const { data: selectedYearStats, isLoading: isLoadingYearStats } = useWrappedStats(selectedYear, {
-    enabled: isFocused && selectedYear !== null,
-  });
-
-  const stats = selectedYear === null ? allTimeStats : selectedYearStats;
-  const isLoading = isLoadingAllTime || (selectedYear !== null && isLoadingYearStats);
-  const availableYears = allTimeStats?.availableYears ?? [];
-
-  const hasData = stats && stats.totalConfirmedVisits > 0;
-  const showConfetti = Boolean(hasData && !isLoading);
-
-  // Haptic feedback when wrapped loads
-  useEffect(() => {
-    if (showConfetti) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    }
-  }, [showConfetti]);
-
-  // Track wrapped view
-  useEffect(() => {
-    if (hasData) {
-      logWrappedViewed(selectedYear ?? new Date().getFullYear());
-    }
-  }, [hasData, selectedYear]);
-
+function StatsScreenHeader({
+  availableYears,
+  hasData,
+  onOpenStories,
+  onSelectYear,
+  selectedYear,
+}: Pick<StatsScreenLayoutProps, "availableYears" | "hasData" | "onOpenStories" | "onSelectYear" | "selectedYear">) {
   const headerSubtitle = selectedYear
     ? `Your ${selectedYear} culinary journey`
     : "A look back at your culinary adventures";
 
   return (
-    <ScrollView
-      className={"flex-1 bg-background"}
-      contentInsetAdjustmentBehavior={"automatic"}
-      keyboardDismissMode={"interactive"}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{
-        paddingTop: 0,
-        paddingBottom: insets.bottom + 24,
-        paddingHorizontal: 16,
-      }}
-    >
-      {/* Header */}
+    <>
       <Animated.View entering={FadeInDown.duration(500)} className={"gap-3 mb-5 pt-2"}>
         <View className={"flex-row items-center gap-3"}>
           <ThemedText variant={"caption2"} className={"uppercase tracking-widest text-amber-300 font-semibold"}>
@@ -2331,41 +2375,225 @@ export default function StatsScreen() {
               tintColor={"#fbbf24"}
               prominent
               size={"small"}
-              onPress={() => {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setIsStoriesOpen(true);
-              }}
+              onPress={onOpenStories}
             />
           )}
         </View>
       </Animated.View>
-      {/* Year Tabs */}
       {availableYears.length > 0 && (
         <Animated.View entering={FadeIn.delay(200).duration(400)} className={"mb-6"}>
-          <YearSelector availableYears={availableYears} selectedYear={selectedYear} onSelectYear={setSelectedYear} />
+          <YearSelector availableYears={availableYears} selectedYear={selectedYear} onSelectYear={onSelectYear} />
         </Animated.View>
       )}
-      {/* Content */}
-      {isLoading ? (
-        <View className={"flex-1 items-center justify-center"}>
-          <ThemedText variant={"body"} className={"text-muted-foreground"}>
-            Loading your stats...
-          </ThemedText>
-        </View>
-      ) : hasData ? (
+    </>
+  );
+}
+
+function StatsScreenEmptyContent({ isLoading }: { isLoading: boolean }) {
+  return isLoading ? (
+    <View className={"flex-1 items-center justify-center"}>
+      <ThemedText variant={"body"} className={"text-muted-foreground"}>
+        Loading your stats...
+      </ThemedText>
+    </View>
+  ) : (
+    <EmptyState />
+  );
+}
+
+function EagerStatsScreenLayout(props: StatsScreenLayoutProps) {
+  const {
+    availableYears,
+    hasData,
+    insetsBottom,
+    isLoading,
+    isStoriesOpen,
+    onCloseStories,
+    onOpenStories,
+    onSelectYear,
+    selectedYear,
+    stats,
+  } = props;
+
+  return (
+    <ScrollView
+      testID={"wrapped-stats-eager-v1"}
+      className={"flex-1 bg-background"}
+      contentInsetAdjustmentBehavior={"automatic"}
+      keyboardDismissMode={"interactive"}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={{
+        paddingTop: 0,
+        paddingBottom: insetsBottom + 24,
+        paddingHorizontal: 16,
+      }}
+    >
+      <StatsScreenHeader
+        availableYears={availableYears}
+        hasData={hasData}
+        onOpenStories={onOpenStories}
+        onSelectYear={onSelectYear}
+        selectedYear={selectedYear}
+      />
+      {hasData && stats ? (
         <WrappedContent stats={stats} selectedYear={selectedYear} />
       ) : (
-        <EmptyState />
+        <StatsScreenEmptyContent isLoading={isLoading} />
       )}
-
       {hasData && stats && (
-        <StatsStoriesModal
-          visible={isStoriesOpen}
-          onClose={() => setIsStoriesOpen(false)}
-          stats={stats}
-          selectedYear={selectedYear}
-        />
+        <StatsStoriesModal visible={isStoriesOpen} onClose={onCloseStories} stats={stats} selectedYear={selectedYear} />
       )}
     </ScrollView>
   );
+}
+
+function VirtualizedStatsScreenLayout(props: StatsScreenLayoutProps) {
+  const {
+    availableYears,
+    hasData,
+    insetsBottom,
+    isLoading,
+    isStoriesOpen,
+    onCloseStories,
+    onOpenStories,
+    onSelectYear,
+    selectedYear,
+    stats,
+  } = props;
+  const [nativeMapVisible, observeNativeMapVisibility] = React.useReducer(retainWrappedStatsMapVisibility, false);
+  const sections = useMemo(
+    () => (hasData && stats ? getWrappedStatsSectionPlan(stats, selectedYear) : EMPTY_WRAPPED_STATS_SECTIONS),
+    [hasData, selectedYear, stats],
+  );
+  const renderSection = useCallback(
+    ({ item, index }: { item: WrappedStatsSectionDescriptor; index: number }) => {
+      if (!stats) {
+        return null;
+      }
+      return (
+        <View style={{ marginBottom: index + 1 < sections.length ? 24 : 0 }}>
+          <WrappedStatsSection
+            section={item}
+            stats={stats}
+            selectedYear={selectedYear}
+            nativeMapEnabled={item.kind !== "dining-map" || nativeMapVisible}
+            deferFullscreenMap={item.kind === "dining-map"}
+          />
+        </View>
+      );
+    },
+    [nativeMapVisible, sections.length, selectedYear, stats],
+  );
+  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    observeNativeMapVisibility(
+      viewableItems.some(
+        (token) =>
+          token.isViewable &&
+          typeof token.item === "object" &&
+          token.item !== null &&
+          (token.item as WrappedStatsSectionDescriptor).kind === "dining-map",
+      ),
+    );
+  }, []);
+  const listHeader = useMemo(
+    () => (
+      <StatsScreenHeader
+        availableYears={availableYears}
+        hasData={hasData}
+        onOpenStories={onOpenStories}
+        onSelectYear={onSelectYear}
+        selectedYear={selectedYear}
+      />
+    ),
+    [availableYears, hasData, onOpenStories, onSelectYear, selectedYear],
+  );
+
+  return (
+    <View className={"flex-1 bg-background"}>
+      <FlashList
+        testID={"wrapped-stats-virtualized-v1"}
+        data={sections}
+        renderItem={renderSection}
+        keyExtractor={(section) => section.key}
+        getItemType={getWrappedStatsSectionType}
+        extraData={nativeMapVisible}
+        drawDistance={200}
+        contentInsetAdjustmentBehavior={"automatic"}
+        keyboardDismissMode={"interactive"}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingTop: 0,
+          paddingBottom: insetsBottom + 24,
+          paddingHorizontal: 16,
+        }}
+        ListHeaderComponent={listHeader}
+        ListEmptyComponent={<StatsScreenEmptyContent isLoading={isLoading} />}
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={WRAPPED_STATS_VIEWABILITY_CONFIG}
+      />
+      {hasData && stats && (
+        <StatsStoriesModal visible={isStoriesOpen} onClose={onCloseStories} stats={stats} selectedYear={selectedYear} />
+      )}
+    </View>
+  );
+}
+
+export default function StatsScreen() {
+  const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [isStoriesOpen, setIsStoriesOpen] = useState(false);
+
+  // Fetch all-time stats to get available years
+  const { data: allTimeStats, isLoading: isLoadingAllTime } = useWrappedStats(null, { enabled: isFocused });
+
+  // Keep the selected-year observer dormant until it represents a distinct query.
+  const { data: selectedYearStats, isLoading: isLoadingYearStats } = useWrappedStats(selectedYear, {
+    enabled: isFocused && selectedYear !== null,
+  });
+
+  const stats = selectedYear === null ? allTimeStats : selectedYearStats;
+  const isLoading = isLoadingAllTime || (selectedYear !== null && isLoadingYearStats);
+  const availableYears = allTimeStats?.availableYears ?? [];
+
+  const hasData = Boolean(stats && stats.totalConfirmedVisits > 0);
+  const showConfetti = Boolean(hasData && !isLoading);
+
+  // Haptic feedback when wrapped loads
+  useEffect(() => {
+    if (showConfetti) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, [showConfetti]);
+
+  // Track wrapped view
+  useEffect(() => {
+    if (hasData) {
+      logWrappedViewed(selectedYear ?? new Date().getFullYear());
+    }
+  }, [hasData, selectedYear]);
+
+  const openStories = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setIsStoriesOpen(true);
+  }, []);
+  const closeStories = useCallback(() => setIsStoriesOpen(false), []);
+  const layoutProps: StatsScreenLayoutProps = {
+    availableYears,
+    hasData,
+    insetsBottom: insets.bottom,
+    isLoading,
+    isStoriesOpen,
+    onCloseStories: closeStories,
+    onOpenStories: openStories,
+    onSelectYear: setSelectedYear,
+    selectedYear,
+    stats,
+  };
+
+  if (WRAPPED_STATS_RENDER_STRATEGY === VIRTUALIZED_WRAPPED_STATS_RENDER_STRATEGY) {
+    return <VirtualizedStatsScreenLayout key={wrappedStatsVisibilityScopeKey(selectedYear)} {...layoutProps} />;
+  }
+
+  return <EagerStatsScreenLayout {...layoutProps} />;
 }

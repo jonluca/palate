@@ -173,6 +173,107 @@ assert_equal() {
   fi
 }
 
+assert_prepared_provider_spatial_contract() {
+  local label="$1"
+  local valid_restaurant_count indexed_restaurant_count
+  assert_equal \
+    "$(sqlite3 "$DATABASE_PATH" "
+      SELECT COUNT(*)
+      FROM sqlite_schema
+      WHERE (type = 'table' AND name IN (
+          'michelin_restaurant_spatial_index',
+          'michelin_restaurant_spatial_index_node',
+          'michelin_restaurant_spatial_index_parent',
+          'michelin_restaurant_spatial_index_rowid'
+        ))
+        OR (type = 'trigger' AND tbl_name = 'michelin_restaurants' AND name IN (
+          'michelin_provider_spatial_delete',
+          'michelin_provider_spatial_insert',
+          'michelin_provider_spatial_update'
+        ));
+    ")" \
+    "7" \
+    "$label provider spatial schema object count"
+  assert_equal \
+    "$(sqlite3 "$DATABASE_PATH" "
+      SELECT COUNT(*) FROM sqlite_schema
+      WHERE type = 'table'
+        AND name = 'michelin_restaurant_spatial_index'
+        AND lower(sql) LIKE 'create virtual table%using rtree(%';
+    ")" \
+    "1" \
+    "$label provider RTree virtual table count"
+  assert_equal \
+    "$(sqlite3 "$DATABASE_PATH" "
+      SELECT COUNT(*) FROM sqlite_schema
+      WHERE type = 'table' AND name IN (
+        'michelin_restaurant_spatial_index_node',
+        'michelin_restaurant_spatial_index_parent',
+        'michelin_restaurant_spatial_index_rowid'
+      );
+    ")" \
+    "3" \
+    "$label provider RTree shadow table count"
+  assert_equal \
+    "$(sqlite3 "$DATABASE_PATH" "
+      SELECT group_concat(name, ',')
+      FROM (SELECT name FROM pragma_table_info('michelin_restaurant_spatial_index') ORDER BY cid);
+    ")" \
+    "restaurantRowId,minimumLatitude,maximumLatitude,minimumLongitude,maximumLongitude" \
+    "$label provider RTree columns"
+
+  valid_restaurant_count="$(sqlite3 "$DATABASE_PATH" "
+    SELECT COUNT(*)
+    FROM michelin_restaurants
+    WHERE latitude BETWEEN -90.0 AND 90.0
+      AND longitude BETWEEN -180.0 AND 180.0
+      AND NOT (latitude = 0.0 AND longitude = 0.0);
+  ")"
+  indexed_restaurant_count="$(sqlite3 "$DATABASE_PATH" \
+    "SELECT COUNT(*) FROM michelin_restaurant_spatial_index;")"
+  assert_equal "$valid_restaurant_count" "1" "$label valid guide restaurant count"
+  assert_equal "$indexed_restaurant_count" "$valid_restaurant_count" "$label provider RTree row parity"
+  assert_equal \
+    "$(sqlite3 "$DATABASE_PATH" "
+      SELECT (
+        SELECT COUNT(*)
+        FROM michelin_restaurants m
+        LEFT JOIN michelin_restaurant_spatial_index spatial
+          ON spatial.restaurantRowId = m.rowid
+        WHERE m.latitude BETWEEN -90.0 AND 90.0
+          AND m.longitude BETWEEN -180.0 AND 180.0
+          AND NOT (m.latitude = 0.0 AND m.longitude = 0.0)
+          AND (
+            spatial.restaurantRowId IS NULL
+            OR NOT (m.latitude BETWEEN spatial.minimumLatitude AND spatial.maximumLatitude)
+            OR NOT (m.longitude BETWEEN spatial.minimumLongitude AND spatial.maximumLongitude)
+            OR spatial.maximumLatitude - spatial.minimumLatitude > 0.001
+            OR spatial.maximumLongitude - spatial.minimumLongitude > 0.001
+          )
+      ) + (
+        SELECT COUNT(*)
+        FROM michelin_restaurant_spatial_index spatial
+        LEFT JOIN michelin_restaurants m ON m.rowid = spatial.restaurantRowId
+        WHERE m.rowid IS NULL
+          OR NOT (
+            m.latitude BETWEEN -90.0 AND 90.0
+            AND m.longitude BETWEEN -180.0 AND 180.0
+            AND NOT (m.latitude = 0.0 AND m.longitude = 0.0)
+          )
+      );
+    ")" \
+    "0" \
+    "$label provider spatial health"
+  assert_equal \
+    "$(sqlite3 "$DATABASE_PATH" "SELECT rtreecheck('michelin_restaurant_spatial_index');")" \
+    "ok" \
+    "$label provider RTree integrity"
+  if [[ -s "$DATABASE_PATH-wal" ]]; then
+    print -u2 "$label created a non-empty WAL before the measured trigger"
+    return 1
+  fi
+}
+
 assert_restored_contract() {
   local label="$1"
   assert_equal \
@@ -290,6 +391,7 @@ run_interactive_case() {
     "$(sqlite3 "$DATABASE_PATH" "SELECT COUNT(*) FROM visits WHERE status = 'confirmed';")" \
     "15" \
     "$case_name prepared confirmed count"
+  assert_prepared_provider_spatial_contract "$case_name"
   record_trigger "$output_prefix.trigger"
   if [[ "$mode" == "hold" ]]; then
     for _ in {1..200}; do
@@ -305,10 +407,21 @@ run_interactive_case() {
     success)
       jq -e \
         '.status == "ok"
+         and .fixture.schemaVersion == 2
          and .fixture.constants.yearCount == 15
          and .fixture.constants.legacyAllTimeSqlCalls == 39
          and .fixture.constants.candidateAllTimeSqlCalls == 20
          and .fixture.constants.selectedYearSqlCalls == 19
+         and .fixture.prepared.providerSpatial.tableName == "michelin_restaurant_spatial_index"
+         and .fixture.prepared.providerSpatial.schemaObjectCount == 7
+         and .fixture.prepared.providerSpatial.virtualTableCount == 1
+         and .fixture.prepared.providerSpatial.shadowTableCount == 3
+         and .fixture.prepared.providerSpatial.triggerCount == 3
+         and .fixture.prepared.providerSpatial.rtreeCompileOptionEnabled
+         and .fixture.prepared.providerSpatial.validGuideRestaurantCount == 1
+         and .fixture.prepared.providerSpatial.indexedRestaurantCount == 1
+         and .fixture.prepared.providerSpatial.healthIssueCount == 0
+         and .fixture.prepared.providerSpatial.rtreeCheck == "ok"
          and .oracle.allTime.confirmedVisits == 15
          and .oracle.allTime.uniqueRestaurants == 1
          and .oracle.allTime.totalPhotos == 135
@@ -338,8 +451,17 @@ run_interactive_case() {
          and .validation.readOnlyParity.matches
          and .validation.readOnlyParity.byteIdentical
          and .validation.readOnlyParity.persistedPragmasMatch
+         and (.validation.readOnlyParity.candidateSchemaObjectCount
+           == .validation.readOnlyParity.preparedSchemaObjectCount)
          and (.validation.readOnlyParity.candidateTables | index("sqlite_sequence") != null)
+         and ([.validation.readOnlyParity.tables[]
+           | select(.table | startswith("michelin_restaurant_spatial_index"))] | length) == 4
+         and ([.validation.readOnlyParity.tables[]
+           | select(.table | startswith("michelin_restaurant_spatial_index"))] | all(.matches))
+         and .process.preTriggerWalBytes == 0
+         and .process.sampledMaxWalBytes == 0
          and .app.processBundleMatchesSuppliedBundle
+         and (.database.preparedSha256 == .database.resultSha256)
          and .database.restoredByteIdentical' \
         "$output_prefix.json" >/dev/null
       if rg -q 'ES:SENZ|Mietenkamer|michelin-1|visit-20[0-9][0-9]|event-20[0-9][0-9]' "$output_prefix.json"; then
@@ -366,6 +488,19 @@ run_interactive_case() {
          and (.oracle | has("perYear") | not)' \
         "$output_prefix.json" >/dev/null
       assert_sensitive_diagnostics_retained "$output_prefix" "mutation"
+      ;;
+    spatial-mutation)
+      rg -q 'Wrapped Stats read-only parity failed; diagnostic fixture artifacts retained' "$log_path"
+      jq -e \
+        '.status == "failed"
+         and (.validation.readOnlyParity.matches | not)
+         and ([.validation.readOnlyParity.tables[]
+           | select(.table | startswith("michelin_restaurant_spatial_index"))
+           | select(.matches | not)] | length) > 0
+         and (.database.preparedSha256 != .database.resultSha256)
+         and .database.restoredByteIdentical' \
+        "$output_prefix.json" >/dev/null
+      assert_sensitive_diagnostics_retained "$output_prefix" "spatial-mutation"
       ;;
   esac
 }
@@ -424,5 +559,6 @@ run_mismatch_case
 run_interactive_case stale stale 1
 run_interactive_case signal hold 143
 run_interactive_case mutation mutate 1
+run_interactive_case spatial-mutation mutate-spatial 1
 
-print "macOS Wrapped Stats harness contract tests passed: success, pre-trigger bundle mismatch, stale visual-ready rejection, TERM cleanup, semantic-mutation detection, and byte-identical restoration."
+print "macOS Wrapped Stats harness contract tests passed: spatial prewarm/health/zero-write parity, pre-trigger bundle mismatch, stale visual-ready rejection, TERM cleanup, semantic and RTree mutation detection, and byte-identical restoration."

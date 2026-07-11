@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
+
+import {
+  MICHELIN_PROVIDER_SPATIAL_BACKFILL_SQL,
+  MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL,
+  MICHELIN_PROVIDER_SPATIAL_SCHEMA_SQL,
+} from "../utils/db/michelin-provider-spatial-core.ts";
 
 const FIXTURE_RESTAURANT_ID = "michelin-1";
 const FIRST_YEAR = 2012;
@@ -11,10 +17,27 @@ const YEAR_COUNT = LAST_YEAR - FIRST_YEAR + 1;
 const LEGACY_ALL_TIME_SQL_CALLS = 24 + YEAR_COUNT;
 const CANDIDATE_ALL_TIME_SQL_CALLS = 20;
 const SELECTED_YEAR_SQL_CALLS = 19;
+const PROVIDER_SPATIAL_TABLE = "michelin_restaurant_spatial_index";
+const PROVIDER_SPATIAL_SHADOW_TABLES = [
+  `${PROVIDER_SPATIAL_TABLE}_node`,
+  `${PROVIDER_SPATIAL_TABLE}_parent`,
+  `${PROVIDER_SPATIAL_TABLE}_rowid`,
+];
+const PROVIDER_SPATIAL_TRIGGERS = [
+  "michelin_provider_spatial_delete",
+  "michelin_provider_spatial_insert",
+  "michelin_provider_spatial_update",
+];
+const PROVIDER_SPATIAL_SCHEMA_SHAPE = [
+  { type: "table", name: PROVIDER_SPATIAL_TABLE, tableName: PROVIDER_SPATIAL_TABLE },
+  ...PROVIDER_SPATIAL_SHADOW_TABLES.map((name) => ({ type: "table", name, tableName: name })),
+  ...PROVIDER_SPATIAL_TRIGGERS.map((name) => ({ type: "trigger", name, tableName: "michelin_restaurants" })),
+].sort((left, right) => left.type.localeCompare(right.type) || left.name.localeCompare(right.name));
 
 function usage() {
   process.stdout.write(`Usage:
   macos-wrapped-stats-fixture.mjs prepare --database=PATH --manifest=PATH
+  macos-wrapped-stats-fixture.mjs verify-spatial --database=PATH
   macos-wrapped-stats-fixture.mjs oracle --database=PATH --report=PATH
   macos-wrapped-stats-fixture.mjs validate --candidate=PATH --prepared=PATH --manifest=PATH --report=PATH
 
@@ -62,6 +85,17 @@ function sha256File(path) {
   return hash.digest("hex");
 }
 
+function fileSize(path) {
+  try {
+    return Number(statSync(path).size);
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return 0;
+    }
+    throw error;
+  }
+}
+
 function openDatabase(path, { readOnly = false } = {}) {
   const database = new DatabaseSync(path, { readOnly });
   database.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;");
@@ -97,6 +131,141 @@ function integrity(database) {
     database.prepare("SELECT COUNT(*) AS count FROM pragma_foreign_key_check").get().count,
   );
   return { quickCheck, integrityCheck, foreignKeyViolationCount };
+}
+
+function providerSpatialSummary(database) {
+  const expectedNames = PROVIDER_SPATIAL_SCHEMA_SHAPE.map(({ name }) => name);
+  const placeholders = expectedNames.map(() => "?").join(", ");
+  const schemaShape = database
+    .prepare(`
+      SELECT type, name, tbl_name AS tableName
+      FROM sqlite_schema
+      WHERE name IN (${placeholders})
+      ORDER BY type, name
+    `)
+    .all(...expectedNames)
+    .map((row) => ({ type: String(row.type), name: String(row.name), tableName: String(row.tableName) }));
+  if (JSON.stringify(schemaShape) !== JSON.stringify(PROVIDER_SPATIAL_SCHEMA_SHAPE)) {
+    throw new Error(`Provider spatial schema shape mismatch: ${JSON.stringify(schemaShape)}`);
+  }
+
+  const spatialColumns = database
+    .prepare(`PRAGMA table_info(${quoteIdentifier(PROVIDER_SPATIAL_TABLE)})`)
+    .all()
+    .map((row) => String(row.name));
+  const expectedSpatialColumns = [
+    "restaurantRowId",
+    "minimumLatitude",
+    "maximumLatitude",
+    "minimumLongitude",
+    "maximumLongitude",
+  ];
+  if (JSON.stringify(spatialColumns) !== JSON.stringify(expectedSpatialColumns)) {
+    throw new Error(`Provider spatial columns mismatch: ${JSON.stringify(spatialColumns)}`);
+  }
+
+  const validGuideRestaurantCount = Number(
+    database
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM michelin_restaurants
+        WHERE latitude BETWEEN -90.0 AND 90.0
+          AND longitude BETWEEN -180.0 AND 180.0
+          AND NOT (latitude = 0.0 AND longitude = 0.0)
+      `)
+      .get().count,
+  );
+  const indexedRestaurantCount = Number(
+    database.prepare(`SELECT COUNT(*) AS count FROM ${quoteIdentifier(PROVIDER_SPATIAL_TABLE)}`).get().count,
+  );
+  const healthIssueCount = Number(database.prepare(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL).get()?.issueCount ?? -1);
+  const rtreeCheck = String(
+    database.prepare("SELECT rtreecheck(?) AS result").get(PROVIDER_SPATIAL_TABLE)?.result ?? "missing",
+  );
+  const rtreeCompileOptionEnabled =
+    Number(database.prepare("SELECT sqlite_compileoption_used('ENABLE_RTREE') AS enabled").get()?.enabled ?? 0) === 1;
+  if (
+    !rtreeCompileOptionEnabled ||
+    indexedRestaurantCount !== validGuideRestaurantCount ||
+    healthIssueCount !== 0 ||
+    rtreeCheck !== "ok"
+  ) {
+    throw new Error(
+      `Provider spatial prewarm failed: ${JSON.stringify({
+        rtreeCompileOptionEnabled,
+        validGuideRestaurantCount,
+        indexedRestaurantCount,
+        healthIssueCount,
+        rtreeCheck,
+      })}`,
+    );
+  }
+
+  return {
+    tableName: PROVIDER_SPATIAL_TABLE,
+    schemaObjectCount: schemaShape.length,
+    virtualTableCount: schemaShape.filter(({ name }) => name === PROVIDER_SPATIAL_TABLE).length,
+    shadowTableCount: schemaShape.filter(({ name }) => PROVIDER_SPATIAL_SHADOW_TABLES.includes(name)).length,
+    triggerCount: schemaShape.filter(({ type }) => type === "trigger").length,
+    rtreeCompileOptionEnabled,
+    validGuideRestaurantCount,
+    indexedRestaurantCount,
+    healthIssueCount,
+    rtreeCheck,
+  };
+}
+
+function prewarmProviderSpatialIndex(database) {
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    database.exec(`
+      DROP TRIGGER IF EXISTS michelin_provider_spatial_delete;
+      DROP TRIGGER IF EXISTS michelin_provider_spatial_insert;
+      DROP TRIGGER IF EXISTS michelin_provider_spatial_update;
+      DROP TABLE IF EXISTS ${PROVIDER_SPATIAL_TABLE};
+    `);
+    database.exec(MICHELIN_PROVIDER_SPATIAL_SCHEMA_SQL);
+    database.exec(MICHELIN_PROVIDER_SPATIAL_BACKFILL_SQL);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+  return providerSpatialSummary(database);
+}
+
+function verifyProviderSpatialStartupIsReadOnly(databasePath) {
+  const databaseSha256Before = sha256File(databasePath);
+  const walPath = `${databasePath}-wal`;
+  const walBytesBefore = fileSize(walPath);
+  if (walBytesBefore !== 0) {
+    throw new Error(`Provider spatial startup verification requires an empty WAL; found ${walBytesBefore} bytes`);
+  }
+
+  const database = openDatabase(databasePath);
+  let summary;
+  try {
+    // This is the exact healthy-startup sequence: idempotent schema guards,
+    // followed by the read-only health query inside providerSpatialSummary.
+    database.exec(MICHELIN_PROVIDER_SPATIAL_SCHEMA_SQL);
+    summary = providerSpatialSummary(database);
+  } finally {
+    database.close();
+  }
+
+  const databaseSha256After = sha256File(databasePath);
+  const walBytesAfter = fileSize(walPath);
+  if (databaseSha256After !== databaseSha256Before || walBytesAfter !== 0) {
+    throw new Error(
+      `Healthy provider spatial startup wrote to its fixture: ${JSON.stringify({
+        databaseBytesChanged: databaseSha256After !== databaseSha256Before,
+        walBytesAfter,
+      })}`,
+    );
+  }
+  process.stdout.write(
+    `Verified zero-write provider spatial startup (${summary.indexedRestaurantCount} indexed rows)\n`,
+  );
 }
 
 function selectedFixtureRows(database) {
@@ -226,6 +395,14 @@ function prepareFixture(databasePath, manifestPath) {
     throw error;
   }
 
+  let providerSpatial;
+  try {
+    providerSpatial = prewarmProviderSpatialIndex(database);
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+
   const preparedIntegrity = integrity(database);
   if (
     preparedIntegrity.quickCheck !== "ok" ||
@@ -252,7 +429,7 @@ function prepareFixture(databasePath, manifestPath) {
   checkpointAndClose(database);
 
   atomicWriteJson(manifestPath, {
-    schemaVersion: 1,
+    schemaVersion: 2,
     fixtureKind: "one-real-visit-per-utc-year",
     databaseSha256: sha256File(databasePath),
     constants: {
@@ -279,6 +456,7 @@ function prepareFixture(databasePath, manifestPath) {
       threeStarVisits: YEAR_COUNT,
       accumulatedStars: YEAR_COUNT * 3,
       mapPointCount: 1,
+      providerSpatial,
     },
     integrity: preparedIntegrity,
   });
@@ -692,6 +870,8 @@ if (!command || argumentsMap.has("help")) {
 
 if (command === "prepare") {
   prepareFixture(requiredArgument(argumentsMap, "database"), requiredArgument(argumentsMap, "manifest"));
+} else if (command === "verify-spatial") {
+  verifyProviderSpatialStartupIsReadOnly(requiredArgument(argumentsMap, "database"));
 } else if (command === "oracle") {
   writeOracle(requiredArgument(argumentsMap, "database"), requiredArgument(argumentsMap, "report"));
 } else if (command === "validate") {

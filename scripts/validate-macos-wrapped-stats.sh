@@ -452,13 +452,17 @@ mv -f -- "$PREPARED_TEMP_PATH" "$PREPARED_PATH"
 NODE_NO_WARNINGS=1 "$NODE_BINARY" "$HELPER_PATH" prepare \
   --database="$PREPARED_PATH" --manifest="$MANIFEST_PATH"
 remove_database_sidecars "$PREPARED_PATH"
+NODE_NO_WARNINGS=1 "$NODE_BINARY" "$HELPER_PATH" verify-spatial \
+  --database="$PREPARED_PATH"
+remove_database_sidecars "$PREPARED_PATH"
 PREPARED_SHA256="$(sha256_file "$PREPARED_PATH")"
 if [[ "$(jq -r '.databaseSha256' "$MANIFEST_PATH")" != "$PREPARED_SHA256" ]]; then
   print -u2 "Prepared fixture manifest hash mismatch"
   exit 1
 fi
 if ! jq -e \
-  '.constants.firstYear == 2012
+  '.schemaVersion == 2
+   and .constants.firstYear == 2012
    and .constants.lastYear == 2026
    and .constants.yearCount == 15
    and .constants.legacyAllTimeSqlCalls == 39
@@ -466,6 +470,17 @@ if ! jq -e \
    and .constants.selectedYearSqlCalls == 19
    and .prepared.confirmedVisits == 15
    and .prepared.uniqueRestaurants == 1
+   and .prepared.providerSpatial.tableName == "michelin_restaurant_spatial_index"
+   and .prepared.providerSpatial.schemaObjectCount == 7
+   and .prepared.providerSpatial.virtualTableCount == 1
+   and .prepared.providerSpatial.shadowTableCount == 3
+   and .prepared.providerSpatial.triggerCount == 3
+   and .prepared.providerSpatial.rtreeCompileOptionEnabled
+   and .prepared.providerSpatial.validGuideRestaurantCount > 0
+   and (.prepared.providerSpatial.indexedRestaurantCount
+     == .prepared.providerSpatial.validGuideRestaurantCount)
+   and .prepared.providerSpatial.healthIssueCount == 0
+   and .prepared.providerSpatial.rtreeCheck == "ok"
    and (.selectedVisitIds | length) == 15' \
   "$MANIFEST_PATH" >/dev/null; then
   print -u2 "Prepared fixture does not have the required 15-year shape"
@@ -542,6 +557,19 @@ attest_process_bundle
 PROCESS_OBSERVED_EPOCH="$(date +%s.%N)"
 if [[ "$(sqlite3 "$DATABASE_PATH" "SELECT COUNT(*) FROM visits WHERE status = 'confirmed';")" != "15" ]]; then
   print -u2 "Running app changed the fixture before trigger"
+  exit 1
+fi
+if [[ "$(sha256_file "$DATABASE_PATH")" != "$PREPARED_SHA256" ]]; then
+  print -u2 "Running app changed the prepared database file before trigger"
+  exit 1
+fi
+if [[ -e "$DATABASE_PATH-wal" ]]; then
+  PRE_TRIGGER_WAL_BYTES="$(stat -f '%z' "$DATABASE_PATH-wal" 2>/dev/null || print 0)"
+else
+  PRE_TRIGGER_WAL_BYTES=0
+fi
+if (( PRE_TRIGGER_WAL_BYTES != 0 )); then
+  print -u2 "Running app wrote to the database WAL before trigger: $PRE_TRIGGER_WAL_BYTES bytes"
   exit 1
 fi
 print "READY run_id=$RUN_ID pid=$APP_PID trigger=$TRIGGER_PATH visual_ready=$VISUAL_READY_PATH"
@@ -659,6 +687,7 @@ jq -n \
   --argjson baselineRssKiB "$BASELINE_RSS_KIB" \
   --argjson rssDeltaKiB "$RSS_DELTA_KIB" \
   --argjson maxCpuPercent "$MAX_CPU_PERCENT" \
+  --argjson preTriggerWalBytes "$PRE_TRIGGER_WAL_BYTES" \
   --argjson maxWalBytes "$MAX_WAL_BYTES" \
   --arg suppliedAppPath "$APP_PATH" \
   --arg processAppPath "$PROCESS_APP_PATH" \
@@ -696,6 +725,7 @@ jq -n \
       baselineRssKiB: $baselineRssKiB,
       rssDeltaKiB: $rssDeltaKiB,
       sampledMaxCpuPercent: $maxCpuPercent,
+      preTriggerWalBytes: $preTriggerWalBytes,
       sampledMaxWalBytes: $maxWalBytes
     },
     app: {
