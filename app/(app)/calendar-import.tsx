@@ -73,18 +73,15 @@ export default function CalendarImportScreen() {
       setImportingEventIds((prev) => new Set(prev).add(calendarEventId));
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       try {
-        // If a specific restaurant was selected, pass it as an override
-        if (selectedRestaurantId) {
-          const restaurantOverrides = new Map<string, string>();
-          restaurantOverrides.set(calendarEventId, selectedRestaurantId);
-          await importCalendarMutation.mutateAsync({
-            calendarEventIds: [calendarEventId],
-            restaurantOverrides,
-          });
+        const restaurantOverrides = selectedRestaurantId
+          ? new Map([[calendarEventId, selectedRestaurantId]])
+          : undefined;
+        const result = await importCalendarMutation.mutateAsync({ events: [event], restaurantOverrides });
+        if (result.insertedCount > 0) {
+          logCalendarImported(result.insertedCount);
         } else {
-          await importCalendarMutation.mutateAsync([calendarEventId]);
+          showToast({ type: "error", message: "This calendar event is no longer available to import." });
         }
-        logCalendarImported(1);
       } catch (error) {
         console.error("Error importing calendar event:", error);
         showToast({ type: "error", message: "Failed to import. Please try again." });
@@ -137,13 +134,18 @@ export default function CalendarImportScreen() {
             setImportingEventIds(new Set(allIds));
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             try {
-              const count = await importCalendarMutation.mutateAsync(allIds);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              showToast({
-                type: "success",
-                message: `Imported ${count.toLocaleString()} visit${count === 1 ? "" : "s"} from calendar.`,
-              });
-              logCalendarImported(count);
+              const result = await importCalendarMutation.mutateAsync({ events: pastImportableCalendarEvents });
+              const count = result.insertedCount;
+              if (count > 0) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                showToast({
+                  type: "success",
+                  message: `Imported ${count.toLocaleString()} visit${count === 1 ? "" : "s"} from calendar.`,
+                });
+                logCalendarImported(count);
+              } else {
+                showToast({ type: "error", message: "No calendar events were still available to import." });
+              }
             } catch (error) {
               console.error("Error importing calendar events:", error);
               showToast({ type: "error", message: "Failed to import. Please try again." });

@@ -7,12 +7,14 @@ import { Button, ButtonText, Card } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
-import { usePendingReview, useBatchUpdateVisitStatus, useBatchConfirmVisits } from "@/hooks/queries";
+import { usePendingQuickActions, useBatchUpdateVisitStatus, useBatchConfirmVisits } from "@/hooks/queries";
 
 const PHOTO_THRESHOLD_OPTIONS = [2, 3, 5, 10, 20];
 
 // Aggregate all unique food labels with visit counts
-function useAllFoodLabels(pendingVisits: Array<{ id: string; foodLabels: Array<{ label: string }> }>) {
+function useAllFoodLabels(
+  pendingVisits: ReadonlyArray<{ readonly id: string; readonly foodLabels: readonly { readonly label: string }[] }>,
+) {
   return useMemo(() => {
     const labelMap = new Map<string, Set<string>>(); // label -> set of visit IDs
 
@@ -44,7 +46,7 @@ export default function QuickActionsScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const { showToast } = useToast();
 
-  const { data, isLoading } = usePendingReview();
+  const { data, isLoading } = usePendingQuickActions();
   const pendingVisits = useMemo(() => data?.visits ?? [], [data?.visits]);
   const exactCalendarMatches = useMemo(() => data?.exactMatches ?? [], [data?.exactMatches]);
 

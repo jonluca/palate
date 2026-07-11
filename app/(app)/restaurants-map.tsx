@@ -1,14 +1,9 @@
 import { MichelinRestaurantCard } from "@/components/restaurants/michelin-restaurant-card";
 import { ThemedText } from "@/components/themed-text";
 import { FilterPills } from "@/components/ui";
-import { useConfirmedRestaurants, useMichelinRestaurants } from "@/hooks/queries";
-import type { MichelinRestaurantRecord } from "@/utils/db";
-import {
-  clampRestaurantMapLatitude,
-  normalizeRestaurantMapLongitude,
-  RestaurantViewportIndex,
-  type RestaurantViewportEntry,
-} from "@/utils/restaurant-viewport-index";
+import { useConfirmedRestaurants, useMichelinMapViewport } from "@/hooks/queries";
+import type { MichelinMapAwardFilter, MichelinMapViewportRestaurant, MichelinMapVisitStatusFilter } from "@/utils/db";
+import { clampRestaurantMapLatitude, normalizeRestaurantMapLongitude } from "@/utils/restaurant-viewport-index";
 import { FlashList } from "@shopify/flash-list";
 import { AppleMaps, GoogleMaps, type CameraPosition } from "expo-maps";
 import { Stack, router } from "expo-router";
@@ -23,6 +18,7 @@ const DEFAULT_CAMERA: CameraPosition = {
 };
 const INITIAL_RECENT_PIN_ZOOM = 8;
 const IOS_BACK_SWIPE_EDGE_WIDTH = 26;
+const CAMERA_QUERY_DEBOUNCE_MILLISECONDS = 120;
 
 interface CameraSnapshot {
   latitude: number;
@@ -30,65 +26,10 @@ interface CameraSnapshot {
   zoom: number;
 }
 
-type VisitStatusFilter = "visited" | "unvisited" | "all";
-type QuickAwardFilter = "all" | "1star" | "2star" | "3star" | "bib" | "selected" | "green";
 type ViewMode = "map" | "list";
-
-type MapRestaurantPoint = MichelinRestaurantRecord & {
-  visited: boolean;
-};
-
-function awardIncludesBib(award: string) {
-  return award.toLowerCase().includes("bib gourmand");
-}
-
-function awardIncludesGreenStar(award: string) {
-  return award.toLowerCase().includes("green star");
-}
-
-function getAwardStarCount(award: string) {
-  const lower = award.toLowerCase();
-  if (lower.includes("3 stars") || lower.includes("3 star")) {
-    return 3;
-  }
-  if (lower.includes("2 stars") || lower.includes("2 star")) {
-    return 2;
-  }
-  if (lower.includes("1 star")) {
-    return 1;
-  }
-  return 0;
-}
-
-function awardMatchesQuickFilter(award: string, filter: QuickAwardFilter) {
-  if (filter === "all") {
-    return true;
-  }
-
-  switch (filter) {
-    case "1star":
-      return getAwardStarCount(award) === 1;
-    case "2star":
-      return getAwardStarCount(award) === 2;
-    case "3star":
-      return getAwardStarCount(award) === 3;
-    case "bib":
-      return awardIncludesBib(award);
-    case "selected":
-      return award.toLowerCase().includes("selected");
-    case "green":
-      return awardIncludesGreenStar(award);
-    default:
-      return true;
-  }
-}
 
 function getMinimumCurrentAwardYear(referenceDate: Date = new Date()) {
   return referenceDate.getFullYear() - (CURRENT_AWARD_LOOKBACK_YEARS - 1);
-}
-
-function hasRecentAwardYear(awardYear: number | null, minimumYear: number) {
-  return typeof awardYear === "number" && awardYear >= minimumYear;
 }
 
 function normalizeCameraEvent(
@@ -107,12 +48,12 @@ function normalizeCameraEvent(
 }
 
 export default function RestaurantsMapScreen() {
-  const { data: michelinRestaurants = [], isLoading: michelinLoading } = useMichelinRestaurants();
+  const isMapPlatformSupported = Platform.OS === "ios" || Platform.OS === "android";
   const { data: confirmedRestaurants = [], isLoading: confirmedRestaurantsLoading } = useConfirmedRestaurants();
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [visitStatusFilter, setVisitStatusFilter] = useState<VisitStatusFilter>("visited");
-  const [quickAwardFilter, setQuickAwardFilter] = useState<QuickAwardFilter>("all");
+  const [visitStatusFilter, setVisitStatusFilter] = useState<MichelinMapVisitStatusFilter>("visited");
+  const [quickAwardFilter, setQuickAwardFilter] = useState<MichelinMapAwardFilter>("all");
   const [hasUserMovedMapCamera, setHasUserMovedMapCamera] = useState(false);
   const [camera, setCamera] = useState<CameraSnapshot>({
     latitude: DEFAULT_CAMERA.coordinates?.latitude ?? 20,
@@ -132,10 +73,6 @@ export default function RestaurantsMapScreen() {
       }
     };
   }, []);
-
-  const visitedRestaurantIds = useMemo(() => {
-    return new Set(confirmedRestaurants.map((restaurant) => restaurant.id));
-  }, [confirmedRestaurants]);
 
   const visitFilterOptions = useMemo(() => {
     return [
@@ -163,36 +100,6 @@ export default function RestaurantsMapScreen() {
       { value: "green" as const, label: "Green" },
     ];
   }, []);
-
-  const filteredRestaurantEntries = useMemo(() => {
-    const entries: RestaurantViewportEntry<MichelinRestaurantRecord>[] = [];
-    for (const restaurant of michelinRestaurants) {
-      const isVisited = visitedRestaurantIds.has(restaurant.id);
-
-      if (visitStatusFilter === "visited" && !isVisited) {
-        continue;
-      }
-      if (visitStatusFilter === "unvisited" && isVisited) {
-        continue;
-      }
-
-      if (!hasRecentAwardYear(restaurant.latestAwardYear, minimumCurrentAwardYear)) {
-        continue;
-      }
-
-      if (!awardMatchesQuickFilter(restaurant.award, quickAwardFilter)) {
-        continue;
-      }
-
-      entries.push({ restaurant, visited: isVisited });
-    }
-    return entries;
-  }, [michelinRestaurants, minimumCurrentAwardYear, quickAwardFilter, visitStatusFilter, visitedRestaurantIds]);
-
-  const viewportIndex = useMemo(
-    () => new RestaurantViewportIndex(filteredRestaurantEntries),
-    [filteredRestaurantEntries],
-  );
 
   const mostRecentConfirmedPin = useMemo(() => {
     let latestRestaurant: (typeof confirmedRestaurants)[number] | null = null;
@@ -232,15 +139,29 @@ export default function RestaurantsMapScreen() {
   }, [initialMapCamera]);
 
   const viewportCamera = hasUserMovedMapCamera ? camera : initialViewportCamera;
-
-  const restaurantsInView = useMemo<MapRestaurantPoint[]>(() => {
-    const selection = viewportIndex.select({
+  const viewportRequest = useMemo(
+    () => ({
       camera: viewportCamera,
       width: mapSize.width,
       height: mapSize.height,
-    });
-    return selection.entries.map(({ restaurant, visited }) => ({ ...restaurant, visited }));
-  }, [mapSize.height, mapSize.width, viewportCamera, viewportIndex]);
+      minimumAwardYear: minimumCurrentAwardYear,
+      visitStatusFilter,
+      awardFilter: quickAwardFilter,
+    }),
+    [mapSize.height, mapSize.width, minimumCurrentAwardYear, quickAwardFilter, viewportCamera, visitStatusFilter],
+  );
+  const {
+    data: viewportSelection,
+    isLoading: viewportLoading,
+    isFetching: viewportFetching,
+  } = useMichelinMapViewport(
+    viewportRequest,
+    (isMapPlatformSupported || viewMode === "list") && !confirmedRestaurantsLoading,
+  );
+  const restaurantsInView = useMemo<MichelinMapViewportRestaurant[]>(
+    () => viewportSelection?.restaurants ?? [],
+    [viewportSelection?.restaurants],
+  );
 
   const handleMapLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -249,31 +170,22 @@ export default function RestaurantsMapScreen() {
 
   const flushCameraUpdate = useCallback(() => {
     cameraDebounceRef.current = null;
-    if (pendingCameraRef.current) {
-      setCamera((previous) => normalizeCameraEvent(pendingCameraRef.current ?? previous, previous));
-      pendingCameraRef.current = null;
+    const pendingCamera = pendingCameraRef.current;
+    if (!pendingCamera) {
+      return;
     }
+    pendingCameraRef.current = null;
+    setCamera((previous) => normalizeCameraEvent(pendingCamera, previous));
+    setHasUserMovedMapCamera(true);
   }, []);
 
   const handleCameraMove = useCallback(
     (event: { coordinates?: { latitude?: number; longitude?: number }; zoom?: number }) => {
-      setHasUserMovedMapCamera(true);
-
-      if (Platform.OS === "ios") {
-        if (cameraDebounceRef.current) {
-          clearTimeout(cameraDebounceRef.current);
-          cameraDebounceRef.current = null;
-        }
-        pendingCameraRef.current = null;
-        setCamera((previous) => normalizeCameraEvent(event, previous));
-        return;
-      }
-
       pendingCameraRef.current = normalizeCameraEvent(event, pendingCameraRef.current ?? camera);
-
-      if (!cameraDebounceRef.current) {
-        cameraDebounceRef.current = setTimeout(flushCameraUpdate, 120);
+      if (cameraDebounceRef.current) {
+        clearTimeout(cameraDebounceRef.current);
       }
+      cameraDebounceRef.current = setTimeout(flushCameraUpdate, CAMERA_QUERY_DEBOUNCE_MILLISECONDS);
     },
     [camera, flushCameraUpdate],
   );
@@ -359,8 +271,8 @@ export default function RestaurantsMapScreen() {
     }));
   }, [restaurantsInView]);
 
-  const isUnsupportedPlatform = Platform.OS !== "ios" && Platform.OS !== "android";
-  const isMapLoading = michelinLoading;
+  const isUnsupportedPlatform = !isMapPlatformSupported;
+  const isMapLoading = confirmedRestaurantsLoading || viewportLoading || viewportFetching;
   const iosBackSwipePanResponder = useMemo(() => {
     if (Platform.OS !== "ios") {
       return null;
@@ -389,9 +301,12 @@ export default function RestaurantsMapScreen() {
     setViewMode(value);
   }, []);
 
-  const renderInViewRestaurant = useCallback(({ item, index }: { item: MapRestaurantPoint; index: number }) => {
-    return <MichelinRestaurantCard restaurant={item} visited={item.visited} index={index < 8 ? index : undefined} />;
-  }, []);
+  const renderInViewRestaurant = useCallback(
+    ({ item, index }: { item: MichelinMapViewportRestaurant; index: number }) => {
+      return <MichelinRestaurantCard restaurant={item} visited={item.visited} index={index < 8 ? index : undefined} />;
+    },
+    [],
+  );
 
   const inViewSeparator = useCallback(() => <View style={{ height: 12 }} />, []);
 

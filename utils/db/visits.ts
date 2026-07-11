@@ -6,6 +6,14 @@ import {
   type FoodDetectionVisitSampleRow,
 } from "./visit-photo-sampling-core";
 import { buildVisitsWithDetailsQuery, parseVisitDetailsRows, type VisitDetailsQueryRow } from "./visit-details-core";
+import {
+  buildVisitListPageQuery,
+  parseVisitListPageRows,
+  type VisitListCursor,
+  type VisitListFilter,
+  type VisitListPage,
+  type VisitListPageRow,
+} from "./visit-list-paging-core";
 import { buildVisitStatusBatchStatement, type VisitStatus } from "./visit-status-batch-core";
 import type { RestaurantVisitWithPreview, VisitPreviewPhoto, VisitRecord, VisitWithDetails } from "./types";
 
@@ -108,6 +116,16 @@ export async function getVisitsWithDetails(
   }
 
   return parseVisitDetailsRows(rows);
+}
+
+export async function getVisitListPage(
+  filter?: VisitListFilter,
+  cursor: VisitListCursor | null = null,
+): Promise<VisitListPage> {
+  const database = await getDatabase();
+  const query = buildVisitListPageQuery(filter, cursor);
+  const rows = await database.getAllAsync<VisitListPageRow>(query.sql, query.parameters);
+  return parseVisitListPageRows(rows, query.pageSize);
 }
 
 export async function getVisitById(id: string): Promise<VisitRecord | null> {

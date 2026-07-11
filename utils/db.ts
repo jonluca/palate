@@ -33,6 +33,8 @@ export { getDatabase, nukeDatabase, performDatabaseMaintenance, performFullMaint
 export {
   batchUpdatePhotosFoodDetected,
   getExportPhotoCountsByVisitIds,
+  getExistingPhotoAssetIdsForIncrementalScan,
+  getPhotoDatabasePathForIncrementalScan,
   getPhotosByAssetIds,
   getPhotosByVisitId,
   getPhotosByVisitIdsPage,
@@ -53,6 +55,7 @@ export {
   confirmVisit,
   createManualVisit,
   getFoodDetectionVisitSamplePlan,
+  getVisitListPage,
   getVisitById,
   getRestaurantVisitsWithPreviews,
   getVisits,
@@ -64,7 +67,31 @@ export {
   updateVisitStatus,
 } from "./db/visits";
 
-export { getPendingVisitsForReview } from "./db/visit-review";
+export type { VisitListCursor, VisitListFilter, VisitListItem, VisitListPage } from "./db/visit-list-paging-core";
+
+export {
+  getPendingQuickActionsData,
+  getPendingVisitReviewFirstPage,
+  getPendingVisitReviewPage,
+  getPendingVisitsForReview,
+} from "./db/visit-review";
+
+export type {
+  PendingQuickActionExactMatch,
+  PendingQuickActionSuggestion,
+  PendingQuickActionVisit,
+  PendingQuickActionsData,
+  PendingVisitReviewProgressivePage,
+} from "./db/visit-review";
+export type {
+  PendingVisitReviewExactConfirmation,
+  PendingVisitReviewFilters,
+  PendingVisitReviewGeneration,
+  PendingVisitReviewGenerationRecord,
+  PendingVisitReviewPageRequest,
+} from "./db/visit-review-paging-core";
+
+export type { ConfirmedRestaurantSearchRow } from "./db/confirmed-restaurant-search-core";
 
 export {
   batchUpdateVisitSuggestedRestaurants,
@@ -76,6 +103,7 @@ export {
 
 export {
   getAllRestaurants,
+  getConfirmedRestaurantSearchRows,
   getConfirmedRestaurantsWithVisits,
   getRestaurantDisplayById,
   getRestaurantById,
@@ -83,15 +111,30 @@ export {
 } from "./db/restaurants";
 
 export {
+  getActiveMichelinUnicodeNameRows,
   getAllMichelinRestaurants,
+  getMichelinMapViewport,
+  getMichelinImportResolution,
   getImportedMichelinDatasetVersion,
   getMichelinRestaurantsForCalendarNormalizedNames,
   getMichelinRestaurantById,
   getMichelinRestaurantCount,
+  hydrateUnvisitedMichelinNameSearchIds,
   insertMichelinRestaurants,
+  importMichelinRestaurantsFromAttachedSource,
   selectMichelinProviderSpatialCandidates,
   searchUnvisitedMichelinRestaurantsByName,
 } from "./db/michelin";
+
+export type { MichelinUnicodeNameIndexRow, MichelinUnicodeNameRow } from "./db/michelin-name-search-core";
+
+export type {
+  MichelinMapAwardFilter,
+  MichelinMapVisitStatusFilter,
+  MichelinMapViewportRequest,
+  MichelinMapViewportRestaurant,
+  MichelinMapViewportSelection,
+} from "./db/michelin-map-viewport-core";
 
 export {
   addIgnoredLocation,
@@ -109,18 +152,27 @@ export {
   dismissCalendarEvents,
   getConfirmedVisitsWithMichelinIds,
   getConfirmedVisitsWithoutCalendarEvents,
+  getCalendarEnrichmentVisitSnapshot,
   getConfirmedLinkedReservationSourceEventIds,
   getDismissedReservationImportSourceEventIds,
   getDismissedCalendarEventIds,
   getExcludedReservationImportReviewSourceEventIds,
   getLinkedCalendarEventIds,
+  getProviderReservationReviewPrefilterSnapshot,
   getReservationImportCandidatesMappedToConfirmedRestaurantDateSourceIds,
   getReservationOnlyVisitsMappedToConfirmedVisitSourceIds,
   getVisitsWithExportedCalendarEvents,
   getVisitsWithoutCalendarData,
   insertCalendarOnlyVisits,
+  importCalendarSnapshotPlan,
   insertReservationOnlyVisits,
 } from "./db/calendar";
+
+export type { ReservationOnlyVisitPersistenceOptions, ReservationOnlyVisitPersistenceStrategy } from "./db/calendar";
+export type {
+  ReservationReviewPrefilterCandidate,
+  ReservationReviewPrefilterSnapshot,
+} from "./db/reservation-review-prefilter-core";
 
 export { getMichelinRestaurantsForStatsBucket, getStats, getWrappedStats } from "./db/stats";
 

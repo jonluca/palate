@@ -30,6 +30,25 @@ export interface PendingVisitReviewQueryRow {
   readonly hasUnanalyzedPhotos: number;
 }
 
+/** One deterministic nearest-first order shared by every Review suggestion aggregate. */
+export const PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL = "vsr.distance ASC, m.id COLLATE BINARY ASC";
+
+/**
+ * Preserve the legacy photo-label aggregate byte-for-byte across card and
+ * Quick Actions projections. Its input order affects stable top-five tie
+ * selection, so callers must not add an independent ORDER BY here.
+ */
+export const PENDING_VISIT_REVIEW_FOOD_LABELS_CTE_SQL = `food_labels AS (
+    SELECT
+      p.visitId,
+      json_group_array(json(p.foodLabels)) AS labelsJson
+    FROM photos p
+    WHERE p.visitId IN (SELECT id FROM pending_visits WHERE foodProbable = 1)
+      AND p.foodDetected = 1
+      AND p.foodLabels IS NOT NULL
+    GROUP BY p.visitId
+  )`;
+
 /**
  * Fetch every pending-review field in one database call.
  *
@@ -67,23 +86,14 @@ export const PENDING_VISITS_FOR_REVIEW_SQL = `WITH
           'latestAwardYear', m.latestAwardYear,
           'award', m.award,
           'distance', vsr.distance
-        )
+        ) ORDER BY ${PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL}
       ) AS restaurants
     FROM visit_suggested_restaurants vsr
     JOIN michelin_restaurants m ON vsr.restaurantId = m.id
     WHERE vsr.visitId IN (SELECT id FROM pending_visits)
     GROUP BY vsr.visitId
   ),
-  food_labels AS (
-    SELECT
-      p.visitId,
-      json_group_array(json(p.foodLabels)) AS labelsJson
-    FROM photos p
-    WHERE p.visitId IN (SELECT id FROM pending_visits WHERE foodProbable = 1)
-      AND p.foodDetected = 1
-      AND p.foodLabels IS NOT NULL
-    GROUP BY p.visitId
-  )
+  ${PENDING_VISIT_REVIEW_FOOD_LABELS_CTE_SQL}
 SELECT
   pv.*,
   NULLIF((
@@ -119,4 +129,4 @@ SELECT
 FROM pending_visits pv
 LEFT JOIN suggested_restaurants sr ON pv.id = sr.visitId
 LEFT JOIN food_labels fl ON pv.id = fl.visitId
-ORDER BY priority ASC, pv.startTime DESC`;
+ORDER BY priority ASC, pv.startTime DESC, pv.id COLLATE BINARY ASC`;

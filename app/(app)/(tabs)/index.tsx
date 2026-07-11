@@ -16,6 +16,11 @@ import { IconSymbol } from "@/components/icon-symbol";
 import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
 import * as Haptics from "expo-haptics";
 import { cn } from "@/utils/cn";
+import {
+  MICHELIN_NAME_SEARCH_DEBOUNCE_MS,
+  normalizeMichelinNameSearchQuery,
+} from "@/utils/db/michelin-name-search-core";
+import { refreshAllQueriesWithVisitListPageReset } from "@/utils/query-cache-policy";
 
 type SortOption = "recent" | "confirmed" | "name" | "visits";
 type StarFilter = "all" | "1star" | "2star" | "3star" | "lost" | "gained";
@@ -35,6 +40,8 @@ const starFilterOptions: { value: StarFilter; label: string }[] = [
   { value: "lost", label: "Lost Stars" },
   { value: "gained", label: "Gained Stars" },
 ];
+
+const EMPTY_MICHELIN_SEARCH_RESULTS: MichelinRestaurantRecord[] = [];
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp);
@@ -258,10 +265,26 @@ export default function RestaurantsScreen() {
   const listRef = useRef<any>(null);
 
   const { data: restaurants = [], isLoading } = useConfirmedRestaurants();
-  const { data: michelinRestaurants = [], isFetching: isMichelinSearchLoading } = useMichelinRestaurantSearch(
-    searchQuery,
-    starFilter === "all",
-  );
+  const normalizedMichelinSearchQuery = useMemo(() => normalizeMichelinNameSearchQuery(searchQuery), [searchQuery]);
+  const shouldSearchMichelin = starFilter === "all" && normalizedMichelinSearchQuery.length > 0;
+  const [debouncedMichelinSearchQuery, setDebouncedMichelinSearchQuery] = useState("");
+
+  useEffect(() => {
+    const timeoutId = setTimeout(
+      () => {
+        setDebouncedMichelinSearchQuery(shouldSearchMichelin ? normalizedMichelinSearchQuery : "");
+      },
+      shouldSearchMichelin ? MICHELIN_NAME_SEARCH_DEBOUNCE_MS : 0,
+    );
+    return () => clearTimeout(timeoutId);
+  }, [normalizedMichelinSearchQuery, shouldSearchMichelin]);
+
+  const isMichelinSearchDebouncing =
+    shouldSearchMichelin && debouncedMichelinSearchQuery !== normalizedMichelinSearchQuery;
+  const { data: fetchedMichelinRestaurants = EMPTY_MICHELIN_SEARCH_RESULTS, isFetching: isMichelinSearchFetching } =
+    useMichelinRestaurantSearch(normalizedMichelinSearchQuery, shouldSearchMichelin && !isMichelinSearchDebouncing);
+  const michelinRestaurants = isMichelinSearchDebouncing ? EMPTY_MICHELIN_SEARCH_RESULTS : fetchedMichelinRestaurants;
+  const isMichelinSearchLoading = isMichelinSearchDebouncing || isMichelinSearchFetching;
 
   const scrollToTop = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -357,8 +380,9 @@ export default function RestaurantsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await queryClient.invalidateQueries();
-    setRefreshing(false);
+    await refreshAllQueriesWithVisitListPageReset(queryClient).finally(() => {
+      setRefreshing(false);
+    });
   };
 
   const handleSortChange = useCallback((value: SortOption) => {

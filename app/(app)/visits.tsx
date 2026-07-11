@@ -1,17 +1,18 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { FilterPills, NoVisitsEmpty, SkeletonVisitCard } from "@/components/ui";
-import { useStats, useVisits, type VisitWithRestaurant } from "@/hooks/queries";
+import { useStats, useVisits, type VisitListItem } from "@/hooks/queries";
 import { useVisitsFilter, useSetVisitsFilter } from "@/store";
 import { FlashList } from "@shopify/flash-list";
 import { router, Stack, useIsFocused } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
-import { View, RefreshControl, Pressable } from "react-native";
+import { ActivityIndicator, View, RefreshControl, Pressable } from "react-native";
 import Animated, { LinearTransition } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ListModeCard } from "@/components/visit-card/list-mode-card";
+import { refreshAllQueriesWithVisitListPageReset } from "@/utils/query-cache-policy";
 
 function LoadingState() {
   return (
@@ -34,12 +35,40 @@ export default function VisitsScreen() {
   const isFocused = useIsFocused();
   // Queries
   const { data: stats } = useStats();
-  const { data: visits = [], isLoading: visitsLoading } = useVisits(filter, { enabled: isFocused });
+  const {
+    data,
+    isLoading: visitsLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useVisits(filter, {
+    enabled: isFocused,
+  });
+  const visits = useMemo(() => data?.pages.flatMap((page) => page.visits) ?? [], [data?.pages]);
+  const visitCount = useMemo(() => {
+    if (!stats) {
+      return visits.length;
+    }
+    switch (filter) {
+      case "confirmed":
+        return stats.confirmedVisits;
+      case "pending":
+        return stats.pendingVisits;
+      case "rejected":
+        return stats.totalVisits - stats.pendingVisits - stats.confirmedVisits;
+      case "food":
+        return stats.foodProbableVisits;
+      case "all":
+      default:
+        return stats.totalVisits;
+    }
+  }, [filter, stats, visits.length]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await queryClient.invalidateQueries();
-    setRefreshing(false);
+    await refreshAllQueriesWithVisitListPageReset(queryClient).finally(() => {
+      setRefreshing(false);
+    });
   };
 
   const filterOptions = useMemo(
@@ -61,7 +90,7 @@ export default function VisitsScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item, index }: { item: VisitWithRestaurant; index: number }) => (
+    ({ item, index }: { item: VisitListItem; index: number }) => (
       <ListModeCard
         mode={"list"}
         id={item.id}
@@ -105,7 +134,7 @@ export default function VisitsScreen() {
         )}
 
         {/* Visits List Title */}
-        {visits.length > 0 && (
+        {visitCount > 0 && (
           <Animated.View layout={LinearTransition}>
             <ThemedText
               variant={"footnote"}
@@ -113,13 +142,13 @@ export default function VisitsScreen() {
               className={"uppercase font-semibold tracking-wide px-1"}
             >
               {filter === "all" ? "All Visits" : `${filter.charAt(0).toUpperCase() + filter.slice(1)} Visits`} (
-              {visits.length.toLocaleString()})
+              {visitCount.toLocaleString()})
             </ThemedText>
           </Animated.View>
         )}
       </View>
     ),
-    [stats, filter, filterOptions, visits.length, setFilter],
+    [stats, filter, filterOptions, visitCount, setFilter],
   );
 
   const ItemSeparator = useCallback(() => <View style={{ height: 24 }} />, []);
@@ -129,9 +158,16 @@ export default function VisitsScreen() {
       <Stack.Screen options={{ headerShown: false }} />
       <ScreenLayout scrollable={false} className={"p-0"} style={{ paddingTop: 0, paddingBottom: 0 }}>
         <FlashList
+          key={filter}
           data={visits}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
+          onEndReached={() => {
+            if (hasNextPage && !isFetchingNextPage) {
+              void fetchNextPage();
+            }
+          }}
+          onEndReachedThreshold={0.5}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           contentContainerStyle={{
             paddingTop: insets.top + 16,
@@ -140,6 +176,13 @@ export default function VisitsScreen() {
           }}
           ListHeaderComponent={ListHeader}
           ListHeaderComponentStyle={{ marginBottom: 24 }}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View className={"items-center py-6"}>
+                <ActivityIndicator />
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
             visitsLoading ? (
               <LoadingState />

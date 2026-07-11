@@ -1,4 +1,5 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
+import { CONFIRMED_RESTAURANT_SEARCH_SQL, type ConfirmedRestaurantSearchRow } from "./confirmed-restaurant-search-core";
 import { getMichelinRestaurantById } from "./michelin";
 import type { RestaurantRecord, RestaurantWithVisits, UpdateRestaurantData } from "./types";
 
@@ -204,4 +205,24 @@ export async function getConfirmedRestaurantsWithVisits(): Promise<RestaurantWit
       visitedAward: visitedAward && visitedAward !== currentAward ? visitedAward : null,
     };
   });
+}
+
+/**
+ * Fetch only the confirmed-restaurant fields used by the visit restaurant
+ * search modal. Search remains in JavaScript so its matching behavior is
+ * identical to the other modal sources and this projection can be reused as
+ * the user types.
+ */
+export async function getConfirmedRestaurantSearchRows(): Promise<ConfirmedRestaurantSearchRow[]> {
+  const start = DEBUG_TIMING ? performance.now() : 0;
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<ConfirmedRestaurantSearchRow>(CONFIRMED_RESTAURANT_SEARCH_SQL);
+
+  if (DEBUG_TIMING) {
+    console.log(
+      `[DB] getConfirmedRestaurantSearchRows: ${(performance.now() - start).toFixed(2)}ms (${rows.length} results)`,
+    );
+  }
+
+  return rows;
 }

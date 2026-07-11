@@ -5,9 +5,9 @@ import {
   useUnifiedNearbyRestaurants,
   useSearchAppleRestaurants,
   useSearchNearbyRestaurants,
-  useConfirmedRestaurants,
+  useConfirmedRestaurantSearch,
   type NearbyRestaurant,
-  type RestaurantWithVisits,
+  type ConfirmedRestaurantSearchRow,
 } from "@/hooks";
 import { isMapKitSearchAvailable, type MapKitSearchResult } from "@/modules/mapkit-search";
 import type { PlaceResult } from "@/services/places";
@@ -23,6 +23,7 @@ import {
   isMichelinRestaurantCandidate,
   normalizeRestaurantNameForPriority,
 } from "@/utils/restaurant-priority";
+import { filterConfirmedRestaurantSearchRows } from "@/utils/db/confirmed-restaurant-search-core";
 
 export interface RestaurantOption {
   id: string;
@@ -211,8 +212,8 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
     visible,
   );
 
-  // Also fetch confirmed restaurants (restaurants the user has visited)
-  const { data: confirmedRestaurants = [] } = useConfirmedRestaurants();
+  // Fetch the slim visited-restaurant projection only while typed search is visible.
+  const { data: confirmedRestaurants = [] } = useConfirmedRestaurantSearch(visible, searchQuery);
 
   const { mutateAsync: searchAppleRestaurants } = useSearchAppleRestaurants();
   const searchGoogleMutation = useSearchNearbyRestaurants();
@@ -307,10 +308,9 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
       return [];
     }
 
-    const query = searchQuery.toLowerCase();
-    const filtered = confirmedRestaurants.filter((r: RestaurantWithVisits) => r.name.toLowerCase().includes(query));
+    const filtered = filterConfirmedRestaurantSearchRows(confirmedRestaurants, searchQuery);
 
-    const options = filtered.map((r: RestaurantWithVisits) => ({
+    const options = filtered.map((r: ConfirmedRestaurantSearchRow) => ({
       id: r.id,
       name: r.name,
       latitude: r.latitude,

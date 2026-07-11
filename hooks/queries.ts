@@ -1,21 +1,36 @@
-import { useQuery, useMutation, useQueryClient, type QueryClient, type UseQueryOptions } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type QueryClient,
+  type UseQueryOptions,
+} from "@tanstack/react-query";
+import type { QueryKey } from "@tanstack/query-core";
 import * as Location from "expo-location";
 import { useMemo, useRef } from "react";
 import { logVisitConfirmed, logVisitRejected } from "@/services/analytics";
 import {
-  getVisitsWithDetails,
+  getVisitListPage,
   getVisitById,
   getStats,
   getPhotosByVisitId,
   updateVisitStatus,
   updateVisitNotes,
+  getConfirmedRestaurantSearchRows,
   getConfirmedRestaurantsWithVisits,
   getRestaurantVisitsWithPreviews,
-  getPendingVisitsForReview,
+  getPendingQuickActionsData,
+  getPendingVisitReviewFirstPage,
+  getPendingVisitReviewPage,
   batchUpdateVisitStatuses,
   batchConfirmVisits,
   confirmVisit,
   getAllMichelinRestaurants,
+  getActiveMichelinUnicodeNameRows,
+  getImportedMichelinDatasetVersion,
+  getMichelinMapViewport,
+  hydrateUnvisitedMichelinNameSearchIds,
   searchUnvisitedMichelinRestaurantsByName,
   getMichelinRestaurantById,
   getRestaurantById,
@@ -47,13 +62,23 @@ import {
   movePhotosToVisit,
   removePhotosFromVisit,
   type VisitWithDetails,
+  type VisitListCursor,
+  type VisitListItem,
+  type VisitListPage,
   type MovePhotosResult,
   type RemovePhotosResult,
   type PhotoRecord,
   type RestaurantRecord,
+  type ConfirmedRestaurantSearchRow as ConfirmedRestaurantSearchRowDB,
   type MichelinRestaurantRecord,
+  type MichelinMapViewportRequest,
   type RestaurantWithVisits as RestaurantWithVisitsDB,
   type PendingVisitForReview as PendingVisitForReviewDB,
+  type PendingQuickActionsData as PendingQuickActionsDataDB,
+  type PendingVisitReviewExactConfirmation,
+  type PendingVisitReviewFilters,
+  type PendingVisitReviewPageRequest,
+  type PendingVisitReviewProgressivePage,
   type VisitRecord as VisitRecordDB,
   type WrappedStats,
   type IgnoredLocationRecord,
@@ -64,6 +89,7 @@ import {
   type ReclassifyProgress,
   type MichelinStatsBucket,
   type MichelinStatsRestaurantSummary,
+  type MichelinUnicodeNameIndexRow,
   createManualVisit,
   batchMergeSameRestaurantVisits,
   type MergeableVisitGroup,
@@ -71,7 +97,6 @@ import {
   excludeReservationImportReviews,
 } from "@/utils/db";
 import {
-  compareRestaurantAndCalendarTitle,
   requestCalendarPermission,
   getWritableCalendars,
   getAllSyncableCalendars,
@@ -83,8 +108,41 @@ import {
 } from "@/services/calendar";
 import { compareSameNameMichelinFirst, normalizeRestaurantNameForPriority } from "@/utils/restaurant-priority";
 import { selectCalendarMutationSuccessfulItems } from "@/utils/calendar-batch-mutation-core";
-import { REVIEW_QUERY_MOUNT_POLICY, invalidatePendingReviewQuery, reviewQueryKeys } from "@/utils/review-query-policy";
-import { invalidateVisitStatusQueries, invalidateWrappedStatsQueries } from "@/utils/query-cache-policy";
+import { getUniqueCalendarImportEventIds, reconcileCalendarImportCache } from "@/utils/calendar-import-cache-policy";
+import {
+  REVIEW_QUERY_MOUNT_POLICY,
+  REVIEW_STATUS_MUTATION_SCOPE,
+  invalidatePendingReviewQuery,
+  interruptPendingReviewRefreshForMutationSettlement,
+  markPendingReviewQueryStale,
+  removePendingReviewInfiniteVisits,
+  restoreFailedPendingReviewMutation,
+  restoreFailedPendingReviewInfiniteMutation,
+  reviewQueryKeys,
+  type PendingReviewInfiniteData,
+} from "@/utils/review-query-policy";
+import {
+  invalidateVisitStatusQueries,
+  invalidateWrappedStatsQueries,
+  resetVisitListPageQueries,
+  VISIT_LIST_PAGE_QUERY_ROOT,
+  VISIT_LIST_QUERY_POLICY,
+} from "@/utils/query-cache-policy";
+import { getNextPendingVisitReviewPageRequest } from "@/utils/db/visit-review-paging-core";
+import {
+  CONFIRMED_RESTAURANTS_QUERY_KEY,
+  CONFIRMED_RESTAURANT_SEARCH_QUERY_KEY,
+  shouldLoadConfirmedRestaurantSearch,
+} from "@/utils/db/confirmed-restaurant-search-core";
+import {
+  assertMichelinNameSearchNotAborted,
+  createMichelinUnicodeNameIndex,
+  isNonAsciiMichelinNameSearchQuery,
+  normalizeMichelinNameSearchQuery,
+  runStableMichelinNameSearch,
+  selectSortedMichelinUnicodeMatchIds,
+} from "@/utils/db/michelin-name-search-core";
+import { ensureMichelinDataInitialized, MICHELIN_STATIC_QUERY_CACHE_POLICY } from "@/utils/michelin-query-cache-policy";
 
 // ============================================================================
 // QUERY INVALIDATION HELPERS
@@ -98,7 +156,8 @@ function invalidateVisitQueries(queryClient: QueryClient) {
 
 /** Reconcile every cache that can reflect incrementally persisted food results. */
 function invalidateFoodDetectionQueries(queryClient: QueryClient) {
-  queryClient.invalidateQueries({ queryKey: ["visits"] });
+  invalidateVisitStatusQueries(queryClient);
+  void invalidatePendingReviewQuery(queryClient);
   queryClient.invalidateQueries({ queryKey: ["visitPhotos"] });
   queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
   queryClient.invalidateQueries({ queryKey: queryKeys.stats });
@@ -123,6 +182,13 @@ function invalidateReservationImportQueries(queryClient: QueryClient) {
 // OPTIMISTIC UPDATE HELPERS
 // ============================================================================
 
+type PendingReviewPagedData = PendingReviewInfiniteData<PendingVisitForReviewDB>;
+
+interface PendingReviewMutationBaseline {
+  readonly legacy: PendingReviewData | undefined;
+  readonly pages: ReadonlyArray<readonly [QueryKey, PendingReviewPagedData | undefined]>;
+}
+
 function optimisticallyRemoveVisitsFromPending(queryClient: QueryClient, visitIds: string[]) {
   queryClient.setQueryData<PendingReviewData>(queryKeys.pendingReview, (old) => {
     if (!old) {
@@ -134,18 +200,111 @@ function optimisticallyRemoveVisitsFromPending(queryClient: QueryClient, visitId
       exactMatches: old.exactMatches.filter((m) => !visitIdSet.has(m.visitId)),
     };
   });
+  queryClient.setQueriesData<PendingReviewPagedData>({ queryKey: reviewQueryKeys.pendingReviewPagesRoot }, (current) =>
+    removePendingReviewInfiniteVisits(current, visitIds),
+  );
 }
 
-function optimisticallyUpdateStats(queryClient: QueryClient, delta: { pending?: number; confirmed?: number }) {
-  queryClient.setQueryData<Stats>(queryKeys.stats, (old) =>
-    old
-      ? {
-          ...old,
-          pendingVisits: old.pendingVisits + (delta.pending ?? 0),
-          confirmedVisits: old.confirmedVisits + (delta.confirmed ?? 0),
-        }
-      : old,
+function restoreFailedVisitsToPending(
+  queryClient: QueryClient,
+  baseline: PendingReviewMutationBaseline | undefined,
+  visitIds: readonly string[],
+) {
+  queryClient.setQueryData<PendingReviewData>(queryKeys.pendingReview, (current) =>
+    restoreFailedPendingReviewMutation(current, baseline?.legacy, visitIds),
   );
+  for (const [queryKey, previous] of baseline?.pages ?? []) {
+    queryClient.setQueryData<PendingReviewPagedData>(queryKey, (current) =>
+      restoreFailedPendingReviewInfiniteMutation(current, previous, visitIds),
+    );
+  }
+}
+
+const optimisticallyStalePendingReviewClients = new WeakSet<QueryClient>();
+
+interface PendingReviewMutationGroup {
+  activeMutations: number;
+  readonly rollbackBaseline: PendingReviewMutationBaseline;
+  readonly successfulVisitIds: Set<string>;
+}
+
+const pendingReviewMutationGroups = new WeakMap<QueryClient, PendingReviewMutationGroup>();
+
+function snapshotPendingReviewMutationBaseline(queryClient: QueryClient): PendingReviewMutationBaseline {
+  return {
+    legacy: queryClient.getQueryData<PendingReviewData>(queryKeys.pendingReview),
+    pages: queryClient.getQueriesData<PendingReviewPagedData>({
+      queryKey: reviewQueryKeys.pendingReviewPagesRoot,
+    }),
+  };
+}
+
+function beginPendingReviewMutationGroup(queryClient: QueryClient): PendingReviewMutationBaseline {
+  const existing = pendingReviewMutationGroups.get(queryClient);
+  if (existing) {
+    existing.activeMutations += 1;
+    return existing.rollbackBaseline;
+  }
+  const rollbackBaseline = snapshotPendingReviewMutationBaseline(queryClient);
+  pendingReviewMutationGroups.set(queryClient, {
+    activeMutations: 1,
+    rollbackBaseline,
+    successfulVisitIds: new Set(),
+  });
+  return rollbackBaseline;
+}
+
+function markPendingReviewMutationIdsSuccessful(queryClient: QueryClient, visitIds: readonly string[]): void {
+  const group = pendingReviewMutationGroups.get(queryClient);
+  for (const visitId of visitIds) {
+    group?.successfulVisitIds.add(visitId);
+  }
+}
+
+function pendingReviewMutationIdsEligibleForRollback(queryClient: QueryClient, visitIds: readonly string[]): string[] {
+  const successfulVisitIds = pendingReviewMutationGroups.get(queryClient)?.successfulVisitIds;
+  return successfulVisitIds ? visitIds.filter((visitId) => !successfulVisitIds.has(visitId)) : [...visitIds];
+}
+
+function finishPendingReviewMutationGroup(queryClient: QueryClient): void {
+  const group = pendingReviewMutationGroups.get(queryClient);
+  if (!group) {
+    return;
+  }
+  group.activeMutations -= 1;
+  if (group.activeMutations === 0) {
+    pendingReviewMutationGroups.delete(queryClient);
+  }
+}
+
+function pendingReviewRefreshNeedsReconciliation(queryClient: QueryClient): boolean {
+  const expectedOptimisticStaleness = optimisticallyStalePendingReviewClients.delete(queryClient);
+  const states = queryClient
+    .getQueryCache()
+    .findAll({ queryKey: reviewQueryKeys.pendingReview })
+    .map((query) => query.state);
+  return (
+    states.some((state) => state.fetchStatus === "fetching") ||
+    (expectedOptimisticStaleness === false && states.some((state) => state.isInvalidated === true))
+  );
+}
+
+async function settleOptimisticPendingReviewMutation(
+  queryClient: QueryClient,
+  refreshNeedsReconciliation: boolean,
+): Promise<void> {
+  await markPendingReviewQueryStale(queryClient);
+  optimisticallyStalePendingReviewClients.add(queryClient);
+  if (refreshNeedsReconciliation) {
+    optimisticallyStalePendingReviewClients.delete(queryClient);
+    await invalidatePendingReviewQuery(queryClient);
+  }
+}
+
+async function initializeMichelinDataForQuery(queryClient: QueryClient): Promise<void> {
+  await ensureMichelinDataInitialized(queryClient, initializeMichelinData, async () => {
+    await Promise.all([invalidatePendingReviewQuery(queryClient), resetVisitListPageQueries(queryClient)]);
+  });
 }
 
 function optimisticallyRemoveImportableCalendarEvents(queryClient: QueryClient, calendarEventIds: string[]) {
@@ -157,6 +316,7 @@ function optimisticallyRemoveImportableCalendarEvents(queryClient: QueryClient, 
 
 // Re-export types for external use with visit naming
 export type RestaurantWithVisits = RestaurantWithVisitsDB;
+export type ConfirmedRestaurantSearchRow = ConfirmedRestaurantSearchRowDB;
 export type PendingVisitForReview = PendingVisitForReviewDB;
 export type VisitWithRestaurant = VisitWithDetails;
 export type VisitRecord = VisitRecordDB;
@@ -235,6 +395,7 @@ function isValidCoordinatePair(latitude: number, longitude: number): boolean {
 export const queryKeys = {
   stats: ["stats"] as const,
   visits: (filter?: FilterType) => ["visits", filter] as const,
+  visitPages: (filter: FilterType) => [...VISIT_LIST_PAGE_QUERY_ROOT, filter] as const,
   visitDetail: (id: string) => ["visits", "visit", id] as const,
   visitPhotos: (id: string) => ["visitPhotos", id] as const,
   unmatchedVisits: ["unmatchedVisits"] as const,
@@ -244,12 +405,28 @@ export const queryKeys = {
   unanalyzedPhotoCount: reviewQueryKeys.unanalyzedPhotoCount,
   placesConfigured: ["static", "placesConfigured"] as const,
   // Restaurant-centric keys
-  confirmedRestaurants: ["confirmedRestaurants"] as const,
+  confirmedRestaurants: CONFIRMED_RESTAURANTS_QUERY_KEY,
+  confirmedRestaurantSearch: CONFIRMED_RESTAURANT_SEARCH_QUERY_KEY,
   restaurantVisits: (restaurantId: string) => ["visits", "restaurantVisits", restaurantId] as const,
   restaurantDetail: (restaurantId: string) => ["restaurants", "detail", restaurantId] as const,
   pendingReview: reviewQueryKeys.pendingReview,
   michelinRestaurants: ["static", "michelinRestaurants"] as const,
+  michelinMapViewport: (request: MichelinMapViewportRequest) =>
+    [
+      "michelinMapViewport",
+      request.minimumAwardYear,
+      request.visitStatusFilter,
+      request.awardFilter,
+      request.maximumResults ?? 500,
+      request.camera.latitude,
+      request.camera.longitude,
+      request.camera.zoom,
+      request.width,
+      request.height,
+    ] as const,
   michelinRestaurantSearch: (query: string) => ["michelinRestaurantSearch", query] as const,
+  michelinUnicodeNameIndex: (datasetVersion: string | null) =>
+    ["static", "michelinUnicodeNameIndex", datasetVersion ?? "unversioned"] as const,
   michelinRestaurantDetail: (michelinId: string) => ["static", "michelinRestaurants", "detail", michelinId] as const,
   nearbyMichelin: (lat: number, lon: number) => ["static", "nearbyMichelin", lat, lon] as const,
   mapKitNearby: (lat: number, lon: number, radius: number) =>
@@ -327,16 +504,27 @@ export function useMichelinStatsBucketRestaurants(
 /**
  * Fetch visits with restaurant names and preview photos
  */
-export function useVisits(
-  filter: FilterType,
-  options?: Omit<UseQueryOptions<VisitWithDetails[], Error>, "queryKey" | "queryFn">,
-) {
-  return useQuery({
-    queryKey: queryKeys.visits(filter),
-    queryFn: () => getVisitsWithDetails(filter === "all" ? undefined : filter),
-    ...options,
+export function useVisits(filter: FilterType, options?: { readonly enabled?: boolean }) {
+  return useInfiniteQuery({
+    queryKey: queryKeys.visitPages(filter),
+    initialPageParam: null as VisitListCursor | null,
+    queryFn: async ({ pageParam, signal }): Promise<VisitListPage> => {
+      if (signal.aborted) {
+        throw signal.reason ?? new Error("Visit-list page request was cancelled");
+      }
+      const page = await getVisitListPage(filter === "all" ? undefined : filter, pageParam);
+      if (signal.aborted) {
+        throw signal.reason ?? new Error("Visit-list page request was cancelled");
+      }
+      return page;
+    },
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    ...VISIT_LIST_QUERY_POLICY,
+    enabled: options?.enabled,
   });
 }
+
+export type { VisitListItem };
 
 /**
  * Check if media library permission is granted
@@ -444,6 +632,18 @@ export function useConfirmedRestaurants() {
 }
 
 /**
+ * Fetch the modal's slim confirmed-restaurant projection only while the user
+ * can see and use visited-restaurant search results.
+ */
+export function useConfirmedRestaurantSearch(visible: boolean, searchQuery: string) {
+  return useQuery({
+    queryKey: queryKeys.confirmedRestaurantSearch,
+    queryFn: getConfirmedRestaurantSearchRows,
+    enabled: shouldLoadConfirmedRestaurantSearch(visible, searchQuery),
+  });
+}
+
+/**
  * Fetch visits for a specific restaurant
  */
 export function useRestaurantVisits(restaurantId: string | undefined) {
@@ -454,22 +654,53 @@ export function useRestaurantVisits(restaurantId: string | undefined) {
   });
 }
 
-export interface PendingReviewData {
-  visits: PendingVisitForReviewDB[];
-  exactMatches: ExactCalendarMatch[];
+export type PendingReviewData = PendingQuickActionsDataDB;
+
+export type ExactCalendarConfirmation = PendingVisitReviewExactConfirmation;
+export type PendingReviewPageFilters = PendingVisitReviewFilters;
+
+export function createLoadedExactCalendarMatches(
+  visits: readonly PendingVisitForReviewDB[],
+  confirmations: readonly PendingVisitReviewExactConfirmation[],
+): ExactCalendarMatch[] {
+  const visitsById = new Map(visits.map((visit) => [visit.id, visit]));
+  return confirmations.flatMap((confirmation) => {
+    const visit = visitsById.get(confirmation.visitId);
+    return visit ? [{ ...confirmation, visit }] : [];
+  });
 }
 
 /**
- * Fetch pending visits for review with suggestions and exact calendar matches
+ * Fetch the complete Quick Actions queue without hydrating Review-card fields.
+ * The legacy cache key is retained so status mutations keep one optimistic source of truth.
  */
-export function usePendingReview() {
+export function usePendingQuickActions() {
   return useQuery({
     queryKey: queryKeys.pendingReview,
-    queryFn: async (): Promise<PendingReviewData> => {
-      const visits = await getPendingVisitsForReview();
-      const exactMatches = getExactCalendarMatches(visits);
-      return { visits, exactMatches };
+    queryFn: getPendingQuickActionsData,
+    ...REVIEW_QUERY_MOUNT_POLICY,
+  });
+}
+
+/** Progressively hydrate the globally ordered Review queue in bounded pages. */
+export function usePendingReviewPages(filters: PendingVisitReviewFilters) {
+  return useInfiniteQuery({
+    queryKey: reviewQueryKeys.pendingReviewPages(filters.food, filters.restaurantMatches),
+    initialPageParam: null as PendingVisitReviewPageRequest | null,
+    queryFn: async ({ pageParam, signal }): Promise<PendingVisitReviewProgressivePage> => {
+      if (signal.aborted) {
+        throw signal.reason ?? new Error("Pending-review page request was cancelled");
+      }
+      const page = pageParam
+        ? await getPendingVisitReviewPage(pageParam)
+        : await getPendingVisitReviewFirstPage(filters);
+      if (signal.aborted) {
+        throw signal.reason ?? new Error("Pending-review page request was cancelled");
+      }
+      return page;
     },
+    getNextPageParam: (_lastPage: PendingVisitReviewProgressivePage, pages: PendingVisitReviewProgressivePage[]) =>
+      getNextPendingVisitReviewPageRequest(pages),
     ...REVIEW_QUERY_MOUNT_POLICY,
   });
 }
@@ -478,15 +709,43 @@ export function usePendingReview() {
  * Fetch all Michelin restaurants (for searching)
  */
 export function useMichelinRestaurants() {
+  const queryClient = useQueryClient();
+
   return useQuery({
     queryKey: queryKeys.michelinRestaurants,
     queryFn: async () => {
       // The version check is cheap after the first import and prevents an app
       // update from caching the previous bundled guide for this whole process.
-      await initializeMichelinData();
+      await initializeMichelinDataForQuery(queryClient);
       return getAllMichelinRestaurants();
     },
     staleTime: Infinity, // This data doesn't change
+  });
+}
+
+/** Fetch only the active Michelin rows that can be rendered in one map viewport. */
+export function useMichelinMapViewport(request: MichelinMapViewportRequest, enabled: boolean = true) {
+  const queryClient = useQueryClient();
+
+  return useQuery({
+    queryKey: queryKeys.michelinMapViewport(request),
+    queryFn: async () => {
+      await initializeMichelinDataForQuery(queryClient);
+      return getMichelinMapViewport(request);
+    },
+    enabled: enabled && request.width > 0 && request.height > 0,
+    staleTime: Infinity,
+    gcTime: 1_000,
+    placeholderData: (previous, previousQuery) => {
+      const previousKey = previousQuery?.queryKey;
+      return Array.isArray(previousKey) &&
+        previousKey[1] === request.minimumAwardYear &&
+        previousKey[2] === request.visitStatusFilter &&
+        previousKey[3] === request.awardFilter &&
+        previousKey[4] === (request.maximumResults ?? 500)
+        ? previous
+        : undefined;
+    },
   });
 }
 
@@ -495,15 +754,45 @@ export function useMichelinRestaurants() {
  * The query remains disabled until the user enters non-whitespace text.
  */
 export function useMichelinRestaurantSearch(query: string, enabled: boolean = true) {
-  const normalizedQuery = query.trim().toLowerCase();
+  const queryClient = useQueryClient();
+  const normalizedQuery = normalizeMichelinNameSearchQuery(query);
 
   return useQuery({
     queryKey: queryKeys.michelinRestaurantSearch(normalizedQuery),
-    queryFn: async () => {
-      await initializeMichelinData();
-      return searchUnvisitedMichelinRestaurantsByName(normalizedQuery);
+    queryFn: async ({ signal }) => {
+      await initializeMichelinDataForQuery(queryClient);
+      assertMichelinNameSearchNotAborted(signal);
+
+      if (!isNonAsciiMichelinNameSearchQuery(normalizedQuery)) {
+        return searchUnvisitedMichelinRestaurantsByName(normalizedQuery, undefined, signal);
+      }
+
+      return runStableMichelinNameSearch({
+        signal,
+        readDatasetVersion: getImportedMichelinDatasetVersion,
+        loadIndex: (datasetVersion) =>
+          queryClient.ensureQueryData<MichelinUnicodeNameIndexRow[]>({
+            queryKey: queryKeys.michelinUnicodeNameIndex(datasetVersion),
+            queryFn: async ({ signal: indexSignal }) => {
+              const rows = await getActiveMichelinUnicodeNameRows();
+              assertMichelinNameSearchNotAborted(indexSignal);
+              return createMichelinUnicodeNameIndex(rows);
+            },
+            ...MICHELIN_STATIC_QUERY_CACHE_POLICY,
+            revalidateIfStale: true,
+          }),
+        selectMatchingIds: (index) => selectSortedMichelinUnicodeMatchIds(index, normalizedQuery),
+        hydrateMatchingIds: hydrateUnvisitedMichelinNameSearchIds,
+        onDatasetChanged: (previousVersion) => {
+          queryClient.removeQueries({
+            queryKey: queryKeys.michelinUnicodeNameIndex(previousVersion),
+            exact: true,
+          });
+        },
+      });
     },
     enabled: enabled && normalizedQuery.length > 0,
+    staleTime: Infinity,
   });
 }
 
@@ -815,6 +1104,7 @@ export function useConfirmVisit() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    scope: REVIEW_STATUS_MUTATION_SCOPE,
     mutationFn: async ({
       visitId,
       restaurantId,
@@ -840,30 +1130,50 @@ export function useConfirmVisit() {
       return { visitId };
     },
     onMutate: async ({ visitId }) => {
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: queryKeys.pendingReview }),
-        queryClient.cancelQueries({ queryKey: queryKeys.stats }),
-      ]);
-      const previousPending = queryClient.getQueryData<PendingReviewData>(queryKeys.pendingReview);
-      const previousStats = queryClient.getQueryData<Stats>(queryKeys.stats);
+      const refreshNeedsReconciliation = pendingReviewRefreshNeedsReconciliation(queryClient);
+      const rollbackBaseline = beginPendingReviewMutationGroup(queryClient);
+      try {
+        await queryClient.cancelQueries({ queryKey: queryKeys.pendingReview });
+      } catch (error) {
+        finishPendingReviewMutationGroup(queryClient);
+        throw error;
+      }
 
       optimisticallyRemoveVisitsFromPending(queryClient, [visitId]);
-      optimisticallyUpdateStats(queryClient, { pending: -1, confirmed: 1 });
 
-      return { previousPending, previousStats };
+      return { rollbackBaseline, refreshNeedsReconciliation };
     },
-    onError: (_err, _vars, context) => {
-      if (context?.previousPending) {
-        queryClient.setQueryData(queryKeys.pendingReview, context.previousPending);
-      }
-      if (context?.previousStats) {
-        queryClient.setQueryData(queryKeys.stats, context.previousStats);
-      }
+    onError: async (_err, { visitId }, context) => {
+      await interruptPendingReviewRefreshForMutationSettlement(
+        queryClient,
+        context?.refreshNeedsReconciliation ?? false,
+      );
+      restoreFailedVisitsToPending(
+        queryClient,
+        context?.rollbackBaseline,
+        pendingReviewMutationIdsEligibleForRollback(queryClient, [visitId]),
+      );
+      // Failures are rare; reconcile canonically so overlapping status work
+      // cannot leave an optimistic rollback as the final source of truth.
+      await settleOptimisticPendingReviewMutation(queryClient, true);
     },
-    onSuccess: (_data, variables) => {
+    onSuccess: async (_data, variables, context) => {
+      const refreshNeedsReconciliation = await interruptPendingReviewRefreshForMutationSettlement(
+        queryClient,
+        context?.refreshNeedsReconciliation ?? false,
+      );
+      // Reapply the exact postcondition after an earlier serialized rollback.
+      markPendingReviewMutationIdsSuccessful(queryClient, [variables.visitId]);
+      optimisticallyRemoveVisitsFromPending(queryClient, [variables.visitId]);
+      await settleOptimisticPendingReviewMutation(queryClient, refreshNeedsReconciliation);
       invalidateVisitStatusQueries(queryClient);
       // Track analytics
       logVisitConfirmed(parseInt(variables.visitId, 10) || 0);
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      if (context) {
+        finishPendingReviewMutationGroup(queryClient);
+      }
     },
   });
 }
@@ -877,6 +1187,7 @@ export function useBatchConfirmVisits() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    scope: REVIEW_STATUS_MUTATION_SCOPE,
     mutationFn: async (
       confirmations: Array<{
         visitId: string;
@@ -937,34 +1248,52 @@ export function useBatchConfirmVisits() {
       return { count: confirmations.length, mergeCount };
     },
     onMutate: async (confirmations) => {
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: queryKeys.pendingReview }),
-        queryClient.cancelQueries({ queryKey: queryKeys.stats }),
-      ]);
-      const previousPending = queryClient.getQueryData<PendingReviewData>(queryKeys.pendingReview);
-      const previousStats = queryClient.getQueryData<Stats>(queryKeys.stats);
+      const refreshNeedsReconciliation = pendingReviewRefreshNeedsReconciliation(queryClient);
+      const rollbackBaseline = beginPendingReviewMutationGroup(queryClient);
+      try {
+        await queryClient.cancelQueries({ queryKey: queryKeys.pendingReview });
+      } catch (error) {
+        finishPendingReviewMutationGroup(queryClient);
+        throw error;
+      }
 
       optimisticallyRemoveVisitsFromPending(
         queryClient,
         confirmations.map((c) => c.visitId),
       );
-      optimisticallyUpdateStats(queryClient, { pending: -confirmations.length, confirmed: confirmations.length });
 
-      return { previousPending, previousStats };
+      return { rollbackBaseline, refreshNeedsReconciliation };
     },
-    onError: (_err, _vars, context) => {
-      if (context?.previousPending) {
-        queryClient.setQueryData(queryKeys.pendingReview, context.previousPending);
-      }
-      if (context?.previousStats) {
-        queryClient.setQueryData(queryKeys.stats, context.previousStats);
-      }
+    onError: async (_err, confirmations, context) => {
+      await interruptPendingReviewRefreshForMutationSettlement(
+        queryClient,
+        context?.refreshNeedsReconciliation ?? false,
+      );
+      const visitIds = confirmations.map((confirmation) => confirmation.visitId);
+      restoreFailedVisitsToPending(
+        queryClient,
+        context?.rollbackBaseline,
+        pendingReviewMutationIdsEligibleForRollback(queryClient, visitIds),
+      );
+      await settleOptimisticPendingReviewMutation(queryClient, true);
     },
-    onSuccess: () => {
+    onSuccess: async (_data, confirmations, context) => {
+      const refreshNeedsReconciliation = await interruptPendingReviewRefreshForMutationSettlement(
+        queryClient,
+        context?.refreshNeedsReconciliation ?? false,
+      );
+      const visitIds = confirmations.map((confirmation) => confirmation.visitId);
+      markPendingReviewMutationIdsSuccessful(queryClient, visitIds);
+      optimisticallyRemoveVisitsFromPending(queryClient, visitIds);
+      await settleOptimisticPendingReviewMutation(queryClient, refreshNeedsReconciliation);
       // Merging duplicates may affect confirmed visits, stats, and cleanup queries.
-      invalidateVisitQueries(queryClient);
       invalidateVisitStatusQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      if (context) {
+        finishPendingReviewMutationGroup(queryClient);
+      }
     },
   });
 }
@@ -972,48 +1301,8 @@ export function useBatchConfirmVisits() {
 /**
  * Exact calendar match - visit where the calendar event matches a Michelin restaurant
  */
-export interface ExactCalendarMatch {
-  visitId: string;
+export interface ExactCalendarMatch extends PendingVisitReviewExactConfirmation {
   visit: PendingVisitForReview;
-  restaurantId: string;
-  restaurantName: string;
-  latitude: number;
-  longitude: number;
-  calendarTitle: string;
-  startTime: number;
-}
-
-/**
- * Find exact-style calendar event matches to Michelin restaurant names
- * Pure function that can be called independently
- */
-function getExactCalendarMatches(pendingVisits: PendingVisitForReview[]): ExactCalendarMatch[] {
-  const matches: ExactCalendarMatch[] = [];
-
-  for (const visit of pendingVisits) {
-    if (!visit.calendarEventTitle) {
-      continue;
-    }
-
-    // Check for match with any suggested restaurant using comprehensive comparison
-    for (const restaurant of visit.suggestedRestaurants) {
-      if (compareRestaurantAndCalendarTitle(visit.calendarEventTitle, restaurant.name)) {
-        matches.push({
-          visitId: visit.id,
-          visit,
-          restaurantId: restaurant.id,
-          restaurantName: restaurant.name,
-          latitude: restaurant.latitude,
-          longitude: restaurant.longitude,
-          calendarTitle: visit.calendarEventTitle,
-          startTime: visit.startTime,
-        });
-        break; // Only match once per visit
-      }
-    }
-  }
-
-  return matches;
 }
 
 // Re-export for use in UI
@@ -1035,9 +1324,9 @@ export function useImportableCalendarEvents() {
  * Input for importing calendar events with optional restaurant selection
  */
 export interface ImportCalendarEventsInput {
-  calendarEventIds: string[];
+  events: readonly ImportableCalendarEvent[];
   /** Map of calendarEventId -> restaurantId to use instead of the default matched restaurant */
-  restaurantOverrides?: Map<string, string>;
+  restaurantOverrides?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -1047,17 +1336,13 @@ export function useImportCalendarEvents() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (input: string[] | ImportCalendarEventsInput) => {
-      // Support both old simple array and new object format
-      if (Array.isArray(input)) {
-        return importCalendarEvents(input);
-      }
-      return importCalendarEvents(input.calendarEventIds, {
+    scope: { id: "calendar-import" },
+    mutationFn: (input: ImportCalendarEventsInput) =>
+      importCalendarEvents(input.events, {
         restaurantOverrides: input.restaurantOverrides,
-      });
-    },
+      }),
     onMutate: async (input) => {
-      const calendarEventIds = Array.isArray(input) ? input : input.calendarEventIds;
+      const calendarEventIds = getUniqueCalendarImportEventIds(input.events);
 
       // Cancel any outgoing refetches to avoid overwriting optimistic update
       await queryClient.cancelQueries({ queryKey: queryKeys.importableCalendarEvents });
@@ -1068,18 +1353,25 @@ export function useImportCalendarEvents() {
       // Optimistically remove the imported events from the list
       optimisticallyRemoveImportableCalendarEvents(queryClient, calendarEventIds);
 
-      // Also optimistically update stats (since these are now confirmed visits)
-      optimisticallyUpdateStats(queryClient, { confirmed: calendarEventIds.length });
-
-      return { previousEvents };
+      return { previousEvents, calendarEventIds };
     },
     onError: (_error, _input, context) => {
-      // Rollback to previous state on error
-      if (context?.previousEvents) {
-        queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, context.previousEvents);
-      }
+      queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, (current) =>
+        reconcileCalendarImportCache(current, context?.previousEvents, context?.calendarEventIds ?? [], []),
+      );
     },
-    onSuccess: () => {
+    onSuccess: (result, _input, context) => {
+      queryClient.setQueryData<ImportableCalendarEvent[]>(queryKeys.importableCalendarEvents, (current) =>
+        reconcileCalendarImportCache(
+          current,
+          context?.previousEvents,
+          context?.calendarEventIds ?? [],
+          result.insertedCalendarEventIds,
+        ),
+      );
+      // Stats are intentionally not optimistic: exact inserted cardinality is
+      // unknown until SQLite resolves conflicts. This invalidation loads the
+      // canonical count for zero, partial, and complete outcomes.
       invalidateReservationImportQueries(queryClient);
     },
   });
@@ -1232,6 +1524,7 @@ export function useUpdateVisitStatus(visitId: string | undefined) {
   const queryClient = useQueryClient();
 
   return useMutation({
+    scope: REVIEW_STATUS_MUTATION_SCOPE,
     mutationFn: async (newStatus: VisitStatus) => {
       if (!visitId) {
         throw new Error("Visit ID is required");
@@ -1280,46 +1573,72 @@ export function useUpdateVisitNotes(visitId: string | undefined) {
 
 /**
  * Quick status update mutation
- * Uses optimistic updates for instant UI feedback - no query invalidation needed for pending reviews
+ * Keeps the exact optimistic Review result visible and marks it stale without refetching.
  */
 export function useQuickUpdateVisitStatus() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    scope: REVIEW_STATUS_MUTATION_SCOPE,
     mutationFn: async ({ visitId, newStatus }: { visitId: string; newStatus: VisitStatus }) => {
       await updateVisitStatus(visitId, newStatus);
       return { visitId, newStatus };
     },
     onMutate: async ({ visitId, newStatus }) => {
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: queryKeys.pendingReview }),
-        queryClient.cancelQueries({ queryKey: queryKeys.stats }),
-      ]);
-      const previousPending = queryClient.getQueryData<PendingReviewData>(queryKeys.pendingReview);
-      const previousStats = queryClient.getQueryData<Stats>(queryKeys.stats);
-
-      // Optimistically remove from pending review list
-      optimisticallyRemoveVisitsFromPending(queryClient, [visitId]);
-      // Update stats based on new status
-      const delta = newStatus === "confirmed" ? { pending: -1, confirmed: 1 } : { pending: -1 }; // rejected just decrements pending
-      optimisticallyUpdateStats(queryClient, delta);
-
-      return { previousPending, previousStats };
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.previousPending) {
-        queryClient.setQueryData(queryKeys.pendingReview, context.previousPending);
+      const refreshNeedsReconciliation = pendingReviewRefreshNeedsReconciliation(queryClient);
+      const rollbackBaseline = newStatus === "pending" ? undefined : beginPendingReviewMutationGroup(queryClient);
+      try {
+        await queryClient.cancelQueries({ queryKey: queryKeys.pendingReview });
+      } catch (error) {
+        if (newStatus !== "pending") {
+          finishPendingReviewMutationGroup(queryClient);
+        }
+        throw error;
       }
-      if (context?.previousStats) {
-        queryClient.setQueryData(queryKeys.stats, context.previousStats);
+
+      if (newStatus !== "pending") {
+        // Optimistically remove from pending review list
+        optimisticallyRemoveVisitsFromPending(queryClient, [visitId]);
       }
+
+      return { rollbackBaseline, mutationGroupStarted: newStatus !== "pending", refreshNeedsReconciliation };
     },
-    onSuccess: (_data, { visitId, newStatus }) => {
+    onError: async (_err, { visitId, newStatus }, context) => {
+      await interruptPendingReviewRefreshForMutationSettlement(
+        queryClient,
+        context?.refreshNeedsReconciliation ?? false,
+      );
+      if (newStatus !== "pending") {
+        restoreFailedVisitsToPending(
+          queryClient,
+          context?.rollbackBaseline,
+          pendingReviewMutationIdsEligibleForRollback(queryClient, [visitId]),
+        );
+      }
+      await settleOptimisticPendingReviewMutation(queryClient, true);
+    },
+    onSuccess: async (_data, { visitId, newStatus }, context) => {
+      const refreshNeedsReconciliation = await interruptPendingReviewRefreshForMutationSettlement(
+        queryClient,
+        context?.refreshNeedsReconciliation ?? false,
+      );
+      if (newStatus === "pending") {
+        await invalidatePendingReviewQuery(queryClient);
+      } else {
+        markPendingReviewMutationIdsSuccessful(queryClient, [visitId]);
+        optimisticallyRemoveVisitsFromPending(queryClient, [visitId]);
+        await settleOptimisticPendingReviewMutation(queryClient, refreshNeedsReconciliation);
+      }
       invalidateVisitStatusQueries(queryClient);
       if (newStatus === "confirmed") {
         logVisitConfirmed(parseInt(visitId, 10) || 0);
       } else if (newStatus === "rejected") {
         logVisitRejected(parseInt(visitId, 10) || 0);
+      }
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      if (context?.mutationGroupStarted) {
+        finishPendingReviewMutationGroup(queryClient);
       }
     },
   });
@@ -1333,13 +1652,14 @@ export function useUndoVisitAction() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    scope: REVIEW_STATUS_MUTATION_SCOPE,
     mutationFn: async ({ visitId }: { visitId: string }) => {
       await updateVisitStatus(visitId, "pending");
       return { visitId };
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       // Refetch the pending review list to restore the visit
-      queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
+      await invalidatePendingReviewQuery(queryClient);
       invalidateVisitStatusQueries(queryClient);
     },
   });
@@ -1347,49 +1667,70 @@ export function useUndoVisitAction() {
 
 /**
  * Batch update visit statuses - for bulk operations
- * Uses optimistic updates for instant UI feedback - no query invalidation needed for pending reviews
+ * Keeps the exact optimistic Review result visible and marks it stale without refetching.
  */
 export function useBatchUpdateVisitStatus() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    scope: REVIEW_STATUS_MUTATION_SCOPE,
     mutationFn: async ({ visitIds, newStatus }: { visitIds: string[]; newStatus: VisitStatus }) => {
       const uniqueVisitIds = [...new Set(visitIds)];
       await batchUpdateVisitStatuses(uniqueVisitIds, newStatus);
       return { visitIds: uniqueVisitIds, newStatus };
     },
     onMutate: async ({ visitIds, newStatus }) => {
-      await Promise.all([
-        queryClient.cancelQueries({ queryKey: queryKeys.pendingReview }),
-        queryClient.cancelQueries({ queryKey: queryKeys.stats }),
-      ]);
-      const previousPending = queryClient.getQueryData<PendingReviewData>(queryKeys.pendingReview);
-      const previousStats = queryClient.getQueryData<Stats>(queryKeys.stats);
+      const refreshNeedsReconciliation = pendingReviewRefreshNeedsReconciliation(queryClient);
+      const rollbackBaseline = newStatus === "pending" ? undefined : beginPendingReviewMutationGroup(queryClient);
+      try {
+        await queryClient.cancelQueries({ queryKey: queryKeys.pendingReview });
+      } catch (error) {
+        if (newStatus !== "pending") {
+          finishPendingReviewMutationGroup(queryClient);
+        }
+        throw error;
+      }
 
       if (newStatus !== "pending") {
-        const uniqueVisitCount = new Set(visitIds).size;
         optimisticallyRemoveVisitsFromPending(queryClient, visitIds);
-        const delta =
-          newStatus === "confirmed"
-            ? { pending: -uniqueVisitCount, confirmed: uniqueVisitCount }
-            : { pending: -uniqueVisitCount };
-        optimisticallyUpdateStats(queryClient, delta);
       }
 
-      return { previousPending, previousStats };
+      return { rollbackBaseline, mutationGroupStarted: newStatus !== "pending", refreshNeedsReconciliation };
     },
-    onError: (_err, _vars, context) => {
-      if (context?.previousPending) {
-        queryClient.setQueryData(queryKeys.pendingReview, context.previousPending);
+    onError: async (_err, { visitIds, newStatus }, context) => {
+      await interruptPendingReviewRefreshForMutationSettlement(
+        queryClient,
+        context?.refreshNeedsReconciliation ?? false,
+      );
+      if (newStatus !== "pending") {
+        restoreFailedVisitsToPending(
+          queryClient,
+          context?.rollbackBaseline,
+          pendingReviewMutationIdsEligibleForRollback(queryClient, visitIds),
+        );
       }
-      if (context?.previousStats) {
-        queryClient.setQueryData(queryKeys.stats, context.previousStats);
-      }
+      await settleOptimisticPendingReviewMutation(queryClient, true);
     },
-    onSuccess: () => {
+    onSuccess: async (data, { newStatus }, context) => {
+      const refreshNeedsReconciliation = await interruptPendingReviewRefreshForMutationSettlement(
+        queryClient,
+        context?.refreshNeedsReconciliation ?? false,
+      );
+      if (newStatus === "pending") {
+        await invalidatePendingReviewQuery(queryClient);
+      } else {
+        markPendingReviewMutationIdsSuccessful(queryClient, data.visitIds);
+        optimisticallyRemoveVisitsFromPending(queryClient, data.visitIds);
+        await settleOptimisticPendingReviewMutation(queryClient, refreshNeedsReconciliation);
+      }
       // Reconcile every status-derived cache with the atomic database result.
       // This also handles duplicate/missing IDs after the optimistic update.
       invalidateVisitStatusQueries(queryClient);
+    },
+    onSettled: (_data, _error, _variables, context) => {
+      if (context?.mutationGroupStarted) {
+        finishPendingReviewMutationGroup(queryClient);
+      }
     },
   });
 }
@@ -1420,7 +1761,7 @@ export function useMergeVisits() {
       await mergeVisits(targetVisitId, sourceVisitId);
       return { targetVisitId };
     },
-    onSuccess: ({ targetVisitId }) => {
+    onSettled: (_data, _error, { targetVisitId }) => {
       invalidateVisitQueries(queryClient);
       invalidateVisitStatusQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(targetVisitId) });
@@ -1446,7 +1787,7 @@ export function useBatchMergeSameRestaurantVisits() {
       const mergeCount = await batchMergeSameRestaurantVisits(groups);
       return { mergeCount };
     },
-    onSuccess: () => {
+    onSettled: () => {
       // Invalidate all visit-related queries
       invalidateVisitQueries(queryClient);
       invalidateVisitStatusQueries(queryClient);
@@ -1482,6 +1823,7 @@ export function useCreateManualVisit() {
       return { visitId, restaurantId };
     },
     onSuccess: ({ restaurantId }) => {
+      void resetVisitListPageQueries(queryClient);
       // Invalidate restaurant visits to show the new visit
       queryClient.invalidateQueries({ queryKey: queryKeys.restaurantVisits(restaurantId) });
       // Invalidate confirmed restaurants list (visit count changed)
@@ -1516,6 +1858,7 @@ export function useIgnoreLocation() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    scope: REVIEW_STATUS_MUTATION_SCOPE,
     mutationFn: async ({
       latitude,
       longitude,
@@ -1531,8 +1874,9 @@ export function useIgnoreLocation() {
       const rejectedCount = await rejectVisitsInIgnoredLocations();
       return { id, rejectedCount };
     },
-    onSuccess: () => {
+    onSettled: async () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.ignoredLocations });
+      await invalidatePendingReviewQuery(queryClient);
       invalidateVisitStatusQueries(queryClient);
     },
   });
@@ -1598,7 +1942,13 @@ export function useUpdateRestaurant(restaurantId: string | undefined) {
         queryClient.setQueryData(queryKeys.confirmedRestaurants, context.previousRestaurants);
       }
     },
+    onSuccess: async (data) => {
+      if (data.name !== undefined) {
+        await invalidatePendingReviewQuery(queryClient);
+      }
+    },
     onSettled: () => {
+      void resetVisitListPageQueries(queryClient);
       // Refetch to ensure consistency with server
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
       if (restaurantId) {
@@ -1786,7 +2136,7 @@ export function useCreateCalendarEventsForVisits() {
       // Invalidate queries to refresh the lists
       queryClient.invalidateQueries({ queryKey: queryKeys.visitsWithoutCalendarEvents });
       queryClient.invalidateQueries({ queryKey: queryKeys.exportedCalendarEvents });
-      queryClient.invalidateQueries({ queryKey: queryKeys.visits() });
+      void resetVisitListPageQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
     },
   });
@@ -1829,7 +2179,7 @@ export function useDeleteExportedCalendarEvents() {
       // Invalidate queries to refresh the lists
       queryClient.invalidateQueries({ queryKey: queryKeys.exportedCalendarEvents });
       queryClient.invalidateQueries({ queryKey: queryKeys.visitsWithoutCalendarEvents });
-      queryClient.invalidateQueries({ queryKey: queryKeys.visits() });
+      void resetVisitListPageQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
     },
   });
@@ -1967,6 +2317,7 @@ export function useReclassifyPhotos(onProgress?: (progress: ReclassifyProgress) 
     },
     onSuccess: () => {
       // Invalidate all relevant queries after reclassification
+      void resetVisitListPageQueries(queryClient);
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       queryClient.invalidateQueries({ queryKey: queryKeys.photosWithLabelsCount });
@@ -1985,8 +2336,9 @@ export function useRecomputeSuggestedRestaurants() {
     mutationFn: async () => {
       return recomputeSuggestedRestaurants();
     },
-    onSuccess: () => {
+    onSettled: () => {
       // Invalidate visit-related queries to reflect new suggestions
+      void resetVisitListPageQueries(queryClient);
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
     },
@@ -2020,10 +2372,11 @@ export function useAddPhotosToVisit(visitId: string | undefined) {
       // Move the photos to this visit
       return movePhotosToVisit(existingPhotoIds, visitId);
     },
-    onSuccess: (_result, _vars) => {
+    onSettled: (_result, _error, _vars) => {
+      void resetVisitListPageQueries(queryClient);
       // Invalidate visit detail query for this visit
       if (visitId) {
-        queryClient.invalidateQueries({ queryKey: ["visitDetail", visitId] });
+        queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId) });
       }
       // Also invalidate any affected source visits and general queries
       invalidateVisitQueries(queryClient);
@@ -2047,7 +2400,8 @@ export function useRemovePhotosFromVisit(visitId: string | undefined) {
       }
       return removePhotosFromVisit(photoIds, visitId);
     },
-    onSuccess: (_result, _vars) => {
+    onSettled: (_result, _error, _vars) => {
+      void resetVisitListPageQueries(queryClient);
       // Invalidate visit detail query for this visit
       if (visitId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId) });

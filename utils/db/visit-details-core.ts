@@ -52,7 +52,7 @@ export function buildVisitsWithDetailsQuery(filter?: VisitDetailsFilter): VisitD
           LEFT JOIN restaurants r ON c.restaurantId = r.id
           LEFT JOIN michelin_restaurants m ON c.suggestedRestaurantId = m.id
           ${whereClause}
-          ORDER BY c.startTime DESC`,
+          ORDER BY c.startTime DESC, c.id COLLATE BINARY DESC`,
     parameters,
   };
 }

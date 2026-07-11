@@ -14,6 +14,7 @@ import {
   QuickActionsCard,
   SectionHeader,
 } from "@/components/settings";
+import { refreshAllQueriesWithVisitListPageReset } from "@/utils/query-cache-policy";
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -22,8 +23,9 @@ export default function SettingsScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await queryClient.invalidateQueries();
-    setRefreshing(false);
+    await refreshAllQueriesWithVisitListPageReset(queryClient).finally(() => {
+      setRefreshing(false);
+    });
   }, [queryClient]);
 
   return (

@@ -1,112 +1,74 @@
-import { cleanCalendarEventTitle, isFuzzyRestaurantMatch } from "@/services/calendar";
+import {
+  cleanCalendarEventTitle,
+  compareRestaurantAndCalendarTitle,
+  isFuzzyRestaurantMatch,
+} from "@/services/calendar";
 import { DEBUG_TIMING, getDatabase } from "./core";
-import type { AggregatedFoodLabel, FoodLabel, PendingVisitForReview, SuggestedRestaurantDetail } from "./types";
+import type { PendingVisitForReview, SuggestedRestaurantDetail } from "./types";
+import {
+  PENDING_QUICK_ACTIONS_SQL,
+  createPendingQuickActionsData,
+  parseLegacyPendingVisitFoodLabels,
+  parsePendingQuickActionRows,
+  type PendingQuickActionQueryRow,
+  type PendingQuickActionsData,
+} from "./quick-actions-core";
 import { PENDING_VISITS_FOR_REVIEW_SQL, type PendingVisitReviewQueryRow } from "./visit-review-core";
+import {
+  DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE,
+  PENDING_VISIT_REVIEW_MANIFEST_SQL,
+  PENDING_VISIT_REVIEW_PAGE_SQL,
+  createPendingVisitReviewGeneration,
+  parsePendingVisitReviewManifest,
+  serializePendingVisitReviewPageKeys,
+  validatePendingVisitReviewPageSize,
+  type PendingVisitReviewFilters,
+  type PendingVisitReviewGeneration,
+  type PendingVisitReviewManifestItem,
+  type PendingVisitReviewManifestRow,
+  type PendingVisitReviewPage,
+  type PendingVisitReviewPageKey,
+  type PendingVisitReviewPageRequest,
+} from "./visit-review-paging-core";
 
-// Get pending visits that need review (with suggestions)
-export async function getPendingVisitsForReview(): Promise<PendingVisitForReview[]> {
-  const start = DEBUG_TIMING ? performance.now() : 0;
-  const database = await getDatabase();
+export type PendingVisitReviewProgressivePage = PendingVisitReviewPage<PendingVisitForReview>;
+export type {
+  PendingQuickActionExactMatch,
+  PendingQuickActionSuggestion,
+  PendingQuickActionVisit,
+  PendingQuickActionsData,
+} from "./quick-actions-core";
 
-  const results = await database.getAllAsync<PendingVisitReviewQueryRow>(PENDING_VISITS_FOR_REVIEW_SQL);
+const PENDING_VISIT_REVIEW_MATCH_TOOLS = {
+  cleanCalendarEventTitle,
+  isFuzzyRestaurantMatch,
+  compareRestaurantAndCalendarTitle,
+} as const;
 
-  if (results.length === 0) {
-    if (DEBUG_TIMING) {
-      console.log(`[DB] getPendingVisitsForReview: ${(performance.now() - start).toFixed(2)}ms (0 results)`);
-    }
-    return [];
-  }
-
-  if (DEBUG_TIMING) {
-    console.log(
-      `[DB] getPendingVisitsForReview: ${(performance.now() - start).toFixed(2)}ms (${results.length} results)`,
-    );
-  }
-  // Process results - parse JSON and compute calendar matches
-  // Pre-build a map of normalized restaurant names for faster calendar matching
-  const normalizedRestaurantNames = new Map<string, string>();
-
-  const processedVisits: PendingVisitForReview[] = [];
-  const calendarMatchVisitIds = new Set<string>();
-
-  for (const row of results) {
-    // Parse preview photos
+/** Decode card-sized raw rows without changing their caller-supplied order. */
+export function mapPendingVisitReviewRows(results: readonly PendingVisitReviewQueryRow[]): PendingVisitForReview[] {
+  return results.map((row) => {
     let previewPhotos: string[] = [];
     if (row.previewPhotosJson) {
       try {
         previewPhotos = JSON.parse(row.previewPhotosJson);
       } catch {
-        // Skip malformed JSON
+        // Preserve legacy tolerance for malformed optional JSON.
       }
     }
 
-    // Parse suggested restaurants
     let suggestedRestaurants: SuggestedRestaurantDetail[] = [];
     if (row.suggestedRestaurantsJson) {
       try {
         suggestedRestaurants = JSON.parse(row.suggestedRestaurantsJson);
       } catch {
-        // Skip malformed JSON
+        // Preserve legacy tolerance for malformed optional JSON.
       }
     }
 
-    // Parse and aggregate food labels
-    // json_group_array(json(...)) produces an array of label arrays: [[{label,confidence},...], [...]]
-    let foodLabels: AggregatedFoodLabel[] = [];
-    if (row.foodLabelsJson && row.foodProbable) {
-      try {
-        const rawLabelsArrays = JSON.parse(row.foodLabelsJson) as FoodLabel[][];
-        const labelMap = new Map<string, AggregatedFoodLabel>();
+    const foodLabels = parseLegacyPendingVisitFoodLabels(row.foodLabelsJson, Boolean(row.foodProbable));
 
-        for (const labels of rawLabelsArrays) {
-          if (!Array.isArray(labels)) {
-            continue;
-          }
-          for (const label of labels) {
-            const existing = labelMap.get(label.label);
-            if (existing) {
-              existing.maxConfidence = Math.max(existing.maxConfidence, label.confidence);
-              existing.photoCount++;
-            } else {
-              labelMap.set(label.label, {
-                label: label.label,
-                maxConfidence: label.confidence,
-                photoCount: 1,
-              });
-            }
-          }
-        }
-
-        // Sort by confidence and limit to top 5
-        foodLabels = Array.from(labelMap.values())
-          .sort((a, b) => b.maxConfidence - a.maxConfidence)
-          .slice(0, 5);
-      } catch {
-        // Skip malformed JSON
-      }
-    }
-
-    // Check for calendar match with suggested restaurants
-    if (row.calendarEventTitle && suggestedRestaurants.length > 0) {
-      const cleanedTitle = cleanCalendarEventTitle(row.calendarEventTitle);
-      if (cleanedTitle) {
-        for (const restaurant of suggestedRestaurants) {
-          // Use cached normalized name or compute and cache
-          let normalizedName = normalizedRestaurantNames.get(restaurant.id);
-          if (normalizedName === undefined) {
-            normalizedName = restaurant.name;
-            normalizedRestaurantNames.set(restaurant.id, normalizedName);
-          }
-
-          if (isFuzzyRestaurantMatch(cleanedTitle, normalizedName)) {
-            calendarMatchVisitIds.add(row.id);
-            break;
-          }
-        }
-      }
-    }
-
-    processedVisits.push({
+    return {
       id: row.id,
       restaurantId: row.restaurantId,
       suggestedRestaurantId: row.suggestedRestaurantId,
@@ -121,10 +83,10 @@ export async function getPendingVisitsForReview(): Promise<PendingVisitForReview
       calendarEventTitle: row.calendarEventTitle,
       calendarEventLocation: row.calendarEventLocation,
       calendarEventIsAllDay: row.calendarEventIsAllDay === 1,
-      exportedToCalendarId: null, // Pending visits don't have exported events
+      exportedToCalendarId: null,
       notes: row.notes,
       updatedAt: row.updatedAt,
-      awardAtVisit: null, // Pending visits don't have historical award yet
+      awardAtVisit: null,
       restaurantName: row.restaurantName,
       suggestedRestaurantName: row.suggestedRestaurantName,
       suggestedRestaurantAward: row.suggestedRestaurantAward,
@@ -134,27 +96,194 @@ export async function getPendingVisitsForReview(): Promise<PendingVisitForReview
       suggestedRestaurants,
       foodLabels,
       hasUnanalyzedPhotos: row.hasUnanalyzedPhotos === 1,
-    });
+    };
+  });
+}
+
+function orderPendingVisitsByFuzzyCalendarMatch(visits: readonly PendingVisitForReview[]): PendingVisitForReview[] {
+  const matched: PendingVisitForReview[] = [];
+  const remaining: PendingVisitForReview[] = [];
+  const restaurantNames = new Map<string, string>();
+
+  for (const visit of visits) {
+    let hasMatch = false;
+    if (visit.calendarEventTitle && visit.suggestedRestaurants.length > 0) {
+      const cleanedTitle = cleanCalendarEventTitle(visit.calendarEventTitle);
+      if (cleanedTitle) {
+        hasMatch = visit.suggestedRestaurants.some((restaurant) => {
+          const restaurantName = restaurantNames.get(restaurant.id) ?? restaurant.name;
+          restaurantNames.set(restaurant.id, restaurantName);
+          return isFuzzyRestaurantMatch(cleanedTitle, restaurantName);
+        });
+      }
+    }
+    (hasMatch ? matched : remaining).push(visit);
   }
 
-  // Sort with calendar matches first, preserving original order within groups
-  // Use a stable sort approach - only swap when calendar match status differs
-  if (calendarMatchVisitIds.size > 0) {
-    processedVisits.sort((a, b) => {
-      const aHasMatch = calendarMatchVisitIds.has(a.id);
-      const bHasMatch = calendarMatchVisitIds.has(b.id);
-      if (aHasMatch !== bHasMatch) {
-        return aHasMatch ? -1 : 1;
-      }
-      return 0;
-    });
-  }
+  return [...matched, ...remaining];
+}
+
+/** Legacy monolithic API retained as a safe paging fallback and parity oracle. */
+export async function getPendingVisitsForReview(): Promise<PendingVisitForReview[]> {
+  const startedAt = DEBUG_TIMING ? performance.now() : 0;
+  const database = await getDatabase();
+  const results = await database.getAllAsync<PendingVisitReviewQueryRow>(PENDING_VISITS_FOR_REVIEW_SQL);
+  const visits = orderPendingVisitsByFuzzyCalendarMatch(mapPendingVisitReviewRows(results));
 
   if (DEBUG_TIMING) {
     console.log(
-      `[DB] getPendingVisitsForReview: ${(performance.now() - start).toFixed(2)}ms Post-processing: ${processedVisits.length} results`,
+      `[DB] getPendingVisitsForReview: ${(performance.now() - startedAt).toFixed(2)}ms (${visits.length} results)`,
     );
   }
+  return visits;
+}
 
-  return processedVisits;
+/** Fetch the complete Quick Actions queue without hydrating Review card fields. */
+export async function getPendingQuickActionsData(): Promise<PendingQuickActionsData> {
+  const startedAt = DEBUG_TIMING ? performance.now() : 0;
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<PendingQuickActionQueryRow>(PENDING_QUICK_ACTIONS_SQL);
+  const data = createPendingQuickActionsData(parsePendingQuickActionRows(rows), PENDING_VISIT_REVIEW_MATCH_TOOLS);
+
+  if (DEBUG_TIMING) {
+    console.log(
+      `[DB] getPendingQuickActionsData: ${(performance.now() - startedAt).toFixed(2)}ms (${data.visits.length} visits, ${data.exactMatches.length} exact matches)`,
+    );
+  }
+  return data;
+}
+
+function priorityForVisit(visit: PendingVisitForReview): 1 | 2 | 3 | 4 {
+  const hasRestaurantMatch = Boolean(visit.suggestedRestaurantId) || visit.suggestedRestaurants.length > 0;
+  if (visit.foodProbable && hasRestaurantMatch) {
+    return 1;
+  }
+  if (hasRestaurantMatch) {
+    return 2;
+  }
+  return visit.foodProbable ? 3 : 4;
+}
+
+function manifestItemsFromVisits(visits: readonly PendingVisitForReview[]): PendingVisitReviewManifestItem[] {
+  return visits.map((visit) => ({
+    id: visit.id,
+    priority: priorityForVisit(visit),
+    startTime: visit.startTime,
+    foodProbable: visit.foodProbable,
+    calendarEventTitle: visit.calendarEventTitle,
+    suggestedRestaurants: visit.suggestedRestaurants.map((restaurant) => ({
+      id: restaurant.id,
+      name: restaurant.name,
+      latitude: restaurant.latitude,
+      longitude: restaurant.longitude,
+    })),
+  }));
+}
+
+function assertPageRowsMatchRequestedOrder(
+  rows: readonly PendingVisitReviewQueryRow[],
+  requestedKeys: readonly PendingVisitReviewPageKey[],
+): void {
+  const keyIndexById = new Map(requestedKeys.map((key, index) => [key.id, index]));
+  let previousIndex = -1;
+  for (const row of rows) {
+    const index = keyIndexById.get(row.id);
+    if (index === undefined || index <= previousIndex) {
+      throw new Error("Pending-review page returned an unexpected or out-of-order visit");
+    }
+    if (row.priority !== requestedKeys[index]?.priority) {
+      throw new Error(`Pending-review page priority changed for visit ${JSON.stringify(row.id)}`);
+    }
+    previousIndex = index;
+  }
+}
+
+async function hydratePendingVisitReviewPage(
+  generationId: string,
+  requestedKeys: readonly PendingVisitReviewPageKey[],
+  manifest: PendingVisitReviewGeneration | null,
+): Promise<PendingVisitReviewProgressivePage> {
+  if (requestedKeys.length === 0) {
+    return { generationId, requestedKeys: [], visits: [], manifest };
+  }
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<PendingVisitReviewQueryRow>(
+    PENDING_VISIT_REVIEW_PAGE_SQL,
+    serializePendingVisitReviewPageKeys(requestedKeys),
+  );
+  assertPageRowsMatchRequestedOrder(rows, requestedKeys);
+  return {
+    generationId,
+    requestedKeys: [...requestedKeys],
+    visits: mapPendingVisitReviewRows(rows),
+    manifest,
+  };
+}
+
+async function legacyFallbackFirstPage(filters: PendingVisitReviewFilters): Promise<PendingVisitReviewProgressivePage> {
+  const visits = await getPendingVisitsForReview();
+  const items = manifestItemsFromVisits(visits);
+  const manifest = createPendingVisitReviewGeneration(
+    items,
+    filters,
+    PENDING_VISIT_REVIEW_MATCH_TOOLS,
+    JSON.stringify(items),
+    "legacy-fallback",
+  );
+  const visitById = new Map(visits.map((visit) => [visit.id, visit]));
+  return {
+    generationId: manifest.generationId,
+    requestedKeys: manifest.selectedKeys,
+    visits: manifest.selectedKeys.flatMap((key) => {
+      const visit = visitById.get(key.id);
+      return visit ? [visit] : [];
+    }),
+    manifest,
+  };
+}
+
+export async function getPendingVisitReviewFirstPage(
+  filters: PendingVisitReviewFilters,
+  pageSize: number = DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE,
+): Promise<PendingVisitReviewProgressivePage> {
+  validatePendingVisitReviewPageSize(pageSize);
+  try {
+    const database = await getDatabase();
+    const row = await database.getFirstAsync<PendingVisitReviewManifestRow>(PENDING_VISIT_REVIEW_MANIFEST_SQL);
+    if (!row) {
+      throw new Error("Pending-review manifest query returned no row");
+    }
+    const items = parsePendingVisitReviewManifest(row);
+    const manifest = createPendingVisitReviewGeneration(
+      items,
+      filters,
+      PENDING_VISIT_REVIEW_MATCH_TOOLS,
+      row.manifestJson,
+    );
+    return hydratePendingVisitReviewPage(manifest.generationId, manifest.selectedKeys.slice(0, pageSize), manifest);
+  } catch (error) {
+    console.warn("[DB] Progressive pending-review bootstrap failed; using legacy hydration.", error);
+    return legacyFallbackFirstPage(filters);
+  }
+}
+
+export async function getPendingVisitReviewPage(
+  request: PendingVisitReviewPageRequest,
+): Promise<PendingVisitReviewProgressivePage> {
+  try {
+    return await hydratePendingVisitReviewPage(request.generationId, request.keys, null);
+  } catch (error) {
+    console.warn("[DB] Progressive pending-review page failed; using legacy hydration for that page.", error);
+    const visits = await getPendingVisitsForReview();
+    const visitById = new Map(visits.map((visit) => [visit.id, visit]));
+    return {
+      generationId: request.generationId,
+      requestedKeys: [...request.keys],
+      visits: request.keys.flatMap((key) => {
+        const visit = visitById.get(key.id);
+        return visit ? [visit] : [];
+      }),
+      manifest: null,
+    };
+  }
 }

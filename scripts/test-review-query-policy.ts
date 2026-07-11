@@ -118,7 +118,7 @@ async function testScopedManualRefresh(): Promise<void> {
     pendingReview: 0,
     unanalyzedPhotoCount: 0,
     unrelatedStats: 0,
-    pendingReviewChild: 0,
+    pendingReviewPage: 0,
   };
 
   const pendingOptions: QueryObserverOptions<GenerationData> = {
@@ -139,23 +139,23 @@ async function testScopedManualRefresh(): Promise<void> {
     queryFn: async () => ++calls.unrelatedStats,
     staleTime: REVIEW_QUERY_MOUNT_POLICY.staleTime,
   };
-  const childOptions: QueryObserverOptions<number> = {
-    queryKey: [...reviewQueryKeys.pendingReview, "child"],
-    queryFn: async () => ++calls.pendingReviewChild,
+  const pageOptions: QueryObserverOptions<number> = {
+    queryKey: reviewQueryKeys.pendingReviewPages("on", "on"),
+    queryFn: async () => ++calls.pendingReviewPage,
     staleTime: REVIEW_QUERY_MOUNT_POLICY.staleTime,
   };
 
-  const [pendingMount, unanalyzedMount, statsMount, childMount] = await Promise.all([
+  const [pendingMount, unanalyzedMount, statsMount, pageMount] = await Promise.all([
     mountAndWait(queryClient, pendingOptions),
     mountAndWait(queryClient, unanalyzedOptions),
     mountAndWait(queryClient, statsOptions),
-    mountAndWait(queryClient, childOptions),
+    mountAndWait(queryClient, pageOptions),
   ]);
   assert.deepEqual(calls, {
     pendingReview: 1,
     unanalyzedPhotoCount: 1,
     unrelatedStats: 1,
-    pendingReviewChild: 1,
+    pendingReviewPage: 1,
   });
 
   const refreshPromise = refreshReviewQueries(queryClient);
@@ -171,7 +171,7 @@ async function testScopedManualRefresh(): Promise<void> {
   );
   assert.equal(calls.unanalyzedPhotoCount, 2, "manual refresh should refetch the displayed count");
   assert.equal(calls.unrelatedStats, 1, "manual refresh must not touch unrelated queries");
-  assert.equal(calls.pendingReviewChild, 1, "exact key matching must not refetch descendants");
+  assert.equal(calls.pendingReviewPage, 2, "manual refresh must refetch the active paged Review generation");
   assert.equal(queryClient.getQueryData<number>(["stats"]), 1, "unrelated cached data should remain intact");
 
   pendingRefresh.resolve({ generation: 2 });
@@ -181,7 +181,7 @@ async function testScopedManualRefresh(): Promise<void> {
   pendingMount.unsubscribe();
   unanalyzedMount.unsubscribe();
   statsMount.unsubscribe();
-  childMount.unsubscribe();
+  pageMount.unsubscribe();
   queryClient.clear();
 }
 
@@ -189,7 +189,7 @@ async function testNotesMutationInvalidatesExactPendingReviewQuery(): Promise<vo
   const queryClient = createQueryClient();
   const calls = {
     pendingReview: 0,
-    pendingReviewChild: 0,
+    pendingReviewPage: 0,
     unrelatedStats: 0,
   };
   const pendingOptions: QueryObserverOptions<GenerationData> = {
@@ -197,9 +197,9 @@ async function testNotesMutationInvalidatesExactPendingReviewQuery(): Promise<vo
     queryFn: async () => ({ generation: ++calls.pendingReview }),
     ...REVIEW_QUERY_MOUNT_POLICY,
   };
-  const childOptions: QueryObserverOptions<number> = {
-    queryKey: [...reviewQueryKeys.pendingReview, "child"],
-    queryFn: async () => ++calls.pendingReviewChild,
+  const pageOptions: QueryObserverOptions<number> = {
+    queryKey: reviewQueryKeys.pendingReviewPages("off", "off"),
+    queryFn: async () => ++calls.pendingReviewPage,
     ...REVIEW_QUERY_MOUNT_POLICY,
   };
   const statsOptions: QueryObserverOptions<number> = {
@@ -208,22 +208,22 @@ async function testNotesMutationInvalidatesExactPendingReviewQuery(): Promise<vo
     ...REVIEW_QUERY_MOUNT_POLICY,
   };
 
-  const [pendingMount, childMount, statsMount] = await Promise.all([
+  const [pendingMount, pageMount, statsMount] = await Promise.all([
     mountAndWait(queryClient, pendingOptions),
-    mountAndWait(queryClient, childOptions),
+    mountAndWait(queryClient, pageOptions),
     mountAndWait(queryClient, statsOptions),
   ]);
 
   await invalidatePendingReviewQuery(queryClient);
   assert.deepEqual(calls, {
     pendingReview: 2,
-    pendingReviewChild: 1,
+    pendingReviewPage: 2,
     unrelatedStats: 1,
   });
   assert.deepEqual(pendingMount.observer.getCurrentResult().data, { generation: 2 });
 
   pendingMount.unsubscribe();
-  childMount.unsubscribe();
+  pageMount.unsubscribe();
   statsMount.unsubscribe();
 
   await invalidatePendingReviewQuery(queryClient);

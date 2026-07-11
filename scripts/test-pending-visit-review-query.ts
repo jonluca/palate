@@ -3,7 +3,11 @@
 
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { PENDING_VISITS_FOR_REVIEW_SQL, type PendingVisitReviewQueryRow } from "../utils/db/visit-review-core.ts";
+import {
+  PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL,
+  PENDING_VISITS_FOR_REVIEW_SQL,
+  type PendingVisitReviewQueryRow,
+} from "../utils/db/visit-review-core.ts";
 
 interface QueryPlanRow {
   readonly id: number;
@@ -66,7 +70,7 @@ const WINDOW_ORACLE_SQL = `WITH
           'latestAwardYear', m.latestAwardYear,
           'award', m.award,
           'distance', vsr.distance
-        )
+        ) ORDER BY ${PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL}
       ) AS restaurants
     FROM visit_suggested_restaurants vsr
     JOIN michelin_restaurants m ON vsr.restaurantId = m.id
@@ -107,7 +111,7 @@ FROM pending_visits pv
 LEFT JOIN preview_photos pp ON pv.id = pp.visitId
 LEFT JOIN suggested_restaurants sr ON pv.id = sr.visitId
 LEFT JOIN food_labels fl ON pv.id = fl.visitId
-ORDER BY priority ASC, pv.startTime DESC`;
+ORDER BY priority ASC, pv.startTime DESC, pv.id COLLATE BINARY ASC`;
 
 function createDatabase(): DatabaseSync {
   const database = new DatabaseSync(":memory:");
@@ -400,6 +404,12 @@ function seedParityFixture(database: DatabaseSync): void {
       null,
     );
 
+    // Insert equal-priority/equal-time visits opposite their binary ID order.
+    // Candidate and independent oracle must both return the explicit ID tie-break.
+    for (const id of ["visit-tie-z", "visit-tie-a"]) {
+      insertVisit.run(id, null, null, "pending", 750, 850, 0, 0, 0, 0, null, null, null, null, null, null, null, null);
+    }
+
     for (const [id, status] of [
       ["visit-confirmed-excluded", "confirmed"],
       ["visit-rejected-excluded", "rejected"],
@@ -451,11 +461,13 @@ function assertCompleteParity(database: DatabaseSync): void {
       "visit-priority-3",
       "visit-priority-4-with-photo",
       "visit-priority-4-empty",
+      "visit-tie-a",
+      "visit-tie-z",
     ],
   );
   assert.deepEqual(
     candidateRows.map((row) => row.priority),
-    [1, 2, 3, 4, 4],
+    [1, 2, 3, 4, 4, 4, 4],
   );
 
   const rowsById = new Map(candidateRows.map((row) => [row.id, row]));

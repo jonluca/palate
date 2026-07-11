@@ -4,15 +4,17 @@ import { DeepScanCard } from "@/components/settings/deep-scan-card";
 import { SkeletonVisitCard, Button, ButtonText, Card, useUndo } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import {
-  usePendingReview,
+  createLoadedExactCalendarMatches,
+  usePendingReviewPages,
   useBatchConfirmVisits,
   useUnanalyzedPhotoCount,
   type PendingVisitForReview,
+  type ExactCalendarConfirmation,
   type ExactCalendarMatch,
 } from "@/hooks/queries";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, RefreshControl, Alert, Pressable, type ViewProps } from "react-native";
+import { View, RefreshControl, Alert, Pressable, ActivityIndicator, type ViewProps } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
@@ -29,6 +31,11 @@ import {
 } from "@/store";
 import { ReviewModeCard } from "@/components/visit-card/review-mode-card";
 import { refreshReviewQueries } from "@/utils/review-query-policy";
+import {
+  allowsAutomaticDeepScanFollowup,
+  getResolvedVisitFoodDetectionStrategy,
+  isVisionVisitFoodValidationModeEnabled,
+} from "@/modules/batch-asset-info";
 
 type ReviewListItem =
   | {
@@ -108,8 +115,8 @@ async function approveAllExactMatches({
   setIsApproving,
   showToast,
 }: {
-  exactMatches: ExactCalendarMatch[];
-  batchConfirm: (matches: ExactCalendarMatch[]) => Promise<unknown>;
+  exactMatches: readonly ExactCalendarConfirmation[];
+  batchConfirm: (matches: ExactCalendarConfirmation[]) => Promise<unknown>;
   onBeforeRemove: () => void;
   setIsApproving: React.Dispatch<React.SetStateAction<boolean>>;
   showToast: ReturnType<typeof useToast>["showToast"];
@@ -119,7 +126,7 @@ async function approveAllExactMatches({
 
   try {
     onBeforeRemove();
-    await batchConfirm(exactMatches);
+    await batchConfirm([...exactMatches]);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     showToast({
       type: "success",
@@ -156,10 +163,18 @@ export default function ReviewScreen() {
   const reviewListRef = useRef<FlashListRef<ReviewListItem>>(null);
 
   // Data queries
-  const { data, isLoading } = usePendingReview();
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = usePendingReviewPages({
+    food: foodFilter,
+    restaurantMatches: restaurantMatchesFilter,
+  });
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
-  const pendingVisits = useMemo(() => data?.visits ?? [], [data?.visits]);
-  const exactMatches = useMemo(() => data?.exactMatches ?? [], [data?.exactMatches]);
+  const manifest = data?.pages[0]?.manifest ?? null;
+  const pendingVisits = useMemo(() => data?.pages.flatMap((page) => page.visits) ?? [], [data?.pages]);
+  const exactConfirmations = useMemo(() => manifest?.exactConfirmations ?? [], [manifest?.exactConfirmations]);
+  const exactMatches = useMemo(
+    () => createLoadedExactCalendarMatches(pendingVisits, exactConfirmations),
+    [pendingVisits, exactConfirmations],
+  );
 
   const prepareForReviewItemRemoval = useCallback(() => {
     reviewListRef.current?.prepareForLayoutAnimationRender();
@@ -169,7 +184,10 @@ export default function ReviewScreen() {
   const batchConfirmMutation = useBatchConfirmVisits();
 
   // Computed data
-  const exactMatchVisitIds = useMemo(() => new Set(exactMatches.map((m) => m.visitId)), [exactMatches]);
+  const exactMatchVisitIds = useMemo(
+    () => new Set(exactConfirmations.map((confirmation) => confirmation.visitId)),
+    [exactConfirmations],
+  );
 
   const reviewableVisits = useMemo(
     () => pendingVisits.filter((v) => !exactMatchVisitIds.has(v.id)),
@@ -200,40 +218,6 @@ export default function ReviewScreen() {
     [],
   );
 
-  const filteredReviewableVisits = useMemo(() => {
-    const filtered = reviewableVisits.filter((v) => {
-      // Food toggle: ON => must have food
-      if (foodFilter === "on" && !v.foodProbable) {
-        return false;
-      }
-
-      // Restaurant matches toggle: ON => must have matches
-      // Treat "no matches" as both [] and missing/null (defensive).
-      const matchCount = v.suggestedRestaurants?.length ?? 0;
-      const hasRestaurantMatches = matchCount > 0;
-      if (restaurantMatchesFilter === "on" && !hasRestaurantMatches) {
-        return false;
-      }
-
-      return true;
-    });
-
-    return filtered
-      .map((visit, index) => ({ visit, index }))
-      .sort((a, b) => {
-        const aHasCalendarMatch = Boolean(a.visit.calendarEventTitle);
-        const bHasCalendarMatch = Boolean(b.visit.calendarEventTitle);
-
-        if (aHasCalendarMatch !== bHasCalendarMatch) {
-          return aHasCalendarMatch ? -1 : 1;
-        }
-
-        // Preserve backend order for ties.
-        return a.index - b.index;
-      })
-      .map(({ visit }) => visit);
-  }, [reviewableVisits, foodFilter, restaurantMatchesFilter]);
-
   const mergedReviewItems = useMemo<ReviewListItem[]>(
     () => [
       ...exactMatches.map(
@@ -246,7 +230,7 @@ export default function ReviewScreen() {
             exactIndex,
           }) satisfies ReviewListItem,
       ),
-      ...filteredReviewableVisits.map(
+      ...reviewableVisits.map(
         (visit, manualIndex) =>
           ({
             type: "manual",
@@ -257,50 +241,58 @@ export default function ReviewScreen() {
           }) satisfies ReviewListItem,
       ),
     ],
-    [exactMatches, filteredReviewableVisits],
+    [exactMatches, reviewableVisits],
   );
 
   // UI state
-  const hasExactMatches = exactMatches.length > 0;
-  const isAllCaughtUp = !isLoading && pendingVisits.length === 0;
+  const exactMatchCount = manifest?.summary.exactMatchCount ?? 0;
+  const filteredManualCount = manifest?.summary.filteredManualCount ?? 0;
+  const hasExactMatches = exactMatchCount > 0;
+  const isAllCaughtUp = !isLoading && manifest !== null && manifest.summary.totalPending === 0;
   const reviewSummary = useMemo(() => {
     if (isAllCaughtUp) {
       return "No visits pending review";
     }
 
     if (hasExactMatches) {
-      return `${exactMatches.length.toLocaleString()} exact match${exactMatches.length === 1 ? "" : "es"} shown first${
-        filteredReviewableVisits.length > 0
-          ? `, ${filteredReviewableVisits.length.toLocaleString()} ${filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"} manual review`
+      return `${exactMatchCount.toLocaleString()} exact match${exactMatchCount === 1 ? "" : "es"} shown first${
+        filteredManualCount > 0
+          ? `, ${filteredManualCount.toLocaleString()} ${filteredManualCount === 1 ? "visit needs" : "visits need"} manual review`
           : ""
       }`;
     }
 
-    return `${filteredReviewableVisits.length.toLocaleString()} ${
-      filteredReviewableVisits.length === 1 ? "visit needs" : "visits need"
+    return `${filteredManualCount.toLocaleString()} ${
+      filteredManualCount === 1 ? "visit needs" : "visits need"
     } manual review`;
-  }, [isAllCaughtUp, hasExactMatches, exactMatches.length, filteredReviewableVisits.length]);
+  }, [isAllCaughtUp, hasExactMatches, exactMatchCount, filteredManualCount]);
 
   const shouldAutoDeepScan =
+    allowsAutomaticDeepScanFollowup(
+      getResolvedVisitFoodDetectionStrategy(),
+      isVisionVisitFoodValidationModeEnabled(),
+    ) &&
     !isLoading &&
     (unanalyzedPhotoCount ?? 0) > 0 &&
     (isAllCaughtUp ||
-      (foodFilter === "on" && reviewableVisits.length > 0 && !reviewableVisits.some((visit) => visit.foodProbable)));
+      (foodFilter === "on" &&
+        (manifest?.summary.reviewableCount ?? 0) > 0 &&
+        manifest?.summary.reviewableFoodCount === 0));
 
   const previousExactMatchCountRef = useRef(0);
 
   useEffect(() => {
     const previousExactMatchCount = previousExactMatchCountRef.current;
-    previousExactMatchCountRef.current = exactMatches.length;
+    previousExactMatchCountRef.current = exactMatchCount;
 
-    if (previousExactMatchCount > 0 && exactMatches.length === 0) {
+    if (previousExactMatchCount > 0 && exactMatchCount === 0) {
       const frame = requestAnimationFrame(() => {
         reviewListRef.current?.scrollToTop({ animated: true });
       });
 
       return () => cancelAnimationFrame(frame);
     }
-  }, [exactMatches.length]);
+  }, [exactMatchCount]);
 
   // Register undo complete callback to scroll back to restored item
   useEffect(() => {
@@ -318,23 +310,21 @@ export default function ReviewScreen() {
   }, [setOnUndoComplete, mergedReviewItems]);
 
   // Handlers
-  const onRefresh = useCallback(async () => {
+  const onRefresh = useCallback(() => {
     setRefreshing(true);
-    try {
-      await refreshReviewQueries(queryClient);
-    } finally {
+    return refreshReviewQueries(queryClient).finally(() => {
       setRefreshing(false);
-    }
+    });
   }, [queryClient]);
 
   const handleApproveAllExactMatches = useCallback(() => {
-    if (exactMatches.length === 0) {
+    if (exactConfirmations.length === 0) {
       return;
     }
 
     Alert.alert(
       "Approve All Exact Matches",
-      `This will confirm ${exactMatches.length.toLocaleString()} visit${exactMatches.length === 1 ? "" : "s"} where the calendar event name matches a Michelin restaurant.`,
+      `This will confirm ${exactConfirmations.length.toLocaleString()} visit${exactConfirmations.length === 1 ? "" : "s"} where the calendar event name matches a Michelin restaurant.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -342,7 +332,7 @@ export default function ReviewScreen() {
           style: "default",
           onPress: async () => {
             await approveAllExactMatches({
-              exactMatches,
+              exactMatches: exactConfirmations,
               batchConfirm: batchConfirmMutation.mutateAsync,
               onBeforeRemove: prepareForReviewItemRemoval,
               setIsApproving,
@@ -352,7 +342,13 @@ export default function ReviewScreen() {
         },
       ],
     );
-  }, [exactMatches, batchConfirmMutation, prepareForReviewItemRemoval, showToast]);
+  }, [exactConfirmations, batchConfirmMutation, prepareForReviewItemRemoval, showToast]);
+
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   // Render functions
   const renderReviewItem = useCallback(
@@ -392,7 +388,7 @@ export default function ReviewScreen() {
           </ThemedText>
         </View>
 
-        {exactMatches.length > 1 && (
+        {exactMatchCount > 1 && (
           <Button
             variant={"success"}
             onPress={handleApproveAllExactMatches}
@@ -402,13 +398,13 @@ export default function ReviewScreen() {
           >
             <IconSymbol name={"checkmark.circle.fill"} size={18} color={"#fff"} />
             <ButtonText variant={"success"} className={"ml-2"}>
-              Approve All Exact Matches ({exactMatches.length.toLocaleString()})
+              Approve All Exact Matches ({exactMatchCount.toLocaleString()})
             </ButtonText>
           </Button>
         )}
 
         {/* Filters */}
-        {reviewableVisits.length > 0 && (
+        {(manifest?.summary.reviewableCount ?? 0) > 0 && (
           <Pressable
             className={"bg-card rounded-2xl px-3 py-2.5"}
             onPress={() => {
@@ -447,11 +443,11 @@ export default function ReviewScreen() {
       </View>
     ),
     [
-      exactMatches.length,
+      exactMatchCount,
       reviewSummary,
       handleApproveAllExactMatches,
       isApproving,
-      reviewableVisits.length,
+      manifest?.summary.reviewableCount,
       filtersCollapsed,
       setFiltersCollapsed,
       foodFilter,
@@ -490,11 +486,20 @@ export default function ReviewScreen() {
           getItemType={getReviewItemType}
           CellRendererComponent={ReviewCellRenderer}
           maintainVisibleContentPosition={reviewMaintainVisibleContentPosition}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.6}
           refreshControl={refreshControl}
           refreshing={refreshing}
           contentContainerStyle={listContentStyle}
           ListHeaderComponent={ReviewListHeader}
           ListHeaderComponentStyle={{ marginTop: 0, paddingTop: 0, marginBottom: 12 }}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View className={"items-center py-6"}>
+                <ActivityIndicator color={"#8E8E93"} />
+              </View>
+            ) : null
+          }
           ListEmptyComponent={
             isLoading ? (
               <LoadingState />
