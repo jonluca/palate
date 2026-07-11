@@ -124,7 +124,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
       [
         "expo-sqlite",
         {
-          customBuildFlags: "-DSQLITE_ENABLE_RTREE=1",
+          customBuildFlags: "-DSQLITE_ENABLE_RTREE=1 -DSQLITE_USE_URI=1",
         },
       ],
       "expo-video",

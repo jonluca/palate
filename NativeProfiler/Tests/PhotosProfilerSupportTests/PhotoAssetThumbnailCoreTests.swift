@@ -96,6 +96,30 @@ struct PhotoAssetThumbnailCoreTests {
     #expect(cache.object(forKey: PhotoAssetThumbnailCacheKey(requestKey)) == "cached")
   }
 
+  @Test("Visible requests and preheat calls share one exact PhotoKit option descriptor")
+  func renderDescriptorOptions() throws {
+    let target = try PhotoAssetThumbnailTarget(pixelWidth: 320, pixelHeight: 240)
+    let key = try PhotoAssetThumbnailRequestKey(
+      assetIdentifier: "asset",
+      target: target,
+      contentMode: .aspectFill
+    )
+    let descriptor = key.renderDescriptor
+    let requestOptions = descriptor.makePhotoKitOptions()
+    let preheatOptions = descriptor.makePhotoKitOptions()
+
+    #expect(descriptor.target == target)
+    #expect(descriptor.contentMode == .aspectFill)
+    #expect(requestOptions !== preheatOptions)
+    #expect(requestOptions.isSynchronous == preheatOptions.isSynchronous)
+    #expect(requestOptions.version == preheatOptions.version)
+    #expect(requestOptions.deliveryMode == preheatOptions.deliveryMode)
+    #expect(requestOptions.resizeMode == preheatOptions.resizeMode)
+    #expect(requestOptions.normalizedCropRect == preheatOptions.normalizedCropRect)
+    #expect(requestOptions.isNetworkAccessAllowed == preheatOptions.isNetworkAccessAllowed)
+    #expect(requestOptions.isNetworkAccessAllowed)
+  }
+
   @Test("Cancellation before the batch flush suppresses all delivery")
   func cancellationBeforeFlush() async throws {
     let target = try PhotoAssetThumbnailTarget(pixelWidth: 120, pixelHeight: 120)
@@ -111,6 +135,31 @@ struct PhotoAssetThumbnailCoreTests {
     try await Task.sleep(for: .milliseconds(100))
 
     #expect(state.deliveryCount == 0)
+  }
+
+  @Test("A fresh store reports zero deterministic operation metrics")
+  func freshStoreMetrics() async {
+    let store = PhotoAssetThumbnailStore()
+    let metrics = await withCheckedContinuation { continuation in
+      store.readMetrics { value in
+        continuation.resume(returning: value)
+      }
+    }
+
+    #expect(metrics.assetFetchBatchCount == 0)
+    #expect(metrics.assetFetchIdentifierCount == 0)
+    #expect(metrics.imageRequestCount == 0)
+    #expect(metrics.assetFetchScheduler == .zero)
+    #expect(metrics.preheat.updateCount == 0)
+    #expect(metrics.preheat.startedKeyCount == 0)
+    #expect(metrics.preheat.stoppedKeyCount == 0)
+    #expect(metrics.preheat.retainedKeyCount == 0)
+    #expect(metrics.preheat.fetchIdentifierCount == 0)
+    #expect(metrics.preheat.cacheStartCallCount == 0)
+    #expect(metrics.preheat.cacheStopCallCount == 0)
+    #expect(metrics.preheat.cacheStopAllCount == 0)
+    #expect(metrics.preheat.activeKeyCount == 0)
+    #expect(metrics.preheat.pendingKeyCount == 0)
   }
 
   @Test("A replacement entry rejects callbacks from the canceled request")

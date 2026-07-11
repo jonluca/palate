@@ -20,6 +20,7 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
   public static let defaultAssetCacheCountLimit = 256
 
   private let imageManager: PHCachingImageManager
+  private let preheatRuntime: PhotoAssetThumbnailPreheatRuntime
   private let stateQueue: DispatchQueue
   private let assetFetchQueue: DispatchQueue
   private let callbackQueue: DispatchQueue
@@ -34,9 +35,12 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
   private var pendingBatch = PhotoAssetThumbnailBatchAccumulator()
   private var flushScheduled = false
   private var waitingKeysByAssetIdentifier: [String: Set<PhotoAssetThumbnailRequestKey>] = [:]
-  private var assetIdentifiersBeingFetched: Set<String> = []
+  private var assetFetchScheduler = PhotoAssetThumbnailAssetFetchSchedulerState()
   private var cacheGeneration: UInt64 = 0
   private var observesPhotoLibraryChanges = false
+  private var assetFetchBatchCount = 0
+  private var assetFetchIdentifierCount = 0
+  private var imageRequestCount = 0
 
   public init(
     callbackQueue: DispatchQueue = .main,
@@ -48,7 +52,9 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
     self.callbackQueue = callbackQueue
     callbacksRunOnMainQueue = callbackQueue === DispatchQueue.main
     self.batchDelay = max(0, batchDelay)
-    imageManager = PHCachingImageManager()
+    let imageManager = PHCachingImageManager()
+    self.imageManager = imageManager
+    preheatRuntime = PhotoAssetThumbnailPreheatRuntime(imageManager: imageManager)
     stateQueue = DispatchQueue(
       label: "com.jonluca.palate.photo-thumbnails.state", qos: .userInitiated)
     assetFetchQueue = DispatchQueue(
@@ -122,12 +128,13 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
       }
 
       cacheGeneration &+= 1
+      preheatRuntime.invalidateCache()
       finalImageCache.removeAllObjects()
       assetCache.removeAllObjects()
       pendingBatch = PhotoAssetThumbnailBatchAccumulator()
       flushScheduled = false
       waitingKeysByAssetIdentifier.removeAll(keepingCapacity: false)
-      assetIdentifiersBeingFetched.removeAll(keepingCapacity: false)
+      assetFetchScheduler.invalidateCache(to: cacheGeneration)
 
       let activeEntries = Array(entries.values)
       entries.removeAll(keepingCapacity: false)
@@ -146,6 +153,70 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
         )
         completion?()
       }
+    }
+  }
+
+  public func updatePreheat(
+    ownerID: UUID,
+    scopeID: String,
+    candidates: [PhotoAssetThumbnailRequestKey],
+    budget: PhotoAssetThumbnailPreheatBudget = .windowedV1
+  ) {
+    stateQueue.async { [weak self] in
+      guard let self else {
+        return
+      }
+
+      let maximumCandidateCount = assetFetchScheduler.maximumQueuedPreheatIdentifierCount
+      let boundedCandidates =
+        candidates.count <= maximumCandidateCount
+        ? candidates : Array(candidates.prefix(maximumCandidateCount))
+      var availableAssetsByIdentifier: [String: PHAsset] = [:]
+      availableAssetsByIdentifier.reserveCapacity(boundedCandidates.count)
+      for candidate in boundedCandidates
+      where availableAssetsByIdentifier[candidate.assetIdentifier] == nil {
+        if let asset = assetCache.object(forKey: candidate.assetIdentifier as NSString) {
+          availableAssetsByIdentifier[candidate.assetIdentifier] = asset
+        }
+      }
+
+      let pendingPreheatIdentifiers = preheatRuntime.update(
+        ownerID: ownerID,
+        scopeID: scopeID,
+        candidates: boundedCandidates,
+        budget: budget,
+        availableAssetsByIdentifier: availableAssetsByIdentifier
+      )
+      replacePreheatAssetFetchDemand(with: pendingPreheatIdentifiers)
+    }
+  }
+
+  public func endPreheat(ownerID: UUID, scopeID: String? = nil) {
+    stateQueue.async { [weak self] in
+      guard let self else {
+        return
+      }
+      preheatRuntime.end(ownerID: ownerID, scopeID: scopeID)
+      replacePreheatAssetFetchDemand(with: preheatRuntime.pendingAssetIdentifiers)
+    }
+  }
+
+  public func readMetrics(
+    completion: @escaping @Sendable (PhotoAssetThumbnailStoreMetrics) -> Void
+  ) {
+    stateQueue.async { [weak self] in
+      guard let self else {
+        return
+      }
+      completion(
+        PhotoAssetThumbnailStoreMetrics(
+          assetFetchBatchCount: assetFetchBatchCount,
+          assetFetchIdentifierCount: assetFetchIdentifierCount,
+          imageRequestCount: imageRequestCount,
+          assetFetchScheduler: assetFetchScheduler.metrics,
+          preheat: preheatRuntime.metrics
+        )
+      )
     }
   }
 
@@ -211,7 +282,7 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
     }
 
     var identifiersToFetch: [String] = []
-    var newlyQueuedIdentifiers: Set<String> = []
+    var queuedIdentifiers: Set<String> = []
 
     for key in queuedKeys {
       guard var entry = entries[key], !entry.subscribers.isEmpty, entry.phase == .pending else {
@@ -227,27 +298,43 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
       entries[key] = entry
       waitingKeysByAssetIdentifier[key.assetIdentifier, default: []].insert(key)
 
-      if !assetIdentifiersBeingFetched.contains(key.assetIdentifier),
-        newlyQueuedIdentifiers.insert(key.assetIdentifier).inserted
-      {
-        assetIdentifiersBeingFetched.insert(key.assetIdentifier)
+      if queuedIdentifiers.insert(key.assetIdentifier).inserted {
         identifiersToFetch.append(key.assetIdentifier)
       }
     }
 
-    guard !identifiersToFetch.isEmpty else {
+    enqueueVisibleAssetFetchDemand(identifiersToFetch)
+  }
+
+  private func replacePreheatAssetFetchDemand(with identifiers: [String]) {
+    let batch = assetFetchScheduler.replacePreheatDemand(
+      with: identifiers,
+      cacheGeneration: cacheGeneration
+    )
+    dispatchAssetFetch(batch)
+  }
+
+  private func enqueueVisibleAssetFetchDemand(_ identifiers: [String]) {
+    let batch = assetFetchScheduler.enqueueVisibleDemand(
+      identifiers,
+      cacheGeneration: cacheGeneration
+    )
+    dispatchAssetFetch(batch)
+  }
+
+  private func dispatchAssetFetch(_ batch: PhotoAssetThumbnailAssetFetchBatch?) {
+    guard let batch else {
       return
     }
 
-    let generation = cacheGeneration
-    let identifiers = identifiersToFetch
+    assetFetchBatchCount += 1
+    assetFetchIdentifierCount += batch.identifiers.count
     assetFetchQueue.async { [weak self] in
-      let result = Self.fetchAssets(withIdentifiers: identifiers)
+      let result = Self.fetchAssets(withIdentifiers: batch.identifiers)
       self?.stateQueue.async { [weak self] in
         self?.finishAssetFetch(
-          identifiers: identifiers,
-          result: result,
-          generation: generation
+          batch: batch,
+          result: result
         )
       }
     }
@@ -271,22 +358,28 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
   }
 
   private func finishAssetFetch(
-    identifiers: [String],
-    result: PhotoAssetThumbnailAssetFetchResult,
-    generation: UInt64
+    batch: PhotoAssetThumbnailAssetFetchBatch,
+    result: PhotoAssetThumbnailAssetFetchResult
   ) {
-    guard generation == cacheGeneration else {
+    let completion = assetFetchScheduler.finish(batch)
+    guard completion.accepted else {
+      dispatchAssetFetch(completion.nextBatch)
       return
     }
+    let identifiers = batch.identifiers
 
     switch result {
     case .success(let assetsByIdentifier):
       for asset in assetsByIdentifier.values {
         assetCache.setObject(asset, forKey: asset.localIdentifier as NSString)
       }
+      preheatRuntime.resolveAssetFetch(
+        identifiers: identifiers,
+        assetsByIdentifier: assetsByIdentifier,
+        cacheGeneration: batch.cacheGeneration
+      )
 
       for identifier in identifiers {
-        assetIdentifiersBeingFetched.remove(identifier)
         let waitingKeys = waitingKeysByAssetIdentifier.removeValue(forKey: identifier) ?? []
         guard let asset = assetsByIdentifier[identifier] else {
           for key in waitingKeys {
@@ -301,14 +394,19 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
       }
 
     case .failure(let error):
+      preheatRuntime.resolveAssetFetch(
+        identifiers: identifiers,
+        assetsByIdentifier: [:],
+        cacheGeneration: batch.cacheGeneration
+      )
       for identifier in identifiers {
-        assetIdentifiersBeingFetched.remove(identifier)
         let waitingKeys = waitingKeysByAssetIdentifier.removeValue(forKey: identifier) ?? []
         for key in waitingKeys {
           failEntry(for: key, error: error)
         }
       }
     }
+    dispatchAssetFetch(completion.nextBatch)
   }
 
   private func startImageRequest(for key: PhotoAssetThumbnailRequestKey, asset: PHAsset) {
@@ -323,19 +421,14 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
     let entryId = entry.id
     entries[key] = entry
 
-    let options = PHImageRequestOptions()
-    options.isSynchronous = false
-    options.version = .current
-    options.deliveryMode = .opportunistic
-    options.resizeMode = .exact
-    options.normalizedCropRect = .zero
-    options.isNetworkAccessAllowed = true
+    let descriptor = key.renderDescriptor
+    imageRequestCount += 1
 
     let requestId = imageManager.requestImage(
       for: asset,
-      targetSize: key.target.size,
-      contentMode: key.contentMode.photoKitValue,
-      options: options
+      targetSize: descriptor.target.size,
+      contentMode: descriptor.contentMode.photoKitValue,
+      options: descriptor.makePhotoKitOptions()
     ) { [weak self] image, info in
       let result = PhotoAssetThumbnailRawResult(
         image: image,
@@ -428,6 +521,13 @@ public final class PhotoAssetThumbnailStore: NSObject, PHPhotoLibraryChangeObser
       waitingKeysByAssetIdentifier[key.assetIdentifier]?.remove(key)
       if waitingKeysByAssetIdentifier[key.assetIdentifier]?.isEmpty == true {
         waitingKeysByAssetIdentifier.removeValue(forKey: key.assetIdentifier)
+        let removedVisibleDemand = assetFetchScheduler.removeVisibleDemand(
+          [key.assetIdentifier],
+          cacheGeneration: cacheGeneration
+        )
+        if removedVisibleDemand > 0 {
+          replacePreheatAssetFetchDemand(with: preheatRuntime.pendingAssetIdentifiers)
+        }
       }
       if let requestId = entry.requestId {
         imageManager.cancelImageRequest(requestId)

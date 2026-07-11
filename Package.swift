@@ -46,7 +46,10 @@ let package = Package(
   targets: [
     .target(
       name: "BatchAssetInfoCore",
-      path: "modules/batch-asset-info/ios/Core"
+      path: "modules/batch-asset-info/ios/Core",
+      linkerSettings: [
+        .linkedLibrary("sqlite3")
+      ]
     ),
     .target(
       name: "CalendarBatchMutationCore",

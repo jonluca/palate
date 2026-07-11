@@ -9,6 +9,7 @@ import {
 } from "./photo-food-detection-core";
 import { buildExportPhotoCountsQuery, buildExportPhotosQuery, type ExportPhotoCursor } from "./export-photos-core";
 import { buildPhotoIngestionStatement, PHOTO_INGESTION_FLUSH_SIZE } from "./photo-ingestion-core";
+import { INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL } from "../incremental-photo-scan-core";
 import type { FoodLabel, PhotoRecord, UnvisitedPhotoRecord } from "./types";
 
 // Raw photo record as stored in database (foodLabels and allLabels are JSON strings)
@@ -181,6 +182,32 @@ export async function getTotalPhotoCount(): Promise<number> {
   const database = await getDatabase();
   const result = await database.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM photos`);
   return result?.count ?? 0;
+}
+
+/**
+ * Read stable local identifiers for native incremental PhotoKit exclusion.
+ * The single query also identifies an empty database without a second SQLite
+ * round trip; callers preserve the full-scan path when this returns `[]`.
+ */
+export async function getExistingPhotoAssetIdsForIncrementalScan(): Promise<string[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<{ id: string }>(INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL);
+  const ids = rows.map((row, index) => {
+    if (typeof row.id !== "string" || row.id.length === 0) {
+      throw new Error(`Photo asset ID query returned an invalid ID at row ${index}`);
+    }
+    return row.id;
+  });
+  return ids;
+}
+
+/** Return the exact SQLite path for native database-backed PhotoKit exclusion. */
+export async function getPhotoDatabasePathForIncrementalScan(): Promise<string> {
+  const database = await getDatabase();
+  if (typeof database.databasePath !== "string" || database.databasePath.trim().length === 0) {
+    throw new Error("Expo SQLite did not expose a usable photo database path");
+  }
+  return database.databasePath;
 }
 
 export async function getVisitablePhotoCounts(): Promise<{

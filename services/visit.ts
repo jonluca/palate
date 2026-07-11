@@ -7,19 +7,20 @@ import {
   syncAllVisitsFoodProbable,
   batchUpdatePhotosFoodDetected,
   batchUpdateVisitsCalendarEvents,
-  getVisitsWithoutCalendarData,
+  getCalendarEnrichmentVisitSnapshot,
   getMichelinRestaurantsForCalendarNormalizedNames,
   insertMichelinRestaurants,
+  importMichelinRestaurantsFromAttachedSource,
   getMichelinRestaurantCount,
+  getMichelinImportResolution,
   getFoodDetectionVisitSamplePlan,
   insertVisitSuggestedRestaurants,
   getUnanalyzedPhotoIds,
-  getSuggestedRestaurantsForVisits,
   batchUpdateVisitSuggestedRestaurants,
   recomputeSuggestedRestaurantsIfNeeded,
   getLinkedCalendarEventIds,
   getDismissedCalendarEventIds,
-  insertCalendarOnlyVisits,
+  importCalendarSnapshotPlan,
   performDatabaseMaintenance,
   getConfirmedVisitsWithMichelinIds,
   getEnabledFoodKeywords,
@@ -32,6 +33,11 @@ import {
   type MichelinRestaurantRecord,
   type CalendarEventUpdate,
 } from "@/utils/db";
+import {
+  MICHELIN_IMPORT_ATTACH_STRATEGY,
+  MichelinImportTerminalError,
+  NO_VALID_MICHELIN_ROWS_MESSAGE,
+} from "@/utils/db/michelin-import-core";
 import {
   ensureRestaurantLocationIndex,
   MICHELIN_PRIMARY_MATCH_RADIUS_METERS,
@@ -52,19 +58,41 @@ import {
   type CalendarEventInfo,
   stripComparisonAffixes,
 } from "./calendar";
-import { getMichelinDatasetVersion, loadMichelinRestaurants } from "./michelin";
+import { getMichelinDatasetVersion, loadMichelinRestaurants, prepareMichelinImportSource } from "./michelin";
 import { searchNearbyRestaurants, isGoogleMapsConfigured, type PlaceResult } from "./places";
-import { detectFoodInImageBatch, getVisionResultPageSize, isBatchAssetInfoAvailable } from "@/modules/batch-asset-info";
+import {
+  RANK3_BULK_TAIL_VISIT_FOOD_DETECTION_STRATEGY,
+  detectFoodInImageBatch,
+  getResolvedVisitFoodDetectionStrategy,
+  getResolvedVisionPageOrchestrationStrategy,
+  getVisionResultPageSize,
+  isBatchAssetInfoAvailable,
+  isVisionVisitFoodValidationModeEnabled,
+  type FoodDetectionResult,
+} from "@/modules/batch-asset-info";
 import { scanCameraRoll, formatEta } from "./scanner";
 import { DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE } from "@/utils/food-detection-buffer-core";
 import { runBufferedResultPersistence } from "@/utils/food-detection-persistence-core";
 import { createVisionResultPagePlan } from "@/utils/vision-result-page-plan";
+import { runOrderedPagePipeline } from "@/utils/ordered-page-pipeline-core";
+import {
+  runRank3BulkTailVisitFoodDetection,
+  type VisitFoodDetectionBatchProgress,
+} from "@/utils/visit-food-detection-orchestration-core";
+import type { AdaptiveVisitFoodOutcome, AdaptiveVisitFoodSample } from "@/utils/visit-food-adaptive-scan-core";
 import { hasVisitPhotosForSpatialWork } from "@/utils/visit-photo-spatial-work";
+import { calculateVisitPhotoCentroid } from "@/utils/visit-photo-centroid-core";
+import {
+  areVisitPhotosNearbyWithPreparedThreshold,
+  prepareVisitPhotoDistanceThreshold,
+} from "@/utils/visit-photo-proximity-core";
 import {
   getCalendarGuideMatchesForEvent,
   loadCalendarGuideMatchingContext,
   type CalendarGuideNameTools,
 } from "@/utils/calendar-guide-matching-core";
+import { planCalendarImportFromSnapshots } from "@/utils/calendar-import-plan-core";
+import type { CalendarImportTransactionResult } from "@/utils/db/calendar-import-transaction-core";
 
 // ============================================================================
 // PARALLEL PROCESSING UTILITIES
@@ -132,6 +160,7 @@ interface FoodDetectionProgress {
   totalSamples: number;
   processedSamples: number;
   retryableFailures: number;
+  foodPhotosFound: number;
   foodVisitsFound: number;
   isComplete: boolean;
   elapsedMs: number;
@@ -150,6 +179,7 @@ interface AnalyzingVisitsOptions {
 const DEFAULT_TIME_GAP_MS = 3 * 60 * 60 * 1000; // 3 hours
 const DEFAULT_DISTANCE_THRESHOLD = 100;
 let michelinInitializationPromise: Promise<{ loaded: number; skipped: boolean }> | null = null;
+let michelinInitializationTerminalError: MichelinImportTerminalError | null = null;
 const michelinInitializationProgressListeners = new Set<(message: string) => void>();
 
 async function initializeMichelinDataInternal(
@@ -171,22 +201,41 @@ async function initializeMichelinDataInternal(
       : "Loading Michelin restaurant data...",
   );
 
+  const resolution = await getMichelinImportResolution();
+  if (resolution.resolvedStrategy === MICHELIN_IMPORT_ATTACH_STRATEGY) {
+    onProgress("Importing Michelin guide directly in SQLite...");
+    let source;
+    try {
+      source = await prepareMichelinImportSource();
+      if (source.datasetVersion !== bundledDatasetVersion) {
+        throw new Error("Prepared Michelin guide version did not match the bundled asset");
+      }
+    } catch (error) {
+      throw new MichelinImportTerminalError("Set-based Michelin source preparation failed", error);
+    }
+    const result = await importMichelinRestaurantsFromAttachedSource(source, resolution);
+    console.log(`Initialized ${result.importedRows} Michelin restaurants with ${result.strategy}`);
+    return { loaded: result.importedRows, skipped: false };
+  }
+
+  let sourceRows = 0;
   const michelinData = await loadMichelinRestaurants((loaded, total) => {
+    sourceRows = total;
     onProgress(`Parsing restaurants: ${loaded.toLocaleString()} / ${total.toLocaleString()}`);
   });
 
   if (michelinData.length === 0) {
-    throw new Error("The bundled Michelin database did not contain any valid restaurant locations");
+    throw new Error(NO_VALID_MICHELIN_ROWS_MESSAGE);
   }
 
   onProgress(
     `${existingCount > 100 ? "Refreshing" : "Saving"} ${michelinData.length.toLocaleString()} Michelin restaurants to database...`,
   );
 
-  await insertMichelinRestaurants(michelinData, bundledDatasetVersion);
+  const result = await insertMichelinRestaurants(michelinData, bundledDatasetVersion, resolution, sourceRows);
 
-  console.log(`Initialized ${michelinData.length} Michelin restaurants`);
-  return { loaded: michelinData.length, skipped: false };
+  console.log(`Initialized ${result.importedRows} Michelin restaurants with ${result.strategy}`);
+  return { loaded: result.importedRows, skipped: false };
 }
 
 /**
@@ -196,6 +245,9 @@ async function initializeMichelinDataInternal(
 export async function initializeMichelinData(
   onProgress?: (message: string) => void,
 ): Promise<{ loaded: number; skipped: boolean }> {
+  if (michelinInitializationTerminalError) {
+    throw michelinInitializationTerminalError;
+  }
   if (onProgress) {
     michelinInitializationProgressListeners.add(onProgress);
   }
@@ -206,7 +258,12 @@ export async function initializeMichelinData(
         listener(message);
       }
     };
-    const initialization = initializeMichelinDataInternal(emitProgress);
+    const initialization = initializeMichelinDataInternal(emitProgress).catch((error: unknown) => {
+      if (error instanceof MichelinImportTerminalError) {
+        michelinInitializationTerminalError = error;
+      }
+      throw error;
+    });
     const trackedInitialization = initialization.finally(() => {
       if (michelinInitializationPromise === trackedInitialization) {
         michelinInitializationPromise = null;
@@ -237,80 +294,6 @@ function generateVisitHash(startTime: number, endTime: number, centerLat: number
   const input = `${timeRounded}-${latRounded}-${lonRounded}`;
 
   return input;
-}
-
-/**
- * Calculate the centroid (center point) of a group of photos
- */
-function calculateCentroid(photos: UnvisitedPhotoRecord[]): {
-  lat: number;
-  lon: number;
-} {
-  if (photos.length === 0) {
-    return { lat: 0, lon: 0 };
-  }
-
-  const sumLat = photos.reduce((sum, photo) => sum + photo.latitude, 0);
-  const sumLon = photos.reduce((sum, photo) => sum + photo.longitude, 0);
-
-  return {
-    lat: sumLat / photos.length,
-    lon: sumLon / photos.length,
-  };
-}
-
-// ============================================================================
-// FAST DISTANCE CALCULATIONS FOR GROUPING
-// ============================================================================
-
-// Pre-computed constants for distance approximation
-const DEG_TO_RAD = Math.PI / 180;
-const EARTH_RADIUS_METERS = 6371000;
-
-// Quick rejection thresholds in degrees
-// For 200m threshold: max lat diff ≈ 0.0018°, we use 0.003° (~333m) for safety margin
-// Longitude varies by latitude but 0.006° is safe for latitudes up to 70°
-const QUICK_REJECT_LAT_DEG = 0.003;
-const QUICK_REJECT_LON_DEG = 0.006;
-
-/**
- * Fast distance calculation using equirectangular approximation.
- * Accurate to within 0.5% for distances under 1km - perfect for our 200m threshold.
- * ~10x faster than Haversine by avoiding most trig functions.
- */
-function fastDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const dLat = (lat2 - lat1) * DEG_TO_RAD;
-  const dLon = (lon2 - lon1) * DEG_TO_RAD;
-  // Use average latitude for longitude scaling
-  const avgLatRad = ((lat1 + lat2) / 2) * DEG_TO_RAD;
-  const x = dLon * Math.cos(avgLatRad);
-  return EARTH_RADIUS_METERS * Math.sqrt(x * x + dLat * dLat);
-}
-
-/**
- * Check if two photos are within the distance threshold.
- * Optimized with quick bounding box rejection before computing distance.
- */
-function arePhotosNearby(photo1: UnvisitedPhotoRecord, photo2: UnvisitedPhotoRecord, threshold: number): boolean {
-  const lat1 = photo1.latitude;
-  const lon1 = photo1.longitude;
-  const lat2 = photo2.latitude;
-  const lon2 = photo2.longitude;
-
-  // Quick bounding box rejection - very fast, catches most far-apart photos
-  const latDiff = lat2 - lat1;
-  const lonDiff = lon2 - lon1;
-  if (
-    latDiff > QUICK_REJECT_LAT_DEG ||
-    latDiff < -QUICK_REJECT_LAT_DEG ||
-    lonDiff > QUICK_REJECT_LON_DEG ||
-    lonDiff < -QUICK_REJECT_LON_DEG
-  ) {
-    return false;
-  }
-
-  // Fast equirectangular distance for nearby photos
-  return fastDistanceMeters(lat1, lon1, lat2, lon2) <= threshold;
 }
 
 // Visit group structure for batch processing
@@ -392,6 +375,7 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
   onProgress?.(progress);
   const photoGroups: UnvisitedPhotoRecord[][] = [];
   let currentGroup: UnvisitedPhotoRecord[] = [photos[0]];
+  const preparedDistanceThreshold = prepareVisitPhotoDistanceThreshold(distanceThreshold);
 
   const GROUPING_CHUNK_SIZE = 1000; // Yield every 1000 photos
 
@@ -403,7 +387,11 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
 
     // OPTIMIZATION: Short-circuit evaluation - only compute distance if time check passes
     // This avoids expensive distance calculations for photos already separated by time
-    if (timeDiff > timeGapThreshold || !arePhotosNearby(prevPhoto, currentPhoto, distanceThreshold)) {
+    if (
+      timeDiff > timeGapThreshold ||
+      preparedDistanceThreshold === null ||
+      !areVisitPhotosNearbyWithPreparedThreshold(prevPhoto, currentPhoto, preparedDistanceThreshold)
+    ) {
       photoGroups.push(currentGroup);
       currentGroup = [currentPhoto];
     } else {
@@ -443,7 +431,11 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
     const batchVisitGroups = await processInChunks(
       batchPhotoGroups,
       (groupPhotos) => {
-        const centroid = calculateCentroid(groupPhotos);
+        const centroidCoordinate = calculateVisitPhotoCentroid(groupPhotos);
+        if (!centroidCoordinate) {
+          throw new Error("Cannot calculate a visit centroid from invalid photo coordinates.");
+        }
+        const centroid = { lat: centroidCoordinate.latitude, lon: centroidCoordinate.longitude };
         const visitStartTime = groupPhotos[0].creationTime;
         const visitEndTime = groupPhotos[groupPhotos.length - 1].creationTime;
 
@@ -566,6 +558,7 @@ async function detectFoodInVisits(options: DetectFoodOptions = {}): Promise<Food
     totalSamples: 0,
     processedSamples: 0,
     retryableFailures: 0,
+    foodPhotosFound: 0,
     foodVisitsFound: 0,
     isComplete: false,
     elapsedMs: 0,
@@ -595,6 +588,11 @@ async function detectFoodInVisits(options: DetectFoodOptions = {}): Promise<Food
   onProgress?.(progress);
 
   const tracker = createProgressTracker();
+
+  if (getResolvedVisitFoodDetectionStrategy() === RANK3_BULK_TAIL_VISIT_FOOD_DETECTION_STRATEGY) {
+    return processRank3BulkTailVisitFoodDetection(allSamples, confidenceThreshold, progress, tracker, onProgress);
+  }
+
   const visitFoodResults = new Set<string>();
   const processedVisitIds = new Set<string>();
   const sampleVisitByPhotoId = new Map(allSamples.map((sample) => [sample.photoId, sample.visitId]));
@@ -603,9 +601,10 @@ async function detectFoodInVisits(options: DetectFoodOptions = {}): Promise<Food
   await processFoodDetectionBatchesWithBufferedPersistence(
     allSamples.map((s) => ({ id: s.photoId, visitId: s.visitId })),
     confidenceThreshold,
-    (processed, _foodFound, retryableFailures) => {
+    (processed, foodFound, retryableFailures) => {
       progress.processedSamples = processed;
       progress.retryableFailures = retryableFailures;
+      progress.foodPhotosFound = foodFound;
       progress.foodVisitsFound = visitFoodResults.size;
       const stats = tracker.update(processed, allSamples.length);
       progress.elapsedMs = stats.elapsedMs;
@@ -669,6 +668,11 @@ interface FoodBatchResult {
   allLabels?: FoodLabel[];
 }
 
+interface ProducedFoodDetectionPage<T extends FoodBatchItem> {
+  readonly items: T[];
+  readonly detectionResults: FoodDetectionResult[];
+}
+
 /** Generic batch food detection processor - shared by all food detection functions */
 async function processFoodDetectionBatches<T extends FoodBatchItem>(
   items: T[],
@@ -677,70 +681,93 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
   foodKeywords?: string[],
   onBatchResults?: (batchResults: FoodBatchResult[]) => void | Promise<void>,
   collectResults: boolean = true,
-): Promise<{ results: FoodBatchResult[]; foodFoundCount: number; failedCount: number }> {
+  collectOutcomes: boolean = false,
+): Promise<{
+  results: FoodBatchResult[];
+  foodFoundCount: number;
+  failedCount: number;
+  outcomes: AdaptiveVisitFoodOutcome[];
+}> {
   const results: FoodBatchResult[] = [];
+  const outcomes: AdaptiveVisitFoodOutcome[] = [];
   let foodFoundCount = 0;
   let failedCount = 0;
 
   // Fetch enabled food keywords from database if not provided
   const keywords = foodKeywords ?? (await getEnabledFoodKeywords());
+  const pages = createVisionResultPagePlan(items.length, FOOD_DETECTION_BATCH_SIZE);
 
-  for (const page of createVisionResultPagePlan(items.length, FOOD_DETECTION_BATCH_SIZE)) {
-    const batch = items.slice(page.offset, page.endOffset);
-    const itemMap = new Map(batch.map((item) => [item.id, item]));
+  await runOrderedPagePipeline({
+    pages,
+    strategy: getResolvedVisionPageOrchestrationStrategy(),
+    produce: async (page): Promise<ProducedFoodDetectionPage<T>> => {
+      const pageItems = items.slice(page.offset, page.endOffset);
+      const detectionResults = await detectFoodInImageBatch(
+        pageItems.map((item) => item.id),
+        { confidenceThreshold, foodKeywords: keywords },
+      );
+      return { items: pageItems, detectionResults };
+    },
+    consume: async ({ items: pageItems, detectionResults }, page) => {
+      const itemMap = new Map(pageItems.map((item) => [item.id, item]));
+      const batchResults: FoodBatchResult[] = [];
+      const returnedAssetIds = new Set<string>();
+      for (const result of detectionResults) {
+        // Never turn a PhotoKit/Vision failure into a permanent "not food" result.
+        // Failed or missing assets remain unanalyzed and can be retried later.
+        if (!itemMap.has(result.assetId)) {
+          continue;
+        }
+        returnedAssetIds.add(result.assetId);
+        if (result.error !== undefined) {
+          failedCount++;
+          if (collectOutcomes) {
+            outcomes.push({ photoId: result.assetId, status: "failure" });
+          }
+          continue;
+        }
 
-    const detectionResults = await detectFoodInImageBatch(
-      batch.map((item) => item.id),
-      { confidenceThreshold, foodKeywords: keywords },
-    );
+        const record: FoodBatchResult = {
+          photoId: result.assetId,
+          foodDetected: result.containsFood,
+          foodLabels: result.foodLabels as FoodLabel[],
+          foodConfidence: result.foodConfidence,
+          allLabels: result.labels as FoodLabel[], // Store all labels from classifier
+        };
 
-    const batchResults: FoodBatchResult[] = [];
-    const returnedAssetIds = new Set<string>();
-    for (const result of detectionResults) {
-      // Never turn a PhotoKit/Vision failure into a permanent "not food" result.
-      // Failed or missing assets remain unanalyzed and can be retried later.
-      if (!itemMap.has(result.assetId)) {
-        continue;
+        if (collectResults) {
+          results.push(record);
+        }
+        batchResults.push(record);
+        if (result.containsFood) {
+          foodFoundCount++;
+        }
+        if (collectOutcomes) {
+          outcomes.push({
+            photoId: result.assetId,
+            status: "success",
+            containsFood: result.containsFood,
+          });
+        }
       }
-      returnedAssetIds.add(result.assetId);
-      if (result.error) {
-        failedCount++;
-        continue;
+
+      for (const item of pageItems) {
+        if (!returnedAssetIds.has(item.id)) {
+          failedCount++;
+        }
       }
 
-      const record: FoodBatchResult = {
-        photoId: result.assetId,
-        foodDetected: result.containsFood,
-        foodLabels: result.foodLabels as FoodLabel[],
-        foodConfidence: result.foodConfidence,
-        allLabels: result.labels as FoodLabel[], // Store all labels from classifier
-      };
-
-      if (collectResults) {
-        results.push(record);
+      if (batchResults.length > 0) {
+        // Persistence errors must abort the scan. Continuing would report completion
+        // while silently leaving a processed batch unsaved.
+        await onBatchResults?.(batchResults);
       }
-      batchResults.push(record);
-      if (result.containsFood) {
-        foodFoundCount++;
-      }
-    }
 
-    for (const item of batch) {
-      if (!returnedAssetIds.has(item.id)) {
-        failedCount++;
-      }
-    }
+      onBatchComplete?.(page.endOffset, foodFoundCount, failedCount);
+    },
+  });
 
-    if (batchResults.length > 0) {
-      // Persistence errors must abort the scan. Continuing would report completion
-      // while silently leaving a processed batch unsaved.
-      await onBatchResults?.(batchResults);
-    }
-
-    onBatchComplete?.(page.endOffset, foodFoundCount, failedCount);
-  }
-
-  return { results, foodFoundCount, failedCount };
+  return { results, foodFoundCount, failedCount, outcomes };
 }
 
 /**
@@ -789,6 +816,92 @@ async function processFoodDetectionBatchesWithBufferedPersistence<T extends Food
   });
 }
 
+async function processRank3BulkTailVisitFoodDetection(
+  samples: readonly AdaptiveVisitFoodSample[],
+  confidenceThreshold: number,
+  progress: FoodDetectionProgress,
+  tracker: ProgressTracker,
+  onProgress: ((progress: FoodDetectionProgress) => void) | undefined,
+): Promise<FoodDetectionProgress> {
+  const foodKeywords = await getEnabledFoodKeywords();
+  const positiveVisitIds = new Set<string>();
+  const processedVisitIds = new Set<string>();
+
+  const summary = await runRank3BulkTailVisitFoodDetection<FoodBatchResult>({
+    samples,
+    maximumPageSize: FOOD_DETECTION_BATCH_SIZE,
+    persistenceFlushSize: DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE,
+    persist: batchUpdatePhotosFoodDetected,
+    synchronize: syncAllVisitsFoodProbable,
+    processBatch: async (batchSamples, context) => {
+      let accountedSamples = 0;
+      const visitIdByPhotoId = new Map(batchSamples.map((sample) => [sample.photoId, sample.visitId]));
+      const { outcomes } = await processFoodDetectionBatches(
+        batchSamples.map((sample) => ({ id: sample.photoId, visitId: sample.visitId })),
+        confidenceThreshold,
+        (processed, foodFound, retryableFailures) => {
+          while (accountedSamples < processed) {
+            const sample = batchSamples[accountedSamples];
+            if (!sample) {
+              throw new Error("Visit food-detection progress exceeded its adaptive batch.");
+            }
+            processedVisitIds.add(sample.visitId);
+            accountedSamples += 1;
+          }
+          const batchProgress: VisitFoodDetectionBatchProgress = {
+            processedSamples: processed,
+            foodFoundSamples: foodFound,
+            retryableFailures,
+          };
+          context.onProgress(batchProgress);
+        },
+        foodKeywords,
+        async (batchResults) => {
+          await context.appendResults(batchResults);
+          for (const result of batchResults) {
+            if (!result.foodDetected) {
+              continue;
+            }
+            const visitId = visitIdByPhotoId.get(result.photoId);
+            if (visitId) {
+              positiveVisitIds.add(visitId);
+            }
+          }
+        },
+        false,
+        true,
+      );
+      return { outcomes };
+    },
+    onProgress: (orchestrationProgress) => {
+      progress.processedSamples = orchestrationProgress.processedSamples;
+      progress.retryableFailures = orchestrationProgress.retryableFailures;
+      progress.foodPhotosFound = orchestrationProgress.foodFoundSamples;
+      progress.foodVisitsFound = positiveVisitIds.size;
+      progress.processedVisits = processedVisitIds.size;
+      const stats = tracker.update(orchestrationProgress.processedSamples, progress.totalSamples);
+      progress.elapsedMs = stats.elapsedMs;
+      progress.samplesPerSecond = stats.perSecond;
+      progress.etaMs = stats.etaMs;
+      onProgress?.({ ...progress });
+    },
+  });
+
+  progress.totalSamples = summary.attemptedSamples;
+  progress.processedSamples = summary.attemptedSamples;
+  progress.processedVisits = progress.totalVisits;
+  progress.retryableFailures = summary.retryableFailures;
+  progress.foodPhotosFound = summary.foodFoundSamples;
+  progress.foodVisitsFound = summary.positiveVisitIds.length;
+  const finalStats = tracker.update(summary.attemptedSamples, summary.attemptedSamples);
+  progress.elapsedMs = finalStats.elapsedMs;
+  progress.samplesPerSecond = finalStats.perSecond;
+  progress.etaMs = 0;
+  progress.isComplete = true;
+  onProgress?.({ ...progress });
+  return progress;
+}
+
 /**
  * Enrich visits with calendar event data.
  * Finds calendar events that overlap with each visit's time range.
@@ -823,7 +936,7 @@ async function enrichVisitsWithCalendarEvents(
     return progress;
   }
 
-  const visitsToProcess = await getVisitsWithoutCalendarData();
+  const visitsToProcess = await getCalendarEnrichmentVisitSnapshot();
   progress.totalVisits = visitsToProcess.length;
 
   if (visitsToProcess.length === 0) {
@@ -865,30 +978,10 @@ async function enrichVisitsWithCalendarEvents(
     emitProgress();
   };
 
-  type SuggestedRestaurant = MichelinRestaurantRecord & { distance: number };
-  type SuggestedRestaurantMap = Map<string, SuggestedRestaurant[]>;
-  let preloadedSuggestedRestaurants: SuggestedRestaurantMap | null = null;
   let nativeMatches: Awaited<ReturnType<typeof matchCalendarEventsForVisitsNatively>> = null;
 
   if (isNativeCalendarMatchingAvailable()) {
-    preloadedSuggestedRestaurants = new Map();
-    for (let i = 0; i < visitsToProcess.length; i += BATCH_SIZE) {
-      const batchIds = visitsToProcess.slice(i, i + BATCH_SIZE).map((visit) => visit.id);
-      const batchSuggestions = await getSuggestedRestaurantsForVisits(batchIds);
-      for (const [visitId, restaurants] of batchSuggestions) {
-        preloadedSuggestedRestaurants.set(visitId, restaurants);
-      }
-    }
-
-    nativeMatches = await matchCalendarEventsForVisitsNatively(
-      visitsToProcess.map((visit) => ({
-        ...visit,
-        suggestedRestaurants: (preloadedSuggestedRestaurants?.get(visit.id) ?? []).map((restaurant) => ({
-          id: restaurant.id,
-          name: restaurant.name,
-        })),
-      })),
-    );
+    nativeMatches = await matchCalendarEventsForVisitsNatively(visitsToProcess);
   }
 
   if (nativeMatches !== null) {
@@ -908,18 +1001,7 @@ async function enrichVisitsWithCalendarEvents(
   } else {
     for (let i = 0; i < visitsToProcess.length; i += BATCH_SIZE) {
       const batch = visitsToProcess.slice(i, i + BATCH_SIZE);
-      const batchIds = batch.map((visit) => visit.id);
-      let candidateEventMap: Map<string, CalendarEventInfo[]>;
-      let suggestedRestaurantsMap: SuggestedRestaurantMap;
-      if (preloadedSuggestedRestaurants) {
-        candidateEventMap = await batchFindCandidateEventsForVisits(batch);
-        suggestedRestaurantsMap = preloadedSuggestedRestaurants;
-      } else {
-        [candidateEventMap, suggestedRestaurantsMap] = await Promise.all([
-          batchFindCandidateEventsForVisits(batch),
-          getSuggestedRestaurantsForVisits(batchIds),
-        ]);
-      }
+      const candidateEventMap = await batchFindCandidateEventsForVisits(batch);
 
       for (const visit of batch) {
         const candidateEvents = candidateEventMap.get(visit.id) ?? [];
@@ -927,7 +1009,7 @@ async function enrichVisitsWithCalendarEvents(
           continue;
         }
 
-        const suggestedRestaurants = suggestedRestaurantsMap.get(visit.id) ?? [];
+        const suggestedRestaurants = visit.suggestedRestaurants;
         let matchedRestaurant: (typeof suggestedRestaurants)[number] | undefined;
         let event = candidateEvents[0]!;
 
@@ -981,15 +1063,6 @@ async function enrichVisitsWithCalendarEvents(
 // ============================================================================
 // CALENDAR-ONLY VISITS
 // ============================================================================
-
-/**
- * Generate a deterministic hash for a calendar-only visit
- */
-function generateCalendarVisitHash(calendarEventId: string, startTime: number): string {
-  // Round time to nearest hour for some stability
-  const timeRounded = Math.floor(startTime / (60 * 60 * 1000));
-  return `cal-${calendarEventId}-${timeRounded}`;
-}
 
 /**
  * Represents a calendar event that can be imported as a visit
@@ -1277,84 +1350,52 @@ function dedupeImportableEvents(
  */
 export interface ImportCalendarEventOptions {
   /** Map of calendarEventId -> restaurantId to use instead of the default matched restaurant */
-  restaurantOverrides?: Map<string, string>;
+  restaurantOverrides?: ReadonlyMap<string, string>;
 }
 
 /**
- * Import specific calendar events as visits.
- * Takes an array of calendar event IDs to import.
- * The matched restaurant is auto-confirmed on the created visit.
+ * Import the exact Calendar event snapshots that the user reviewed. One SQLite
+ * transaction rechecks linked/dismissed IDs and every original restaurant's
+ * ±1-day confirmed-visit conflict before inserting visits and suggestions,
+ * without repeating the 1,000-day EventKit and Michelin discovery pipeline.
  *
- * @param calendarEventIds - Array of calendar event IDs to import
+ * @param events - Rendered import candidates to persist
  * @param options - Optional configuration including restaurant overrides
  */
 export async function importCalendarEvents(
-  calendarEventIds: string[],
+  events: readonly ImportableCalendarEvent[],
   options: ImportCalendarEventOptions = {},
-): Promise<number> {
+): Promise<CalendarImportTransactionResult> {
   const { restaurantOverrides } = options;
 
-  if (calendarEventIds.length === 0) {
-    return 0;
-  }
-
-  // Get all importable events
-  const importableEvents = await getImportableCalendarEvents();
-
-  // Filter to only the requested events
-  const eventsToImport = importableEvents.filter((e) => calendarEventIds.includes(e.calendarEventId));
-  const pastEventsToImport = eventsToImport.filter((event) => event.startDate <= Date.now());
-
-  if (pastEventsToImport.length === 0) {
-    return 0;
-  }
-
-  const visitsToCreate = pastEventsToImport.map((event) => {
-    // Check if there's an override for this event's restaurant
-    const overrideRestaurantId = restaurantOverrides?.get(event.calendarEventId);
-    let restaurant = event.matchedRestaurant;
-
-    // If override provided, find the restaurant in matchedRestaurants
-    if (overrideRestaurantId) {
-      const overrideRestaurant = event.matchedRestaurants.find((r) => r.id === overrideRestaurantId);
-      if (overrideRestaurant) {
-        restaurant = overrideRestaurant;
-      }
-    }
-
+  if (events.length === 0) {
     return {
-      id: generateCalendarVisitHash(event.calendarEventId, event.startDate),
-      calendarEventId: event.calendarEventId,
-      calendarEventTitle: event.calendarEventTitle,
-      calendarEventLocation: event.calendarEventLocation,
-      startTime: event.startDate,
-      endTime: event.endDate,
-      centerLat: restaurant.latitude,
-      centerLon: restaurant.longitude,
-      // Pass full restaurant data for auto-confirmation
-      matchedRestaurant: {
-        id: restaurant.id,
-        name: restaurant.name,
-        latitude: restaurant.latitude,
-        longitude: restaurant.longitude,
-        address: restaurant.address,
-        cuisine: restaurant.cuisine,
-      },
+      requestedCalendarEventIds: [],
+      insertedCalendarEventIds: [],
+      unavailableCalendarEventIds: [],
+      nearbyConfirmedCalendarEventIds: [],
+      insertConflictCalendarEventIds: [],
+      insertedCount: 0,
     };
+  }
+
+  const now = Date.now();
+  const plannedImport = planCalendarImportFromSnapshots(events, {
+    now,
+    restaurantOverrides,
   });
+  if (plannedImport.visitsToCreate.length === 0) {
+    return {
+      requestedCalendarEventIds: [],
+      insertedCalendarEventIds: [],
+      unavailableCalendarEventIds: [],
+      nearbyConfirmedCalendarEventIds: [],
+      insertConflictCalendarEventIds: [],
+      insertedCount: 0,
+    };
+  }
 
-  // Insert visits with auto-confirmation
-  await insertCalendarOnlyVisits(visitsToCreate);
-
-  // Also insert into suggested restaurants for tracking/UI purposes
-  const suggestedRestaurantsToInsert: VisitSuggestedRestaurant[] = visitsToCreate.map((v) => ({
-    visitId: v.id,
-    restaurantId: v.matchedRestaurant.id,
-    distance: 0,
-  }));
-  await insertVisitSuggestedRestaurants(suggestedRestaurantsToInsert);
-
-  return visitsToCreate.length;
+  return importCalendarSnapshotPlan(plannedImport, now);
 }
 
 /**
@@ -1380,6 +1421,19 @@ export interface DeepScanOptions {
   photos?: Array<{ id: string }>;
 }
 
+function adaptVisitFoodProgressToDeepScan(progress: FoodDetectionProgress): DeepScanProgress {
+  return {
+    totalPhotos: progress.totalSamples,
+    processedPhotos: progress.processedSamples,
+    foodPhotosFound: progress.foodPhotosFound,
+    retryableFailures: progress.retryableFailures,
+    isComplete: progress.isComplete,
+    elapsedMs: progress.elapsedMs,
+    photosPerSecond: progress.samplesPerSecond,
+    etaMs: progress.etaMs,
+  };
+}
+
 /**
  * Deep scan photos for food detection.
  * Scans the provided photos, or every unanalyzed photo when none are specified.
@@ -1387,6 +1441,14 @@ export interface DeepScanOptions {
  */
 export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): Promise<DeepScanProgress> {
   const { confidenceThreshold = 0.3, onProgress, photos } = options;
+
+  if (isVisionVisitFoodValidationModeEnabled()) {
+    const visitFoodProgress = await detectFoodInVisits({
+      confidenceThreshold,
+      onProgress: (progress) => onProgress?.(adaptVisitFoodProgressToDeepScan(progress)),
+    });
+    return adaptVisitFoodProgressToDeepScan(visitFoodProgress);
+  }
 
   const progress: DeepScanProgress = {
     totalPhotos: 0,

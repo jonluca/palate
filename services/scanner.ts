@@ -1,26 +1,36 @@
 import * as MediaLibrary from "expo-media-library/legacy";
 import * as Device from "expo-device";
 import pMap from "p-map";
-import { insertPhotos, type PhotoRecord } from "@/utils/db";
+import {
+  getExistingPhotoAssetIdsForIncrementalScan,
+  getPhotoDatabasePathForIncrementalScan,
+  insertPhotos,
+  type PhotoRecord,
+} from "@/utils/db";
 import { getPhotoIngestionFlushCount } from "@/utils/db/photo-ingestion-core";
 import { getValidatedAssetScanNextOffset, getValidatedMediaLibraryPageState } from "@/utils/photo-scan-core";
 import {
+  beginPreferredAssetScan,
+  getIncrementalPhotoScanInitialProgressWithCleanup,
+  processPhotoScanAssets,
+  type ProcessedPhotoScanAssets,
+} from "@/utils/incremental-photo-scan-core";
+import {
   beginAssetScan,
+  beginDatabaseBackedIncrementalAssetScan,
+  beginIncrementalAssetScan,
   endAssetScan,
   getAssetInfoBatch,
   getAssetScanPage,
   isAssetScanAvailable,
   isBatchAssetInfoAvailable,
-  type AssetScanRecord,
+  isDatabaseBackedIncrementalAssetScanAvailable,
+  isIncrementalAssetScanAvailable,
 } from "@/modules/batch-asset-info";
 
 type PhotoInsertRecord = Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">;
 
-interface ProcessedAssetBatch {
-  photos: PhotoInsertRecord[];
-  photosWithLocation: number;
-  skippedAssets: number;
-}
+type ProcessedAssetBatch = ProcessedPhotoScanAssets;
 
 export interface ScanProgress {
   totalAssets: number;
@@ -128,40 +138,6 @@ function isValidLocation(location: { latitude: number; longitude: number } | nul
     location.longitude >= -180 &&
     location.longitude <= 180
   );
-}
-
-function processNativeScanPage(assets: AssetScanRecord[]): ProcessedAssetBatch {
-  const photos: PhotoInsertRecord[] = [];
-  let photosWithLocation = 0;
-  let skippedAssets = 0;
-
-  for (const asset of assets) {
-    if (asset.creationTime === null || !Number.isFinite(asset.creationTime)) {
-      skippedAssets++;
-      continue;
-    }
-
-    const location =
-      asset.latitude === null || asset.longitude === null
-        ? null
-        : { latitude: asset.latitude, longitude: asset.longitude };
-    const hasLocation = isValidLocation(location);
-    if (hasLocation) {
-      photosWithLocation++;
-    }
-
-    photos.push({
-      id: asset.id,
-      uri: asset.uri,
-      creationTime: asset.creationTime,
-      latitude: hasLocation ? asset.latitude : null,
-      longitude: hasLocation ? asset.longitude : null,
-      mediaType: asset.mediaType,
-      duration: asset.mediaType === "video" ? asset.duration : null,
-    });
-  }
-
-  return { photos, photosWithLocation, skippedAssets };
 }
 
 /**
@@ -281,22 +257,47 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     throw new RangeError(`Scan concurrency must be a positive safe integer; received ${concurrency}`);
   }
 
-  const nativeSession = useNativeScanSession ? await beginAssetScan() : null;
-  const totalAssets = nativeSession
-    ? nativeSession.totalCount
-    : (
-        await MediaLibrary.getAssetsAsync({
-          first: 1,
-          mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+  const nativeScan = useNativeScanSession
+    ? await beginPreferredAssetScan({
+        databaseBackedIncrementalAvailable: isDatabaseBackedIncrementalAssetScanAvailable(),
+        // Signed real-library A/B retained this lower-memory path for profiling,
+        // but did not show a latency win over the identifier-list implementation.
+        preferDatabaseBackedIncremental: false,
+        incrementalAvailable: isIncrementalAssetScanAvailable(),
+        beginDatabaseBackedIncrementalScan: async () =>
+          beginDatabaseBackedIncrementalAssetScan(await getPhotoDatabasePathForIncrementalScan()),
+        loadExistingAssetIds: getExistingPhotoAssetIdsForIncrementalScan,
+        beginFullScan: beginAssetScan,
+        beginIncrementalScan: beginIncrementalAssetScan,
+        onIncrementalBeginFailure: (error) => {
+          console.warn("Native incremental asset scan failed to start; retrying once with a full scan:", error);
+        },
+      })
+    : null;
+  const nativeSession = nativeScan?.session ?? null;
+  const incrementalInitialProgress =
+    nativeScan?.kind === "incremental"
+      ? await getIncrementalPhotoScanInitialProgressWithCleanup(nativeScan.session, endAssetScan, (cleanupError) => {
+          console.error("Failed to release malformed native asset scan session:", cleanupError);
         })
-      ).totalCount;
+      : null;
+  const totalAssets = incrementalInitialProgress
+    ? incrementalInitialProgress.totalAssets
+    : nativeSession
+      ? nativeSession.totalCount
+      : (
+          await MediaLibrary.getAssetsAsync({
+            first: 1,
+            mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+          })
+        ).totalCount;
 
   const progress: ScanProgress = {
     totalAssets,
-    processedAssets: 0,
+    processedAssets: incrementalInitialProgress?.processedAssets ?? 0,
     newPhotosAdded: 0,
-    photosWithLocation: 0,
-    skippedAssets: 0,
+    photosWithLocation: incrementalInitialProgress?.photosWithLocation ?? 0,
+    skippedAssets: incrementalInitialProgress?.skippedAssets ?? 0,
     isComplete: false,
     elapsedMs: 0,
     newPhotosPerSecond: 0,
@@ -372,9 +373,9 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
           hasNextPage: page.hasNextPage,
         });
 
-        await persistBatch(processNativeScanPage(page.assets));
-        progress.processedAssets += page.assets.length;
+        await persistBatch(processPhotoScanAssets(page.assets));
         offset = nextOffset;
+        progress.processedAssets = (incrementalInitialProgress?.processedAssets ?? 0) + offset;
         updateProgress();
       }
     } else {

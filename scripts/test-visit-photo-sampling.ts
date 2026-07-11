@@ -32,7 +32,7 @@ function legacySamplePlan(database: DatabaseSync, samplePercentage: number) {
   );
   for (const visit of visits) {
     const photos = sampleStatement.all(visit.id, visit.id, samplePercentage) as Array<{ id: string }>;
-    samples.push(...photos.map(({ id }) => ({ visitId: visit.id, photoId: id })));
+    samples.push(...photos.map(({ id }, index) => ({ visitId: visit.id, photoId: id, sampleRank: index + 1 })));
   }
   return { totalVisits: visits.length, samples };
 }
@@ -62,7 +62,7 @@ function chunkedSamplePlan(database: DatabaseSync, samplePercentage: number) {
       samplePercentage,
     );
     const rows = database.prepare(statement.sql).all(...statement.parameters) as unknown as FoodDetectionVisitSample[];
-    samples.push(...rows.map(({ visitId, photoId }) => ({ visitId, photoId })));
+    samples.push(...rows.map(({ visitId, photoId, sampleRank }) => ({ visitId, photoId, sampleRank })));
   }
   return { totalVisits: visits.length, samples };
 }
@@ -135,11 +135,11 @@ try {
   assert.deepEqual(combinedSamplePlan(database, 0.2), {
     totalVisits: 4,
     samples: [
-      { visitId: "v-newer-a", photoId: "a-00" },
-      { visitId: "v-newer-a", photoId: "a-01" },
-      { visitId: "v-newer-b", photoId: "b-a" },
-      { visitId: "v-nine", photoId: "nine-雪's" },
-      { visitId: "v-old-雪's", photoId: "old-0" },
+      { visitId: "v-newer-a", photoId: "a-00", sampleRank: 1 },
+      { visitId: "v-newer-a", photoId: "a-01", sampleRank: 2 },
+      { visitId: "v-newer-b", photoId: "b-a", sampleRank: 1 },
+      { visitId: "v-nine", photoId: "nine-雪's", sampleRank: 1 },
+      { visitId: "v-old-雪's", photoId: "old-0", sampleRank: 1 },
     ],
   });
 
@@ -148,10 +148,10 @@ try {
     database
       .prepare(duplicateStatement.sql)
       .all(...duplicateStatement.parameters)
-      .map(({ visitId, photoId }) => ({ visitId, photoId })),
+      .map(({ visitId, photoId, sampleRank }) => ({ visitId, photoId, sampleRank })),
     [
-      { visitId: "v-old-雪's", photoId: "old-0" },
-      { visitId: "v-old-雪's", photoId: "old-0" },
+      { visitId: "v-old-雪's", photoId: "old-0", sampleRank: 1 },
+      { visitId: "v-old-雪's", photoId: "old-0", sampleRank: 1 },
     ],
   );
   assert.throws(() => buildVisitPhotoSampleStatement([], 0.2), RangeError);
@@ -168,6 +168,26 @@ try {
   database.exec("DELETE FROM photos");
   assert.deepEqual(combinedSamplePlan(database, 0.2), { totalVisits: 0, samples: [] });
   assert.deepEqual(parseFoodDetectionVisitSampleRows([]), { totalVisits: 0, samples: [] });
+  assert.throws(
+    () => parseFoodDetectionVisitSampleRows([{ visitId: "visit", photoId: "photo", sampleRank: 0, totalVisits: 1 }]),
+    /sampleRank/,
+  );
+  assert.throws(
+    () => parseFoodDetectionVisitSampleRows([{ visitId: "visit", photoId: "photo-2", sampleRank: 2, totalVisits: 1 }]),
+    /expected 1/,
+  );
+  assert.throws(
+    () => parseFoodDetectionVisitSampleRows([{ visitId: "visit", photoId: "photo", sampleRank: 1, totalVisits: 2 }]),
+    /contain 1 visits but report totalVisits 2/,
+  );
+  assert.throws(
+    () =>
+      parseFoodDetectionVisitSampleRows([
+        { visitId: "visit-a", photoId: "photo", sampleRank: 1, totalVisits: 2 },
+        { visitId: "visit-b", photoId: "photo", sampleRank: 1, totalVisits: 2 },
+      ]),
+    /duplicate photoId/,
+  );
 } finally {
   database.close();
 }
@@ -190,6 +210,8 @@ console.log(
         analyzedAndEmptyVisitsExcluded: true,
         unassignedAndOrphanPhotosExcluded: true,
         emptyPlan: true,
+        strictSampleRankParsing: true,
+        consistentVisitCountParsing: true,
       },
     },
     null,

@@ -1,12 +1,15 @@
 export interface FoodDetectionVisitSampleRow {
   readonly visitId: string;
   readonly photoId: string;
+  readonly sampleRank: number;
   readonly totalVisits: number;
 }
 
 export interface FoodDetectionVisitSample {
   readonly visitId: string;
   readonly photoId: string;
+  /** One-based deterministic position inside this visit's complete sample plan. */
+  readonly sampleRank: number;
 }
 
 export interface FoodDetectionVisitSamplePlan {
@@ -64,7 +67,7 @@ export function buildVisitPhotoSampleStatement(
         INNER JOIN photos AS photo
           ON photo.visitId = requested.visitId AND photo.foodDetected IS NULL
       )
-      SELECT visitId, photoId
+      SELECT visitId, photoId, sampleRank
       FROM ranked
       WHERE sampleRank <= MAX(1, CAST(totalPhotoCount * ? AS INTEGER))
       ORDER BY requestOrder ASC, sampleRank ASC`,
@@ -110,6 +113,7 @@ export const FOOD_DETECTION_VISIT_SAMPLES_SQL = `WITH photo_counts AS MATERIALIZ
   SELECT
     eligible.visitId,
     ranked.photoId,
+    ranked.sampleRank,
     (SELECT COUNT(*) FROM eligible_visits) AS totalVisits
   FROM eligible_visits AS eligible
   INNER JOIN ranked_unanalyzed AS ranked ON ranked.visitId = eligible.visitId
@@ -119,8 +123,62 @@ export const FOOD_DETECTION_VISIT_SAMPLES_SQL = `WITH photo_counts AS MATERIALIZ
 export function parseFoodDetectionVisitSampleRows(
   rows: readonly FoodDetectionVisitSampleRow[],
 ): FoodDetectionVisitSamplePlan {
+  if (!Array.isArray(rows)) {
+    throw new TypeError("Food-detection sample rows must be an array.");
+  }
+  if (rows.length === 0) {
+    return { totalVisits: 0, samples: [] };
+  }
+
+  const firstTotalVisits = rows[0]?.totalVisits;
+  if (!Number.isSafeInteger(firstTotalVisits) || firstTotalVisits < 1) {
+    throw new TypeError("Food-detection sample rows must report a positive safe-integer totalVisits value.");
+  }
+
+  const visitNextRanks = new Map<string, number>();
+  const photoIds = new Set<string>();
+  const samples: FoodDetectionVisitSample[] = [];
+
+  for (const [index, row] of rows.entries()) {
+    if (row === null || typeof row !== "object") {
+      throw new TypeError(`Food-detection sample row ${index} must be an object.`);
+    }
+    if (typeof row.visitId !== "string" || row.visitId.length === 0) {
+      throw new TypeError(`Food-detection sample row ${index} has an invalid visitId.`);
+    }
+    if (typeof row.photoId !== "string" || row.photoId.length === 0) {
+      throw new TypeError(`Food-detection sample row ${index} has an invalid photoId.`);
+    }
+    if (!Number.isSafeInteger(row.sampleRank) || row.sampleRank < 1) {
+      throw new TypeError(`Food-detection sample row ${index} has an invalid sampleRank.`);
+    }
+    if (row.totalVisits !== firstTotalVisits) {
+      throw new TypeError(`Food-detection sample row ${index} has an inconsistent totalVisits value.`);
+    }
+    if (photoIds.has(row.photoId)) {
+      throw new TypeError(`Food-detection sample rows contain duplicate photoId ${JSON.stringify(row.photoId)}.`);
+    }
+
+    const expectedRank = visitNextRanks.get(row.visitId) ?? 1;
+    if (row.sampleRank !== expectedRank) {
+      throw new TypeError(
+        `Food-detection sample row ${index} has sampleRank ${row.sampleRank}; expected ${expectedRank} for visit ${JSON.stringify(row.visitId)}.`,
+      );
+    }
+
+    photoIds.add(row.photoId);
+    visitNextRanks.set(row.visitId, expectedRank + 1);
+    samples.push({ visitId: row.visitId, photoId: row.photoId, sampleRank: row.sampleRank });
+  }
+
+  if (visitNextRanks.size !== firstTotalVisits) {
+    throw new TypeError(
+      `Food-detection sample rows contain ${visitNextRanks.size} visits but report totalVisits ${firstTotalVisits}.`,
+    );
+  }
+
   return {
-    totalVisits: rows[0]?.totalVisits ?? 0,
-    samples: rows.map(({ visitId, photoId }) => ({ visitId, photoId })),
+    totalVisits: firstTotalVisits,
+    samples,
   };
 }

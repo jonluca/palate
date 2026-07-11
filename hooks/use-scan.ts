@@ -12,6 +12,11 @@ import { useAppStore, useHasCompletedInitialScan } from "@/store/app-store";
 import { formatEta, getPhotoCount } from "@/services/scanner";
 import { logScanStarted, logScanCompleted } from "@/services/analytics";
 import { getUnanalyzedPhotoCount } from "@/utils/db";
+import {
+  allowsAutomaticDeepScanFollowup,
+  getResolvedVisitFoodDetectionStrategy,
+  isVisionVisitFoodValidationModeEnabled,
+} from "@/modules/batch-asset-info";
 
 export interface UseScanReturn {
   // Permission state
@@ -109,6 +114,15 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   }, [requestPermissionMutation]);
 
   const shouldAutoDeepScan = useCallback(async () => {
+    if (
+      !allowsAutomaticDeepScanFollowup(
+        getResolvedVisitFoodDetectionStrategy(),
+        isVisionVisitFoodValidationModeEnabled(),
+      )
+    ) {
+      return false;
+    }
+
     if (autoDeepScanRemainingPhotoThreshold !== undefined) {
       const remainingPhotoCount = await getUnanalyzedPhotoCount().catch(() => null);
       return (

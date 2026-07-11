@@ -10,7 +10,11 @@ export interface BufferedResultPersistenceOptions<T, Result> {
    * Produces ordered result pages. Await `appendResults` for every page so a
    * persistence rejection stops further production.
    */
-  readonly process: (appendResults: (results: readonly T[]) => Promise<void>) => Promise<Result>;
+  readonly process: (
+    appendResults: (results: readonly T[]) => Promise<void>,
+    /** Persists the currently accepted ordered prefix without synchronizing derived state. */
+    flushPendingResults: () => Promise<void>,
+  ) => Promise<Result>;
 
   /**
    * Atomically persists one ordered batch. A rejection is never automatically
@@ -46,9 +50,42 @@ export interface BufferedResultPersistenceOptions<T, Result> {
   readonly maximumPageSize?: number;
 }
 
+function flattenUniqueErrors(errors: readonly unknown[]): unknown[] {
+  const flattened: unknown[] = [];
+  const expandedAggregates = new Set<AggregateError>();
+
+  const appendUnique = (error: unknown): void => {
+    if (!flattened.some((existing) => Object.is(existing, error))) {
+      flattened.push(error);
+    }
+  };
+  const appendFlattened = (error: unknown): void => {
+    if (!(error instanceof AggregateError)) {
+      appendUnique(error);
+      return;
+    }
+    if (expandedAggregates.has(error)) {
+      return;
+    }
+    expandedAggregates.add(error);
+    if (error.errors.length === 0) {
+      appendUnique(error);
+      return;
+    }
+    for (const nestedError of error.errors) {
+      appendFlattened(nestedError);
+    }
+  };
+
+  for (const error of errors) {
+    appendFlattened(error);
+  }
+  return flattened;
+}
+
 function createAggregateFailure(primaryError: unknown, additionalErrors: readonly unknown[]): AggregateError {
   return new AggregateError(
-    [primaryError, ...additionalErrors],
+    flattenUniqueErrors([primaryError, ...additionalErrors]),
     "Buffered result processing failed with additional persistence or synchronization errors.",
   );
 }
@@ -59,8 +96,9 @@ function createAggregateFailure(primaryError: unknown, additionalErrors: readonl
  * rejection stops the lifecycle without retrying that batch. If any earlier
  * persistence succeeded, derived state is synchronized before the error escapes.
  *
- * Multiple failures are reported as an `AggregateError` whose first item is the
- * primary processing or persistence failure.
+ * Multiple failures are reported as an `AggregateError`. Nested aggregates are
+ * flattened depth-first and repeated error identities are retained only once,
+ * with the primary processing or persistence failure first.
  */
 export async function runBufferedResultPersistence<T, Result>(
   options: BufferedResultPersistenceOptions<T, Result>,
@@ -106,9 +144,16 @@ export async function runBufferedResultPersistence<T, Result>(
     await buffer.append(results);
   };
 
+  const flushPendingResults = async (): Promise<void> => {
+    if (didPersistenceFail) {
+      throw persistenceFailure;
+    }
+    await buffer.flush();
+  };
+
   let result: Result;
   try {
-    result = await options.process(appendResults);
+    result = await options.process(appendResults, flushPendingResults);
     if (didPersistenceFail) {
       throw persistenceFailure;
     }

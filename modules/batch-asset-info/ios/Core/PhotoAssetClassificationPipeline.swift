@@ -44,9 +44,22 @@ final class PhotoAssetClassificationLifecycleGate: @unchecked Sendable {
 }
 
 struct PhotoAssetClassificationRuntimeConfiguration: Equatable, Sendable {
+  enum PageOrchestrationStrategy: String, Equatable, Sendable {
+    case serial
+    case lookahead
+  }
+
+  enum ResultTransport: String, Equatable, Sendable {
+    case legacy
+    case packedV1 = "packed-v1"
+  }
+
   static let visionConcurrencyEnvironmentKey = "PALATE_VISION_CONCURRENCY"
   static let pipelineDepthEnvironmentKey = "PALATE_VISION_PIPELINE_DEPTH"
   static let resultPageSizeEnvironmentKey = "PALATE_VISION_RESULT_PAGE_SIZE"
+  static let resultTransportEnvironmentKey = "PALATE_VISION_RESULT_TRANSPORT"
+  static let pageOrchestrationStrategyEnvironmentKey =
+    "PALATE_VISION_PAGE_ORCHESTRATION_STRATEGY"
   static let defaultResultPageSize = 1_000
   static let maximumVisionConcurrency = 16
   static let maximumPipelineDepth = 64
@@ -55,6 +68,8 @@ struct PhotoAssetClassificationRuntimeConfiguration: Equatable, Sendable {
   let visionConcurrency: Int
   let pipelineMaximumInFlight: Int
   let resultPageSize: Int
+  let resultTransport: ResultTransport
+  let pageOrchestrationStrategy: PageOrchestrationStrategy
 
   static func resolve(
     environment: [String: String] = ProcessInfo.processInfo.environment
@@ -74,7 +89,13 @@ struct PhotoAssetClassificationRuntimeConfiguration: Equatable, Sendable {
         environment[resultPageSizeEnvironmentKey],
         maximum: maximumResultPageSize,
         fallback: defaultResultPageSize
-      )
+      ),
+      resultTransport: ResultTransport(
+        rawValue: environment[resultTransportEnvironmentKey] ?? ""
+      ) ?? .legacy,
+      pageOrchestrationStrategy: PageOrchestrationStrategy(
+        rawValue: environment[pageOrchestrationStrategyEnvironmentKey] ?? ""
+      ) ?? .lookahead
     )
   }
 

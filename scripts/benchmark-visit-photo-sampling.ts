@@ -205,7 +205,7 @@ function legacyPlan(database: DatabaseSync, samplePercentage: number): FoodDetec
          LIMIT MAX(1, CAST((SELECT COUNT(*) FROM photos WHERE visitId = ?) * ? AS INTEGER))`,
       )
       .all(visit.id, visit.id, samplePercentage) as Array<{ id: string }>;
-    samples.push(...rows.map(({ id }) => ({ visitId: visit.id, photoId: id })));
+    samples.push(...rows.map(({ id }, index) => ({ visitId: visit.id, photoId: id, sampleRank: index + 1 })));
   }
   return { totalVisits: visits.length, samples };
 }
@@ -235,7 +235,7 @@ function chunkedPlan(database: DatabaseSync, samplePercentage: number): FoodDete
       samplePercentage,
     );
     const rows = database.prepare(statement.sql).all(...statement.parameters) as unknown as FoodDetectionVisitSample[];
-    samples.push(...rows.map(({ visitId, photoId }) => ({ visitId, photoId })));
+    samples.push(...rows.map(({ visitId, photoId, sampleRank }) => ({ visitId, photoId, sampleRank })));
   }
   return { totalVisits: visits.length, samples };
 }
@@ -252,7 +252,7 @@ function updateChecksum(checksum: number, value: string): number {
 function planChecksum(plan: FoodDetectionVisitSamplePlan): string {
   let checksum = updateChecksum(2_166_136_261, `${plan.totalVisits}\0${plan.samples.length}\0`);
   for (const sample of plan.samples) {
-    checksum = updateChecksum(checksum, `${sample.visitId}\0${sample.photoId}\0`);
+    checksum = updateChecksum(checksum, `${sample.visitId}\0${sample.photoId}\0${sample.sampleRank}\0`);
   }
   return checksum.toString(16).padStart(8, "0");
 }

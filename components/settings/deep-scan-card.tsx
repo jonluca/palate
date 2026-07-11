@@ -10,6 +10,11 @@ import { useToast } from "@/components/ui/toast";
 import { queryKeys, useDeepScan, useUnanalyzedPhotoCount, type DeepScanProgress } from "@/hooks/queries";
 import { formatEta } from "@/services/scanner";
 import { getUnanalyzedPhotoIds } from "@/utils/db";
+import {
+  allowsAutomaticDeepScanFollowup,
+  getResolvedVisitFoodDetectionStrategy,
+  isVisionVisitFoodValidationModeEnabled,
+} from "@/modules/batch-asset-info";
 
 interface DeepScanCardProps {
   autoStart?: boolean;
@@ -80,6 +85,15 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
 
   const startDeepScan = useCallback(
     async (source: "auto" | "manual") => {
+      if (
+        source === "auto" &&
+        !allowsAutomaticDeepScanFollowup(
+          getResolvedVisitFoodDetectionStrategy(),
+          isVisionVisitFoodValidationModeEnabled(),
+        )
+      ) {
+        return;
+      }
       if (isStartingRef.current || deepScanMutation.isPending) {
         return;
       }

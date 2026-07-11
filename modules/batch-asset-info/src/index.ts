@@ -1,6 +1,43 @@
 import { requireNativeModule } from "expo";
 import { Platform } from "react-native";
 import { resolveVisionNativePageSize } from "../../../utils/food-detection-buffer-core";
+import {
+  resolveVisionPageOrchestrationStrategy,
+  type VisionPageOrchestrationStrategy,
+} from "../../../utils/vision-page-orchestration-core";
+import {
+  classifyWithVisionResultTransport,
+  resolveVisionResultTransport,
+  type PackedVisionClassificationPayload,
+  type VisionClassificationLabel,
+  type VisionClassificationResult,
+  type VisionResultTransport,
+} from "../../../utils/vision-classification-transport-core";
+import { resolveVisitFoodDetectionStrategy, type VisitFoodDetectionStrategy } from "./visit-food-detection-strategy";
+import {
+  DISABLED_PHOTO_ASSET_THUMBNAIL_PREHEAT_STRATEGY,
+  preparePhotoAssetThumbnailPreheatBridgeRequest,
+  resolvePhotoAssetThumbnailPreheatStrategy,
+  WINDOWED_PHOTO_ASSET_THUMBNAIL_PREHEAT_STRATEGY,
+  type PhotoAssetThumbnailPixelTarget,
+  type PhotoAssetThumbnailPreheatStrategy,
+} from "../../../utils/photo-asset-thumbnail-preheat-core";
+
+export type { VisionPageOrchestrationStrategy } from "../../../utils/vision-page-orchestration-core";
+export {
+  DISABLED_PHOTO_ASSET_THUMBNAIL_PREHEAT_STRATEGY,
+  WINDOWED_PHOTO_ASSET_THUMBNAIL_PREHEAT_STRATEGY,
+  type PhotoAssetThumbnailPixelTarget,
+  type PhotoAssetThumbnailPreheatStrategy,
+} from "../../../utils/photo-asset-thumbnail-preheat-core";
+export {
+  allowsAutomaticDeepScanFollowup,
+  DEFAULT_VISIT_FOOD_DETECTION_STRATEGY,
+  FULL_PLAN_VISIT_FOOD_DETECTION_STRATEGY,
+  RANK3_BULK_TAIL_VISIT_FOOD_DETECTION_STRATEGY,
+  resolveVisitFoodDetectionStrategy,
+  type VisitFoodDetectionStrategy,
+} from "./visit-food-detection-strategy";
 
 interface AssetLocation {
   latitude: number;
@@ -26,11 +63,25 @@ export interface BatchAssetInfo {
 export interface AssetScanSession {
   /** Opaque identifier used by {@link getAssetScanPage} and {@link endAssetScan}. */
   readonly sessionId: string;
-  /** Number of image and video assets in the stable scan snapshot. */
+  /** Number of assets in this session's pageable domain. */
   readonly totalCount: number;
   /** Largest page size accepted by {@link getAssetScanPage}. */
   readonly maxPageSize: number;
 }
+
+/** Retained scan whose pageable domain contains only assets absent from SQLite. */
+export interface IncrementalAssetScanSession extends AssetScanSession {
+  /** Number of visible image and video assets in the complete stable PhotoKit snapshot. */
+  readonly libraryTotalCount: number;
+  /** Existing database assets found in the visible PhotoKit snapshot. */
+  readonly excludedVisibleCount: number;
+  /** Excluded visible assets with a usable creation time and valid location. */
+  readonly excludedPhotosWithLocation: number;
+  /** Excluded visible assets whose creation time is missing or nonfinite. */
+  readonly excludedSkippedAssets: number;
+}
+
+export type PhotoScanStrategy = "legacy" | "incremental";
 
 /** Options for reading a page from an {@link AssetScanSession}. */
 export interface AssetScanPageOptions {
@@ -66,7 +117,7 @@ export interface AssetScanPage {
   readonly offset: number;
   /** Offset for the next page, or `null` when this is the final page. */
   readonly nextOffset: number | null;
-  /** Number of assets in the retained snapshot. */
+  /** Number of assets in this session's pageable domain. */
   readonly totalCount: number;
   /** Whether another page exists after this one. */
   readonly hasNextPage: boolean;
@@ -98,26 +149,35 @@ export interface FoodDetectionOptions extends ClassificationOptions {
   foodKeywords?: string[];
 }
 
-interface ClassificationLabel {
-  label: string;
-  confidence: number;
-}
+type ClassificationLabel = VisionClassificationLabel;
+type ClassificationResult = VisionClassificationResult;
 
-interface ClassificationResult {
-  assetId: string;
-  labels: ClassificationLabel[];
-  error?: string;
-}
+export type { VisionResultTransport } from "../../../utils/vision-classification-transport-core";
 
 interface NativeBatchAssetInfoModule {
   readonly supportsPhotoAssetThumbnailView?: boolean;
+  readonly supportsPhotoAssetThumbnailPreheat?: boolean;
+  readonly resolvedPhotoAssetThumbnailPreheatStrategy?: string;
   readonly visionResultPageSize?: number;
+  readonly resolvedVisionPageOrchestrationStrategy?: string;
+  readonly resolvedVisionResultTransport?: string;
+  readonly resolvedPhotoScanStrategy?: string;
+  readonly resolvedVisitFoodDetectionStrategy?: string;
+  isVisionVisitFoodValidationModeEnabled?(): boolean;
   getAssetInfoBatch(assetIds: string[]): Promise<BatchAssetInfo[]>;
   classifyImageBatch(assetIds: string[], options: Required<ClassificationOptions>): Promise<ClassificationResult[]>;
+  classifyImageBatchPackedV1?(
+    assetIds: string[],
+    options: Required<ClassificationOptions>,
+  ): Promise<PackedVisionClassificationPayload>;
   beginAssetScan(): Promise<AssetScanSession>;
+  beginIncrementalAssetScan?(existingAssetIds: string[]): Promise<IncrementalAssetScanSession>;
+  beginDatabaseBackedIncrementalAssetScan?(databasePath: string): Promise<IncrementalAssetScanSession>;
   getAssetScanPage(sessionId: string, offset: number, limit: number): Promise<AssetScanPage>;
   endAssetScan(sessionId: string): Promise<void>;
   clearPhotoAssetThumbnailCache?(): Promise<void>;
+  updatePhotoAssetThumbnailPreheat?(scopeID: string, uris: string[], pixelWidth: number, pixelHeight: number): boolean;
+  endPhotoAssetThumbnailPreheat?(scopeID: string): boolean;
 }
 
 export interface FoodDetectionResult {
@@ -260,6 +320,32 @@ export function getVisionResultPageSize(): number {
   return resolveVisionNativePageSize(BatchAssetInfoModule?.visionResultPageSize);
 }
 
+/** Returns the native-selected Vision page orchestration strategy. */
+export function getResolvedVisionPageOrchestrationStrategy(): VisionPageOrchestrationStrategy {
+  return resolveVisionPageOrchestrationStrategy(BatchAssetInfoModule?.resolvedVisionPageOrchestrationStrategy);
+}
+
+/** Returns the selected result transport, falling back for older native binaries. */
+export function getResolvedVisionResultTransport(): VisionResultTransport {
+  return resolveVisionResultTransport(
+    typeof BatchAssetInfoModule?.classifyImageBatchPackedV1 === "function",
+    BatchAssetInfoModule?.resolvedVisionResultTransport,
+  );
+}
+
+/** Returns the native-selected visit food-detection strategy, defaulting for older binaries. */
+export function getResolvedVisitFoodDetectionStrategy(): VisitFoodDetectionStrategy {
+  return resolveVisitFoodDetectionStrategy(BatchAssetInfoModule?.resolvedVisitFoodDetectionStrategy);
+}
+
+/**
+ * Whether the guarded macOS validator requested its isolated visit-food entry
+ * point. Older binaries do not expose the native proof and safely return false.
+ */
+export function isVisionVisitFoodValidationModeEnabled(): boolean {
+  return BatchAssetInfoModule?.isVisionVisitFoodValidationModeEnabled?.() === true;
+}
+
 /**
  * Whether this native binary includes the retained PhotoKit scan-session API.
  * This separate capability check keeps OTA updates compatible with older app binaries.
@@ -272,9 +358,77 @@ export function isAssetScanAvailable(): boolean {
   );
 }
 
+/** Returns the native process's resolved PhotoKit scan strategy. */
+export function getResolvedPhotoScanStrategy(): PhotoScanStrategy {
+  return BatchAssetInfoModule?.resolvedPhotoScanStrategy === "legacy" ? "legacy" : "incremental";
+}
+
+/** Whether the installed binary exposes and enables native incremental PhotoKit scans. */
+export function isIncrementalAssetScanAvailable(): boolean {
+  return (
+    isAssetScanAvailable() &&
+    getResolvedPhotoScanStrategy() === "incremental" &&
+    typeof BatchAssetInfoModule?.beginIncrementalAssetScan === "function"
+  );
+}
+
+/** Whether this binary can read the existing-photo index directly from SQLite. */
+export function isDatabaseBackedIncrementalAssetScanAvailable(): boolean {
+  return (
+    isAssetScanAvailable() &&
+    getResolvedPhotoScanStrategy() === "incremental" &&
+    typeof BatchAssetInfoModule?.beginDatabaseBackedIncrementalAssetScan === "function"
+  );
+}
+
 /** Whether this native binary includes the native PhotoKit thumbnail view. */
 export function isPhotoAssetThumbnailAvailable(): boolean {
   return BatchAssetInfoModule?.supportsPhotoAssetThumbnailView === true;
+}
+
+/** Returns the guarded native preheat strategy, disabled for older or incompatible binaries. */
+export function getResolvedPhotoAssetThumbnailPreheatStrategy(): PhotoAssetThumbnailPreheatStrategy {
+  return resolvePhotoAssetThumbnailPreheatStrategy({
+    nativeValue: BatchAssetInfoModule?.resolvedPhotoAssetThumbnailPreheatStrategy,
+    nativeMethodAvailable:
+      BatchAssetInfoModule?.supportsPhotoAssetThumbnailPreheat === true &&
+      typeof BatchAssetInfoModule.updatePhotoAssetThumbnailPreheat === "function",
+  });
+}
+
+/** Whether the installed binary exposes the explicitly enabled windowed preheat path. */
+export function isPhotoAssetThumbnailPreheatAvailable(): boolean {
+  return getResolvedPhotoAssetThumbnailPreheatStrategy() === WINDOWED_PHOTO_ASSET_THUMBNAIL_PREHEAT_STRATEGY;
+}
+
+/** Enqueues one bounded preheat window without waiting for PhotoKit I/O. */
+export function updatePhotoAssetThumbnailPreheat(
+  scopeID: string,
+  uris: readonly string[],
+  target: PhotoAssetThumbnailPixelTarget,
+): boolean {
+  const request = preparePhotoAssetThumbnailPreheatBridgeRequest(scopeID, uris, target);
+  if (
+    !request ||
+    getResolvedPhotoAssetThumbnailPreheatStrategy() === DISABLED_PHOTO_ASSET_THUMBNAIL_PREHEAT_STRATEGY ||
+    typeof BatchAssetInfoModule?.updatePhotoAssetThumbnailPreheat !== "function"
+  ) {
+    return false;
+  }
+  return BatchAssetInfoModule.updatePhotoAssetThumbnailPreheat(
+    request.scopeID,
+    [...request.uris],
+    request.target.pixelWidth,
+    request.target.pixelHeight,
+  );
+}
+
+/** Ends only this mount's native preheat lease; repeated or stale scope cleanup is harmless. */
+export function endPhotoAssetThumbnailPreheat(scopeID: string): boolean {
+  if (scopeID.length === 0 || typeof BatchAssetInfoModule?.endPhotoAssetThumbnailPreheat !== "function") {
+    return false;
+  }
+  return BatchAssetInfoModule.endPhotoAssetThumbnailPreheat(scopeID);
 }
 
 /** Clears the bounded native PhotoKit thumbnail and PHAsset caches when available. */
@@ -295,6 +449,41 @@ export async function clearPhotoAssetThumbnailCache(): Promise<boolean> {
  */
 export async function beginAssetScan(): Promise<AssetScanSession> {
   return requireBatchAssetInfoModule().beginAssetScan();
+}
+
+/**
+ * Creates a retained PhotoKit snapshot paged over assets absent from `existingAssetIds`.
+ * The installed native strategy must be incremental; callers should feature-detect first.
+ *
+ * @throws When incremental scanning is unavailable, disabled, or Photos access is unavailable.
+ * @platform ios
+ */
+export async function beginIncrementalAssetScan(existingAssetIds: string[]): Promise<IncrementalAssetScanSession> {
+  const nativeModule = requireBatchAssetInfoModule();
+  if (!isIncrementalAssetScanAvailable() || typeof nativeModule.beginIncrementalAssetScan !== "function") {
+    throw new Error("Incremental asset scanning is unavailable in this native binary");
+  }
+  return nativeModule.beginIncrementalAssetScan(existingAssetIds);
+}
+
+/**
+ * Creates an incremental PhotoKit snapshot using the existing-photo index read
+ * directly from SQLite by native code, avoiding a full identifier bridge payload.
+ */
+export async function beginDatabaseBackedIncrementalAssetScan(
+  databasePath: string,
+): Promise<IncrementalAssetScanSession> {
+  if (typeof databasePath !== "string" || databasePath.trim().length === 0) {
+    throw new TypeError("Incremental photo scan database path must be a non-empty string");
+  }
+  const nativeModule = requireBatchAssetInfoModule();
+  if (
+    !isDatabaseBackedIncrementalAssetScanAvailable() ||
+    typeof nativeModule.beginDatabaseBackedIncrementalAssetScan !== "function"
+  ) {
+    throw new Error("Database-backed incremental asset scanning is unavailable in this native binary");
+  }
+  return nativeModule.beginDatabaseBackedIncrementalAssetScan(databasePath);
 }
 
 /**
@@ -365,7 +554,14 @@ async function classifyImageBatch(
     maxLabels: options.maxLabels ?? 50,
   };
 
-  return BatchAssetInfoModule.classifyImageBatch(assetIds, opts);
+  return classifyWithVisionResultTransport(assetIds, {
+    resolvedTransport: BatchAssetInfoModule.resolvedVisionResultTransport,
+    classifyLegacy: () => BatchAssetInfoModule.classifyImageBatch(assetIds, opts),
+    classifyPackedV1:
+      typeof BatchAssetInfoModule.classifyImageBatchPackedV1 === "function"
+        ? () => BatchAssetInfoModule.classifyImageBatchPackedV1!(assetIds, opts)
+        : undefined,
+  });
 }
 
 /**
