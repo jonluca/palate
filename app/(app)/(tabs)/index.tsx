@@ -13,7 +13,7 @@ import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconSymbol } from "@/components/icon-symbol";
-import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
+import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { cn } from "@/utils/cn";
 import {
@@ -101,7 +101,13 @@ function PhotoPreview({ photos }: { photos: string[] }) {
     <View className={"flex-row h-32 overflow-hidden border-b border-border"}>
       {photos.slice(0, 3).map((uri) => (
         <View key={uri} className={"flex-1"}>
-          <PhotoAssetThumbnail uri={uri} style={{ width: "100%", height: 128 }} />
+          <Image
+            source={{ uri }}
+            recyclingKey={uri}
+            cachePolicy={"memory-disk"}
+            contentFit={"cover"}
+            style={{ width: "100%", height: 128 }}
+          />
         </View>
       ))}
     </View>

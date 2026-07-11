@@ -1,7 +1,7 @@
 import { Pressable, View } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { ThemedText } from "@/components/themed-text";
-import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
 
 interface MediaItem {
   uri: string;
@@ -34,7 +34,13 @@ export function PhotoPreview({ photos, onPhotoPress }: PhotoPreviewProps) {
 
         return (
           <Pressable key={uri} className={"flex-1"} onPress={() => onPhotoPress?.(i)} disabled={!onPhotoPress}>
-            <PhotoAssetThumbnail uri={uri} style={{ width: "100%", height: 160 }} />
+            <Image
+              source={{ uri }}
+              recyclingKey={uri}
+              cachePolicy={"memory-disk"}
+              contentFit={"cover"}
+              style={{ width: "100%", height: 160 }}
+            />
             {isVideo && (
               <View
                 className={"absolute bottom-2 left-2 flex-row items-center gap-1 bg-black/60 px-1.5 py-0.5 rounded"}
