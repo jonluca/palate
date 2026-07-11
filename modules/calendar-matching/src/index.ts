@@ -5,6 +5,7 @@ import type {
   NativeCalendarExportEventMutationRequest,
   NativeCalendarMutationResult,
 } from "../../../utils/calendar-batch-mutation-core";
+import { assertValidCalendarTimestamp, validateCalendarVisitsForNativeMatching } from "./request-core";
 
 export interface CalendarEvent {
   id: string;
@@ -39,7 +40,7 @@ interface NativeCalendarMatchingModule {
   readonly calendarQueryGapDays?: number;
   getEvents(startMs: number, endMs: number, selectedCalendarIds: string[] | null): Promise<CalendarEvent[]>;
   matchVisits(
-    visits: CalendarVisit[],
+    visits: readonly CalendarVisit[],
     selectedCalendarIds: string[] | null,
     bufferMinutes: number,
   ): Promise<CalendarVisitMatch[]>;
@@ -54,19 +55,11 @@ interface NativeCalendarMatchingModule {
 const CalendarMatchingModule =
   Platform.OS === "ios" ? requireOptionalNativeModule<NativeCalendarMatchingModule>("CalendarMatching") : null;
 
-const MAX_DATE_TIMESTAMP_MS = 8_640_000_000_000_000;
-
 function requireCalendarMatchingModule(): NativeCalendarMatchingModule {
   if (!CalendarMatchingModule) {
     throw new Error("CalendarMatching native module is unavailable on this platform or binary.");
   }
   return CalendarMatchingModule;
-}
-
-function assertValidTimestamp(value: number, name: string): void {
-  if (!Number.isFinite(value) || Math.abs(value) > MAX_DATE_TIMESTAMP_MS) {
-    throw new TypeError(`${name} must be a valid ECMAScript Date timestamp in milliseconds.`);
-  }
 }
 
 function copySelectedCalendarIds(selectedCalendarIds: readonly string[] | null): string[] | null {
@@ -125,8 +118,8 @@ export async function getEvents(
   endMs: number,
   selectedCalendarIds: readonly string[] | null = null,
 ): Promise<CalendarEvent[]> {
-  assertValidTimestamp(startMs, "startMs");
-  assertValidTimestamp(endMs, "endMs");
+  assertValidCalendarTimestamp(startMs, "startMs");
+  assertValidCalendarTimestamp(endMs, "endMs");
   if (endMs < startMs) {
     throw new RangeError("endMs must be greater than or equal to startMs.");
   }
@@ -147,17 +140,7 @@ export async function matchVisits(
     throw new RangeError("bufferMinutes must be a finite non-negative number.");
   }
 
-  const nativeVisits = visits.map((visit) => {
-    assertValidTimestamp(visit.startTime, "visit.startTime");
-    assertValidTimestamp(visit.endTime, "visit.endTime");
-    if (visit.endTime < visit.startTime) {
-      throw new RangeError(`Visit ${visit.id} has an endTime before its startTime.`);
-    }
-    return {
-      ...visit,
-      suggestedRestaurants: visit.suggestedRestaurants.map((restaurant) => ({ ...restaurant })),
-    };
-  });
+  const nativeVisits = validateCalendarVisitsForNativeMatching(visits);
 
   if (nativeVisits.length === 0) {
     return [];
