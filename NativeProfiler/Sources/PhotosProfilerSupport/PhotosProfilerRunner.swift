@@ -5,6 +5,9 @@ struct PhotosProfilerExecutionPlan: Equatable, Sendable {
   let runsMetadata: Bool
   let runsVision: Bool
   let runsInitialImages: Bool
+  let runsInitialImagePreheat: Bool
+  let runsThumbnailScroll: Bool
+  let runsPreviewCards: Bool
 
   static func make(for mode: ProfilerMode) -> PhotosProfilerExecutionPlan {
     switch mode {
@@ -12,19 +15,55 @@ struct PhotosProfilerExecutionPlan: Equatable, Sendable {
       PhotosProfilerExecutionPlan(
         runsMetadata: true,
         runsVision: true,
-        runsInitialImages: false
+        runsInitialImages: false,
+        runsInitialImagePreheat: false,
+        runsThumbnailScroll: false,
+        runsPreviewCards: false
       )
     case .vision:
       PhotosProfilerExecutionPlan(
         runsMetadata: false,
         runsVision: true,
-        runsInitialImages: false
+        runsInitialImages: false,
+        runsInitialImagePreheat: false,
+        runsThumbnailScroll: false,
+        runsPreviewCards: false
       )
     case .initialImages:
       PhotosProfilerExecutionPlan(
         runsMetadata: false,
         runsVision: false,
-        runsInitialImages: true
+        runsInitialImages: true,
+        runsInitialImagePreheat: false,
+        runsThumbnailScroll: false,
+        runsPreviewCards: false
+      )
+    case .initialImagePreheat:
+      PhotosProfilerExecutionPlan(
+        runsMetadata: false,
+        runsVision: false,
+        runsInitialImages: false,
+        runsInitialImagePreheat: true,
+        runsThumbnailScroll: false,
+        runsPreviewCards: false
+      )
+    case .thumbnailScroll:
+      PhotosProfilerExecutionPlan(
+        runsMetadata: false,
+        runsVision: false,
+        runsInitialImages: false,
+        runsInitialImagePreheat: false,
+        runsThumbnailScroll: true,
+        runsPreviewCards: false
+      )
+    case .previewCards:
+      PhotosProfilerExecutionPlan(
+        runsMetadata: false,
+        runsVision: false,
+        runsInitialImages: false,
+        runsInitialImagePreheat: false,
+        runsThumbnailScroll: false,
+        runsPreviewCards: true
       )
     }
   }
@@ -61,7 +100,9 @@ public struct PhotosProfilerRunner: Sendable {
   public func run(arguments: ProfilerArguments, bundleIdentifier: String) async throws
     -> ProfilerReport
   {
-    let authorizationStatus = await PhotoLibraryAuthorization.requestIfNeeded()
+    let authorizationStatus = await PhotoLibraryAuthorization.requestIfNeeded(
+      timeoutMilliseconds: arguments.authorizationTimeoutMilliseconds
+    )
     let authorizationName = PhotoLibraryAuthorization.name(for: authorizationStatus)
     guard PhotoLibraryAuthorization.permitsReading(authorizationStatus) else {
       throw PhotosProfilerError.photoLibraryAccessUnavailable(status: authorizationName)
@@ -102,6 +143,27 @@ public struct PhotosProfilerRunner: Sendable {
       initialImages = nil
     }
 
+    let initialImagePreheat: InitialImagePreheatBenchmarkReport?
+    if plan.runsInitialImagePreheat {
+      initialImagePreheat = try await InitialImagePreheatBenchmarkRunner().run(arguments: arguments)
+    } else {
+      initialImagePreheat = nil
+    }
+
+    let thumbnailScroll: ThumbnailScrollBenchmarkReport?
+    if plan.runsThumbnailScroll {
+      thumbnailScroll = try await ThumbnailScrollBenchmarkRunner().run(arguments: arguments)
+    } else {
+      thumbnailScroll = nil
+    }
+
+    let previewCards: PreviewCardsBenchmarkReport?
+    if plan.runsPreviewCards {
+      previewCards = try await PreviewCardsBenchmarkRunner().run(arguments: arguments)
+    } else {
+      previewCards = nil
+    }
+
     return ProfilerReport(
       schemaVersion: 1,
       status: Self.reportStatus(for: vision),
@@ -123,11 +185,15 @@ public struct PhotosProfilerRunner: Sendable {
         visionSampleCount: arguments.visionSampleCount,
         visionConcurrency: arguments.visionConcurrency,
         visionPipelineMaximumInFlight: arguments.visionPipelineMaximumInFlight,
-        visionPipelineFirst: arguments.visionPipelineFirst
+        visionPipelineFirst: arguments.visionPipelineFirst,
+        authorizationTimeoutMilliseconds: arguments.authorizationTimeoutMilliseconds
       ),
       metadata: metadata,
       vision: vision,
-      initialImages: initialImages
+      initialImages: initialImages,
+      initialImagePreheat: initialImagePreheat,
+      thumbnailScroll: thumbnailScroll,
+      previewCards: previewCards
     )
   }
 

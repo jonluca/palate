@@ -3,11 +3,11 @@ import Foundation
 
 final class InitialImageCandidateLoader: @unchecked Sendable {
   private let store: PhotoAssetThumbnailStore
-  private let callbackQueue: DispatchQueue
+  private let preheatOwnerID = UUID()
+  private let preheatScopeID = "real-photos-benchmark"
 
   init(callbackQueue: DispatchQueue) {
-    store = PhotoAssetThumbnailStore()
-    self.callbackQueue = callbackQueue
+    store = PhotoAssetThumbnailStore(callbackQueue: callbackQueue)
   }
 
   func request(
@@ -29,13 +29,41 @@ final class InitialImageCandidateLoader: @unchecked Sendable {
         case .failure(let error):
           profilerEvent = .failure(identifier: key.assetIdentifier, code: error.code)
         }
-        self.callbackQueue.async {
-          receive(profilerEvent)
-        }
+        receive(profilerEvent)
       }
       return { [store, token] in
         token.cancel()
         withExtendedLifetime(store) {}
+      }
+    }
+  }
+
+  func preheat(keys: [PhotoAssetThumbnailRequestKey]) {
+    store.updatePreheat(
+      ownerID: preheatOwnerID,
+      scopeID: preheatScopeID,
+      candidates: keys
+    )
+  }
+
+  func readMetrics() async -> PhotoAssetThumbnailStoreMetrics {
+    await withCheckedContinuation { continuation in
+      store.readMetrics { metrics in
+        continuation.resume(returning: metrics)
+      }
+    }
+  }
+
+  func endPreheatAndReadMetrics() async -> PhotoAssetThumbnailStoreMetrics {
+    store.endPreheat(ownerID: preheatOwnerID, scopeID: preheatScopeID)
+    return await readMetrics()
+  }
+
+  func clear() async {
+    store.endPreheat(ownerID: preheatOwnerID, scopeID: preheatScopeID)
+    await withCheckedContinuation { continuation in
+      store.clearCaches {
+        continuation.resume()
       }
     }
   }

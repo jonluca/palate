@@ -24,9 +24,7 @@ final class PhotoLibraryAuthorizationResolution: @unchecked Sendable {
 }
 
 public enum PhotoLibraryAuthorization {
-  private static let requestTimeout: TimeInterval = 30
-
-  public static func requestIfNeeded() async -> PHAuthorizationStatus {
+  public static func requestIfNeeded(timeoutMilliseconds: Int) async -> PHAuthorizationStatus {
     let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     guard current == .notDetermined else {
       return current
@@ -40,7 +38,7 @@ public enum PhotoLibraryAuthorization {
         resolution.resolve(status)
       }
       DispatchQueue.global(qos: .userInitiated).asyncAfter(
-        deadline: .now() + requestTimeout
+        deadline: .now() + .milliseconds(timeoutMilliseconds)
       ) {
         resolution.resolve(.notDetermined)
       }

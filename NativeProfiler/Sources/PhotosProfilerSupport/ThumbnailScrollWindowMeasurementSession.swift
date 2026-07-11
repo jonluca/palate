@@ -1,11 +1,7 @@
 import Foundation
 
-final class InitialImageMeasurementSession: @unchecked Sendable {
-  struct TimedMeasurement: Sendable {
-    let measurement: InitialImageBenchmarkReport.Measurement
-    let terminalUptimeNanoseconds: UInt64
-  }
-
+final class ThumbnailScrollWindowMeasurementSession: @unchecked Sendable {
+  typealias TimedMeasurement = InitialImageMeasurementSession.TimedMeasurement
   typealias CancellationHandler = @Sendable () -> Void
   typealias RequestStarter =
     @Sendable (
@@ -13,61 +9,74 @@ final class InitialImageMeasurementSession: @unchecked Sendable {
     ) -> [CancellationHandler]
 
   private let callbackQueue: DispatchQueue
-  private let strategy: InitialImageStrategy
   private let imageCount: Int
   private let iteration: Int
   private let samplePosition: InitialImageSamplePosition
   private let timeoutMilliseconds: Int
+  private let onTerminal: @Sendable () -> Void
   private var accumulator: InitialImageMeasurementAccumulator
-  private var continuation: CheckedContinuation<TimedMeasurement, Never>?
+  private var resultContinuation: CheckedContinuation<TimedMeasurement, Never>?
+  private var completedResult: TimedMeasurement?
   private var cancellationHandlers: [CancellationHandler] = []
   private var timer: DispatchSourceTimer?
   private var startedAt: UInt64 = 0
-  private var completed = false
+  private var started = false
 
   init(
     callbackQueue: DispatchQueue,
-    strategy: InitialImageStrategy,
     imageCount: Int,
     iteration: Int,
     samplePosition: InitialImageSamplePosition,
     timeoutMilliseconds: Int,
     requestedIdentifiers: [String],
-    displayDegradedImages: Bool
+    onTerminal: @escaping @Sendable () -> Void
   ) {
     self.callbackQueue = callbackQueue
-    self.strategy = strategy
     self.imageCount = imageCount
     self.iteration = iteration
     self.samplePosition = samplePosition
     self.timeoutMilliseconds = timeoutMilliseconds
+    self.onTerminal = onTerminal
     accumulator = InitialImageMeasurementAccumulator(
       requestedIdentifiers: requestedIdentifiers,
-      displayDegradedImages: displayDegradedImages
+      displayDegradedImages: true
     )
   }
 
-  func run(startRequests: @escaping RequestStarter) async -> InitialImageBenchmarkReport.Measurement
-  {
-    let timedMeasurement = await runWithTerminalTimestamp(startRequests: startRequests)
-    return timedMeasurement.measurement
-  }
-
-  func runWithTerminalTimestamp(startRequests: @escaping RequestStarter) async -> TimedMeasurement {
+  /// Starts every request before returning, allowing the caller to submit preheat work afterward
+  /// with the same render-before-viewability ordering used by the FlashList producer.
+  func start(startRequests: @escaping RequestStarter) async {
     await withCheckedContinuation { continuation in
       callbackQueue.async { [self] in
-        self.continuation = continuation
+        precondition(!started, "A thumbnail-scroll window can only start once")
+        started = true
         startedAt = DispatchTime.now().uptimeNanoseconds
         startTimer()
         let handlers = startRequests { [weak self] event in
           self?.receive(event)
         }
-        if completed {
+        if completedResult != nil {
           for handler in handlers {
             handler()
           }
         } else {
           cancellationHandlers = handlers
+        }
+        continuation.resume()
+      }
+    }
+  }
+
+  func result() async -> TimedMeasurement {
+    await withCheckedContinuation { continuation in
+      callbackQueue.async { [self] in
+        precondition(started, "A thumbnail-scroll window must start before awaiting its result")
+        precondition(
+          resultContinuation == nil, "Only one thumbnail-scroll result waiter is allowed")
+        if let completedResult {
+          continuation.resume(returning: completedResult)
+        } else {
+          resultContinuation = continuation
         }
       }
     }
@@ -84,7 +93,7 @@ final class InitialImageMeasurementSession: @unchecked Sendable {
   }
 
   private func receive(_ event: InitialImageLoadEvent) {
-    guard !completed else {
+    guard completedResult == nil else {
       return
     }
     let elapsed = elapsedMilliseconds()
@@ -95,7 +104,7 @@ final class InitialImageMeasurementSession: @unchecked Sendable {
   }
 
   private func timeOut() {
-    guard !completed else {
+    guard completedResult == nil else {
       return
     }
     let elapsed = elapsedMilliseconds()
@@ -109,30 +118,29 @@ final class InitialImageMeasurementSession: @unchecked Sendable {
   }
 
   private func finish(elapsedMilliseconds: Double) {
-    guard !completed else {
+    guard completedResult == nil else {
       return
     }
-    completed = true
     timer?.setEventHandler {}
     timer?.cancel()
     timer = nil
     cancellationHandlers.removeAll(keepingCapacity: false)
 
-    let measurement = accumulator.makeMeasurement(
-      strategy: strategy,
-      imageCount: imageCount,
-      iteration: iteration,
-      samplePosition: samplePosition,
-      allTerminalMilliseconds: elapsedMilliseconds
+    let result = TimedMeasurement(
+      measurement: accumulator.makeMeasurement(
+        strategy: .batchedThumbnailStore,
+        imageCount: imageCount,
+        iteration: iteration,
+        samplePosition: samplePosition,
+        allTerminalMilliseconds: elapsedMilliseconds
+      ),
+      terminalUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
     )
-    let continuation = continuation
-    self.continuation = nil
-    continuation?.resume(
-      returning: TimedMeasurement(
-        measurement: measurement,
-        terminalUptimeNanoseconds: DispatchTime.now().uptimeNanoseconds
-      )
-    )
+    completedResult = result
+    onTerminal()
+    let continuation = resultContinuation
+    resultContinuation = nil
+    continuation?.resume(returning: result)
   }
 
   private func elapsedMilliseconds() -> Double {

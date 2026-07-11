@@ -11,6 +11,9 @@ struct PhotosProfilerRunnerTests {
     #expect(!plan.runsMetadata)
     #expect(plan.runsVision)
     #expect(!plan.runsInitialImages)
+    #expect(!plan.runsInitialImagePreheat)
+    #expect(!plan.runsThumbnailScroll)
+    #expect(!plan.runsPreviewCards)
   }
 
   @Test("Combined Photos execution retains metadata before Vision")
@@ -20,6 +23,57 @@ struct PhotosProfilerRunnerTests {
     #expect(plan.runsMetadata)
     #expect(plan.runsVision)
     #expect(!plan.runsInitialImages)
+    #expect(!plan.runsInitialImagePreheat)
+    #expect(!plan.runsThumbnailScroll)
+    #expect(!plan.runsPreviewCards)
+  }
+
+  @Test("Initial-image execution skips preheating")
+  func initialImageExecutionPlan() {
+    let plan = PhotosProfilerExecutionPlan.make(for: .initialImages)
+
+    #expect(!plan.runsMetadata)
+    #expect(!plan.runsVision)
+    #expect(plan.runsInitialImages)
+    #expect(!plan.runsInitialImagePreheat)
+    #expect(!plan.runsThumbnailScroll)
+    #expect(!plan.runsPreviewCards)
+  }
+
+  @Test("Initial-image preheat execution is isolated")
+  func initialImagePreheatExecutionPlan() {
+    let plan = PhotosProfilerExecutionPlan.make(for: .initialImagePreheat)
+
+    #expect(!plan.runsMetadata)
+    #expect(!plan.runsVision)
+    #expect(!plan.runsInitialImages)
+    #expect(plan.runsInitialImagePreheat)
+    #expect(!plan.runsThumbnailScroll)
+    #expect(!plan.runsPreviewCards)
+  }
+
+  @Test("Thumbnail-scroll execution is isolated")
+  func thumbnailScrollExecutionPlan() {
+    let plan = PhotosProfilerExecutionPlan.make(for: .thumbnailScroll)
+
+    #expect(!plan.runsMetadata)
+    #expect(!plan.runsVision)
+    #expect(!plan.runsInitialImages)
+    #expect(!plan.runsInitialImagePreheat)
+    #expect(plan.runsThumbnailScroll)
+    #expect(!plan.runsPreviewCards)
+  }
+
+  @Test("Preview-card execution is isolated")
+  func previewCardExecutionPlan() {
+    let plan = PhotosProfilerExecutionPlan.make(for: .previewCards)
+
+    #expect(!plan.runsMetadata)
+    #expect(!plan.runsVision)
+    #expect(!plan.runsInitialImages)
+    #expect(!plan.runsInitialImagePreheat)
+    #expect(!plan.runsThumbnailScroll)
+    #expect(plan.runsPreviewCards)
   }
 
   @Test("Root status fails exact parity mismatches")

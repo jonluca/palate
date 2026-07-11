@@ -19,6 +19,7 @@ public struct ProfilerReport: Encodable, Sendable {
     public let visionConcurrency: Int
     public let visionPipelineMaximumInFlight: Int
     public let visionPipelineFirst: Bool
+    public let authorizationTimeoutMilliseconds: Int
   }
 
   public struct Vision: Encodable, Sendable {
@@ -115,4 +116,7 @@ public struct ProfilerReport: Encodable, Sendable {
   public let metadata: MetadataBenchmarkReport?
   public let vision: Vision?
   public let initialImages: InitialImageBenchmarkReport?
+  public let initialImagePreheat: InitialImagePreheatBenchmarkReport?
+  public let thumbnailScroll: ThumbnailScrollBenchmarkReport?
+  public let previewCards: PreviewCardsBenchmarkReport?
 }
