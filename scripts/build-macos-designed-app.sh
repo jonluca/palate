@@ -16,6 +16,10 @@ fi
 CONFIGURATION="${PALATE_XCODE_CONFIGURATION:-Debug}"
 CODE_SIGNING_ALLOWED="${PALATE_CODE_SIGNING_ALLOWED:-NO}"
 IPHONEOS_DEPLOYMENT_TARGET="${PALATE_IPHONEOS_DEPLOYMENT_TARGET:-16.4}"
+# The checked-in iOS target is iPhone-only. Override that setting only for this
+# macOS validation artifact so Xcode emits an app that macOS can run as
+# Designed for iPad, without changing the production Xcode project.
+TARGETED_DEVICE_FAMILY="1,2"
 DERIVED_DATA_PATH="${PALATE_DERIVED_DATA_PATH:-$ROOT_DIR/.build/xcode-macos-$CONFIGURATION-$CODE_SIGNING_ALLOWED}"
 CONFIGURATION_PRODUCTS_PATH="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION-iphoneos"
 typeset -a provisioning_arguments
@@ -51,6 +55,7 @@ cd "$ROOT_DIR"
   -destination "platform=macOS,name=My Mac" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
   "IPHONEOS_DEPLOYMENT_TARGET=$IPHONEOS_DEPLOYMENT_TARGET" \
+  "TARGETED_DEVICE_FAMILY=$TARGETED_DEVICE_FAMILY" \
   "${code_signing_arguments[@]}" \
   "${provisioning_arguments[@]}" \
   build \
@@ -76,6 +81,15 @@ if [[ ! -f "$INFO_PLIST" ]]; then
   print -u2 "Built app is missing its Info.plist at $INFO_PLIST"
   exit 1
 fi
+UIDEVICE_FAMILIES_JSON="$(/usr/bin/plutil -extract UIDeviceFamily json -o - "$INFO_PLIST" 2>/dev/null || true)"
+UIDEVICE_FAMILIES_JSON="${UIDEVICE_FAMILIES_JSON//[[:space:]]/}"
+case "$UIDEVICE_FAMILIES_JSON" in
+  '[2]'|'[2,'*|*',2,'*|*',2]') ;;
+  *)
+    print -u2 "Built app must include iPad (2) in UIDeviceFamily; found ${UIDEVICE_FAMILIES_JSON:-missing}"
+    exit 1
+    ;;
+esac
 PHOTO_USAGE_DESCRIPTION="$(/usr/bin/plutil -extract NSPhotoLibraryUsageDescription raw -o - "$INFO_PLIST" 2>/dev/null || true)"
 if [[ -z "$PHOTO_USAGE_DESCRIPTION" ]]; then
   print -u2 "Built app is missing NSPhotoLibraryUsageDescription"

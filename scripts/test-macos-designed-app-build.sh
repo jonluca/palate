@@ -53,10 +53,22 @@ release_output="$(run_build Release)"
 assert_equal "$release_output" "$release_app_path" "Release app selection"
 assert_equal "$(< "$release_app_path/main.jsbundle")" "fresh-Release" "Release bundle recreation"
 assert_equal "$(< "$debug_app_path/unrelated-marker")" "unrelated-debug-product" "Debug product preservation"
+assert_equal "$(/usr/bin/plutil -extract UIDeviceFamily json -o - "$release_app_path/Info.plist")" '[1,2]' "Designed-for-iPad device family"
 
 debug_output="$(run_build Debug)"
 assert_equal "$debug_output" "$debug_app_path" "Debug app selection"
 assert_equal "$(< "$release_app_path/main.jsbundle")" "fresh-Release" "Release product preservation"
+
+invalid_family_derived_data_path="$TEMPORARY_DIRECTORY/InvalidFamilyDerivedData"
+DERIVED_DATA_PATH="$invalid_family_derived_data_path"
+if invalid_family_output="$(run_build Debug PALATE_FAKE_XCODEBUILD_UIDEVICE_FAMILY=1 2>&1)"; then
+  print -u2 "An iPhone-only macOS validation artifact unexpectedly succeeded"
+  exit 1
+fi
+if [[ "$invalid_family_output" != *"must include iPad (2) in UIDeviceFamily"* ]]; then
+  print -u2 "Invalid-device-family failure was not actionable: $invalid_family_output"
+  exit 1
+fi
 
 missing_derived_data_path="$TEMPORARY_DIRECTORY/MissingDerivedData"
 missing_debug_path="$missing_derived_data_path/Build/Products/Debug-iphoneos/Palate.app"
@@ -75,4 +87,4 @@ if [[ "$missing_output" != *"$expected_missing_path"* ]]; then
   exit 1
 fi
 
-print "macOS build helper tests passed: configuration isolation, Release bundle refresh, and missing-product rejection."
+print "macOS build helper tests passed: Designed-for-iPad targeting, plist validation, configuration isolation, Release bundle refresh, and missing-product rejection."

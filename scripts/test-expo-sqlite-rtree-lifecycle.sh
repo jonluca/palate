@@ -34,6 +34,7 @@ clang \
   -std=c11 \
   -O2 \
   -DSQLITE_ENABLE_RTREE=1 \
+  -DSQLITE_USE_URI=1 \
   -DSQLITE_THREADSAFE=2 \
   -I"$SQLITE_DIRECTORY" \
   "$SQLITE_DIRECTORY/sqlite3.c" \
@@ -41,7 +42,8 @@ clang \
   -o "$PROBE_BINARY"
 
 PROBE_OUTPUT="$($PROBE_BINARY)"
-if [[ ! "$PROBE_OUTPUT" =~ '"compileOption":"ENABLE_RTREE"' ]] || \
+if [[ ! "$PROBE_OUTPUT" =~ '"compileOptions":\["ENABLE_RTREE","USE_URI"\]' ]] || \
+   [[ ! "$PROBE_OUTPUT" =~ '"uriAttachReadOnly":true' ]] || \
    [[ ! "$PROBE_OUTPUT" =~ '"rtreeOwnedStatementCount":[1-9][0-9]*' ]] || \
    [[ ! "$PROBE_OUTPUT" =~ '"safeClose":true' ]]; then
   print -u2 "Unexpected R-Tree lifecycle probe output: $PROBE_OUTPUT"
@@ -63,10 +65,15 @@ if ! rg -U -q '(?s)class Transaction extends SQLiteDatabase \{.*?const options =
   exit 1
 fi
 
-if ! rg -q 'customBuildFlags:[[:space:]]*"-DSQLITE_ENABLE_RTREE=1"' "$APP_CONFIG"; then
+if ! rg -q 'customBuildFlags:[^\n]*-DSQLITE_ENABLE_RTREE=1' "$APP_CONFIG"; then
   print -u2 "Expo SQLite must be compiled with SQLITE_ENABLE_RTREE."
   exit 1
 fi
 
-print "Expo SQLite R-Tree lifecycle contract passed."
+if ! rg -q 'customBuildFlags:[^\n]*-DSQLITE_USE_URI=1' "$APP_CONFIG"; then
+  print -u2 "Expo SQLite must be compiled with SQLITE_USE_URI."
+  exit 1
+fi
+
+print "Expo SQLite R-Tree/URI lifecycle contract passed."
 print "$PROBE_OUTPUT"
