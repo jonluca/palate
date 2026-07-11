@@ -12,6 +12,14 @@ import type {
   NormalizedReservationHistory,
   ReservationImportResult,
 } from "@/services/reservation-import";
+import {
+  beginProviderReservationReplay,
+  completeProviderReservationReplay,
+  createProviderReservationReplayGateState,
+  failProviderReservationReplay,
+  resetProviderReservationReplay,
+  type ProviderReservationReplayGateState,
+} from "@/utils/provider-reservation-replay-gate-core";
 
 interface ReservationBrowserImportMutation {
   isPending: boolean;
@@ -107,6 +115,10 @@ export function ReservationImportBrowserScreen({
 }: ReservationBrowserImportScreenProps) {
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
+  const replayGateRef = useRef<ProviderReservationReplayGateState | null>(null);
+  if (replayGateRef.current === null) {
+    replayGateRef.current = createProviderReservationReplayGateState();
+  }
   const [hasSession, setHasSession] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
   const [capturedFetchedCount, setCapturedFetchedCount] = useState(0);
@@ -185,7 +197,21 @@ export function ReservationImportBrowserScreen({
       setLastError(message.error ?? null);
 
       if (payload && count > 0) {
-        const history = normalizePayload(payload);
+        const replay = beginProviderReservationReplay(replayGateRef.current!, event.nativeEvent.data);
+        replayGateRef.current = replay.state;
+        if (!replay.accepted) {
+          return;
+        }
+
+        let history: NormalizedReservationHistory;
+        try {
+          history = normalizePayload(payload);
+        } catch (error) {
+          replayGateRef.current = failProviderReservationReplay(replayGateRef.current!, replay.generation).state;
+          console.error(`Error normalizing ${displayName} reservations for review:`, error);
+          setLastError(`Failed to read captured ${displayName} reservations.`);
+          return;
+        }
         setCapturedFetchedCount(history.fetchedCount);
         setCapturedInvalidCount(history.invalidCount);
         setSkippedExistingConfirmedCount(0);
@@ -194,6 +220,12 @@ export function ReservationImportBrowserScreen({
         filterReviewMutation
           .mutateAsync(history.reservations)
           .then((filterResult) => {
+            const completion = completeProviderReservationReplay(replayGateRef.current!, replay.generation);
+            replayGateRef.current = completion.state;
+            if (!completion.accepted) {
+              return;
+            }
+
             logImportDebug(displayName, "Prepared review reservations", {
               fetchedCount: history.fetchedCount,
               invalidCount: history.invalidCount,
@@ -209,15 +241,24 @@ export function ReservationImportBrowserScreen({
             setReviewPrepared(true);
           })
           .catch((error) => {
+            const failure = failProviderReservationReplay(replayGateRef.current!, replay.generation);
+            replayGateRef.current = failure.state;
+            if (!failure.accepted) {
+              return;
+            }
+
             console.error(`Error preparing ${displayName} reservations for review:`, error);
             setLastError(`Failed to prepare ${displayName} reservations for review.`);
           });
+      } else if (message.error) {
+        replayGateRef.current = resetProviderReservationReplay(replayGateRef.current!);
       }
     },
     [bridgeMessageType, displayName, filterReviewMutation, normalizePayload, review],
   );
 
   const handleReload = useCallback(() => {
+    replayGateRef.current = resetProviderReservationReplay(replayGateRef.current!);
     setLastError(null);
     setCapturedFetchedCount(0);
     setCapturedInvalidCount(0);

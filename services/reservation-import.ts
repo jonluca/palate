@@ -4,16 +4,13 @@ import {
   normalizeForComparison,
   stripComparisonAffixes,
 } from "@/services/calendar";
-import { getAwardForDate } from "@/services/michelin";
+import { getAwardForDate, readAwardsForProviderImportOrThrow } from "@/services/michelin";
 import { searchPlaceByText } from "@/services/places";
 import {
   batchMergeSameRestaurantVisits,
-  getConfirmedLinkedReservationSourceEventIds,
-  getDismissedReservationImportSourceEventIds,
-  getExcludedReservationImportReviewSourceEventIds,
   getMergeableSameRestaurantVisitGroups,
   getMichelinRestaurantsForCalendarNormalizedNames,
-  getReservationImportCandidatesMappedToConfirmedRestaurantDateSourceIds,
+  getProviderReservationReviewPrefilterSnapshot,
   getReservationOnlyVisitsMappedToConfirmedVisitSourceIds,
   insertReservationOnlyVisits,
   selectMichelinProviderSpatialCandidates,
@@ -30,6 +27,11 @@ import {
   type ProviderMichelinNameTools,
   type ProviderMichelinRestaurantsByNormalizedName,
 } from "@/utils/provider-michelin-matching-core";
+import {
+  resolveProviderReservationLocations,
+  type LocatedProviderReservation,
+} from "@/utils/provider-reservation-location-core";
+import { resolveReservationAwardsInBatches } from "@/utils/reservation-award-batch-core";
 
 const DEFAULT_VISIT_DURATION_MS = 2 * 60 * 60 * 1000;
 const RESERVATION_DEDUPE_BUFFER_MS = 2 * 60 * 60 * 1000;
@@ -91,10 +93,7 @@ export interface ReservationReviewFilterResult {
   skippedDuplicateCount: number;
 }
 
-interface LocatedImportableReservation extends ImportableReservation {
-  latitude: number;
-  longitude: number;
-}
+type LocatedImportableReservation = LocatedProviderReservation<ImportableReservation>;
 
 const PROVIDER_MICHELIN_NAME_TOOLS: ProviderMichelinNameTools = {
   normalizeForComparison,
@@ -377,14 +376,6 @@ function dedupeReservationOnlyVisits(visits: ReservationOnlyVisitInput[]): {
   return { visits: deduped.sort((a, b) => b.startTime - a.startTime), duplicateCount };
 }
 
-async function getAwardForReservationVisit(restaurantId: string | null, startTime: number): Promise<string | null> {
-  if (!restaurantId?.startsWith("michelin-")) {
-    return null;
-  }
-
-  return getAwardForDate(restaurantId, startTime);
-}
-
 function getRestaurantInputForReservation(
   reservation: LocatedImportableReservation,
   match: ProviderMichelinMatch | null,
@@ -411,11 +402,12 @@ function getRestaurantInputForReservation(
   };
 }
 
-async function toReservationOnlyVisit(
+function toReservationOnlyVisit(
   reservation: LocatedImportableReservation,
   match: ProviderMichelinMatch | null,
   sourceDisplayName: string,
-): Promise<ReservationOnlyVisitInput> {
+  awardAtVisit: string | null,
+): ReservationOnlyVisitInput {
   const partyText = reservation.partySize ? `Party of ${reservation.partySize}` : null;
   const suggestedRestaurantId = match?.restaurant.id ?? null;
   return {
@@ -429,48 +421,68 @@ async function toReservationOnlyVisit(
     restaurant: getRestaurantInputForReservation(reservation, match),
     suggestedRestaurantId,
     suggestedRestaurantDistance: match?.distance ?? null,
-    awardAtVisit: await getAwardForReservationVisit(suggestedRestaurantId, reservation.startTime),
+    awardAtVisit,
     notes: partyText ? `Imported from ${sourceDisplayName}. ${partyText}.` : `Imported from ${sourceDisplayName}.`,
   };
 }
 
-async function resolveReservationLocation(
-  reservation: ImportableReservation,
-  restaurantsByName: ProviderMichelinRestaurantsByNormalizedName,
-): Promise<LocatedImportableReservation | null> {
-  if (reservation.latitude !== null && reservation.longitude !== null) {
-    return reservation as LocatedImportableReservation;
-  }
-
-  const placeQuery = [reservation.restaurantName, reservation.address].filter(Boolean).join(" ");
-  if (placeQuery) {
-    const places = await searchPlaceByText(placeQuery);
-    const place = places[0];
-    if (place) {
-      return {
-        ...reservation,
-        latitude: place.latitude,
-        longitude: place.longitude,
-        address: reservation.address ?? place.address ?? null,
-      };
-    }
-  }
-
-  const restaurant = getUniqueProviderMichelinNameFallback(
-    reservation.restaurantName,
-    restaurantsByName,
-    PROVIDER_MICHELIN_NAME_TOOLS,
+async function buildReservationOnlyVisits(
+  reservations: readonly LocatedImportableReservation[],
+  matchesBySourceEventId: ReadonlyMap<string, ProviderMichelinMatch | null>,
+  sourceDisplayName: string,
+): Promise<ReservationOnlyVisitInput[]> {
+  const matches = reservations.map((reservation) => matchesBySourceEventId.get(reservation.sourceEventId) ?? null);
+  const awards = await resolveReservationAwardsInBatches(
+    reservations.map((reservation, index) => ({
+      restaurantId: matches[index]?.restaurant.id ?? null,
+      startTime: reservation.startTime,
+    })),
+    (restaurantIds, representativeTimestamp) =>
+      readAwardsForProviderImportOrThrow(restaurantIds, representativeTimestamp),
+    (restaurantId, representativeTimestamp) => getAwardForDate(restaurantId, representativeTimestamp),
   );
-  if (restaurant) {
-    return {
-      ...reservation,
-      latitude: restaurant.latitude,
-      longitude: restaurant.longitude,
-      address: reservation.address ?? restaurant.address ?? null,
-    };
-  }
 
-  return null;
+  return reservations.map((reservation, index) =>
+    toReservationOnlyVisit(reservation, matches[index] ?? null, sourceDisplayName, awards[index] ?? null),
+  );
+}
+
+function buildReservationReviewVisits(
+  reservations: readonly LocatedImportableReservation[],
+  matchesBySourceEventId: ReadonlyMap<string, ProviderMichelinMatch | null>,
+  sourceDisplayName: string,
+): ReservationOnlyVisitInput[] {
+  return reservations.map((reservation) =>
+    toReservationOnlyVisit(
+      reservation,
+      matchesBySourceEventId.get(reservation.sourceEventId) ?? null,
+      sourceDisplayName,
+      null,
+    ),
+  );
+}
+
+async function resolveReservationLocations(
+  reservations: readonly ImportableReservation[],
+  restaurantsByName: ProviderMichelinRestaurantsByNormalizedName,
+): Promise<Array<LocatedImportableReservation | null>> {
+  return resolveProviderReservationLocations(reservations, {
+    searchPlaces: searchPlaceByText,
+    findLocalFallback: (reservation) => {
+      const restaurant = getUniqueProviderMichelinNameFallback(
+        reservation.restaurantName,
+        restaurantsByName,
+        PROVIDER_MICHELIN_NAME_TOOLS,
+      );
+      return restaurant
+        ? {
+            latitude: restaurant.latitude,
+            longitude: restaurant.longitude,
+            address: restaurant.address,
+          }
+        : null;
+    },
+  });
 }
 
 async function loadProviderMichelinFallbackRestaurantsByName(
@@ -538,9 +550,11 @@ export async function importReservationVisitHistory(
   const locatedReservations: LocatedImportableReservation[] = [];
   let missingLocationCount = 0;
   const missingLocationSamples: Array<Record<string, unknown>> = [];
+  const resolvedLocations = await resolveReservationLocations(reservations, restaurantsByName);
 
-  for (const reservation of reservations) {
-    const located = await resolveReservationLocation(reservation, restaurantsByName);
+  for (let index = 0; index < reservations.length; index++) {
+    const reservation = reservations[index]!;
+    const located = resolvedLocations[index];
     if (located) {
       locatedReservations.push(located);
     } else {
@@ -568,14 +582,10 @@ export async function importReservationVisitHistory(
     matchedMichelinCount: preDedupeMichelinMatchCount,
   });
 
-  const visits = await Promise.all(
-    locatedReservations.map((reservation) =>
-      toReservationOnlyVisit(
-        reservation,
-        matchesBySourceEventId.get(reservation.sourceEventId) ?? null,
-        options.sourceDisplayName,
-      ),
-    ),
+  const visits = await buildReservationOnlyVisits(
+    locatedReservations,
+    matchesBySourceEventId,
+    options.sourceDisplayName,
   );
   const deduped = dedupeReservationOnlyVisits(visits);
   logReservationImport(options.sourceDisplayName, "Prepared visits for database insert", {
@@ -633,20 +643,12 @@ export async function filterProviderReservationReviewCandidates(
     };
   }
 
-  const sourceEventIds = deduped.reservations.map((reservation) => reservation.sourceEventId);
-  const dismissedSourceEventIds = await getDismissedReservationImportSourceEventIds(sourceEventIds);
-  const excludedSourceEventIds = await getExcludedReservationImportReviewSourceEventIds(deduped.reservations);
-  const exactSourceEventIdsMappedToConfirmedVisits = await getConfirmedLinkedReservationSourceEventIds(sourceEventIds);
-  const sameDateRestaurantSourceEventIds = await getReservationImportCandidatesMappedToConfirmedRestaurantDateSourceIds(
-    deduped.reservations
-      .filter((reservation) => !excludedSourceEventIds.has(reservation.sourceEventId))
-      .map((reservation) => ({
-        sourceEventId: reservation.sourceEventId,
-        restaurantName: reservation.restaurantName,
-        startTime: reservation.startTime,
-        restaurantId: reservation.restaurantId,
-      })),
-  );
+  const {
+    dismissedSourceEventIds,
+    excludedSourceEventIds,
+    exactConfirmedSourceEventIds: exactSourceEventIdsMappedToConfirmedVisits,
+    sameDateConfirmedSourceEventIds: sameDateRestaurantSourceEventIds,
+  } = await getProviderReservationReviewPrefilterSnapshot(deduped.reservations);
   const preLocationConfirmedSourceEventIds = new Set([
     ...exactSourceEventIdsMappedToConfirmedVisits,
     ...sameDateRestaurantSourceEventIds,
@@ -657,31 +659,37 @@ export async function filterProviderReservationReviewCandidates(
       !preLocationConfirmedSourceEventIds.has(reservation.sourceEventId),
   );
   const restaurantsByName = await loadProviderMichelinFallbackRestaurantsByName(reservationsNeedingLocationCheck);
-  const locatedReservations: LocatedImportableReservation[] = [];
-
-  for (const reservation of reservationsNeedingLocationCheck) {
-    const located = await resolveReservationLocation(reservation, restaurantsByName);
-    if (located) {
-      locatedReservations.push(located);
-    }
-  }
+  const locatedReservations = (
+    await resolveReservationLocations(reservationsNeedingLocationCheck, restaurantsByName)
+  ).filter((reservation): reservation is LocatedImportableReservation => reservation !== null);
+  const locatedReservationsBySourceEventId = new Map(
+    locatedReservations.map((reservation) => [reservation.sourceEventId, reservation] as const),
+  );
+  const unresolvedReservations = reservationsNeedingLocationCheck.filter(
+    (reservation) => !locatedReservationsBySourceEventId.has(reservation.sourceEventId),
+  );
 
   const matchesBySourceEventId = await matchLocatedReservationsToMichelin(locatedReservations);
 
-  const visits = await Promise.all(
-    locatedReservations.map((reservation) =>
-      toReservationOnlyVisit(
-        reservation,
-        matchesBySourceEventId.get(reservation.sourceEventId) ?? null,
-        options.sourceDisplayName,
-      ),
-    ),
-  );
+  const visits = buildReservationReviewVisits(locatedReservations, matchesBySourceEventId, options.sourceDisplayName);
   const overlapSourceEventIdsMappedToConfirmedVisits =
     await getReservationOnlyVisitsMappedToConfirmedVisitSourceIds(visits);
+  // Location resolution and provider lookups may take long enough for another
+  // import to confirm an unresolved reservation after the initial snapshot.
+  // Recheck those candidates now; the located candidates retain their richer
+  // post-location overlap check above.
+  const unresolvedRecheck = await getProviderReservationReviewPrefilterSnapshot(unresolvedReservations);
+  const unresolvedSourceEventIdsMappedToConfirmedVisits = new Set([
+    ...unresolvedRecheck.exactConfirmedSourceEventIds,
+    ...unresolvedRecheck.sameDateConfirmedSourceEventIds,
+  ]);
+  for (const sourceEventId of unresolvedRecheck.excludedSourceEventIds) {
+    excludedSourceEventIds.add(sourceEventId);
+  }
   const sourceEventIdsMappedToConfirmedVisits = new Set([
     ...preLocationConfirmedSourceEventIds,
     ...overlapSourceEventIdsMappedToConfirmedVisits,
+    ...unresolvedSourceEventIdsMappedToConfirmedVisits,
   ]);
   const reviewReservations = deduped.reservations
     .filter(
@@ -689,9 +697,10 @@ export async function filterProviderReservationReviewCandidates(
         !excludedSourceEventIds.has(reservation.sourceEventId) &&
         !sourceEventIdsMappedToConfirmedVisits.has(reservation.sourceEventId),
     )
-    .map((reservation) =>
-      withMichelinReviewMatch(reservation, matchesBySourceEventId.get(reservation.sourceEventId) ?? null),
-    );
+    .map((reservation) => {
+      const locatedReservation = locatedReservationsBySourceEventId.get(reservation.sourceEventId) ?? reservation;
+      return withMichelinReviewMatch(locatedReservation, matchesBySourceEventId.get(reservation.sourceEventId) ?? null);
+    });
 
   logReservationImport(options.sourceDisplayName, "Prepared provider review candidates", {
     receivedReservations: reservations.length,
@@ -705,7 +714,9 @@ export async function filterProviderReservationReviewCandidates(
     exactConfirmedLinkCount: exactSourceEventIdsMappedToConfirmedVisits.size,
     sameDateRestaurantConfirmedVisitCount: sameDateRestaurantSourceEventIds.size,
     overlapOrLocatedConfirmedVisitCount: overlapSourceEventIdsMappedToConfirmedVisits.size,
-    unresolvedLocationCount: reservationsNeedingLocationCheck.length - locatedReservations.length,
+    unresolvedRecheckConfirmedVisitCount: unresolvedSourceEventIdsMappedToConfirmedVisits.size,
+    unresolvedRecheckExcludedCount: unresolvedRecheck.excludedSourceEventIds.size,
+    unresolvedLocationCount: unresolvedReservations.length,
   });
 
   return {

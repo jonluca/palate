@@ -127,6 +127,17 @@ const TOCK_HISTORY_BRIDGE_SCRIPT = `
   }
 
   async function readHistory() {
+    if (window.__palateTockHistoryPayload) {
+      post({
+        type: "tock-history",
+        hasSession: true,
+        payload: window.__palateTockHistoryPayload,
+        count: resultCount(window.__palateTockHistoryPayload),
+        error: null
+      });
+      return;
+    }
+
     if (window.__palateTockReadingHistory) {
       return;
     }
@@ -159,6 +170,19 @@ const TOCK_HISTORY_BRIDGE_SCRIPT = `
         purchases: purchases,
         totalCount: totalCount
       };
+      var captureComplete = typeof totalCount !== "number" || purchases.length >= totalCount;
+      if (!captureComplete) {
+        post({
+          type: "tock-history",
+          hasSession: true,
+          count: 0,
+          error: "Tock history capture was incomplete. Retrying..."
+        });
+        return;
+      }
+      if (resultCount(payload) > 0 && captureComplete) {
+        window.__palateTockHistoryPayload = payload;
+      }
       post({
         type: "tock-history",
         hasSession: true,

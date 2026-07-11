@@ -12,6 +12,27 @@ import {
   CALENDAR_EXPORTED_EVENT_CLEAR_BATCH_SIZE,
   planCalendarExportClearStatements,
 } from "../calendar-batch-mutation-core";
+import {
+  buildCalendarEnrichmentVisitSnapshot,
+  CALENDAR_ENRICHMENT_SNAPSHOT_SQL,
+  type CalendarEnrichmentSnapshotRow,
+  type CalendarEnrichmentVisitSnapshot,
+} from "./calendar-enrichment-snapshot-core";
+import type { CalendarImportSnapshotPlan } from "../calendar-import-plan-core";
+import {
+  executeCalendarImportTransaction,
+  type CalendarImportTransactionResult,
+} from "./calendar-import-transaction-core";
+import { executeSetBasedReservationImportTransaction } from "./reservation-import-transaction-core";
+import {
+  finalizeReservationReviewPrefilterSnapshot,
+  getReservationImportReviewFingerprint as buildReservationImportReviewFingerprint,
+  prepareReservationReviewPrefilter,
+  readReservationReviewPrefilterSnapshotRows,
+  type ReservationReviewPrefilterCandidate,
+  type ReservationReviewPrefilterSnapshot,
+  type ReservationReviewPrefilterSnapshotRows,
+} from "./reservation-review-prefilter-core";
 import type {
   CalendarEventUpdate,
   ConfirmedVisitForCalendarFilter,
@@ -126,6 +147,16 @@ export async function getVisitsWithoutCalendarData(): Promise<
   return database.getAllAsync<{ id: string; startTime: number; endTime: number }>(
     `SELECT id, startTime, endTime FROM visits WHERE calendarEventId IS NULL ORDER BY startTime DESC`,
   );
+}
+
+/**
+ * Loads every visit and the only suggestion fields used by Calendar matching
+ * in one SQLite statement and one consistent read snapshot.
+ */
+export async function getCalendarEnrichmentVisitSnapshot(): Promise<CalendarEnrichmentVisitSnapshot[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<CalendarEnrichmentSnapshotRow>(CALENDAR_ENRICHMENT_SNAPSHOT_SQL);
+  return buildCalendarEnrichmentVisitSnapshot(rows);
 }
 
 /**
@@ -249,7 +280,7 @@ export async function getExcludedReservationImportReviewSourceEventIds(
   const database = await getDatabase();
   const fingerprintsBySourceEventId = new Map<string, string>();
   for (const reservation of reservationsNeedingFingerprintCheck) {
-    const fingerprint = getReservationImportReviewFingerprint(reservation);
+    const fingerprint = buildReservationImportReviewFingerprint(reservation);
     if (fingerprint) {
       fingerprintsBySourceEventId.set(reservation.sourceEventId, fingerprint);
     }
@@ -285,6 +316,42 @@ export async function getExcludedReservationImportReviewSourceEventIds(
   return excludedSourceEventIds;
 }
 
+/**
+ * Read every early provider-review exclusion/confirmation fact from one short,
+ * dedicated deferred transaction. Fuzzy same-day matching runs only after the
+ * transaction releases its WAL snapshot.
+ */
+export async function getProviderReservationReviewPrefilterSnapshot(
+  candidates: readonly ReservationReviewPrefilterCandidate[],
+): Promise<ReservationReviewPrefilterSnapshot> {
+  const prepared = prepareReservationReviewPrefilter(candidates);
+  if (prepared.candidates.length === 0) {
+    return finalizeReservationReviewPrefilterSnapshot({
+      dismissedSourceEventIds: new Set(),
+      excludedSourceEventIds: new Set(),
+      exactConfirmedSourceEventIds: new Set(),
+      sameDateCandidates: [],
+      confirmedVisitRows: [],
+    });
+  }
+
+  const database = await getDatabase();
+  let snapshotRows: ReservationReviewPrefilterSnapshotRows | undefined;
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    snapshotRows = await readReservationReviewPrefilterSnapshotRows(
+      {
+        getAllAsync: <Row>(sql: string, parameters: Array<string | number | null>) =>
+          transaction.getAllAsync<Row>(sql, parameters),
+      },
+      prepared,
+    );
+  });
+  if (!snapshotRows) {
+    throw new Error("Provider reservation review prefilter transaction completed without a result.");
+  }
+  return finalizeReservationReviewPrefilterSnapshot(snapshotRows);
+}
+
 export async function excludeReservationImportReviews(
   reservations: ReservationImportReviewExclusionInput[],
   action: ReservationImportReviewExclusionAction,
@@ -299,7 +366,7 @@ export async function excludeReservationImportReviews(
 
   const rows = reservations
     .map((reservation) => {
-      const fingerprint = getReservationImportReviewFingerprint(reservation);
+      const fingerprint = buildReservationImportReviewFingerprint(reservation);
       if (!fingerprint) {
         return null;
       }
@@ -433,12 +500,42 @@ export async function insertCalendarOnlyVisits(
 }
 
 /**
+ * Atomically recheck and persist rendered Calendar-import snapshots. Expo's
+ * exclusive transaction owns a dedicated connection; every query must use the
+ * supplied transaction object so a stale read can never commit later writes.
+ */
+export async function importCalendarSnapshotPlan(
+  plan: CalendarImportSnapshotPlan,
+  updatedAt: number,
+): Promise<CalendarImportTransactionResult> {
+  const database = await getDatabase();
+  let result: CalendarImportTransactionResult | undefined;
+
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    result = await executeCalendarImportTransaction(
+      {
+        getAllAsync: <Row>(sql: string, parameters: Array<string | number | null>) =>
+          transaction.getAllAsync<Row>(sql, parameters),
+        runAsync: (sql: string, parameters: Array<string | number | null>) => transaction.runAsync(sql, parameters),
+      },
+      plan,
+      updatedAt,
+    );
+  });
+
+  if (!result) {
+    throw new Error("Calendar import transaction completed without a result.");
+  }
+  return result;
+}
+
+/**
  * Insert or link confirmed reservation-only visits for sources that provide
  * their own venue coordinates, such as Resy, Tock, and OpenTable. When possible, these source
  * reservations are attached to an existing overlapping photo visit instead of
  * creating a duplicate reservation-only visit.
  */
-export async function insertReservationOnlyVisits(
+async function insertReservationOnlyVisitsLegacy(
   visits: ReservationOnlyVisitInput[],
 ): Promise<ReservationOnlyVisitImportResult> {
   if (visits.length === 0) {
@@ -761,6 +858,49 @@ export async function insertReservationOnlyVisits(
     skippedDuplicateCount: visits.length - newVisits.length,
     skippedConflictCount,
   };
+}
+
+export type ReservationOnlyVisitPersistenceStrategy = "legacy-row-v1" | "set-based-json-v1";
+
+export interface ReservationOnlyVisitPersistenceOptions {
+  /** Legacy remains the production default until isolated and signed validation are complete. */
+  readonly strategy?: ReservationOnlyVisitPersistenceStrategy;
+}
+
+/**
+ * Persist provider reservations. The optional strategy is an explicit validation
+ * seam; ordinary app callers continue to use the literal row-by-row implementation.
+ */
+export async function insertReservationOnlyVisits(
+  visits: ReservationOnlyVisitInput[],
+  options: ReservationOnlyVisitPersistenceOptions = {},
+): Promise<ReservationOnlyVisitImportResult> {
+  const strategy = options.strategy ?? "legacy-row-v1";
+  if (strategy === "legacy-row-v1") {
+    return insertReservationOnlyVisitsLegacy(visits);
+  }
+  if (strategy !== "set-based-json-v1") {
+    throw new RangeError(`Unsupported reservation import persistence strategy: ${String(strategy)}.`);
+  }
+
+  const database = await getDatabase();
+  let result: ReservationOnlyVisitImportResult | undefined;
+  const updatedAt = Date.now();
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    result = await executeSetBasedReservationImportTransaction(
+      {
+        getAllAsync: <Row>(sql: string, parameters: Array<string | number | null>) =>
+          transaction.getAllAsync<Row>(sql, parameters),
+        runAsync: (sql: string, parameters: Array<string | number | null>) => transaction.runAsync(sql, parameters),
+      },
+      visits,
+      updatedAt,
+    );
+  });
+  if (!result) {
+    throw new Error("Set-based reservation import transaction completed without a result.");
+  }
+  return result;
 }
 
 export async function getConfirmedLinkedReservationSourceEventIds(sourceEventIds: string[]): Promise<Set<string>> {
@@ -1167,16 +1307,6 @@ function normalizeReservationRestaurantName(value: string): string {
     .replace(/[^\w\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function getReservationImportReviewFingerprint(reservation: ReservationImportReviewExclusionInput): string | null {
-  const sourceName = reservation.sourceName.trim().toLowerCase();
-  const restaurantName = normalizeReservationRestaurantName(reservation.restaurantName);
-  if (!sourceName || restaurantName.length < 3) {
-    return null;
-  }
-
-  return `${sourceName}:${getLocalDateKey(reservation.startTime)}:${restaurantName}`;
 }
 
 function getSignificantReservationNameWords(value: string): string[] {
