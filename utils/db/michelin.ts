@@ -1,5 +1,24 @@
 import { getDatabase } from "./core";
+import * as SQLite from "expo-sqlite";
+import { Platform } from "react-native";
 import { invalidateRestaurantIndex } from "./michelin-index";
+import {
+  ATTACHED_MICHELIN_INSERT_SELECT_SQL,
+  MICHELIN_DATASET_VERSION_KEY,
+  MICHELIN_IMPORT_ATTACH_STRATEGY,
+  MICHELIN_IMPORT_ATTESTATION_KEY,
+  MICHELIN_IMPORT_LEGACY_STRATEGY,
+  MICHELIN_IMPORT_METADATA_UPSERT_SQL,
+  MICHELIN_IMPORT_REQUEST_KEY,
+  MichelinImportTerminalError,
+  NO_VALID_MICHELIN_ROWS_MESSAGE,
+  parseMichelinImportValidationRequest,
+  resolveMichelinImportStrategy,
+  serializeMichelinImportAttestation,
+  type MichelinImportResolution,
+  type MichelinImportResult,
+  type MichelinImportSourceDescriptor,
+} from "./michelin-import-core";
 import {
   ACTIVE_MICHELIN_CALENDAR_HYDRATION_SQL,
   ACTIVE_MICHELIN_CALENDAR_NAME_ROWS_SQL,
@@ -18,10 +37,25 @@ import {
   type MichelinProviderSpatialCandidateRow,
   type MichelinProviderSpatialInput,
 } from "./michelin-provider-spatial-core";
+import {
+  selectMichelinMapViewport as selectMichelinMapViewportCore,
+  type MichelinMapViewportRequest,
+  type MichelinMapViewportSelection,
+} from "./michelin-map-viewport-core";
+import {
+  ACTIVE_MICHELIN_UNICODE_NAME_ROWS_SQL,
+  HYDRATE_UNVISITED_MICHELIN_NAME_SEARCH_SQL,
+  MAX_MICHELIN_NAME_SEARCH_RESULTS,
+  assertMichelinNameSearchLimit,
+  assertMichelinNameSearchNotAborted,
+  createMichelinUnicodeNameIndex,
+  isNonAsciiMichelinNameSearchQuery,
+  normalizeMichelinNameSearchQuery,
+  runStableMichelinNameSearch,
+  selectSortedMichelinUnicodeMatchIds,
+  type MichelinUnicodeNameRow,
+} from "./michelin-name-search-core";
 import type { MichelinRestaurantRecord } from "./types";
-
-const MICHELIN_DATASET_VERSION_KEY = "michelin_dataset_version";
-const MAX_MICHELIN_NAME_SEARCH_RESULTS = 50;
 
 function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, "\\$&");
@@ -31,33 +65,55 @@ function escapeLikePattern(value: string): string {
 export async function insertMichelinRestaurants(
   restaurants: MichelinRestaurantRecord[],
   datasetVersion: string,
-): Promise<void> {
+  resolution: MichelinImportResolution,
+  sourceRows: number,
+): Promise<MichelinImportResult> {
   if (restaurants.length === 0) {
-    return;
+    throw new Error(NO_VALID_MICHELIN_ROWS_MESSAGE);
+  }
+  if (
+    resolution.resolvedStrategy !== MICHELIN_IMPORT_LEGACY_STRATEGY ||
+    !Number.isSafeInteger(sourceRows) ||
+    sourceRows < 0
+  ) {
+    throw new Error("Invalid legacy Michelin import request");
   }
 
   const database = await getDatabase();
   const batchSize = 1000;
+  const importedRows = restaurants.length;
+  const attestation = serializeMichelinImportAttestation({
+    schemaVersion: 1,
+    ...resolution,
+    selectedStrategy: MICHELIN_IMPORT_LEGACY_STRATEGY,
+    datasetVersion,
+    sourceRows,
+    importedRows,
+    observedAtEpochSeconds: Math.floor(Date.now() / 1000),
+  });
+  let writeMayHaveOccurred = false;
 
-  await database.withExclusiveTransactionAsync(async (transaction) => {
-    for (let i = 0; i < restaurants.length; i += batchSize) {
-      const batch = restaurants.slice(i, i + batchSize);
-      const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-      const values = batch.flatMap((restaurant) => [
-        restaurant.id,
-        restaurant.name,
-        restaurant.latitude,
-        restaurant.longitude,
-        restaurant.address,
-        restaurant.location,
-        restaurant.cuisine,
-        restaurant.latestAwardYear,
-        restaurant.award,
-        datasetVersion,
-      ]);
+  try {
+    await database.withExclusiveTransactionAsync(async (transaction) => {
+      for (let i = 0; i < restaurants.length; i += batchSize) {
+        const batch = restaurants.slice(i, i + batchSize);
+        const placeholders = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+        const values = batch.flatMap((restaurant) => [
+          restaurant.id,
+          restaurant.name,
+          restaurant.latitude,
+          restaurant.longitude,
+          restaurant.address,
+          restaurant.location,
+          restaurant.cuisine,
+          restaurant.latestAwardYear,
+          restaurant.award,
+          datasetVersion,
+        ]);
 
-      await transaction.runAsync(
-        `INSERT INTO michelin_restaurants
+        writeMayHaveOccurred = true;
+        await transaction.runAsync(
+          `INSERT INTO michelin_restaurants
            (id, name, latitude, longitude, address, location, cuisine, latestAwardYear, award, datasetVersion)
          VALUES ${placeholders}
          ON CONFLICT(id) DO UPDATE SET
@@ -70,22 +126,216 @@ export async function insertMichelinRestaurants(
            latestAwardYear = excluded.latestAwardYear,
            award = excluded.award,
            datasetVersion = excluded.datasetVersion`,
-        values,
-      );
-    }
+          values,
+        );
+      }
 
-    // Keep rows that disappeared from the latest guide. Confirmed visits and old
-    // suggestions still reference them, and deleting them would erase historical
-    // Michelin attribution. Current search/index queries filter by datasetVersion.
-    await transaction.runAsync(
-      `INSERT INTO app_metadata (key, value) VALUES (?, ?)
-       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      [MICHELIN_DATASET_VERSION_KEY, datasetVersion],
-    );
-  });
+      // Keep rows that disappeared from the latest guide. Confirmed visits and old
+      // suggestions still reference them, and deleting them would erase historical
+      // Michelin attribution. Current search/index queries filter by datasetVersion.
+      await transaction.runAsync(MICHELIN_IMPORT_METADATA_UPSERT_SQL, [MICHELIN_DATASET_VERSION_KEY, datasetVersion]);
+      await transaction.runAsync(MICHELIN_IMPORT_METADATA_UPSERT_SQL, [MICHELIN_IMPORT_ATTESTATION_KEY, attestation]);
+    });
+  } catch (error) {
+    if (writeMayHaveOccurred) {
+      invalidateRestaurantIndex();
+      throw new MichelinImportTerminalError("Legacy Michelin import failed after write dispatch", error);
+    }
+    throw error;
+  }
 
   // Invalidate spatial index so it rebuilds with new data
   invalidateRestaurantIndex();
+  return { importedRows, sourceRows, strategy: MICHELIN_IMPORT_LEGACY_STRATEGY };
+}
+
+export async function getMichelinImportResolution(
+  nowEpochSeconds: number = Math.floor(Date.now() / 1000),
+): Promise<MichelinImportResolution> {
+  const database = await getDatabase();
+  const requestRow = await database.getFirstAsync<{ value: string }>(`SELECT value FROM app_metadata WHERE key = ?`, [
+    MICHELIN_IMPORT_REQUEST_KEY,
+  ]);
+
+  let sqliteUriAvailable = false;
+  if (Platform.OS !== "web") {
+    try {
+      const capability = await database.getFirstAsync<{ enabled: number }>(
+        `SELECT sqlite_compileoption_used(?) AS enabled`,
+        ["USE_URI"],
+      );
+      sqliteUriAvailable = capability?.enabled === 1;
+    } catch {
+      // Older SQLite builds safely stay on the legacy importer.
+    }
+  }
+
+  return resolveMichelinImportStrategy(
+    parseMichelinImportValidationRequest(requestRow?.value, nowEpochSeconds),
+    sqliteUriAvailable,
+  );
+}
+
+async function openDedicatedMichelinImportConnection(): Promise<SQLite.SQLiteDatabase> {
+  const mainDatabase = await getDatabase();
+  const separatorIndex = mainDatabase.databasePath.lastIndexOf("/");
+  if (separatorIndex <= 0 || separatorIndex === mainDatabase.databasePath.length - 1) {
+    throw new Error("Main database path cannot be opened as a dedicated connection");
+  }
+  return SQLite.openDatabaseAsync(
+    mainDatabase.databasePath.slice(separatorIndex + 1),
+    {
+      ...mainDatabase.options,
+      enableChangeListener: false,
+      useNewConnection: true,
+      finalizeUnusedStatementsBeforeClosing: false,
+    },
+    mainDatabase.databasePath.slice(0, separatorIndex),
+  );
+}
+
+function assertSafeMichelinSource(source: MichelinImportSourceDescriptor): void {
+  const requiredUriSuffix = "?mode=ro&immutable=1&cache=private";
+  const sourcePath = source.immutableReadOnlyUri.endsWith(requiredUriSuffix)
+    ? source.immutableReadOnlyUri.slice(0, -requiredUriSuffix.length)
+    : "";
+  if (
+    source.datasetVersion.length === 0 ||
+    source.datasetVersion.includes("\0") ||
+    !sourcePath.startsWith("file:") ||
+    sourcePath.length <= "file:".length ||
+    /[?#]/.test(sourcePath) ||
+    /[\0\r\n]/.test(source.immutableReadOnlyUri)
+  ) {
+    throw new Error("Invalid Michelin import source descriptor");
+  }
+}
+
+/**
+ * Import the guide entirely inside SQLite. Once this strategy is selected, any
+ * error is terminal for the process: replaying the legacy importer after an
+ * ambiguous COMMIT could duplicate expensive work or expose mixed state.
+ */
+export async function importMichelinRestaurantsFromAttachedSource(
+  source: MichelinImportSourceDescriptor,
+  resolution: MichelinImportResolution,
+): Promise<MichelinImportResult> {
+  if (resolution.resolvedStrategy !== MICHELIN_IMPORT_ATTACH_STRATEGY) {
+    throw new Error("ATTACH Michelin importer was invoked for a different strategy");
+  }
+
+  let database: SQLite.SQLiteDatabase | null = null;
+  let attached = false;
+  let transactionOpen = false;
+  let writeMayHaveOccurred = false;
+  let committed = false;
+  let sourceRows = 0;
+  let importedRows = 0;
+
+  try {
+    assertSafeMichelinSource(source);
+    database = await openDedicatedMichelinImportConnection();
+    await database.execAsync(`
+      PRAGMA busy_timeout = 5000;
+      PRAGMA foreign_keys = ON;
+      PRAGMA temp_store = MEMORY;
+      PRAGMA cache_size = -128000;
+      PRAGMA mmap_size = 268435456;
+    `);
+    await database.runAsync(`ATTACH DATABASE ? AS michelin_source`, [source.immutableReadOnlyUri]);
+    attached = true;
+
+    const schema = await database.getFirstAsync<{ tableCount: number }>(
+      `SELECT COUNT(*) AS tableCount
+       FROM michelin_source.sqlite_schema
+       WHERE type = 'table' AND name IN ('restaurants', 'restaurant_awards')`,
+    );
+    if (schema?.tableCount !== 2) {
+      throw new Error("Michelin reference database schema is incomplete");
+    }
+    const count = await database.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM michelin_source.restaurants`,
+    );
+    sourceRows = count?.count ?? 0;
+    if (!Number.isSafeInteger(sourceRows) || sourceRows <= 0) {
+      throw new Error(NO_VALID_MICHELIN_ROWS_MESSAGE);
+    }
+
+    await database.execAsync("BEGIN IMMEDIATE");
+    transactionOpen = true;
+    writeMayHaveOccurred = true;
+    const insertResult = await database.runAsync(ATTACHED_MICHELIN_INSERT_SELECT_SQL, [source.datasetVersion]);
+    importedRows = insertResult.changes;
+    if (!Number.isSafeInteger(importedRows) || importedRows <= 0) {
+      throw new Error(NO_VALID_MICHELIN_ROWS_MESSAGE);
+    }
+
+    const attestation = serializeMichelinImportAttestation({
+      schemaVersion: 1,
+      ...resolution,
+      selectedStrategy: MICHELIN_IMPORT_ATTACH_STRATEGY,
+      datasetVersion: source.datasetVersion,
+      sourceRows,
+      importedRows,
+      observedAtEpochSeconds: Math.floor(Date.now() / 1000),
+    });
+    await database.runAsync(MICHELIN_IMPORT_METADATA_UPSERT_SQL, [MICHELIN_DATASET_VERSION_KEY, source.datasetVersion]);
+    await database.runAsync(MICHELIN_IMPORT_METADATA_UPSERT_SQL, [MICHELIN_IMPORT_ATTESTATION_KEY, attestation]);
+    await database.execAsync("COMMIT");
+    transactionOpen = false;
+    committed = true;
+  } catch (error) {
+    if (transactionOpen) {
+      try {
+        await database?.execAsync("ROLLBACK");
+      } catch {
+        // Preserve the original failure; the terminal error forbids replay.
+      }
+      transactionOpen = false;
+    }
+    if (attached) {
+      try {
+        await database?.execAsync("DETACH DATABASE michelin_source");
+      } catch {
+        // Closing below is the final cleanup attempt.
+      }
+      attached = false;
+    }
+    try {
+      await database?.closeAsync();
+    } catch {
+      // The operation is terminal regardless of cleanup outcome.
+    }
+    if (writeMayHaveOccurred) {
+      invalidateRestaurantIndex();
+    }
+    throw new MichelinImportTerminalError("Set-based Michelin import failed", error);
+  }
+
+  if (committed) {
+    const cleanupErrors: unknown[] = [];
+    try {
+      await database.execAsync("DETACH DATABASE michelin_source");
+      attached = false;
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    try {
+      await database.closeAsync();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (cleanupErrors.length > 0) {
+      invalidateRestaurantIndex();
+      throw new MichelinImportTerminalError(
+        "Set-based Michelin import committed but its connection did not close cleanly",
+        cleanupErrors,
+      );
+    }
+  }
+
+  invalidateRestaurantIndex();
+  return { importedRows, sourceRows, strategy: MICHELIN_IMPORT_ATTACH_STRATEGY };
 }
 
 export async function getImportedMichelinDatasetVersion(): Promise<string | null> {
@@ -118,6 +368,54 @@ export async function getAllMichelinRestaurants(): Promise<MichelinRestaurantRec
        SELECT value FROM app_metadata WHERE key = ?
      )`,
     [MICHELIN_DATASET_VERSION_KEY, MICHELIN_DATASET_VERSION_KEY],
+  );
+}
+
+/**
+ * Select only the active guide rows that can be rendered in the current map
+ * viewport. Filtering and the bounded ranking prefix run inside SQLite over
+ * the persistent R-Tree; JavaScript receives only the final tie group and
+ * applies the existing locale-aware ordering before returning at most 500 rows.
+ */
+export async function getMichelinMapViewport(
+  request: MichelinMapViewportRequest,
+): Promise<MichelinMapViewportSelection> {
+  const database = await getDatabase();
+  await ensureInvalidatedMichelinProviderSpatialIndex(database);
+  return selectMichelinMapViewportCore(
+    {
+      getAllAsync: (source, parameters) => database.getAllAsync(source, [...parameters]),
+      withReadTransaction: async (task) => {
+        let completed = false;
+        let result: Awaited<ReturnType<typeof task>> | undefined;
+        if (Platform.OS === "web") {
+          // Expo does not expose a dedicated exclusive connection on web.
+          // This fallback preserves the unsupported-map screen's List mode,
+          // but unrelated web queries may share its deferred transaction.
+          await database.withTransactionAsync(async () => {
+            result = await task({
+              getAllAsync: (source, parameters) => database.getAllAsync(source, [...parameters]),
+            });
+            completed = true;
+          });
+          if (!completed) {
+            throw new Error("Michelin map viewport web read transaction did not complete");
+          }
+          return result as Awaited<ReturnType<typeof task>>;
+        }
+        await database.withExclusiveTransactionAsync(async (transaction) => {
+          result = await task({
+            getAllAsync: (source, parameters) => transaction.getAllAsync(source, [...parameters]),
+          });
+          completed = true;
+        });
+        if (!completed) {
+          throw new Error("Michelin map viewport read transaction did not complete");
+        }
+        return result as Awaited<ReturnType<typeof task>>;
+      },
+    },
+    request,
   );
 }
 
@@ -264,49 +562,32 @@ export async function getMichelinRestaurantsForCalendarNormalizedNames(
 export async function searchUnvisitedMichelinRestaurantsByName(
   query: string,
   limit: number = MAX_MICHELIN_NAME_SEARCH_RESULTS,
+  signal?: AbortSignal,
 ): Promise<MichelinRestaurantRecord[]> {
   const normalizedQuery = query.trim();
   if (normalizedQuery.length === 0) {
     return [];
   }
-  if (!Number.isSafeInteger(limit) || limit <= 0 || limit > MAX_MICHELIN_NAME_SEARCH_RESULTS) {
-    throw new RangeError(`Michelin search limit must be an integer between 1 and ${MAX_MICHELIN_NAME_SEARCH_RESULTS}`);
+  assertMichelinNameSearchLimit(limit);
+  assertMichelinNameSearchNotAborted(signal);
+
+  const normalizedSearchText = normalizeMichelinNameSearchQuery(normalizedQuery);
+
+  if (isNonAsciiMichelinNameSearchQuery(normalizedSearchText)) {
+    return runStableMichelinNameSearch({
+      signal,
+      readDatasetVersion: getImportedMichelinDatasetVersion,
+      loadIndex: async () => createMichelinUnicodeNameIndex(await getActiveMichelinUnicodeNameRows()),
+      selectMatchingIds: (index) => selectSortedMichelinUnicodeMatchIds(index, normalizedSearchText),
+      hydrateMatchingIds: (ids) => hydrateUnvisitedMichelinNameSearchIds(ids, limit),
+    });
   }
 
   const database = await getDatabase();
-  const normalizedSearchText = normalizedQuery.toLowerCase();
-
-  // SQLite's built-in NOCASE collation only folds ASCII. Preserve the prior
-  // Unicode-aware JS search semantics for explicit non-ASCII queries without
-  // paying the full-guide bridge cost during app startup or ordinary searches.
-  if (/[^\u0000-\u007f]/.test(normalizedSearchText)) {
-    const candidates = await database.getAllAsync<MichelinRestaurantRecord>(
-      `SELECT m.*
-       FROM michelin_restaurants m
-       WHERE (
-         NOT EXISTS (
-           SELECT 1 FROM app_metadata WHERE key = ?
-         ) OR m.datasetVersion = (
-           SELECT value FROM app_metadata WHERE key = ?
-         )
-       )
-         AND NOT EXISTS (
-           SELECT 1
-           FROM visits v
-           WHERE v.restaurantId = m.id AND v.status = 'confirmed'
-         )`,
-      [MICHELIN_DATASET_VERSION_KEY, MICHELIN_DATASET_VERSION_KEY],
-    );
-
-    return candidates
-      .filter((restaurant) => restaurant.name.toLowerCase().includes(normalizedSearchText))
-      .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
-      .slice(0, limit);
-  }
-
+  assertMichelinNameSearchNotAborted(signal);
   const escapedPattern = `%${escapeLikePattern(normalizedQuery)}%`;
 
-  return database.getAllAsync<MichelinRestaurantRecord>(
+  const result = await database.getAllAsync<MichelinRestaurantRecord>(
     `SELECT m.*
      FROM michelin_restaurants m
      WHERE (
@@ -326,6 +607,34 @@ export async function searchUnvisitedMichelinRestaurantsByName(
      LIMIT ?`,
     [MICHELIN_DATASET_VERSION_KEY, MICHELIN_DATASET_VERSION_KEY, escapedPattern, limit],
   );
+  assertMichelinNameSearchNotAborted(signal);
+  return result;
+}
+
+export async function getActiveMichelinUnicodeNameRows(): Promise<MichelinUnicodeNameRow[]> {
+  const database = await getDatabase();
+  return database.getAllAsync<MichelinUnicodeNameRow>(ACTIVE_MICHELIN_UNICODE_NAME_ROWS_SQL, [
+    MICHELIN_DATASET_VERSION_KEY,
+    MICHELIN_DATASET_VERSION_KEY,
+  ]);
+}
+
+export async function hydrateUnvisitedMichelinNameSearchIds(
+  sortedMatchingIds: readonly string[],
+  limit: number = MAX_MICHELIN_NAME_SEARCH_RESULTS,
+): Promise<MichelinRestaurantRecord[]> {
+  assertMichelinNameSearchLimit(limit);
+  if (sortedMatchingIds.length === 0) {
+    return [];
+  }
+
+  const database = await getDatabase();
+  return database.getAllAsync<MichelinRestaurantRecord>(HYDRATE_UNVISITED_MICHELIN_NAME_SEARCH_SQL, [
+    JSON.stringify(sortedMatchingIds),
+    MICHELIN_DATASET_VERSION_KEY,
+    MICHELIN_DATASET_VERSION_KEY,
+    limit,
+  ]);
 }
 
 export async function getMichelinRestaurantById(id: string): Promise<MichelinRestaurantRecord | null> {

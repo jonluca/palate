@@ -1,38 +1,33 @@
 import type * as SQLite from "expo-sqlite";
 import { MichelinLocationIndex } from "../michelin-location-index";
-import type { MichelinRestaurantRecord } from "./types";
+import {
+  loadActiveMichelinSuggestionLocations,
+  type MichelinSuggestionLocation,
+} from "./michelin-suggestion-index-core";
 
-/** Maximum distance for the primary Michelin suggestion. */
-export const MICHELIN_PRIMARY_MATCH_RADIUS_METERS = 100;
+export {
+  MICHELIN_PRIMARY_MATCH_RADIUS_METERS,
+  MICHELIN_SUGGESTION_LIMIT,
+  MICHELIN_SUGGESTION_RADIUS_METERS,
+  type MichelinSuggestionLocation,
+} from "./michelin-suggestion-index-core";
 
-/** Maximum distance for the list of nearby Michelin suggestions. */
-export const MICHELIN_SUGGESTION_RADIUS_METERS = 200;
-
-/** Maximum number of Michelin suggestions stored for one visit. */
-export const MICHELIN_SUGGESTION_LIMIT = 5;
-
-let restaurantLocationIndex: MichelinLocationIndex<MichelinRestaurantRecord> | null = null;
+let restaurantLocationIndex: MichelinLocationIndex<MichelinSuggestionLocation> | null = null;
 let isRestaurantLocationIndexReady = false;
 let restaurantLocationIndexGeneration = 0;
 let activeBuild:
   | {
       generation: number;
-      promise: Promise<MichelinLocationIndex<MichelinRestaurantRecord> | null>;
+      promise: Promise<MichelinLocationIndex<MichelinSuggestionLocation> | null>;
     }
   | undefined;
 
 async function createRestaurantLocationIndex(
   database: SQLite.SQLiteDatabase,
   debugTiming: boolean,
-): Promise<MichelinLocationIndex<MichelinRestaurantRecord> | null> {
+): Promise<MichelinLocationIndex<MichelinSuggestionLocation> | null> {
   const startedAt = debugTiming ? performance.now() : 0;
-  const restaurants = await database.getAllAsync<MichelinRestaurantRecord>(
-    `SELECT m.*
-     FROM michelin_restaurants m
-     JOIN app_metadata metadata
-       ON metadata.key = 'michelin_dataset_version'
-      AND m.datasetVersion = metadata.value`,
-  );
+  const restaurants = await loadActiveMichelinSuggestionLocations(database);
   const index = restaurants.length > 0 ? new MichelinLocationIndex(restaurants) : null;
 
   if (debugTiming) {
@@ -51,7 +46,7 @@ async function createRestaurantLocationIndex(
 export async function ensureRestaurantLocationIndex(
   database: SQLite.SQLiteDatabase,
   debugTiming: boolean,
-): Promise<MichelinLocationIndex<MichelinRestaurantRecord> | null> {
+): Promise<MichelinLocationIndex<MichelinSuggestionLocation> | null> {
   while (true) {
     if (isRestaurantLocationIndexReady) {
       return restaurantLocationIndex;
