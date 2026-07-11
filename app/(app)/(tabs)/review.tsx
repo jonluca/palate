@@ -14,7 +14,7 @@ import {
 } from "@/hooks/queries";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, RefreshControl, Alert, Pressable, ActivityIndicator } from "react-native";
+import { View, RefreshControl, Alert, Pressable } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
@@ -143,12 +143,16 @@ export default function ReviewScreen() {
   const reviewListRef = useRef<FlashListRef<ReviewListItem>>(null);
 
   // Data queries
-  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = usePendingReviewPages({
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage, isPlaceholderData } = usePendingReviewPages({
     food: foodFilter,
     restaurantMatches: restaurantMatchesFilter,
   });
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
   const manifest = data?.pages[0]?.manifest ?? null;
+  const displayedFoodFilter = isPlaceholderData ? (manifest?.filters.food ?? foodFilter) : foodFilter;
+  const displayedRestaurantMatchesFilter = isPlaceholderData
+    ? (manifest?.filters.restaurantMatches ?? restaurantMatchesFilter)
+    : restaurantMatchesFilter;
   const pendingVisits = useMemo(() => data?.pages.flatMap((page) => page.visits) ?? [], [data?.pages]);
   const exactConfirmations = useMemo(() => manifest?.exactConfirmations ?? [], [manifest?.exactConfirmations]);
   const exactMatches = useMemo(
@@ -251,7 +255,7 @@ export default function ReviewScreen() {
     !isLoading &&
     (unanalyzedPhotoCount ?? 0) > 0 &&
     (isAllCaughtUp ||
-      (foodFilter === "on" &&
+      (displayedFoodFilter === "on" &&
         (manifest?.summary.reviewableCount ?? 0) > 0 &&
         manifest?.summary.reviewableFoodCount === 0));
 
@@ -320,10 +324,20 @@ export default function ReviewScreen() {
   }, [exactConfirmations, batchConfirmMutation, showToast]);
 
   const handleEndReached = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) {
+    if (!isPlaceholderData && hasNextPage && !isFetchingNextPage) {
       void fetchNextPage();
     }
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, isPlaceholderData]);
+
+  const handleFoodFilterToggle = useCallback(() => {
+    reviewListRef.current?.scrollToTop({ animated: false });
+    setFoodFilter(foodFilter === "on" ? "off" : "on");
+  }, [foodFilter, setFoodFilter]);
+
+  const handleRestaurantMatchesFilterToggle = useCallback(() => {
+    reviewListRef.current?.scrollToTop({ animated: false });
+    setRestaurantMatchesFilter(restaurantMatchesFilter === "on" ? "off" : "on");
+  }, [restaurantMatchesFilter, setRestaurantMatchesFilter]);
 
   // Render functions
   const renderReviewItem = useCallback(({ item }: { item: ReviewListItem; index: number }) => {
@@ -386,15 +400,11 @@ export default function ReviewScreen() {
             {!filtersCollapsed && (
               <Animated.View layout={LinearTransition.duration(200)} className={"gap-2.5 pt-2.5"}>
                 <View className={"flex-row gap-2 flex-wrap"}>
-                  <ToggleChip
-                    label={"Food"}
-                    value={foodFilter === "on"}
-                    onToggle={() => setFoodFilter(foodFilter === "on" ? "off" : "on")}
-                  />
+                  <ToggleChip label={"Food"} value={displayedFoodFilter === "on"} onToggle={handleFoodFilterToggle} />
                   <ToggleChip
                     label={"Restaurant Match"}
-                    value={restaurantMatchesFilter === "on"}
-                    onToggle={() => setRestaurantMatchesFilter(restaurantMatchesFilter === "on" ? "off" : "on")}
+                    value={displayedRestaurantMatchesFilter === "on"}
+                    onToggle={handleRestaurantMatchesFilterToggle}
                   />
                 </View>
               </Animated.View>
@@ -411,10 +421,10 @@ export default function ReviewScreen() {
       manifest?.summary.reviewableCount,
       filtersCollapsed,
       setFiltersCollapsed,
-      foodFilter,
-      setFoodFilter,
-      restaurantMatchesFilter,
-      setRestaurantMatchesFilter,
+      displayedFoodFilter,
+      handleFoodFilterToggle,
+      displayedRestaurantMatchesFilter,
+      handleRestaurantMatchesFilterToggle,
       ToggleChip,
     ],
   );
@@ -433,14 +443,11 @@ export default function ReviewScreen() {
     [refreshing, onRefresh],
   );
 
-  const reviewListKey = `${foodFilter}-${restaurantMatchesFilter}`;
-
   return (
     <ScreenLayout scrollable={false} className={"p-0"} style={{ paddingTop: 0, paddingBottom: 0 }}>
       <View style={{ flex: 1, paddingTop: insets.top }}>
         {/* FlashList must own these absolute-positioned cells; animating them leaves gaps while they are recycled. */}
         <FlashList
-          key={reviewListKey}
           ref={reviewListRef}
           data={mergedReviewItems}
           renderItem={renderReviewItem}
@@ -448,19 +455,12 @@ export default function ReviewScreen() {
           getItemType={getReviewItemType}
           maintainVisibleContentPosition={reviewMaintainVisibleContentPosition}
           onEndReached={handleEndReached}
-          onEndReachedThreshold={0.6}
+          onEndReachedThreshold={1}
           refreshControl={refreshControl}
           refreshing={refreshing}
           contentContainerStyle={listContentStyle}
           ListHeaderComponent={ReviewListHeader}
           ListHeaderComponentStyle={{ marginTop: 0, paddingTop: 0, marginBottom: 12 }}
-          ListFooterComponent={
-            isFetchingNextPage ? (
-              <View className={"items-center py-6"}>
-                <ActivityIndicator color={"#8E8E93"} />
-              </View>
-            ) : null
-          }
           ListEmptyComponent={
             isLoading ? (
               <LoadingState />

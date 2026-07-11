@@ -1,6 +1,6 @@
-import type { QueryClient, QueryKey } from "@tanstack/query-core";
+import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/query-core";
 
-type QueryInvalidator = Pick<QueryClient, "invalidateQueries" | "resetQueries">;
+type QueryInvalidator = Pick<QueryClient, "cancelQueries" | "invalidateQueries" | "setQueriesData">;
 
 export const WRAPPED_QUERY_KEY = ["wrapped"] as const;
 export const VISIT_LIST_PAGE_QUERY_ROOT = ["visits", "pages"] as const;
@@ -11,17 +11,40 @@ export function isVisitListPageQueryKey(queryKey: QueryKey): boolean {
 }
 
 /**
- * Drop every loaded continuation page before refreshing. TanStack otherwise
- * refetches all pages of an invalidated infinite query in sequence.
+ * Retain one populated page for every filter while dropping continuations that
+ * TanStack would otherwise refetch serially on the next navigation.
  */
-export function resetVisitListPageQueries(queryClient: QueryInvalidator): Promise<void> {
-  return queryClient.resetQueries({ queryKey: VISIT_LIST_PAGE_QUERY_ROOT });
+function retainFirstVisitListPage(queryClient: QueryInvalidator): void {
+  queryClient.setQueriesData<InfiniteData<unknown, unknown>>({ queryKey: VISIT_LIST_PAGE_QUERY_ROOT }, (current) =>
+    current && current.pages.length > 1
+      ? {
+          ...current,
+          pages: current.pages.slice(0, 1),
+          pageParams: current.pageParams.slice(0, 1),
+        }
+      : current,
+  );
 }
 
 /**
- * Refresh the whole query cache without retaining every loaded visit-list page.
- * Inactive page queries are cleared, while an active page query refetches only
- * its initial page before the remaining non-page queries are invalidated.
+ * Cancel any continuation, preserve the first visible page, and reconcile only
+ * that page for active screens. Inactive filters remain warm and stale until
+ * they are opened again.
+ */
+export async function invalidateVisitListPageQueries(queryClient: QueryInvalidator): Promise<void> {
+  await queryClient.cancelQueries({ queryKey: VISIT_LIST_PAGE_QUERY_ROOT });
+  retainFirstVisitListPage(queryClient);
+  await queryClient.invalidateQueries({ queryKey: VISIT_LIST_PAGE_QUERY_ROOT });
+}
+
+export function resetVisitListPageQueries(queryClient: QueryInvalidator): Promise<void> {
+  return invalidateVisitListPageQueries(queryClient);
+}
+
+/**
+ * Refresh the whole query cache without refetching every loaded active page.
+ * Every page query stays populated with its first page, while an active query
+ * refetches only that page before the remaining non-page queries are invalidated.
  */
 export async function refreshAllQueriesWithVisitListPageReset(queryClient: QueryInvalidator): Promise<void> {
   await resetVisitListPageQueries(queryClient);
@@ -42,7 +65,7 @@ function invalidateNonPagedVisitQueries(queryClient: QueryInvalidator): void {
  * cannot. Wrapped queries deliberately stay fresh forever between mutations.
  */
 export function invalidateVisitStatusQueries(queryClient: QueryInvalidator): void {
-  void resetVisitListPageQueries(queryClient);
+  void invalidateVisitListPageQueries(queryClient);
   invalidateNonPagedVisitQueries(queryClient);
   void queryClient.invalidateQueries({ queryKey: ["confirmedRestaurants"] });
   void queryClient.invalidateQueries({ queryKey: ["stats"] });

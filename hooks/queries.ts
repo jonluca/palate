@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useQuery,
   useMutation,
@@ -122,9 +123,9 @@ import {
   type PendingReviewInfiniteData,
 } from "@/utils/review-query-policy";
 import {
+  invalidateVisitListPageQueries,
   invalidateVisitStatusQueries,
   invalidateWrappedStatsQueries,
-  resetVisitListPageQueries,
   VISIT_LIST_PAGE_QUERY_ROOT,
   VISIT_LIST_QUERY_POLICY,
 } from "@/utils/query-cache-policy";
@@ -303,7 +304,7 @@ async function settleOptimisticPendingReviewMutation(
 
 async function initializeMichelinDataForQuery(queryClient: QueryClient): Promise<void> {
   await ensureMichelinDataInitialized(queryClient, initializeMichelinData, async () => {
-    await Promise.all([invalidatePendingReviewQuery(queryClient), resetVisitListPageQueries(queryClient)]);
+    await Promise.all([invalidatePendingReviewQuery(queryClient), invalidateVisitListPageQueries(queryClient)]);
   });
 }
 
@@ -508,7 +509,7 @@ export function useVisits(filter: FilterType, options?: { readonly enabled?: boo
   return useInfiniteQuery({
     queryKey: queryKeys.visitPages(filter),
     initialPageParam: null as VisitListCursor | null,
-    queryFn: async ({ pageParam, signal }): Promise<VisitListPage> => {
+    queryFn: async ({ pageParam, signal }): Promise<VisitListPage & { readonly filter: FilterType }> => {
       if (signal.aborted) {
         throw signal.reason ?? new Error("Visit-list page request was cancelled");
       }
@@ -516,10 +517,11 @@ export function useVisits(filter: FilterType, options?: { readonly enabled?: boo
       if (signal.aborted) {
         throw signal.reason ?? new Error("Visit-list page request was cancelled");
       }
-      return page;
+      return { ...page, filter };
     },
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     ...VISIT_LIST_QUERY_POLICY,
+    placeholderData: keepPreviousData,
     enabled: options?.enabled,
   });
 }
@@ -702,6 +704,7 @@ export function usePendingReviewPages(filters: PendingVisitReviewFilters) {
     getNextPageParam: (_lastPage: PendingVisitReviewProgressivePage, pages: PendingVisitReviewProgressivePage[]) =>
       getNextPendingVisitReviewPageRequest(pages),
     ...REVIEW_QUERY_MOUNT_POLICY,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -731,21 +734,21 @@ export function useMichelinMapViewport(request: MichelinMapViewportRequest, enab
     queryKey: queryKeys.michelinMapViewport(request),
     queryFn: async () => {
       await initializeMichelinDataForQuery(queryClient);
-      return getMichelinMapViewport(request);
+      const selection = await getMichelinMapViewport(request);
+      return {
+        ...selection,
+        resolvedFilters: {
+          visitStatus: request.visitStatusFilter,
+          award: request.awardFilter,
+        },
+      };
     },
     enabled: enabled && request.width > 0 && request.height > 0,
     staleTime: Infinity,
-    gcTime: 1_000,
-    placeholderData: (previous, previousQuery) => {
-      const previousKey = previousQuery?.queryKey;
-      return Array.isArray(previousKey) &&
-        previousKey[1] === request.minimumAwardYear &&
-        previousKey[2] === request.visitStatusFilter &&
-        previousKey[3] === request.awardFilter &&
-        previousKey[4] === (request.maximumResults ?? 500)
-        ? previous
-        : undefined;
-    },
+    // Keep recent viewports warm across quick back navigation and preserve the
+    // currently displayed snapshot while the next camera/filter query settles.
+    gcTime: 30_000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -793,6 +796,7 @@ export function useMichelinRestaurantSearch(query: string, enabled: boolean = tr
     },
     enabled: enabled && normalizedQuery.length > 0,
     staleTime: Infinity,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -1823,7 +1827,7 @@ export function useCreateManualVisit() {
       return { visitId, restaurantId };
     },
     onSuccess: ({ restaurantId }) => {
-      void resetVisitListPageQueries(queryClient);
+      void invalidateVisitListPageQueries(queryClient);
       // Invalidate restaurant visits to show the new visit
       queryClient.invalidateQueries({ queryKey: queryKeys.restaurantVisits(restaurantId) });
       // Invalidate confirmed restaurants list (visit count changed)
@@ -1948,7 +1952,7 @@ export function useUpdateRestaurant(restaurantId: string | undefined) {
       }
     },
     onSettled: () => {
-      void resetVisitListPageQueries(queryClient);
+      void invalidateVisitListPageQueries(queryClient);
       // Refetch to ensure consistency with server
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
       if (restaurantId) {
@@ -2136,7 +2140,7 @@ export function useCreateCalendarEventsForVisits() {
       // Invalidate queries to refresh the lists
       queryClient.invalidateQueries({ queryKey: queryKeys.visitsWithoutCalendarEvents });
       queryClient.invalidateQueries({ queryKey: queryKeys.exportedCalendarEvents });
-      void resetVisitListPageQueries(queryClient);
+      void invalidateVisitListPageQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
     },
   });
@@ -2179,7 +2183,7 @@ export function useDeleteExportedCalendarEvents() {
       // Invalidate queries to refresh the lists
       queryClient.invalidateQueries({ queryKey: queryKeys.exportedCalendarEvents });
       queryClient.invalidateQueries({ queryKey: queryKeys.visitsWithoutCalendarEvents });
-      void resetVisitListPageQueries(queryClient);
+      void invalidateVisitListPageQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
     },
   });
@@ -2317,7 +2321,7 @@ export function useReclassifyPhotos(onProgress?: (progress: ReclassifyProgress) 
     },
     onSuccess: () => {
       // Invalidate all relevant queries after reclassification
-      void resetVisitListPageQueries(queryClient);
+      void invalidateVisitListPageQueries(queryClient);
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
       queryClient.invalidateQueries({ queryKey: queryKeys.photosWithLabelsCount });
@@ -2338,7 +2342,7 @@ export function useRecomputeSuggestedRestaurants() {
     },
     onSettled: () => {
       // Invalidate visit-related queries to reflect new suggestions
-      void resetVisitListPageQueries(queryClient);
+      void invalidateVisitListPageQueries(queryClient);
       invalidateVisitQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.stats });
     },
@@ -2373,7 +2377,7 @@ export function useAddPhotosToVisit(visitId: string | undefined) {
       return movePhotosToVisit(existingPhotoIds, visitId);
     },
     onSettled: (_result, _error, _vars) => {
-      void resetVisitListPageQueries(queryClient);
+      void invalidateVisitListPageQueries(queryClient);
       // Invalidate visit detail query for this visit
       if (visitId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId) });
@@ -2401,7 +2405,7 @@ export function useRemovePhotosFromVisit(visitId: string | undefined) {
       return removePhotosFromVisit(photoIds, visitId);
     },
     onSettled: (_result, _error, _vars) => {
-      void resetVisitListPageQueries(queryClient);
+      void invalidateVisitListPageQueries(queryClient);
       // Invalidate visit detail query for this visit
       if (visitId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId) });

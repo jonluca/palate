@@ -2,7 +2,7 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
@@ -932,6 +932,17 @@ try {
   snapshotWriter.close();
   rmSync(snapshotDirectory, { recursive: true, force: true });
 }
+
+const hooksSource = readFileSync(new URL("../hooks/queries.ts", import.meta.url), "utf8");
+const reviewScreenSource = readFileSync(new URL("../app/(app)/(tabs)/review.tsx", import.meta.url), "utf8");
+const reviewHookSource = hooksSource.slice(
+  hooksSource.indexOf("export function usePendingReviewPages"),
+  hooksSource.indexOf("export function useMichelinRestaurants"),
+);
+assert.match(reviewHookSource, /placeholderData:\s*keepPreviousData/);
+assert.match(reviewScreenSource, /displayedFoodFilter = isPlaceholderData \? \(manifest\?\.filters\.food/);
+assert.match(reviewScreenSource, /!isPlaceholderData && hasNextPage/);
+assert.doesNotMatch(reviewScreenSource, /key=\{reviewListKey\}|ListFooterComponent/);
 
 console.log(
   "Pending Review paging tests passed: deterministic manifests, global exact/filter counts, progressive cache mutation rollback, one-bind ordered pages, full raw-field parity, boundaries, randomized fixtures, failure isolation, and WAL snapshot consistency.",

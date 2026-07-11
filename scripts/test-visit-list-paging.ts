@@ -15,6 +15,7 @@ import {
   type VisitListPageRow,
 } from "../utils/db/visit-list-paging-core.ts";
 import {
+  invalidateVisitListPageQueries,
   refreshAllQueriesWithVisitListPageReset,
   resetVisitListPageQueries,
   VISIT_LIST_PAGE_QUERY_ROOT,
@@ -438,15 +439,20 @@ async function assertInactiveFocusResetContract(): Promise<void> {
     observer.setOptions({ ...options, enabled: false });
     const callsBeforeReset = calls.length;
     await resetVisitListPageQueries(queryClient);
-    assert.equal(queryClient.getQueryData(queryKey), undefined, "inactive reset must clear every retained page");
+    const retained = queryClient.getQueryData<InfiniteData<{ index: number }, number>>(queryKey);
+    assert.deepEqual(retained?.pages, [{ index: 0 }], "inactive refresh must retain one populated first page");
+    assert.deepEqual(retained?.pageParams, [0]);
+    assert.equal(queryClient.getQueryState(queryKey)?.isInvalidated, true);
     assert.equal(calls.length, callsBeforeReset, "inactive reset must not refetch while the screen is unfocused");
 
     observer.setOptions({ ...options, enabled: true });
+    assert.equal(observer.getCurrentResult().isLoading, false, "refocus must keep warm rows visible");
+    assert.equal(observer.getCurrentResult().data?.pages.length, 1);
     await waitForCondition(
       () => observer.getCurrentResult().data?.pages.length === 1 && !observer.getCurrentResult().isFetching,
-      "refocused visit-list query did not load one initial page",
+      "refocused visit-list query did not reconcile its retained first page",
     );
-    assert.equal(calls.length, callsBeforeReset + 1, "refocus after reset must fetch exactly one page");
+    assert.equal(calls.length, callsBeforeReset + 1, "refocus must refresh only the retained first page");
     assert.deepEqual(observer.getCurrentResult().data?.pageParams, [0]);
   } finally {
     unsubscribe();
@@ -489,7 +495,12 @@ async function assertBroadRefreshContract(): Promise<void> {
     assert.deepEqual(observer.getCurrentResult().data?.pages, [{ index: 0 }]);
     assert.deepEqual(observer.getCurrentResult().data?.pageParams, [0]);
     assert.equal(calls.length, callsBeforeRefresh + 1, "broad refresh must refetch only the active initial page");
-    assert.equal(queryClient.getQueryData(inactivePageKey), undefined, "broad refresh must clear inactive page caches");
+    assert.deepEqual(
+      queryClient.getQueryData<InfiniteData<{ index: number }, number>>(inactivePageKey)?.pages,
+      [{ index: 0 }],
+      "broad refresh must keep one inactive page warm without retaining continuation work",
+    );
+    assert.equal(queryClient.getQueryState(inactivePageKey)?.isInvalidated, true);
     assert.deepEqual(queryClient.getQueryData(unrelatedKey), { marker: true });
     assert.equal(queryClient.getQueryState(unrelatedKey)?.isInvalidated, true, "non-page queries must be invalidated");
   } finally {
@@ -512,11 +523,16 @@ async function assertMichelinInitializationInvalidationContract(): Promise<void>
       async () => ({ loaded: 28_785, skipped: false }),
       async () => {
         invalidationCalls += 1;
-        await resetVisitListPageQueries(queryClient);
+        await invalidateVisitListPageQueries(queryClient);
       },
     );
     assert.equal(invalidationCalls, 1, "a guide import must run its cache invalidation callback");
-    assert.equal(queryClient.getQueryData(pageKey), undefined, "a guide import must clear stale suggested names");
+    assert.deepEqual(
+      queryClient.getQueryData<InfiniteData<{ index: number }, number>>(pageKey)?.pages,
+      [{ index: 0 }],
+      "a guide import must keep one stale page visible without retaining continuation work",
+    );
+    assert.equal(queryClient.getQueryState(pageKey)?.isInvalidated, true);
   } finally {
     queryClient.clear();
   }
@@ -531,7 +547,7 @@ async function assertMichelinInitializationInvalidationContract(): Promise<void>
         skippedInvalidationCalls += 1;
       },
     );
-    assert.equal(skippedInvalidationCalls, 0, "an unchanged guide must not reset visit pages");
+    assert.equal(skippedInvalidationCalls, 0, "an unchanged guide must not invalidate visit pages");
   } finally {
     skippedClient.clear();
   }
@@ -600,13 +616,22 @@ function assertProductionWiring(): void {
   assert.match(hooks, /useInfiniteQuery\(\{[\s\S]*queryKeys\.visitPages\(filter\)/);
   assert.match(hooks, /getVisitListPage\(filter === "all" \? undefined : filter, pageParam\)/);
   assert.match(hooks, /\.\.\.VISIT_LIST_QUERY_POLICY/);
+  const visitsHook = hooks.slice(
+    hooks.indexOf("export function useVisits"),
+    hooks.indexOf("export type { VisitListItem }"),
+  );
+  assert.match(visitsHook, /placeholderData:\s*keepPreviousData/);
+  assert.match(visitsHook, /return \{ \.\.\.page, filter \}/, "placeholder pages must identify their visible filter");
   assert.match(hooks, /function invalidateFoodDetectionQueries[\s\S]*invalidateVisitStatusQueries\(queryClient\)/);
   const michelinInitialization = hooks.match(/async function initializeMichelinDataForQuery[\s\S]*?\n}/)?.[0];
   assert(michelinInitialization, "Michelin query initialization helper must remain wired");
   assert.match(michelinInitialization, /invalidatePendingReviewQuery\(queryClient\)/);
-  assert.match(michelinInitialization, /resetVisitListPageQueries\(queryClient\)/);
+  assert.match(michelinInitialization, /invalidateVisitListPageQueries\(queryClient\)/);
   assert.match(visitsScreen, /data\?\.pages\.flatMap/);
-  assert.match(visitsScreen, /key=\{filter\}/);
+  assert.match(visitsScreen, /const displayedFilter = data\?\.pages\[0\]\?\.filter \?\? filter/);
+  assert.match(visitsScreen, /!isPlaceholderData && hasNextPage/);
+  assert.doesNotMatch(visitsScreen, /key=\{filter\}/);
+  assert.doesNotMatch(visitsScreen, /ListFooterComponent/);
   assert.match(visitsScreen, /onEndReached/);
   assert.match(visitsScreen, /stats\.foodProbableVisits/);
   for (const [label, source] of [

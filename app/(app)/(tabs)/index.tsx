@@ -16,10 +16,7 @@ import { IconSymbol } from "@/components/icon-symbol";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { cn } from "@/utils/cn";
-import {
-  MICHELIN_NAME_SEARCH_DEBOUNCE_MS,
-  normalizeMichelinNameSearchQuery,
-} from "@/utils/db/michelin-name-search-core";
+import { normalizeMichelinNameSearchQuery } from "@/utils/db/michelin-name-search-core";
 import { refreshAllQueriesWithVisitListPageReset } from "@/utils/query-cache-policy";
 
 type SortOption = "recent" | "confirmed" | "name" | "visits";
@@ -273,24 +270,9 @@ export default function RestaurantsScreen() {
   const { data: restaurants = [], isLoading } = useConfirmedRestaurants();
   const normalizedMichelinSearchQuery = useMemo(() => normalizeMichelinNameSearchQuery(searchQuery), [searchQuery]);
   const shouldSearchMichelin = starFilter === "all" && normalizedMichelinSearchQuery.length > 0;
-  const [debouncedMichelinSearchQuery, setDebouncedMichelinSearchQuery] = useState("");
 
-  useEffect(() => {
-    const timeoutId = setTimeout(
-      () => {
-        setDebouncedMichelinSearchQuery(shouldSearchMichelin ? normalizedMichelinSearchQuery : "");
-      },
-      shouldSearchMichelin ? MICHELIN_NAME_SEARCH_DEBOUNCE_MS : 0,
-    );
-    return () => clearTimeout(timeoutId);
-  }, [normalizedMichelinSearchQuery, shouldSearchMichelin]);
-
-  const isMichelinSearchDebouncing =
-    shouldSearchMichelin && debouncedMichelinSearchQuery !== normalizedMichelinSearchQuery;
-  const { data: fetchedMichelinRestaurants = EMPTY_MICHELIN_SEARCH_RESULTS, isFetching: isMichelinSearchFetching } =
-    useMichelinRestaurantSearch(normalizedMichelinSearchQuery, shouldSearchMichelin && !isMichelinSearchDebouncing);
-  const michelinRestaurants = isMichelinSearchDebouncing ? EMPTY_MICHELIN_SEARCH_RESULTS : fetchedMichelinRestaurants;
-  const isMichelinSearchLoading = isMichelinSearchDebouncing || isMichelinSearchFetching;
+  const { data: michelinRestaurants = EMPTY_MICHELIN_SEARCH_RESULTS, isFetching: isMichelinSearchFetching } =
+    useMichelinRestaurantSearch(normalizedMichelinSearchQuery, shouldSearchMichelin);
 
   const scrollToTop = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -431,8 +413,14 @@ export default function RestaurantsScreen() {
   }, []);
 
   const ListEmpty = useCallback(() => {
-    if (isLoading || isMichelinSearchLoading) {
+    if (isLoading) {
       return <LoadingState />;
+    }
+
+    // Keep the current surface stable without flashing either a skeleton or a
+    // false no-results message while the first indexed lookup is still pending.
+    if (shouldSearchMichelin && isMichelinSearchFetching) {
+      return null;
     }
 
     // If we have restaurants but no results at all (including Michelin)
@@ -465,7 +453,15 @@ export default function RestaurantsScreen() {
     }
 
     return <NoRestaurantsEmpty onPress={() => router.push("/review")} />;
-  }, [isLoading, isMichelinSearchLoading, restaurants.length, listItems.length, searchQuery, starFilter]);
+  }, [
+    isLoading,
+    shouldSearchMichelin,
+    isMichelinSearchFetching,
+    restaurants.length,
+    listItems.length,
+    searchQuery,
+    starFilter,
+  ]);
 
   const ItemSeparator = useCallback(() => <View style={{ height: 16 }} />, []);
 

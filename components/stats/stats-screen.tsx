@@ -8,7 +8,6 @@ import {
   Alert,
   ActivityIndicator,
   useWindowDimensions,
-  type ViewToken,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { AppleMaps, GoogleMaps } from "expo-maps";
@@ -20,32 +19,20 @@ import { ThemedText } from "@/components/themed-text";
 import { NativeStatsButton } from "@/components/stats/native-stats-button";
 import {
   useMichelinStatsBucketRestaurants,
+  queryKeys,
   useWrappedStats,
   type MichelinStatsBucket,
   type WrappedStats,
 } from "@/hooks/queries";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useIsFocused } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as Sharing from "expo-sharing";
 import { File, Paths } from "expo-file-system";
 import { makeImageFromView, ImageFormat } from "@shopify/react-native-skia";
-import { FlashList } from "@shopify/flash-list";
 import { logWrappedViewed } from "@/services/analytics";
-import {
-  VIRTUALIZED_WRAPPED_STATS_RENDER_STRATEGY,
-  buildWrappedStatsSectionPlan,
-  resolveWrappedStatsRenderStrategy,
-  retainWrappedStatsMapVisibility,
-  wrappedStatsVisibilityScopeKey,
-  type WrappedStatsSectionDescriptor,
-} from "@/utils/wrapped-stats-render-core";
-
-// Expo statically replaces EXPO_PUBLIC_* references while producing the JavaScript bundle.
-// The invalid/absent path deliberately retains the current eager screen until a signed A/B wins.
-const WRAPPED_STATS_RENDER_STRATEGY = resolveWrappedStatsRenderStrategy(
-  process.env.EXPO_PUBLIC_PALATE_STATS_RENDER_STRATEGY,
-);
+import { buildWrappedStatsSectionPlan, type WrappedStatsSectionDescriptor } from "@/utils/wrapped-stats-render-core";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -1098,46 +1085,35 @@ function FunFactCard({
 function DiningMapSection({
   points,
   selectedYear,
-  nativeMapEnabled = true,
-  deferFullscreenMap = false,
 }: {
   points: WrappedStats["mapPoints"];
   selectedYear: number | null;
-  nativeMapEnabled?: boolean;
-  deferFullscreenMap?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
-  const cameraPosition = useMemo(
-    () => (nativeMapEnabled ? getMapCameraPosition(points) : null),
-    [nativeMapEnabled, points],
-  );
+  const cameraPosition = useMemo(() => getMapCameraPosition(points), [points]);
 
   const appleMarkers = useMemo<AppleMaps.Marker[]>(
     () =>
-      nativeMapEnabled
-        ? points.map((point) => ({
-            id: point.id,
-            coordinates: { latitude: point.latitude, longitude: point.longitude },
-            title: point.name,
-            tintColor: point.visits > 2 ? "#34d399" : "#f59e0b",
-            systemImage: point.visits > 2 ? "fork.knife.circle.fill" : "fork.knife",
-          }))
-        : [],
-    [nativeMapEnabled, points],
+      points.map((point) => ({
+        id: point.id,
+        coordinates: { latitude: point.latitude, longitude: point.longitude },
+        title: point.name,
+        tintColor: point.visits > 2 ? "#34d399" : "#f59e0b",
+        systemImage: point.visits > 2 ? "fork.knife.circle.fill" : "fork.knife",
+      })),
+    [points],
   );
 
   const googleMarkers = useMemo<GoogleMaps.Marker[]>(
     () =>
-      nativeMapEnabled
-        ? points.map((point) => ({
-            id: point.id,
-            coordinates: { latitude: point.latitude, longitude: point.longitude },
-            title: point.name,
-            snippet: `${point.visits.toLocaleString()} ${point.visits === 1 ? "visit" : "visits"}`,
-          }))
-        : [],
-    [nativeMapEnabled, points],
+      points.map((point) => ({
+        id: point.id,
+        coordinates: { latitude: point.latitude, longitude: point.longitude },
+        title: point.name,
+        snippet: `${point.visits.toLocaleString()} ${point.visits === 1 ? "visit" : "visits"}`,
+      })),
+    [points],
   );
 
   const openRestaurant = useCallback((restaurantId: string) => {
@@ -1161,17 +1137,6 @@ function DiningMapSection({
   }
 
   const renderMap = () => {
-    if (!nativeMapEnabled) {
-      return (
-        <View className={"flex-1 items-center justify-center px-6 bg-secondary/20"}>
-          <IconSymbol name={"map.fill"} size={22} color={"#6b7280"} />
-          <ThemedText variant={"caption2"} className={"text-muted-foreground text-center mt-2"}>
-            Map preview loads when this section is visible.
-          </ThemedText>
-        </View>
-      );
-    }
-
     if (!cameraPosition) {
       return (
         <View className={"flex-1 items-center justify-center px-6"}>
@@ -1262,41 +1227,37 @@ function DiningMapSection({
             }}
           >
             {renderMap()}
-            {nativeMapEnabled && (
-              <View className={"absolute top-2.5 right-2.5"}>
-                <NativeStatsButton
-                  label={"Expand map"}
-                  systemImage={"arrow.up.left.and.arrow.down.right"}
-                  iconOnly
-                  size={"small"}
-                  onPress={() => {
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    setIsFullscreenOpen(true);
-                  }}
-                />
-              </View>
-            )}
-          </View>
-        </View>
-      </Animated.View>
-
-      {nativeMapEnabled && (!deferFullscreenMap || isFullscreenOpen) && (
-        <Modal animationType={"slide"} visible={isFullscreenOpen} onRequestClose={() => setIsFullscreenOpen(false)}>
-          <View className={"flex-1 bg-black"}>
-            <View className={"flex-1"}>{renderMap()}</View>
-            <View style={{ position: "absolute", top: insets.top + 10, right: 12 }}>
+            <View className={"absolute top-2.5 right-2.5"}>
               <NativeStatsButton
-                label={"Done"}
+                label={"Expand map"}
+                systemImage={"arrow.up.left.and.arrow.down.right"}
+                iconOnly
                 size={"small"}
                 onPress={() => {
                   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setIsFullscreenOpen(false);
+                  setIsFullscreenOpen(true);
                 }}
               />
             </View>
           </View>
-        </Modal>
-      )}
+        </View>
+      </Animated.View>
+
+      <Modal animationType={"slide"} visible={isFullscreenOpen} onRequestClose={() => setIsFullscreenOpen(false)}>
+        <View className={"flex-1 bg-black"}>
+          <View className={"flex-1"}>{renderMap()}</View>
+          <View style={{ position: "absolute", top: insets.top + 10, right: 12 }}>
+            <NativeStatsButton
+              label={"Done"}
+              size={"small"}
+              onPress={() => {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setIsFullscreenOpen(false);
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -2171,14 +2132,10 @@ function WrappedStatsSection({
   section,
   stats,
   selectedYear,
-  nativeMapEnabled = true,
-  deferFullscreenMap = false,
 }: {
   section: WrappedStatsSectionDescriptor;
   stats: WrappedStats;
   selectedYear: number | null;
-  nativeMapEnabled?: boolean;
-  deferFullscreenMap?: boolean;
 }) {
   switch (section.kind) {
     case "michelin":
@@ -2190,14 +2147,7 @@ function WrappedStatsSection({
     case "monthly-visits":
       return <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />;
     case "dining-map":
-      return (
-        <DiningMapSection
-          points={stats.mapPoints}
-          selectedYear={selectedYear}
-          nativeMapEnabled={nativeMapEnabled}
-          deferFullscreenMap={deferFullscreenMap}
-        />
-      );
+      return <DiningMapSection points={stats.mapPoints} selectedYear={selectedYear} />;
     case "location-breakdown":
       return <LocationBreakdown locations={stats.topLocations} />;
     case "cuisine-cloud":
@@ -2318,10 +2268,6 @@ function YearSelector({
     </View>
   );
 }
-
-const WRAPPED_STATS_VIEWABILITY_CONFIG = { itemVisiblePercentThreshold: 10 } as const;
-const EMPTY_WRAPPED_STATS_SECTIONS: readonly WrappedStatsSectionDescriptor[] = [];
-const getWrappedStatsSectionType = (section: WrappedStatsSectionDescriptor) => section.kind;
 
 interface StatsScreenLayoutProps {
   readonly availableYears: readonly number[];
@@ -2447,109 +2393,26 @@ function EagerStatsScreenLayout(props: StatsScreenLayoutProps) {
   );
 }
 
-function VirtualizedStatsScreenLayout(props: StatsScreenLayoutProps) {
-  const {
-    availableYears,
-    hasData,
-    insetsBottom,
-    isLoading,
-    isStoriesOpen,
-    onCloseStories,
-    onOpenStories,
-    onSelectYear,
-    selectedYear,
-    stats,
-  } = props;
-  const [nativeMapVisible, observeNativeMapVisibility] = React.useReducer(retainWrappedStatsMapVisibility, false);
-  const sections = useMemo(
-    () => (hasData && stats ? getWrappedStatsSectionPlan(stats, selectedYear) : EMPTY_WRAPPED_STATS_SECTIONS),
-    [hasData, selectedYear, stats],
-  );
-  const renderSection = useCallback(
-    ({ item, index }: { item: WrappedStatsSectionDescriptor; index: number }) => {
-      if (!stats) {
-        return null;
-      }
-      return (
-        <View style={{ marginBottom: index + 1 < sections.length ? 24 : 0 }}>
-          <WrappedStatsSection
-            section={item}
-            stats={stats}
-            selectedYear={selectedYear}
-            nativeMapEnabled={item.kind !== "dining-map" || nativeMapVisible}
-            deferFullscreenMap={item.kind === "dining-map"}
-          />
-        </View>
-      );
-    },
-    [nativeMapVisible, sections.length, selectedYear, stats],
-  );
-  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    observeNativeMapVisibility(
-      viewableItems.some(
-        (token) =>
-          token.isViewable &&
-          typeof token.item === "object" &&
-          token.item !== null &&
-          (token.item as WrappedStatsSectionDescriptor).kind === "dining-map",
-      ),
-    );
-  }, []);
-  const listHeader = useMemo(
-    () => (
-      <StatsScreenHeader
-        availableYears={availableYears}
-        hasData={hasData}
-        onOpenStories={onOpenStories}
-        onSelectYear={onSelectYear}
-        selectedYear={selectedYear}
-      />
-    ),
-    [availableYears, hasData, onOpenStories, onSelectYear, selectedYear],
-  );
-
-  return (
-    <View className={"flex-1 bg-background"}>
-      <FlashList
-        testID={"wrapped-stats-virtualized-v1"}
-        data={sections}
-        renderItem={renderSection}
-        keyExtractor={(section) => section.key}
-        getItemType={getWrappedStatsSectionType}
-        extraData={nativeMapVisible}
-        drawDistance={200}
-        contentInsetAdjustmentBehavior={"automatic"}
-        keyboardDismissMode={"interactive"}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{
-          paddingTop: 0,
-          paddingBottom: insetsBottom + 24,
-          paddingHorizontal: 16,
-        }}
-        ListHeaderComponent={listHeader}
-        ListEmptyComponent={<StatsScreenEmptyContent isLoading={isLoading} />}
-        onViewableItemsChanged={onViewableItemsChanged}
-        viewabilityConfig={WRAPPED_STATS_VIEWABILITY_CONFIG}
-      />
-      {hasData && stats && (
-        <StatsStoriesModal visible={isStoriesOpen} onClose={onCloseStories} stats={stats} selectedYear={selectedYear} />
-      )}
-    </View>
-  );
-}
-
 export default function StatsScreen() {
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
+  const queryClient = useQueryClient();
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [isStoriesOpen, setIsStoriesOpen] = useState(false);
+  const celebratedStatsKeyRef = useRef<string | null>(null);
 
-  // Fetch all-time stats to get available years
-  const { data: allTimeStats, isLoading: isLoadingAllTime } = useWrappedStats(null, { enabled: isFocused });
+  // Native tabs mount every screen eagerly. Load the default Stats payload while
+  // this tab is still offscreen, then keep it dormant while hidden once warm.
+  const hasCachedAllTimeStats = queryClient.getQueryData(queryKeys.wrapped(null)) !== undefined;
+  const { data: allTimeStats, isLoading: isLoadingAllTime } = useWrappedStats(null, {
+    enabled: isFocused || !hasCachedAllTimeStats,
+  });
 
   // Keep the selected-year observer dormant until it represents a distinct query.
+  const hasCachedSelectedYearStats =
+    selectedYear !== null && queryClient.getQueryData(queryKeys.wrapped(selectedYear)) !== undefined;
   const { data: selectedYearStats, isLoading: isLoadingYearStats } = useWrappedStats(selectedYear, {
-    enabled: isFocused && selectedYear !== null,
+    enabled: selectedYear !== null && (isFocused || !hasCachedSelectedYearStats),
   });
 
   const stats = selectedYear === null ? allTimeStats : selectedYearStats;
@@ -2561,17 +2424,22 @@ export default function StatsScreen() {
 
   // Haptic feedback when wrapped loads
   useEffect(() => {
-    if (showConfetti) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (!isFocused || !showConfetti) {
+      return;
     }
-  }, [showConfetti]);
+    const statsKey = selectedYear === null ? "all-time" : String(selectedYear);
+    if (celebratedStatsKeyRef.current !== statsKey) {
+      celebratedStatsKeyRef.current = statsKey;
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+  }, [isFocused, selectedYear, showConfetti]);
 
   // Track wrapped view
   useEffect(() => {
-    if (hasData) {
+    if (isFocused && hasData) {
       logWrappedViewed(selectedYear ?? new Date().getFullYear());
     }
-  }, [hasData, selectedYear]);
+  }, [hasData, isFocused, selectedYear]);
 
   const openStories = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -2590,10 +2458,6 @@ export default function StatsScreen() {
     selectedYear,
     stats,
   };
-
-  if (WRAPPED_STATS_RENDER_STRATEGY === VIRTUALIZED_WRAPPED_STATS_RENDER_STRATEGY) {
-    return <VirtualizedStatsScreenLayout key={wrappedStatsVisibilityScopeKey(selectedYear)} {...layoutProps} />;
-  }
 
   return <EagerStatsScreenLayout {...layoutProps} />;
 }

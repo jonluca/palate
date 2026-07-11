@@ -2,6 +2,7 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import {
   buildMichelinMapViewportQuery,
@@ -823,6 +824,22 @@ assert.equal(validPlan.parameters.at(-1), DEFAULT_MAXIMUM_RESULTS + 32);
 assert.equal(validPlan.maximumResults, DEFAULT_MAXIMUM_RESULTS);
 assert.deepEqual(validPlan.request, finiteRequest);
 
+const hooksSource = readFileSync(new URL("../hooks/queries.ts", import.meta.url), "utf8");
+const mapScreenSource = readFileSync(new URL("../app/(app)/restaurants-map.tsx", import.meta.url), "utf8");
+const viewportHookSource = hooksSource.slice(
+  hooksSource.indexOf("export function useMichelinMapViewport"),
+  hooksSource.indexOf("export function useMichelinRestaurantSearch"),
+);
+assert.match(viewportHookSource, /gcTime:\s*30_000/);
+assert.match(viewportHookSource, /placeholderData:\s*keepPreviousData/);
+assert.match(viewportHookSource, /resolvedFilters:[\s\S]*visitStatus:[\s\S]*award:/);
+assert.match(
+  mapScreenSource,
+  /displayedVisitStatusFilter = viewportSelection\?\.resolvedFilters\.visitStatus \?\? visitStatusFilter/,
+);
+assert.match(mapScreenSource, /isViewportPending \? null : \(/);
+assert.doesNotMatch(mapScreenSource, /ActivityIndicator/);
+
 console.log(
   JSON.stringify(
     {
@@ -841,6 +858,7 @@ console.log(
         emptyResults: true,
         requestAndSourceImmutability: true,
         zeroDatabaseWrites: true,
+        transitionContinuityWiring: true,
       },
     },
     null,

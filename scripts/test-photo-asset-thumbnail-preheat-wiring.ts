@@ -8,21 +8,14 @@ const root = new URL("../", import.meta.url);
 const read = (relativePath: string) => readFileSync(new URL(relativePath, root), "utf8");
 
 const photosSection = read("components/visit/photos-section.tsx");
-assert.match(photosSection, /planPhotoAssetThumbnailPreheat/);
-assert.match(photosSection, /updatePhotoAssetThumbnailPreheat/);
-assert.match(photosSection, /endPhotoAssetThumbnailPreheat/);
-assert.match(photosSection, /transitionPhotoAssetThumbnailPreheatProducer/);
-assert.match(photosSection, /configuredPhotoRowsRef\.current !== photoRows/);
-assert.match(photosSection, /type: dataChanged \? "data-change" : "refresh"/);
-assert.match(photosSection, /type: "viewability"/);
-assert.match(photosSection, /visibleRowIndicesToPlan === null/);
-assert.match(photosSection, /if \(!plan\) \{\s*endPhotoAssetThumbnailPreheat\(preheatScopeID\);\s*return;/);
-assert.match(photosSection, /currentProducerState, event, photoRows\.length/);
-assert.match(photosSection, /const \{ width: screenWidth, scale \} = useWindowDimensions\(\)/);
-assert.match(photosSection, /scale,/);
-assert.doesNotMatch(photosSection, /PixelRatio/);
-assert.match(photosSection, /onViewableItemsChanged=\{onViewableItemsChanged\}/);
-assert.match(photosSection, /viewabilityConfig=\{PHOTO_VIEWABILITY_CONFIG\}/);
+assert.match(photosSection, /PhotoAssetThumbnail/);
+assert.doesNotMatch(photosSection, /PhotoAssetThumbnailPreheat/);
+assert.doesNotMatch(photosSection, /planPhotoAssetThumbnailPreheat/);
+assert.doesNotMatch(photosSection, /updatePhotoAssetThumbnailPreheat/);
+assert.doesNotMatch(photosSection, /endPhotoAssetThumbnailPreheat/);
+assert.doesNotMatch(photosSection, /useIsFocused/);
+assert.doesNotMatch(photosSection, /AppState/);
+assert.doesNotMatch(photosSection, /onViewableItemsChanged/);
 
 const protectedPreview = read("components/visit-card/photo-preview.tsx");
 assert.doesNotMatch(protectedPreview, /PhotoAssetThumbnailPreheat|thumbnail-preheat/i);
@@ -39,4 +32,4 @@ assert.match(nativeStore, /enqueueVisibleAssetFetchDemand\(identifiersToFetch\)/
 assert.match(nativeStore, /assetFetchScheduler\.replacePreheatDemand/);
 assert.match(nativeStore, /preheatRuntime\.resolveAssetFetch/);
 
-console.log("Photo asset thumbnail preheat production wiring tests passed.");
+console.log("Photo asset thumbnail preheat remains available natively but dormant in production UI.");

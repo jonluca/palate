@@ -105,10 +105,13 @@ export function readProductionPolicyContract(rootDirectory = ROOT_DIRECTORY): Pr
     getAllCallSites,
     getFirstCallSites,
     allTimeOnlyCallSites,
-    allTimeObserverSites: countMatches(statsScreen, /useWrappedStats\(null\s*,\s*\{\s*enabled:\s*isFocused\s*\}\)/g),
+    allTimeObserverSites: countMatches(
+      statsScreen,
+      /useWrappedStats\(null\s*,\s*\{\s*enabled:\s*isFocused\s*\|\|\s*!hasCachedAllTimeStats\s*,?\s*\}\)/g,
+    ),
     selectedYearObserverSites: countMatches(
       statsScreen,
-      /useWrappedStats\(selectedYear\s*,\s*\{\s*enabled:\s*isFocused\s*&&\s*selectedYear\s*!==\s*null\s*,?\s*\}\)/g,
+      /useWrappedStats\(selectedYear\s*,\s*\{\s*enabled:\s*selectedYear\s*!==\s*null\s*&&\s*\(isFocused\s*\|\|\s*!hasCachedSelectedYearStats\)\s*,?\s*\}\)/g,
     ),
     visitStatusInvalidatorDefinitions: countMatches(
       queryCachePolicy,

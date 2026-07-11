@@ -1,31 +1,10 @@
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import {
-  AppState,
-  View,
-  Pressable,
-  useWindowDimensions,
-  type AppStateStatus,
-  type LayoutChangeEvent,
-  type ViewToken,
-} from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { View, Pressable, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { ThemedText } from "@/components/themed-text";
 import { Card } from "@/components/ui";
 import { Ionicons } from "@expo/vector-icons";
 import { FlashList } from "@shopify/flash-list";
-import { useIsFocused } from "expo-router";
-import {
-  endPhotoAssetThumbnailPreheat,
-  getResolvedPhotoAssetThumbnailPreheatStrategy,
-  PhotoAssetThumbnail,
-  updatePhotoAssetThumbnailPreheat,
-} from "@/modules/batch-asset-info";
-import {
-  createPhotoAssetThumbnailPreheatProducerState,
-  planPhotoAssetThumbnailPreheat,
-  transitionPhotoAssetThumbnailPreheatProducer,
-  type PhotoAssetThumbnailPreheatProducerEvent,
-  type PhotoAssetThumbnailPreheatProducerState,
-} from "@/utils/photo-asset-thumbnail-preheat-core";
+import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
 
 interface PhotoData {
   id: string;
@@ -50,7 +29,6 @@ interface PhotosSectionProps {
 const NUM_COLUMNS = 3;
 const GAP = 6;
 const CONTAINER_PADDING = 8; // p-2 = 8px
-const PHOTO_VIEWABILITY_CONFIG = Object.freeze({ itemVisiblePercentThreshold: 1 });
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -127,13 +105,8 @@ export function PhotosSection({
   isCreatingAlbum,
   maxRows = 3.5,
 }: PhotosSectionProps) {
-  const isFocused = useIsFocused();
-  const { width: screenWidth, scale } = useWindowDimensions();
-  const reactScopeID = useId();
-  const preheatScopeID = useMemo(() => `visit-photos-${reactScopeID}`, [reactScopeID]);
-  const preheatStrategy = getResolvedPhotoAssetThumbnailPreheatStrategy();
+  const { width: screenWidth } = useWindowDimensions();
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
-  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
 
@@ -153,82 +126,6 @@ export function PhotosSection({
 
   // Calculate the row height (photo + gap)
   const rowHeight = photoSize + GAP;
-
-  const photoRows = useMemo(() => {
-    const rows: string[][] = [];
-    for (let index = 0; index < photos.length; index += NUM_COLUMNS) {
-      rows.push(photos.slice(index, index + NUM_COLUMNS).map((photo) => photo.uri));
-    }
-    return rows;
-  }, [photos]);
-
-  const preheatIsActive = isFocused && appState === "active";
-  const preheatProducerStateRef = useRef<PhotoAssetThumbnailPreheatProducerState | null>(null);
-  const configuredPhotoRowsRef = useRef(photoRows);
-  const updatePreheatProducer = useCallback(
-    (event: PhotoAssetThumbnailPreheatProducerEvent) => {
-      const currentProducerState = preheatProducerStateRef.current ?? createPhotoAssetThumbnailPreheatProducerState();
-      const transition = transitionPhotoAssetThumbnailPreheatProducer(currentProducerState, event, photoRows.length);
-      preheatProducerStateRef.current = transition.state;
-      if (transition.visibleRowIndicesToPlan === null) {
-        return;
-      }
-      if (!preheatIsActive) {
-        endPhotoAssetThumbnailPreheat(preheatScopeID);
-        return;
-      }
-      const plan = planPhotoAssetThumbnailPreheat({
-        strategy: preheatStrategy,
-        photoRows,
-        visibleRowIndices: transition.visibleRowIndicesToPlan,
-        pointWidth: photoSize,
-        pointHeight: photoSize,
-        scale,
-      });
-      if (!plan) {
-        endPhotoAssetThumbnailPreheat(preheatScopeID);
-        return;
-      }
-      updatePhotoAssetThumbnailPreheat(preheatScopeID, plan.uris, plan.target);
-    },
-    [photoRows, photoSize, preheatIsActive, preheatScopeID, preheatStrategy, scale],
-  );
-  const updatePreheatProducerRef = useRef(updatePreheatProducer);
-
-  useEffect(() => {
-    updatePreheatProducerRef.current = updatePreheatProducer;
-  }, [updatePreheatProducer]);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", setAppState);
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => {
-    const dataChanged = configuredPhotoRowsRef.current !== photoRows;
-    configuredPhotoRowsRef.current = photoRows;
-    updatePreheatProducer({ type: dataChanged ? "data-change" : "refresh" });
-  }, [photoRows, updatePreheatProducer]);
-
-  useEffect(
-    () => () => {
-      endPhotoAssetThumbnailPreheat(preheatScopeID);
-    },
-    [preheatScopeID],
-  );
-
-  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const rows = new Set<number>();
-    for (const item of viewableItems) {
-      if (item.isViewable && typeof item.index === "number") {
-        rows.add(Math.floor(item.index / NUM_COLUMNS));
-      }
-    }
-    updatePreheatProducerRef.current({
-      type: "viewability",
-      visibleRowIndices: [...rows].sort((left, right) => left - right),
-    });
-  }, []);
 
   // Calculate actual number of rows needed
   const actualRows = Math.ceil(photos.length / NUM_COLUMNS);
@@ -386,8 +283,6 @@ export function PhotosSection({
               numColumns={NUM_COLUMNS}
               showsVerticalScrollIndicator={actualRows > maxRows}
               extraData={{ isSelectionMode, selectedPhotoIds }}
-              onViewableItemsChanged={onViewableItemsChanged}
-              viewabilityConfig={PHOTO_VIEWABILITY_CONFIG}
             />
           </View>
         </Card>

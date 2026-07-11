@@ -552,9 +552,15 @@ try {
   assert.match(hookSource, /runStableMichelinNameSearch/);
   assert.match(hookSource, /assertMichelinNameSearchNotAborted\(signal\)/);
   assert.doesNotMatch(hookSource, /michelinInitializedQueryClients|michelinInitializationByQueryClient/);
-  assert.match(screenSource, /MICHELIN_NAME_SEARCH_DEBOUNCE_MS/);
-  assert.match(screenSource, /const timeoutId = setTimeout\(/);
-  assert.match(screenSource, /isMichelinSearchDebouncing \|\| isMichelinSearchFetching/);
+  assert.doesNotMatch(screenSource, /MICHELIN_NAME_SEARCH_DEBOUNCE_MS/);
+  assert.doesNotMatch(screenSource, /isMichelinSearchDebouncing|isMichelinSearchLoading/);
+  assert.match(screenSource, /useMichelinRestaurantSearch\(\s*normalizedMichelinSearchQuery,\s*shouldSearchMichelin/);
+  assert.match(screenSource, /if \(shouldSearchMichelin && isMichelinSearchFetching\) \{\s*return null;/);
+  const searchHook = hookSource.slice(
+    hookSource.indexOf("export function useMichelinRestaurantSearch"),
+    hookSource.indexOf("// Re-export Michelin types"),
+  );
+  assert.match(searchHook, /placeholderData:\s*keepPreviousData/);
   assert.match(databaseSource, /m\.name COLLATE NOCASE LIKE \? ESCAPE '\\\\'/, "ASCII LIKE path must remain");
   assert.match(databaseSource, /runStableMichelinNameSearch/);
   assert.doesNotMatch(databaseSource, /const candidates = await database\.getAllAsync<MichelinRestaurantRecord>/);

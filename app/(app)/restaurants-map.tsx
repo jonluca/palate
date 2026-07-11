@@ -9,7 +9,7 @@ import { AppleMaps, GoogleMaps, type CameraPosition } from "expo-maps";
 import { Stack, router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, PanResponder, Platform, Pressable, View, type LayoutChangeEvent } from "react-native";
+import { PanResponder, Platform, Pressable, View, type LayoutChangeEvent } from "react-native";
 
 const CURRENT_AWARD_LOOKBACK_YEARS = 2;
 const DEFAULT_CAMERA: CameraPosition = {
@@ -162,6 +162,8 @@ export default function RestaurantsMapScreen() {
     () => viewportSelection?.restaurants ?? [],
     [viewportSelection?.restaurants],
   );
+  const displayedVisitStatusFilter = viewportSelection?.resolvedFilters.visitStatus ?? visitStatusFilter;
+  const displayedQuickAwardFilter = viewportSelection?.resolvedFilters.award ?? quickAwardFilter;
 
   const handleMapLayout = useCallback((event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -272,7 +274,7 @@ export default function RestaurantsMapScreen() {
   }, [restaurantsInView]);
 
   const isUnsupportedPlatform = !isMapPlatformSupported;
-  const isMapLoading = confirmedRestaurantsLoading || viewportLoading || viewportFetching;
+  const isViewportPending = confirmedRestaurantsLoading || viewportLoading || viewportFetching;
   const iosBackSwipePanResponder = useMemo(() => {
     if (Platform.OS !== "ios") {
       return null;
@@ -335,7 +337,6 @@ export default function RestaurantsMapScreen() {
                 <View className={"flex-1"}>
                   <FilterPills options={viewModeOptions} value={viewMode} onChange={handleViewModeChange} />
                 </View>
-                {isMapLoading ? <ActivityIndicator color={"#0A84FF"} /> : null}
                 <Pressable
                   onPress={handleToggleFilters}
                   className={"h-8 px-2.5 rounded-full border border-border bg-secondary/70 items-center justify-center"}
@@ -352,14 +353,18 @@ export default function RestaurantsMapScreen() {
                 <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
                   Visited
                 </ThemedText>
-                <FilterPills options={visitFilterOptions} value={visitStatusFilter} onChange={setVisitStatusFilter} />
+                <FilterPills
+                  options={visitFilterOptions}
+                  value={displayedVisitStatusFilter}
+                  onChange={setVisitStatusFilter}
+                />
 
                 <ThemedText variant={"caption1"} color={"tertiary"} className={"uppercase font-semibold tracking-wide"}>
                   Awards
                 </ThemedText>
                 <FilterPills
                   options={quickAwardFilterOptions}
-                  value={quickAwardFilter}
+                  value={displayedQuickAwardFilter}
                   onChange={setQuickAwardFilter}
                 />
               </View>
@@ -384,11 +389,13 @@ export default function RestaurantsMapScreen() {
                 paddingBottom: 20,
               }}
               ListEmptyComponent={
-                <View className={"flex-1 items-center justify-center px-6 py-10"}>
-                  <ThemedText variant={"footnote"} color={"tertiary"} className={"text-center"}>
-                    Move the map or change filters to see restaurants here.
-                  </ThemedText>
-                </View>
+                isViewportPending ? null : (
+                  <View className={"flex-1 items-center justify-center px-6 py-10"}>
+                    <ThemedText variant={"footnote"} color={"tertiary"} className={"text-center"}>
+                      Move the map or change filters to see restaurants here.
+                    </ThemedText>
+                  </View>
+                )
               }
             />
           ) : (
