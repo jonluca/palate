@@ -24,6 +24,7 @@ import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
+import { parseLocalDateInput } from "@/utils/local-date";
 
 function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -452,8 +453,8 @@ function AddVisitModal({
   const handleCustomDateChange = (text: string) => {
     setCustomDateStr(text);
     // Try to parse date in format YYYY-MM-DD or MM/DD/YYYY
-    const parsed = new Date(text);
-    if (!isNaN(parsed.getTime()) && parsed <= new Date()) {
+    const parsed = parseLocalDateInput(text);
+    if (parsed && parsed <= new Date()) {
       setSelectedDate(parsed);
     }
   };

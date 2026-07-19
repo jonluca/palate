@@ -1,4 +1,5 @@
 import type { PhotoRecord, RestaurantRecord, VisitRecord } from "./db/types";
+import { getLocalDateKey } from "./local-date.ts";
 
 export interface ExportData {
   exportedAt: string;
@@ -129,7 +130,7 @@ export function withExactExportPhotoCounts(
 }
 
 function formatDate(timestamp: number): string {
-  return new Date(timestamp).toISOString().split("T")[0];
+  return getLocalDateKey(timestamp);
 }
 
 function formatTime(timestamp: number): string {
@@ -305,5 +306,7 @@ export function exportDataToCSVString(data: ExportData): string {
     visit.visitId,
   ]);
 
-  return [headers.join(","), ...rows.map((row) => row.map((cell) => `"${cell}"`).join(","))].join("\n");
+  return [headers.join(","), ...rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(","))].join(
+    "\n",
+  );
 }

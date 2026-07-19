@@ -717,8 +717,8 @@ export default function QuickActionsScreen() {
           <IconSymbol name={"lightbulb.fill"} size={18} color={"#3b82f6"} />
           <View className={"flex-1"}>
             <ThemedText variant={"footnote"} className={"text-blue-400"}>
-              Tip: These actions skip visits (mark as rejected). You can always rescan your photos to find them again
-              later.
+              Tip: These actions mark visits as rejected. You can still review them from the Rejected filter in All
+              Visits.
             </ThemedText>
           </View>
         </View>

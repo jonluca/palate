@@ -1073,6 +1073,7 @@ export function useScanPhotos(onProgress?: (progress: ScanProgress) => void) {
     onSettled: () => {
       invalidateFoodDetectionQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits });
+      queryClient.invalidateQueries({ queryKey: queryKeys.photoCount });
     },
   });
 }
@@ -1823,7 +1824,16 @@ export function useCreateManualVisit() {
       visitDate: number;
       notes?: string | null;
     }) => {
-      const visitId = await createManualVisit(restaurantId, restaurantName, latitude, longitude, visitDate, notes);
+      const awardAtVisit = restaurantId.startsWith("michelin-") ? await getAwardForDate(restaurantId, visitDate) : null;
+      const visitId = await createManualVisit(
+        restaurantId,
+        restaurantName,
+        latitude,
+        longitude,
+        visitDate,
+        notes,
+        awardAtVisit,
+      );
       return { visitId, restaurantId };
     },
     onSuccess: ({ restaurantId }) => {

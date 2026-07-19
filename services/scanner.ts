@@ -11,6 +11,7 @@ import { getPhotoIngestionFlushCount } from "@/utils/db/photo-ingestion-core";
 import { getValidatedAssetScanNextOffset, getValidatedMediaLibraryPageState } from "@/utils/photo-scan-core";
 import {
   beginPreferredAssetScan,
+  getIncrementalPhotoScanInitialProgress,
   getIncrementalPhotoScanInitialProgressWithCleanup,
   processPhotoScanAssets,
   type ProcessedPhotoScanAssets,
@@ -471,6 +472,57 @@ export async function getPhotoCount(): Promise<number> {
   return response.totalCount;
 }
 
+/** Count visible camera-roll assets whose stable IDs are absent from the database. */
+export async function getUnscannedPhotoCount(): Promise<number> {
+  let incrementalSession: Awaited<ReturnType<typeof beginIncrementalAssetScan>> | null = null;
+  try {
+    if (isDatabaseBackedIncrementalAssetScanAvailable()) {
+      incrementalSession = await beginDatabaseBackedIncrementalAssetScan(
+        await getPhotoDatabasePathForIncrementalScan(),
+      );
+    } else if (isIncrementalAssetScanAvailable()) {
+      const existingAssetIds = await getExistingPhotoAssetIdsForIncrementalScan();
+      if (existingAssetIds.length === 0) {
+        return getPhotoCount();
+      }
+      incrementalSession = await beginIncrementalAssetScan(existingAssetIds);
+    }
+
+    if (incrementalSession) {
+      getIncrementalPhotoScanInitialProgress(incrementalSession);
+      return incrementalSession.totalCount;
+    }
+  } catch (error) {
+    console.warn("Native unscanned-photo count failed; falling back to paged identifier comparison:", error);
+  } finally {
+    if (incrementalSession) {
+      await endAssetScan(incrementalSession.sessionId).catch((error) => {
+        console.warn("Failed to release unscanned-photo count session:", error);
+      });
+    }
+  }
+
+  const existingAssetIds = new Set(await getExistingPhotoAssetIdsForIncrementalScan());
+  let unscannedCount = 0;
+  let after: string | undefined;
+  let hasNextPage = true;
+  while (hasNextPage) {
+    const response = await MediaLibrary.getAssetsAsync({
+      first: 1_000,
+      after,
+      mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+    });
+    for (const asset of response.assets) {
+      if (!existingAssetIds.has(asset.id)) {
+        unscannedCount++;
+      }
+    }
+    after = response.endCursor;
+    hasNextPage = response.hasNextPage;
+  }
+  return unscannedCount;
+}
+
 export interface CreateAlbumResult {
   success: boolean;
   albumName: string;
@@ -494,32 +546,41 @@ export async function createAlbumWithPhotos(albumName: string, assetIds: string[
       mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
     });
 
-    // Filter to only include assets that match our IDs
-    const matchingAssets = assets.assets.filter((asset) => assetIds.includes(asset.id));
+    const uniqueAssetIds = [...new Set(assetIds)];
+    const requestedAssetIds = new Set(uniqueAssetIds);
+    const matchingAssetsById = new Map(
+      assets.assets.filter((asset) => requestedAssetIds.has(asset.id)).map((asset) => [asset.id, asset]),
+    );
 
-    if (matchingAssets.length === 0) {
-      // If we couldn't find assets by listing, try to get them directly
-      // This can happen if the assets are older and not in the first batch
-      const directAssets: MediaLibrary.Asset[] = [];
-      for (const id of assetIds) {
+    // The initial listing is only a fast path. Resolve every missing target by
+    // stable ID so old assets outside that first page cannot be omitted.
+    for (const id of uniqueAssetIds) {
+      if (!matchingAssetsById.has(id)) {
         try {
           const asset = await MediaLibrary.getAssetInfoAsync(id);
           if (asset) {
-            directAssets.push(asset);
+            matchingAssetsById.set(id, asset);
           }
         } catch {
-          // Asset may have been deleted, skip it
+          // Report all unavailable targets together below.
         }
       }
-
-      if (directAssets.length === 0) {
-        return { success: false, albumName, photoCount: 0, error: "Could not find any of the photos" };
-      }
-
-      return createOrUpdateAlbum(albumName, directAssets);
     }
 
-    return createOrUpdateAlbum(albumName, matchingAssets);
+    const missingCount = uniqueAssetIds.length - matchingAssetsById.size;
+    if (missingCount > 0) {
+      return {
+        success: false,
+        albumName,
+        photoCount: 0,
+        error: `Could not find ${missingCount.toLocaleString()} selected ${missingCount === 1 ? "photo" : "photos"}`,
+      };
+    }
+
+    return createOrUpdateAlbum(
+      albumName,
+      uniqueAssetIds.map((id) => matchingAssetsById.get(id)!),
+    );
   } catch (error) {
     console.error("Error creating album:", error);
     return {

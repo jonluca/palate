@@ -227,7 +227,7 @@ export function CalendarSection() {
         const isCurrentlySelected = selectedCalendarIds.includes(calendarId);
         if (isCurrentlySelected) {
           const newIds = selectedCalendarIds.filter((id) => id !== calendarId);
-          setSelectedCalendarIds(newIds.length === 0 ? null : newIds);
+          setSelectedCalendarIds(newIds);
         } else {
           setSelectedCalendarIds([...selectedCalendarIds, calendarId]);
         }

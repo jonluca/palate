@@ -10,6 +10,7 @@ import {
   WRAPPED_STATS_YEARLY_SQL,
   type WrappedStatsYearlyQueryRow,
 } from "./wrapped-stats-yearly-core";
+import { parseLocalDateInput } from "../local-date.ts";
 
 const MICHELIN_STATS_BUCKET_WHERE: Record<MichelinStatsBucket, string> = {
   "three-stars": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%3 star%'",
@@ -66,7 +67,7 @@ export async function getMichelinRestaurantsForStatsBucket(
   bucket: MichelinStatsBucket,
 ): Promise<MichelinStatsRestaurantSummary[]> {
   const database = await getDatabase();
-  const yearFilter = year ? `AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = ?` : "";
+  const yearFilter = year ? `AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = ?` : "";
   const params = year ? [String(year)] : [];
 
   const rows = await database.getAllAsync<MichelinStatsRestaurantSummary>(
@@ -101,8 +102,10 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
   const database = await getDatabase();
 
   // Build year filter clause
-  const yearFilter = year ? `AND strftime('%Y', datetime(startTime/1000, 'unixepoch')) = '${year}'` : "";
-  const yearFilterForV = year ? `AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = '${year}'` : "";
+  const yearFilter = year ? `AND strftime('%Y', datetime(startTime/1000, 'unixepoch', 'localtime')) = '${year}'` : "";
+  const yearFilterForV = year
+    ? `AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = '${year}'`
+    : "";
   const michelinQuery = buildWrappedStatsMichelinQuery(year);
 
   // Run all independent queries in parallel
@@ -134,8 +137,8 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     // Monthly visits data for chart
     database.getAllAsync<{ month: number; year: number; visits: number }>(
       `SELECT 
-        CAST(strftime('%m', datetime(startTime/1000, 'unixepoch')) AS INTEGER) as month,
-        CAST(strftime('%Y', datetime(startTime/1000, 'unixepoch')) AS INTEGER) as year,
+        CAST(strftime('%m', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) as month,
+        CAST(strftime('%Y', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) as year,
         COUNT(*) as visits
       FROM visits 
       WHERE status = 'confirmed' ${yearFilter}
@@ -158,8 +161,8 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     // Busiest month
     database.getFirstAsync<{ month: number; year: number; visits: number }>(
       `SELECT 
-        CAST(strftime('%m', datetime(startTime/1000, 'unixepoch')) AS INTEGER) as month,
-        CAST(strftime('%Y', datetime(startTime/1000, 'unixepoch')) AS INTEGER) as year,
+        CAST(strftime('%m', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) as month,
+        CAST(strftime('%Y', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) as year,
         COUNT(*) as visits
       FROM visits 
       WHERE status = 'confirmed' ${yearFilter}
@@ -170,7 +173,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     // Busiest day of week
     database.getFirstAsync<{ day: number; visits: number }>(
       `SELECT 
-        CAST(strftime('%w', datetime(startTime/1000, 'unixepoch')) AS INTEGER) as day,
+        CAST(strftime('%w', datetime(startTime/1000, 'unixepoch', 'localtime')) AS INTEGER) as day,
         COUNT(*) as visits
       FROM visits 
       WHERE status = 'confirmed' ${yearFilter}
@@ -203,7 +206,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     ),
     // Visit dates for streak calculation
     database.getAllAsync<{ date: string }>(
-      `SELECT DISTINCT date(datetime(startTime/1000, 'unixepoch')) as date
+      `SELECT DISTINCT date(datetime(startTime/1000, 'unixepoch', 'localtime')) as date
       FROM visits 
       WHERE status = 'confirmed' ${yearFilter}
       ORDER BY date ASC`,
@@ -269,7 +272,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     database.getAllAsync<{ dayType: string; count: number }>(
       `SELECT 
         CASE 
-          WHEN strftime('%w', datetime(startTime/1000, 'unixepoch')) IN ('0','6') THEN 'weekend' 
+          WHEN strftime('%w', datetime(startTime/1000, 'unixepoch', 'localtime')) IN ('0','6') THEN 'weekend'
           ELSE 'weekday' 
         END as dayType,
         COUNT(*) as count
@@ -332,13 +335,13 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
   if (visitDates.length > 0) {
     let currentStreak = 1;
     let maxStreak = 1;
-    let streakStart = new Date(visitDates[0].date).getTime();
+    let streakStart = parseLocalDateInput(visitDates[0].date)!.getTime();
     let maxStreakStart = streakStart;
     let maxStreakEnd = streakStart;
 
     for (let i = 1; i < visitDates.length; i++) {
-      const prevDate = new Date(visitDates[i - 1].date);
-      const currDate = new Date(visitDates[i].date);
+      const prevDate = parseLocalDateInput(visitDates[i - 1].date)!;
+      const currDate = parseLocalDateInput(visitDates[i].date)!;
       const diffDays = (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24);
 
       if (diffDays === 1) {

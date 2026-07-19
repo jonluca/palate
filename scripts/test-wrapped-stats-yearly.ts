@@ -14,6 +14,8 @@ import {
   type WrappedStatsYearlyStat,
 } from "../utils/db/wrapped-stats-yearly-core.ts";
 
+process.env.TZ = "America/Los_Angeles";
+
 interface LegacyYearlyRow {
   readonly year: number | string | null;
   readonly totalVisits: number;
@@ -37,11 +39,11 @@ interface RankedRestaurantRow {
   readonly visits: number;
 }
 
-// Independent oracle copied from the former production implementation. Keep
+// Independent local-calendar oracle. Keep
 // this separate from the candidate core so changes to the optimized SQL cannot
 // silently change both sides of the parity check.
 const LEGACY_YEARLY_SUMMARY_SQL = `SELECT
-  strftime('%Y', datetime(startTime/1000, 'unixepoch')) as year,
+  strftime('%Y', datetime(startTime/1000, 'unixepoch', 'localtime')) as year,
   COUNT(*) as totalVisits,
   COUNT(DISTINCT restaurantId) as uniqueRestaurants
 FROM visits
@@ -53,7 +55,7 @@ const LEGACY_TOP_RESTAURANT_SQL = `SELECT r.name, COUNT(*) as visits
 FROM visits v
 JOIN restaurants r ON v.restaurantId = r.id
 WHERE v.status = 'confirmed'
-  AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = ?
+  AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = ?
 GROUP BY v.restaurantId
 ORDER BY visits DESC
 LIMIT 1`;
@@ -90,7 +92,7 @@ function executeDeterministicTieOracle(database: DatabaseSync): WrappedStatsYear
   const yearly = database.prepare(LEGACY_YEARLY_SUMMARY_SQL).all() as unknown as LegacyYearlyRow[];
   const ranked = database
     .prepare(`SELECT
-      strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) AS year,
+      strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) AS year,
       v.restaurantId AS restaurantId,
       r.name AS name,
       COUNT(*) AS visits
@@ -126,7 +128,7 @@ function assertLegacyEquivalentModuloUndefinedTies(
   assert.equal(candidate.length, legacy.length);
   const ranked = database
     .prepare(`SELECT
-      strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) AS year,
+      strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) AS year,
       r.name AS name,
       COUNT(*) AS visits
     FROM visits v
@@ -290,31 +292,27 @@ function assertFocusedParity(withProductionIndexes: boolean): void {
     const legacy = executeLegacy(database);
     const candidate = executeCandidate(database);
     assert.deepEqual(candidate.value, executeDeterministicTieOracle(database));
-    assert.deepEqual(
-      candidate.value.filter(({ year }) => year !== 2026),
-      legacy.value.filter(({ year }) => year !== 2026),
-    );
-    assert.equal(assertLegacyEquivalentModuloUndefinedTies(database, candidate.value, legacy.value), 1);
+    assert.equal(assertLegacyEquivalentModuloUndefinedTies(database, candidate.value, legacy.value), 2);
     assert.equal(legacy.sqliteCalls, 1 + legacy.value.length);
     assert.equal(candidate.sqliteCalls, 1);
     assert.deepEqual(candidate.value, [
       {
         year: 2026,
-        totalVisits: 4,
+        totalVisits: 2,
         uniqueRestaurants: 2,
-        topRestaurant: { name: "Alpha", visits: 2 },
+        topRestaurant: { name: "Alpha", visits: 1 },
       },
       {
         year: 2025,
-        totalVisits: 4,
-        uniqueRestaurants: 2,
-        topRestaurant: { name: "寿司 O'Brien 🍣", visits: 3 },
+        totalVisits: 5,
+        uniqueRestaurants: 3,
+        topRestaurant: { name: "Alpha", visits: 2 },
       },
       {
         year: 2024,
-        totalVisits: 3,
-        uniqueRestaurants: 2,
-        topRestaurant: null,
+        totalVisits: 4,
+        uniqueRestaurants: 3,
+        topRestaurant: { name: "寿司 O'Brien 🍣", visits: 1 },
       },
       {
         year: 2022,
@@ -366,7 +364,7 @@ try {
     .prepare("INSERT INTO visits (id, restaurantId, status, startTime) VALUES (?, ?, ?, ?)")
     .run("invalid-time", "invalid", "confirmed", 8_640_000_000_000_000);
   const invalidYear = invalidTimestampDatabase
-    .prepare("SELECT strftime('%Y', datetime(startTime/1000, 'unixepoch')) AS year FROM visits")
+    .prepare("SELECT strftime('%Y', datetime(startTime/1000, 'unixepoch', 'localtime')) AS year FROM visits")
     .get() as { year: unknown };
   assert.equal(invalidYear.year, null);
   assert.throws(() => executeLegacy(invalidTimestampDatabase), TypeError);

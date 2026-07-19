@@ -564,7 +564,8 @@ function getPhotosForVisitLegacy(database: DatabaseSync, visitId: string): Photo
 }
 
 function formatDateLegacy(timestamp: number): string {
-  return new Date(timestamp).toISOString().split("T")[0]!;
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function formatTimeLegacy(timestamp: number): string {
@@ -1130,7 +1131,9 @@ function independentCSVString(data: ExportData): string {
     visit.location.longitude.toFixed(6),
     visit.visitId,
   ]);
-  return [headers.join(","), ...rows.map((row) => row.map((cell) => `"${cell}"`).join(","))].join("\n");
+  return [headers.join(","), ...rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(","))].join(
+    "\n",
+  );
 }
 
 function assertByteParity(actual: string, expected: string, context: string): void {

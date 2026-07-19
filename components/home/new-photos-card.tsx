@@ -6,32 +6,26 @@ import { IconSymbol } from "@/components/icon-symbol";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useQuery } from "@tanstack/react-query";
-import { getTotalPhotoCount } from "@/utils/db";
-import { usePermissions, usePhotoCount, queryKeys } from "@/hooks/queries";
+import { queryKeys, usePermissions } from "@/hooks/queries";
 import { useResetScan } from "@/store";
+import { getUnscannedPhotoCount } from "@/services/scanner";
 
 /**
  * Hook to check for new photos that haven't been scanned yet
  */
 function useNewPhotosCount() {
   const { data: hasPermission } = usePermissions();
-  const { data: cameraRollCount } = usePhotoCount(hasPermission === true);
-
-  const { data: dbPhotoCount } = useQuery({
-    queryKey: [...queryKeys.stats, "dbPhotoCount"],
-    queryFn: getTotalPhotoCount,
+  const { data: newPhotosCount } = useQuery({
+    queryKey: [...queryKeys.photoCount, "unscanned"],
+    queryFn: getUnscannedPhotoCount,
     enabled: hasPermission === true,
+    staleTime: 1000 * 60 * 2,
   });
 
-  const newPhotosCount =
-    hasPermission && cameraRollCount !== undefined && dbPhotoCount !== undefined
-      ? Math.max(0, cameraRollCount - dbPhotoCount)
-      : 0;
-
   return {
-    newPhotosCount,
+    newPhotosCount: newPhotosCount ?? 0,
     hasPermission,
-    isLoading: cameraRollCount === undefined || dbPhotoCount === undefined,
+    isLoading: hasPermission === true && newPhotosCount === undefined,
   };
 }
 

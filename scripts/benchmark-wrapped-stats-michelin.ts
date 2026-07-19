@@ -638,7 +638,10 @@ function createRuntimeDatabase(fixture: Fixture): DatabaseSync {
 }
 
 function withLegacyYearFilter(sql: string, year: number | null): string {
-  return sql.replace("__YEAR_FILTER__", year ? "AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = ?" : "");
+  return sql.replace(
+    "__YEAR_FILTER__",
+    year ? "AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = ?" : "",
+  );
 }
 
 function emptyMichelinStats(
@@ -759,7 +762,7 @@ function explain(database: DatabaseSync, sql: string, parameters: readonly strin
 
 function selectRepresentativeYear(database: DatabaseSync): number {
   const row = database
-    .prepare(`SELECT strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) AS year
+    .prepare(`SELECT strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) AS year
       FROM visits v
       JOIN michelin_restaurants m ON v.restaurantId = m.id
       WHERE v.status = 'confirmed'

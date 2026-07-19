@@ -383,6 +383,7 @@ export async function nukeDatabase(): Promise<void> {
 
     DROP TABLE IF EXISTS michelin_restaurant_spatial_index;
     DROP TABLE IF EXISTS visit_suggested_restaurants;
+    DROP TABLE IF EXISTS reservation_import_sources;
     DROP TABLE IF EXISTS photos;
     DROP TABLE IF EXISTS visits;
     DROP TABLE IF EXISTS restaurants;
@@ -390,6 +391,7 @@ export async function nukeDatabase(): Promise<void> {
     DROP TABLE IF EXISTS ignored_locations;
     DROP TABLE IF EXISTS dismissed_reservation_import_sources;
     DROP TABLE IF EXISTS reservation_import_review_exclusions;
+    DROP TABLE IF EXISTS dismissed_calendar_events;
     
     PRAGMA foreign_keys = ON;
   `);

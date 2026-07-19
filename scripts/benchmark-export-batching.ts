@@ -577,7 +577,8 @@ function asRawPhotoRecords(rows: readonly Record<string, unknown>[]): RawPhotoRe
 }
 
 function legacyFormatDate(timestamp: number): string {
-  return new Date(timestamp).toISOString().split("T")[0]!;
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 function legacyFormatTime(timestamp: number): string {
@@ -733,7 +734,9 @@ function referenceCSVString(data: ExportData): string {
     visit.location.longitude.toFixed(6),
     visit.visitId,
   ]);
-  return [headers.join(","), ...rows.map((row) => row.map((cell) => `"${cell}"`).join(","))].join("\n");
+  return [headers.join(","), ...rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(","))].join(
+    "\n",
+  );
 }
 
 function runLegacy(database: DatabaseSync, format: Format): Execution {

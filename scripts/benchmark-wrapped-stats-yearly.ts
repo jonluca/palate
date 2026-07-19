@@ -90,7 +90,7 @@ interface MeasurementSummary {
 type Strategy = "legacyNPlusOne" | "batchedWindow";
 
 const LEGACY_YEARLY_SUMMARY_SQL = `SELECT
-  strftime('%Y', datetime(startTime/1000, 'unixepoch')) as year,
+  strftime('%Y', datetime(startTime/1000, 'unixepoch', 'localtime')) as year,
   COUNT(*) as totalVisits,
   COUNT(DISTINCT restaurantId) as uniqueRestaurants
 FROM visits
@@ -102,13 +102,13 @@ const LEGACY_TOP_RESTAURANT_SQL = `SELECT r.name, COUNT(*) as visits
 FROM visits v
 JOIN restaurants r ON v.restaurantId = r.id
 WHERE v.status = 'confirmed'
-  AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = ?
+  AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = ?
 GROUP BY v.restaurantId
 ORDER BY visits DESC
 LIMIT 1`;
 
 const RANKED_RESTAURANTS_SQL = `SELECT
-  strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) AS year,
+  strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) AS year,
   r.name AS name,
   COUNT(*) AS visits
 FROM visits v

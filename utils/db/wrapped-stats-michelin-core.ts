@@ -23,7 +23,7 @@ export interface WrappedStatsMichelinQuery {
  * metrics retain their separate restaurant-level deduplication rules.
  */
 export function buildWrappedStatsMichelinQuery(year?: number | null): WrappedStatsMichelinQuery {
-  const yearFilter = year ? "AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = ?" : "";
+  const yearFilter = year ? "AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = ?" : "";
 
   return {
     sql: `WITH

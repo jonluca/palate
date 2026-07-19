@@ -15,6 +15,8 @@ import {
   parseWrappedStatsMichelinRows,
   type WrappedStatsMichelinQueryRow,
 } from "../utils/db/wrapped-stats-michelin-core.ts";
+
+process.env.TZ = "America/Los_Angeles";
 import { assertBenchmarkOutputDoesNotAliasDatabase } from "./benchmark-wrapped-stats-michelin.ts";
 import { countWrappedStatsProductionSqlCalls } from "./wrapped-stats-query-call-counter.ts";
 
@@ -83,7 +85,10 @@ WHERE v.status = 'confirmed' __YEAR_FILTER__
   AND (COALESCE(v.awardAtVisit, m.award) LIKE '%Green Star%' OR COALESCE(v.awardAtVisit, m.award) LIKE '%green star%')`;
 
 function withLegacyYearFilter(sql: string, year: number | null | undefined): string {
-  return sql.replace("__YEAR_FILTER__", year ? "AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch')) = ?" : "");
+  return sql.replace(
+    "__YEAR_FILTER__",
+    year ? "AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = ?" : "",
+  );
 }
 
 function emptyMichelinStats(
@@ -353,7 +358,7 @@ function assertFocusedParity(withProductionIndexes: boolean): void {
     }
 
     assert.deepEqual(executeCandidate(database, 2025).value, {
-      threeStars: 3,
+      threeStars: 2,
       twoStars: 2,
       oneStars: 4,
       bibGourmand: 1,
@@ -363,27 +368,27 @@ function assertFocusedParity(withProductionIndexes: boolean): void {
       distinctOneStars: 4,
       distinctBibGourmand: 1,
       distinctSelected: 1,
-      totalStarredVisits: 14,
+      totalStarredVisits: 13,
       distinctStarredRestaurants: 8,
-      totalAccumulatedStars: 17,
+      totalAccumulatedStars: 14,
       distinctStars: 14,
       greenStarVisits: 2,
     });
     assert.deepEqual(executeCandidate(database, 2024).value, {
-      threeStars: 0,
+      threeStars: 1,
       twoStars: 1,
       oneStars: 0,
       bibGourmand: 1,
       selected: 0,
-      distinctThreeStars: 0,
+      distinctThreeStars: 1,
       distinctTwoStars: 1,
       distinctOneStars: 0,
       distinctBibGourmand: 1,
       distinctSelected: 0,
-      totalStarredVisits: 2,
-      distinctStarredRestaurants: 1,
-      totalAccumulatedStars: 2,
-      distinctStars: 2,
+      totalStarredVisits: 3,
+      distinctStarredRestaurants: 2,
+      totalAccumulatedStars: 5,
+      distinctStars: 5,
       greenStarVisits: 0,
     });
   } finally {

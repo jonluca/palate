@@ -47,7 +47,11 @@ export async function insertVisits(visits: Omit<VisitRecord, "photoCount" | "foo
     ]);
 
     await database.runAsync(
-      `INSERT OR REPLACE INTO visits (id, restaurantId, suggestedRestaurantId, status, startTime, endTime, centerLat, centerLon, photoCount, foodProbable, calendarEventId, calendarEventTitle, calendarEventLocation, calendarEventIsAllDay, updatedAt) VALUES ${placeholders}`,
+      `INSERT INTO visits (id, restaurantId, suggestedRestaurantId, status, startTime, endTime, centerLat, centerLon, photoCount, foodProbable, calendarEventId, calendarEventTitle, calendarEventLocation, calendarEventIsAllDay, updatedAt)
+       VALUES ${placeholders}
+       ON CONFLICT(id) DO UPDATE SET
+         startTime = MIN(visits.startTime, excluded.startTime),
+         endTime = MAX(visits.endTime, excluded.endTime)`,
       values,
     );
   }
@@ -372,6 +376,7 @@ export async function createManualVisit(
   longitude: number,
   visitDate: number,
   notes?: string | null,
+  awardAtVisit?: string | null,
 ): Promise<string> {
   const database = await getDatabase();
   const now = Date.now();
@@ -395,8 +400,8 @@ export async function createManualVisit(
   const endTime = visitDate + 60 * 60 * 1000; // 1 hour after start
 
   await database.runAsync(
-    `INSERT INTO visits (id, restaurantId, suggestedRestaurantId, status, startTime, endTime, centerLat, centerLon, photoCount, foodProbable, notes, updatedAt) 
-     VALUES (?, ?, ?, 'confirmed', ?, ?, ?, ?, 0, 0, ?, ?)`,
+    `INSERT INTO visits (id, restaurantId, suggestedRestaurantId, status, startTime, endTime, centerLat, centerLon, photoCount, foodProbable, notes, awardAtVisit, updatedAt)
+     VALUES (?, ?, ?, 'confirmed', ?, ?, ?, ?, 0, 0, ?, ?, ?)`,
     [
       visitId,
       restaurantId,
@@ -406,6 +411,7 @@ export async function createManualVisit(
       latitude,
       longitude,
       notes ?? null,
+      awardAtVisit ?? null,
       now,
     ],
   );

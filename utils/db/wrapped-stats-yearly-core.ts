@@ -26,7 +26,7 @@ export type WrappedStatsYearlyStat = WrappedStats["yearlyStats"][number];
 export const WRAPPED_STATS_YEARLY_SQL = `WITH
   yearly_data AS (
     SELECT
-      strftime('%Y', datetime(startTime / 1000, 'unixepoch')) AS year,
+      strftime('%Y', datetime(startTime / 1000, 'unixepoch', 'localtime')) AS year,
       COUNT(*) AS totalVisits,
       COUNT(DISTINCT restaurantId) AS uniqueRestaurants
     FROM visits
@@ -35,7 +35,7 @@ export const WRAPPED_STATS_YEARLY_SQL = `WITH
   ),
   yearly_restaurant_visits AS (
     SELECT
-      strftime('%Y', datetime(v.startTime / 1000, 'unixepoch')) AS year,
+      strftime('%Y', datetime(v.startTime / 1000, 'unixepoch', 'localtime')) AS year,
       v.restaurantId AS restaurantId,
       r.name AS name,
       COUNT(*) AS visits
