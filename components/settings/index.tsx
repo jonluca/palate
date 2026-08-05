@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { View, Alert, ScrollView, Pressable, Linking, TextInput, Modal, FlatList } from "react-native";
 import { useToast } from "@/components/ui/toast";
 import { router, type Href } from "expo-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/themed-text";
 import { Button, ButtonText, Card } from "@/components/ui";
 import { ExportButton } from "@/components/home";
@@ -1149,10 +1149,18 @@ export function IgnoredLocationsCard({
 export function DangerZoneCard() {
   const queryClient = useQueryClient();
   const resetAllState = useAppStore((state) => state.resetAllState);
+  const isScanning = useAppStore((state) => state.isScanning);
+  const activeMutationCount = useIsMutating();
   const [isResetting, setIsResetting] = useState(false);
   const { showToast } = useToast();
+  const isDataOperationActive = isScanning || activeMutationCount > 0;
 
   const handleResetAllData = useCallback(() => {
+    if (useAppStore.getState().isScanning || queryClient.isMutating() > 0) {
+      showToast({ type: "error", message: "Finish the current scan or data operation before resetting." });
+      return;
+    }
+
     Alert.alert(
       "Reset All Data",
       "This will delete all your scanned photos, visits, and restaurant data. This action cannot be undone.",
@@ -1162,6 +1170,11 @@ export function DangerZoneCard() {
           text: "Reset Everything",
           style: "destructive",
           onPress: async () => {
+            if (useAppStore.getState().isScanning || queryClient.isMutating() > 0) {
+              showToast({ type: "error", message: "A data operation started. Finish it before resetting." });
+              return;
+            }
+
             setIsResetting(true);
             try {
               await nukeDatabase();
@@ -1194,9 +1207,19 @@ export function DangerZoneCard() {
             </ThemedText>
           </View>
         </View>
-        <Button variant={"destructive"} onPress={handleResetAllData} loading={isResetting}>
+        <Button
+          variant={"destructive"}
+          onPress={handleResetAllData}
+          loading={isResetting}
+          disabled={isDataOperationActive}
+        >
           <ButtonText variant={"destructive"}>Reset Everything</ButtonText>
         </Button>
+        {isDataOperationActive ? (
+          <ThemedText variant={"caption1"} color={"secondary"}>
+            Finish the current scan or data operation before resetting.
+          </ThemedText>
+        ) : null}
       </View>
     </Card>
   );

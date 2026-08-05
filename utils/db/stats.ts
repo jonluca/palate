@@ -10,7 +10,7 @@ import {
   WRAPPED_STATS_YEARLY_SQL,
   type WrappedStatsYearlyQueryRow,
 } from "./wrapped-stats-yearly-core";
-import { parseLocalDateInput } from "../local-date.ts";
+import { calculateLongestDiningStreak } from "./wrapped-stats-streak-core";
 
 const MICHELIN_STATS_BUCKET_WHERE: Record<MichelinStatsBucket, string> = {
   "three-stars": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%3 star%'",
@@ -330,41 +330,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
   const yearlyStats = parseWrappedStatsYearlyRows(yearlyStatsRows);
   const michelinStats = parseWrappedStatsMichelinRows(michelinStatsRows);
 
-  // Calculate longest streak of consecutive dining days
-  let longestStreak: { days: number; startDate: number; endDate: number } | null = null;
-  if (visitDates.length > 0) {
-    let currentStreak = 1;
-    let maxStreak = 1;
-    let streakStart = parseLocalDateInput(visitDates[0].date)!.getTime();
-    let maxStreakStart = streakStart;
-    let maxStreakEnd = streakStart;
-
-    for (let i = 1; i < visitDates.length; i++) {
-      const prevDate = parseLocalDateInput(visitDates[i - 1].date)!;
-      const currDate = parseLocalDateInput(visitDates[i].date)!;
-      const diffDays = (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24);
-
-      if (diffDays === 1) {
-        currentStreak++;
-        if (currentStreak > maxStreak) {
-          maxStreak = currentStreak;
-          maxStreakStart = streakStart;
-          maxStreakEnd = currDate.getTime();
-        }
-      } else {
-        currentStreak = 1;
-        streakStart = currDate.getTime();
-      }
-    }
-
-    if (maxStreak >= 2) {
-      longestStreak = {
-        days: maxStreak,
-        startDate: maxStreakStart,
-        endDate: maxStreakEnd,
-      };
-    }
-  }
+  const longestStreak = calculateLongestDiningStreak(visitDates);
 
   // Calculate average visits per month
   let averageVisitsPerMonth = 0;

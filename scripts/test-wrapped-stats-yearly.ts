@@ -13,8 +13,29 @@ import {
   type WrappedStatsYearlyQueryRow,
   type WrappedStatsYearlyStat,
 } from "../utils/db/wrapped-stats-yearly-core.ts";
+import { calculateLongestDiningStreak } from "../utils/db/wrapped-stats-streak-core.ts";
 
 process.env.TZ = "America/Los_Angeles";
+
+const HOUR_IN_MILLISECONDS = 60 * 60 * 1000;
+
+const springForwardStart = new Date(2024, 2, 10);
+const springForwardEnd = new Date(2024, 2, 11);
+assert.equal((springForwardEnd.getTime() - springForwardStart.getTime()) / HOUR_IN_MILLISECONDS, 23);
+assert.deepEqual(calculateLongestDiningStreak([{ date: "2024-03-10" }, { date: "2024-03-11" }]), {
+  days: 2,
+  startDate: springForwardStart.getTime(),
+  endDate: springForwardEnd.getTime(),
+});
+
+const fallBackStart = new Date(2024, 10, 3);
+const fallBackEnd = new Date(2024, 10, 4);
+assert.equal((fallBackEnd.getTime() - fallBackStart.getTime()) / HOUR_IN_MILLISECONDS, 25);
+assert.deepEqual(calculateLongestDiningStreak([{ date: "2024-11-03" }, { date: "2024-11-04" }]), {
+  days: 2,
+  startDate: fallBackStart.getTime(),
+  endDate: fallBackEnd.getTime(),
+});
 
 interface LegacyYearlyRow {
   readonly year: number | string | null;

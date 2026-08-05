@@ -16,6 +16,7 @@ export const DEBUG_TIMING = __DEV__;
 
 let db: SQLite.SQLiteDatabase | null = null;
 let dbInitPromise: Promise<SQLite.SQLiteDatabase> | null = null;
+let dbResetPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 const MAIN_DATABASE_OPTIONS: SQLite.SQLiteOpenOptions = {
   // Expo SQLite's default close path walks sqlite3_next_stmt() and finalizes
@@ -28,6 +29,12 @@ const MAIN_DATABASE_OPTIONS: SQLite.SQLiteOpenOptions = {
 };
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
+  // Reset owns publication while it is in flight. Check it before the cached
+  // handle so callers cannot observe a database with a partially rebuilt schema.
+  if (dbResetPromise) {
+    return dbResetPromise;
+  }
+
   // Return cached instance if already initialized
   if (db) {
     return db;
@@ -376,17 +383,59 @@ export async function rejectVisitsInIgnoredLocationsInternal(database: SQLite.SQ
 
 // Nuke database completely - drops all tables and recreates them fresh
 export async function nukeDatabase(): Promise<void> {
-  const database = await getDatabase();
+  // Share an active reset rather than dropping and recreating the schema twice.
+  if (dbResetPromise) {
+    await dbResetPromise;
+    return;
+  }
 
-  // Invalidate process-local indexes before mutating their backing tables. If
-  // reset fails partway through, subsequent reads will take their repair paths.
-  invalidateRestaurantIndex();
-  invalidateMichelinProviderSpatialIndex();
+  // Acquire before publishing the reset promise: getDatabase() consults that
+  // promise first, so acquiring afterwards would wait on this reset itself.
+  const databasePromise = getDatabase();
+  const resetPromise = databasePromise.then(async (database) => {
+    // Initialization may have completed after reset was published. Keep the
+    // ordinary caches empty until the rebuilt schema is ready for publication.
+    db = null;
+    dbInitPromise = null;
 
-  await dropApplicationDatabaseTables(database);
+    try {
+      // Invalidate process-local indexes before mutating their backing tables.
+      // If reset fails partway through, subsequent reads take repair paths.
+      invalidateRestaurantIndex();
+      invalidateMichelinProviderSpatialIndex();
 
-  // Reuse the live connection so reset does not leak the previous handle.
-  await initializeDatabase(database);
+      await dropApplicationDatabaseTables(database);
+
+      // Reuse the live connection so reset does not leak the previous handle.
+      await initializeDatabase(database);
+      db = database;
+      return database;
+    } catch (error) {
+      db = null;
+      dbInitPromise = null;
+
+      try {
+        await database.closeAsync();
+      } catch (closeError) {
+        console.warn("[DB] Failed to close database after reset error:", closeError);
+      }
+
+      throw error;
+    }
+  });
+
+  // Publish synchronously, before reset work can start in the promise callback.
+  dbResetPromise = resetPromise;
+  db = null;
+  dbInitPromise = null;
+
+  try {
+    await resetPromise;
+  } finally {
+    if (dbResetPromise === resetPromise) {
+      dbResetPromise = null;
+    }
+  }
 }
 
 /**
