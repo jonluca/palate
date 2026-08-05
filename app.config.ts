@@ -96,6 +96,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
           },
         },
       ],
+      "./plugins/with-rn-firebase-cocoapods.ts",
       "@react-native-firebase/app",
       "expo-router",
       "expo-status-bar",
