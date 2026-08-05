@@ -877,6 +877,7 @@ function testProductionIntegrationSourceContract(): void {
   const reservationSource = readFileSync(new URL("../services/reservation-import.ts", import.meta.url), "utf8");
   const databaseSource = readFileSync(new URL("../utils/db/michelin.ts", import.meta.url), "utf8");
   const coreSource = readFileSync(new URL("../utils/db/core.ts", import.meta.url), "utf8");
+  const resetSource = readFileSync(new URL("../utils/db/reset-core.ts", import.meta.url), "utf8");
   assert.doesNotMatch(reservationSource, /getAllMichelinRestaurants/);
   assert.match(reservationSource, /getMichelinRestaurantsForCalendarNormalizedNames/);
   assert.match(reservationSource, /selectMichelinProviderSpatialCandidates/);
@@ -892,10 +893,8 @@ function testProductionIntegrationSourceContract(): void {
   assert.match(databaseSource, /outside its candidate group/);
   assert.match(databaseSource, /JSON\.stringify\(selectedIds\)/);
   assert.ok(coreSource.indexOf("VACUUM;") < coreSource.indexOf("rebuildMichelinProviderSpatialIndex(database)"));
-  assert.ok(
-    coreSource.indexOf("DROP TABLE IF EXISTS michelin_restaurant_spatial_index") <
-      coreSource.indexOf("DROP TABLE IF EXISTS michelin_restaurants"),
-  );
+  assert.match(coreSource, /await dropApplicationDatabaseTables\(database\)/);
+  assert.ok(resetSource.indexOf('"michelin_restaurant_spatial_index"') < resetSource.indexOf('"michelin_restaurants"'));
 }
 
 testBoundsAndInputValidation();

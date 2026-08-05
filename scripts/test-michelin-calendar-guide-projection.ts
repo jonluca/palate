@@ -479,21 +479,18 @@ const fixtureRows: SeedRow[] = [
   const database = new DatabaseSync(":memory:");
   createSchema(database);
   setDatasetVersion(database, "active");
-  const largeRows = Array.from(
-    { length: 1_205 },
-    (_, index): SeedRow => ({
-      id: `large-${index.toString().padStart(4, "0")}-'雪'`,
-      name: index % 2 === 0 ? "Café Restaurant" : "The Cafe",
-      latitude: 10 + index / 100_000,
-      longitude: 20 + index / 100_000,
-      address: index % 7 === 0 ? "" : `Address ${index}`,
-      location: index % 11 === 0 ? "" : `Location ${index}`,
-      cuisine: `Cuisine ${index % 5}`,
-      latestAwardYear: index % 3 === 0 ? null : 2025,
-      award: index % 2 === 0 ? "1 Star" : "Selected",
-      datasetVersion: "active",
-    }),
-  );
+  const largeRows = Array.from({ length: 1_205 }, (_, index): SeedRow => ({
+    id: `large-${index.toString().padStart(4, "0")}-'雪'`,
+    name: index % 2 === 0 ? "Café Restaurant" : "The Cafe",
+    latitude: 10 + index / 100_000,
+    longitude: 20 + index / 100_000,
+    address: index % 7 === 0 ? "" : `Address ${index}`,
+    location: index % 11 === 0 ? "" : `Location ${index}`,
+    cuisine: `Cuisine ${index % 5}`,
+    latestAwardYear: index % 3 === 0 ? null : 2025,
+    award: index % 2 === 0 ? "1 Star" : "Selected",
+    datasetVersion: "active",
+  }));
   insertRows(database, largeRows);
   const requested = new Set(["cafe"]);
   const candidate = executeCandidate(database, requested);

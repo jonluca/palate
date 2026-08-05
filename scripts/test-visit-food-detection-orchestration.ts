@@ -204,13 +204,11 @@ function fullPlanPositiveVisitIds(
     samples,
     processBatch: async (batchSamples, context) => {
       batchCalls.push(batchSamples.map(({ photoId }) => photoId));
-      const successful = batchSamples.map(
-        (sample): AdaptiveVisitFoodOutcome => ({
-          photoId: sample.photoId,
-          status: "success",
-          containsFood: false,
-        }),
-      );
+      const successful = batchSamples.map((sample): AdaptiveVisitFoodOutcome => ({
+        photoId: sample.photoId,
+        status: "success",
+        containsFood: false,
+      }));
       await context.appendResults(successful.map(({ photoId }) => ({ photoId, foodDetected: false })));
       return { outcomes: successful };
     },

@@ -1,6 +1,7 @@
 import * as MediaLibrary from "expo-media-library/legacy";
 import * as Device from "expo-device";
 import pMap from "p-map";
+import { resolveAlbumAssets } from "./album-assets-core";
 import {
   getExistingPhotoAssetIdsForIncrementalScan,
   getPhotoDatabasePathForIncrementalScan,
@@ -547,27 +548,13 @@ export async function createAlbumWithPhotos(albumName: string, assetIds: string[
     });
 
     const uniqueAssetIds = [...new Set(assetIds)];
-    const requestedAssetIds = new Set(uniqueAssetIds);
-    const matchingAssetsById = new Map(
-      assets.assets.filter((asset) => requestedAssetIds.has(asset.id)).map((asset) => [asset.id, asset]),
+    // The first library page is only an optimization: it can partially overlap
+    // the requested visit, so resolve every missing ID directly as well.
+    const matchingAssets = await resolveAlbumAssets(uniqueAssetIds, assets.assets, (id) =>
+      MediaLibrary.getAssetInfoAsync(id),
     );
 
-    // The initial listing is only a fast path. Resolve every missing target by
-    // stable ID so old assets outside that first page cannot be omitted.
-    for (const id of uniqueAssetIds) {
-      if (!matchingAssetsById.has(id)) {
-        try {
-          const asset = await MediaLibrary.getAssetInfoAsync(id);
-          if (asset) {
-            matchingAssetsById.set(id, asset);
-          }
-        } catch {
-          // Report all unavailable targets together below.
-        }
-      }
-    }
-
-    const missingCount = uniqueAssetIds.length - matchingAssetsById.size;
+    const missingCount = uniqueAssetIds.length - matchingAssets.length;
     if (missingCount > 0) {
       return {
         success: false,
@@ -577,10 +564,7 @@ export async function createAlbumWithPhotos(albumName: string, assetIds: string[
       };
     }
 
-    return createOrUpdateAlbum(
-      albumName,
-      uniqueAssetIds.map((id) => matchingAssetsById.get(id)!),
-    );
+    return createOrUpdateAlbum(albumName, matchingAssets);
   } catch (error) {
     console.error("Error creating album:", error);
     return {

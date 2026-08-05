@@ -581,6 +581,15 @@ assert.equal(
   BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS.compareRestaurantAndCalendarTitle("Dinner at Le Bernardin", "Le Bernardin"),
   true,
 );
+assert.equal(BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS.cleanCalendarEventTitle("Le Bernardin - 2 people"), "Le Bernardin");
+assert.equal(
+  BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS.compareRestaurantAndCalendarTitle("Le Bernardin - 2 people", "Le Bernardin"),
+  true,
+);
+assert.equal(
+  BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS.compareRestaurantAndCalendarTitle("Le Bernardin ‑ 2 people", "Le Bernardin"),
+  true,
+);
 assert.equal(BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS.isFuzzyRestaurantMatch("Café Snow", 'Café "Snow" 雪'), true);
 
 for (const withIndexes of [false, true]) {

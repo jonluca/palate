@@ -52,37 +52,37 @@ internal enum CalendarTitleCleaner {
   ])
 
   private static let titleSuffixes = expressions([
-    #"\s*[-–—]\s*[0-9]+\s*(people|guests|pax|persons?)$"#,
-    #"\s*[-–—]\s*table\s+for\s+[0-9]+$"#,
-    #"\s*[-–—]\s*party\s+of\s+[0-9]+$"#,
+    #"\s*[–—−‐‑‒―-]\s*[0-9]+\s*(people|guests|pax|persons?)$"#,
+    #"\s*[–—−‐‑‒―-]\s*table\s+for\s+[0-9]+$"#,
+    #"\s*[–—−‐‑‒―-]\s*party\s+of\s+[0-9]+$"#,
     #"\s*\([0-9]+\s*(people|guests|pax|persons?)\)$"#,
     #"\s*\(party\s+of\s+[0-9]+\)$"#,
     #"\s*\(table\s+for\s+[0-9]+\)$"#,
     #"\s*\(for\s+[0-9]+\)$"#,
     #"\s*for\s+[0-9]+$"#,
     #"\s*(dinner|lunch|brunch|cena|breakfast|supper)\s*$"#,
-    #"\s*[-–—]\s*(confirmed|pending|waitlist|wait\s*list)$"#,
+    #"\s*[–—−‐‑‒―-]\s*(confirmed|pending|waitlist|wait\s*list)$"#,
     #"\s*\((confirmed|pending|waitlist|wait\s*list)\)$"#,
-    #"\s*[-–—]\s*[0-9]{1,2}:[0-9]{2}\s*(am|pm)?$"#,
+    #"\s*[–—−‐‑‒―-]\s*[0-9]{1,2}:[0-9]{2}\s*(am|pm)?$"#,
     #"\s*@\s*[0-9]{1,2}:[0-9]{2}\s*(am|pm)?$"#,
     #"\s*on\s+[A-Za-z0-9_]+\s*,\s*[A-Za-z0-9_]+\s+[0-9]{1,2}(st|nd|rd|th)?\s*,\s*[0-9]{4}\s*,?\s*[0-9]{1,2}:[0-9]{2}\s*(AM|PM)?$"#,
-    #"\s*[-–—]\s*[0-9]{1,2}/[0-9]{1,2}(/[0-9]{2,4})?$"#,
-    #"\s*[-–—]\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[A-Za-z0-9_]*\s+[0-9]{1,2}(st|nd|rd|th)?$"#,
+    #"\s*[–—−‐‑‒―-]\s*[0-9]{1,2}/[0-9]{1,2}(/[0-9]{2,4})?$"#,
+    #"\s*[–—−‐‑‒―-]\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[A-Za-z0-9_]*\s+[0-9]{1,2}(st|nd|rd|th)?$"#,
     #"\s*\((jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[A-Za-z0-9_]*\s+[0-9]{1,2}(st|nd|rd|th)?\)$"#,
-    #"\s*[-–—]\s*(conf|confirmation)\s*#?\s*[A-Za-z0-9_]+$"#,
+    #"\s*[–—−‐‑‒―-]\s*(conf|confirmation)\s*#?\s*[A-Za-z0-9_]+$"#,
     #"\s*\(confirmation\s*:?\s*[A-Za-z0-9_]+\)$"#,
     #"\s*\(reservation\s*:?\s*[A-Za-z0-9_]+\)$"#,
     #"\s*\(booking\s*:?\s*[A-Za-z0-9_]+\)$"#,
     #"\s*#\s*[A-Za-z0-9_]{4,}$"#,
-    #"\s*[-–—]\s*w/?\s+[A-Za-z0-9_]+.*$"#,
-    #"\s*[-–—]\s*with\s+[A-Za-z0-9_]+.*$"#,
+    #"\s*[–—−‐‑‒―-]\s*w/?\s+[A-Za-z0-9_]+.*$"#,
+    #"\s*[–—−‐‑‒―-]\s*with\s+[A-Za-z0-9_]+.*$"#,
     #"\s*\(w/?\s+[A-Za-z0-9_]+.*\)$"#,
     #"\s*\(with\s+[A-Za-z0-9_]+.*\)$"#,
-    #"\s*[-–—]\s*via\s+(resy|opentable|tock|yelp|thefork)$"#,
+    #"\s*[–—−‐‑‒―-]\s*via\s+(resy|opentable|tock|yelp|thefork)$"#,
     #"\s*\(via\s+(resy|opentable|tock|yelp|thefork)\)$"#,
     #"\s*\((resy|opentable|tock|yelp|thefork)\)$"#,
-    #"\s*[-–—]\s*(downtown|midtown|uptown|westside|eastside)$"#,
-    #"\s*[-–—]\s*(main|flagship|original)\s*(location|branch)?$"#,
+    #"\s*[–—−‐‑‒―-]\s*(downtown|midtown|uptown|westside|eastside)$"#,
+    #"\s*[–—−‐‑‒―-]\s*(main|flagship|original)\s*(location|branch)?$"#,
     #"\s+reservation$"#,
     #"\s+booking$"#,
   ])
@@ -152,7 +152,13 @@ internal enum CalendarTitleCleaner {
       return ""
     }
 
-    var result = normalizeSpacing(title)
+    let withOriginalSeparators = normalizeWhitespace(title)
+    let stripped = stripTitleAffixes(withOriginalSeparators)
+    return stripTitleAffixes(normalizeSpacing(stripped))
+  }
+
+  private static func stripTitleAffixes(_ value: String) -> String {
+    var result = value
     var previous: String
     repeat {
       previous = result
@@ -188,7 +194,12 @@ internal enum CalendarTitleCleaner {
   private static func normalizeSpacing(_ value: String) -> String {
     let trimmed = CalendarJavaScriptWhitespace.trim(value)
     let withoutDashes = dashPattern.replacingMatches(in: trimmed, with: " ")
-    return whitespacePattern.replacingMatches(in: withoutDashes, with: " ")
+    return normalizeWhitespace(withoutDashes)
+  }
+
+  private static func normalizeWhitespace(_ value: String) -> String {
+    let trimmed = CalendarJavaScriptWhitespace.trim(value)
+    return whitespacePattern.replacingMatches(in: trimmed, with: " ")
   }
 
   private static func expressions(_ patterns: [String]) -> [CalendarMatchingRegularExpression] {

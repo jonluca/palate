@@ -514,9 +514,9 @@ const CALENDAR_TITLE_PREFIXES_TO_STRIP = [
 
 const CALENDAR_TITLE_SUFFIXES_TO_STRIP = [
   // Reservation details
-  /\s*[-–—]\s*\d+\s*(people|guests|pax|persons?)$/i,
-  /\s*[-–—]\s*table\s+for\s+\d+$/i,
-  /\s*[-–—]\s*party\s+of\s+\d+$/i,
+  /\s*[–—−‐‑‒―-]\s*\d+\s*(people|guests|pax|persons?)$/i,
+  /\s*[–—−‐‑‒―-]\s*table\s+for\s+\d+$/i,
+  /\s*[–—−‐‑‒―-]\s*party\s+of\s+\d+$/i,
   /\s*\(\d+\s*(people|guests|pax|persons?)\)$/i,
   /\s*\(party\s+of\s+\d+\)$/i,
   /\s*\(table\s+for\s+\d+\)$/i,
@@ -524,49 +524,42 @@ const CALENDAR_TITLE_SUFFIXES_TO_STRIP = [
   /\s*for\s+\d+$/i,
   /\s*(dinner|lunch|brunch|cena|breakfast|supper)\s*$/i,
   // Status suffixes
-  /\s*[-–—]\s*(confirmed|pending|waitlist|wait\s*list)$/i,
+  /\s*[–—−‐‑‒―-]\s*(confirmed|pending|waitlist|wait\s*list)$/i,
   /\s*\((confirmed|pending|waitlist|wait\s*list)\)$/i,
   // Time suffixes
-  /\s*[-–—]\s*\d{1,2}:\d{2}\s*(am|pm)?$/i,
+  /\s*[–—−‐‑‒―-]\s*\d{1,2}:\d{2}\s*(am|pm)?$/i,
   /\s*@\s*\d{1,2}:\d{2}\s*(am|pm)?$/i,
   // Full date with year and time: "on Wednesday, November 29, 2023, 8:45 PM"
   /\s*on\s+\w+\s*,\s*\w+\s+\d{1,2}(st|nd|rd|th)?\s*,\s*\d{4}\s*,?\s*\d{1,2}:\d{2}\s*(AM|PM)?$/i,
   // Date patterns: "12/25", "Dec 25", "December 25th"
-  /\s*[-–—]\s*\d{1,2}\/\d{1,2}(\/\d{2,4})?$/i,
-  /\s*[-–—]\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}(st|nd|rd|th)?$/i,
+  /\s*[–—−‐‑‒―-]\s*\d{1,2}\/\d{1,2}(\/\d{2,4})?$/i,
+  /\s*[–—−‐‑‒―-]\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}(st|nd|rd|th)?$/i,
   /\s*\((jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}(st|nd|rd|th)?\)$/i,
   // Confirmation numbers
-  /\s*[-–—]\s*(conf|confirmation)\s*#?\s*[\w\d]+$/i,
+  /\s*[–—−‐‑‒―-]\s*(conf|confirmation)\s*#?\s*[\w\d]+$/i,
   /\s*\(confirmation\s*:?\s*[\w\d]+\)$/i,
   /\s*\(reservation\s*:?\s*[\w\d]+\)$/i,
   /\s*\(booking\s*:?\s*[\w\d]+\)$/i,
   /\s*#\s*[\w\d]{4,}$/i, // Generic confirmation number
   // Guest/companion patterns
-  /\s*[-–—]\s*w\/?\s+\w+.*$/i, // "- w/ John", "- with friends"
-  /\s*[-–—]\s*with\s+\w+.*$/i,
+  /\s*[–—−‐‑‒―-]\s*w\/?\s+\w+.*$/i, // "- w/ John", "- with friends"
+  /\s*[–—−‐‑‒―-]\s*with\s+\w+.*$/i,
   /\s*\(w\/?\s+\w+.*\)$/i,
   /\s*\(with\s+\w+.*\)$/i,
   // Via platform suffixes
-  /\s*[-–—]\s*via\s+(resy|opentable|tock|yelp|thefork)$/i,
+  /\s*[–—−‐‑‒―-]\s*via\s+(resy|opentable|tock|yelp|thefork)$/i,
   /\s*\(via\s+(resy|opentable|tock|yelp|thefork)\)$/i,
   /\s*\((resy|opentable|tock|yelp|thefork)\)$/i,
   // Location/branch suffixes
-  /\s*[-–—]\s*(downtown|midtown|uptown|westside|eastside)$/i,
-  /\s*[-–—]\s*(main|flagship|original)\s*(location|branch)?$/i,
+  /\s*[–—−‐‑‒―-]\s*(downtown|midtown|uptown|westside|eastside)$/i,
+  /\s*[–—−‐‑‒―-]\s*(main|flagship|original)\s*(location|branch)?$/i,
   // "reservation" or "booking" at the end
   /\s+reservation$/i,
   /\s+booking$/i,
 ];
 
-/** Clean and normalize a calendar event title to extract the likely restaurant name */
-function _cleanCalendarEventTitle(title: string): string {
-  if (!title) {
-    return "";
-  }
-  let cleaned = title
-    .trim()
-    .replace(/[–—−‐‑‒―-]/g, " ")
-    .replace(/\s+/g, " ");
+function stripCalendarTitleAffixes(value: string): string {
+  let cleaned = value;
   let prev: string;
   do {
     prev = cleaned;
@@ -579,6 +572,17 @@ function _cleanCalendarEventTitle(title: string): string {
     cleaned = cleaned.trim();
   } while (cleaned !== prev);
   return cleaned;
+}
+
+/** Clean and normalize a calendar event title to extract the likely restaurant name */
+function _cleanCalendarEventTitle(title: string): string {
+  if (!title) {
+    return "";
+  }
+  const withOriginalSeparators = title.trim().replace(/\s+/g, " ");
+  const stripped = stripCalendarTitleAffixes(withOriginalSeparators);
+  const normalized = stripped.replace(/[–—−‐‑‒―-]/g, " ").replace(/\s+/g, " ");
+  return stripCalendarTitleAffixes(normalized);
 }
 export const cleanCalendarEventTitle = memoize(_cleanCalendarEventTitle);
 

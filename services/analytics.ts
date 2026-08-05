@@ -12,9 +12,9 @@ const analytics = getAnalytics();
  * @param screenName - The name of the screen being viewed
  * @param screenClass - Optional class name of the screen
  */
-export const logScreenView = async (screenName: string, screenClass?: string) => {
+export const logScreenView = (screenName: string, screenClass?: string) => {
   try {
-    await firebaseLogEvent(analytics, "screen_view", {
+    firebaseLogEvent(analytics, "screen_view", {
       screen_name: screenName,
       screen_class: screenClass ?? screenName,
     });
@@ -30,9 +30,9 @@ export const logScreenView = async (screenName: string, screenClass?: string) =>
  * @param eventName - The name of the event (max 40 characters)
  * @param params - Optional parameters for the event
  */
-const logEvent = async (eventName: string, params?: Record<string, string | number | boolean>) => {
+const logEvent = (eventName: string, params?: Record<string, string | number | boolean>) => {
   try {
-    await firebaseLogEvent(analytics, eventName, params);
+    firebaseLogEvent(analytics, eventName, params);
   } catch (error) {
     if (__DEV__) {
       console.warn("Analytics event error:", error);

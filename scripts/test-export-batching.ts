@@ -563,9 +563,12 @@ function getPhotosForVisitLegacy(database: DatabaseSync, visitId: string): Photo
   return rows.map(parseLegacyPhoto);
 }
 
-function formatDateLegacy(timestamp: number): string {
+function formatLocalDateOracle(timestamp: number): string {
   const date = new Date(timestamp);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const year = date.getFullYear().toString().padStart(4, "0");
+  const month = (date.getMonth() + 1).toString().padStart(2, "0");
+  const day = date.getDate().toString().padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatTimeLegacy(timestamp: number): string {
@@ -651,7 +654,7 @@ function buildIndependentExport(
           }
         : null,
       suggestedRestaurantId: visit.suggestedRestaurantId,
-      visitDate: formatDateLegacy(visit.startTime),
+      visitDate: formatLocalDateOracle(visit.startTime),
       startTime: formatTimeLegacy(visit.startTime),
       endTime: formatTimeLegacy(visit.endTime),
       duration: formatDurationLegacy(visit.startTime, visit.endTime),
@@ -1136,6 +1139,48 @@ function independentCSVString(data: ExportData): string {
   );
 }
 
+function assertVisitDateUsesLocalCalendarDay(): void {
+  const previousTimezone = process.env.TZ;
+  try {
+    process.env.TZ = "Pacific/Auckland";
+    const startTime = Date.UTC(2026, 5, 20, 12, 30);
+    const [visit] = buildExportVisits({
+      visits: [
+        {
+          id: "local-midnight",
+          restaurantId: null,
+          suggestedRestaurantId: null,
+          status: "confirmed",
+          startTime,
+          endTime: startTime + 60_000,
+          centerLat: 0,
+          centerLon: 0,
+          photoCount: 0,
+          foodProbable: false,
+          calendarEventId: null,
+          calendarEventTitle: null,
+          calendarEventLocation: null,
+          calendarEventIsAllDay: null,
+          exportedToCalendarId: null,
+          notes: null,
+          updatedAt: null,
+          awardAtVisit: null,
+        },
+      ],
+      restaurants: [],
+      photosByVisitId: new Map(),
+    });
+
+    assert.equal(visit?.visitDate, "2026-06-21", "visit date must use the same local day as the displayed time");
+  } finally {
+    if (previousTimezone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = previousTimezone;
+    }
+  }
+}
+
 function assertByteParity(actual: string, expected: string, context: string): void {
   assert.deepEqual(Buffer.from(actual, "utf8"), Buffer.from(expected, "utf8"), context);
 }
@@ -1153,6 +1198,7 @@ function assertExportQueryPlan(database: DatabaseSync, query: ExportPhotosQuery,
 
 const database = createDatabase();
 try {
+  assertVisitDateUsesLocalCalendarDay();
   seedFixture(database);
 
   assert.equal(buildExportPhotosQuery([]), null);
@@ -1337,6 +1383,15 @@ try {
   }
 
   const candidateAll = buildCandidateExport(database, "all", true).data;
+  const candidateCsv = exportDataToCSVString(candidateAll);
+  assert.ok(
+    candidateCsv.includes('"Café ""雪"",\nSushi"'),
+    "CSV must double embedded quotes while preserving a quoted multiline field",
+  );
+  assert.ok(
+    candidateCsv.includes(`"${EDGE_VISIT_ID.replaceAll('"', '""')}"`),
+    "CSV must escape embedded quotes in visit IDs",
+  );
   const richVisit = candidateAll.visits.find(({ visitId }) => visitId === "visit-confirmed-rich");
   assert.ok(richVisit);
   assert.equal(richVisit.foodProbable, true);

@@ -37,6 +37,27 @@ struct CalendarMatcherNameTests {
     )
   }
 
+  @Test("Dash-delimited party sizes are removed before dash normalization")
+  func dashDelimitedPartySize() {
+    let title = "Le Bernardin - 2 people"
+    let nonbreakingHyphenTitle = "Le Bernardin ‑ 2 people"
+
+    #expect(CalendarTitleCleaner.cleanEventTitle(title) == "Le Bernardin")
+    #expect(CalendarTitleCleaner.cleanEventTitle(nonbreakingHyphenTitle) == "Le Bernardin")
+    #expect(
+      CalendarRestaurantNameMatcher.isExactMatch(
+        calendarTitle: title,
+        restaurantName: "Le Bernardin"
+      )
+    )
+    #expect(
+      CalendarRestaurantNameMatcher.isExactMatch(
+        calendarTitle: nonbreakingHyphenTitle,
+        restaurantName: "Le Bernardin"
+      )
+    )
+  }
+
   @Test("Comparison stripping repeatedly removes prefixes and descriptor suffixes")
   func iterativeComparisonStripping() {
     #expect(

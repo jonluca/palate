@@ -9,7 +9,7 @@ import { memoize } from "../utils/memoize.ts";
 const PRODUCTION_SOURCE_PATH = fileURLToPath(new URL("../services/calendar.ts", import.meta.url));
 const PRODUCTION_SOURCE_START = "const CALENDAR_TITLE_PREFIXES_TO_STRIP = [";
 const PRODUCTION_SOURCE_END = "export const isFuzzyRestaurantMatch = memoize(_isFuzzyRestaurantMatch);";
-const EXPECTED_PRODUCTION_SOURCE_SHA256 = "d35e678969ad647061e9849eb6d64b0895d3ed09106fa5fe6da57b8bfe9f4586";
+const EXPECTED_PRODUCTION_SOURCE_SHA256 = "7fc0e38374480db6408c2481d2412e3f6ba98f454a9a2e7f714e19f05b9cd942";
 
 // This benchmark-only mirror lets Node exercise the same pure title semantics
 // without loading Expo Calendar or the React Native module graph. The source
@@ -62,37 +62,37 @@ const CALENDAR_TITLE_PREFIXES_TO_STRIP = [
 ];
 
 const CALENDAR_TITLE_SUFFIXES_TO_STRIP = [
-  /\s*[-–—]\s*\d+\s*(people|guests|pax|persons?)$/i,
-  /\s*[-–—]\s*table\s+for\s+\d+$/i,
-  /\s*[-–—]\s*party\s+of\s+\d+$/i,
+  /\s*[–—−‐‑‒―-]\s*\d+\s*(people|guests|pax|persons?)$/i,
+  /\s*[–—−‐‑‒―-]\s*table\s+for\s+\d+$/i,
+  /\s*[–—−‐‑‒―-]\s*party\s+of\s+\d+$/i,
   /\s*\(\d+\s*(people|guests|pax|persons?)\)$/i,
   /\s*\(party\s+of\s+\d+\)$/i,
   /\s*\(table\s+for\s+\d+\)$/i,
   /\s*\(for\s+\d+\)$/i,
   /\s*for\s+\d+$/i,
   /\s*(dinner|lunch|brunch|cena|breakfast|supper)\s*$/i,
-  /\s*[-–—]\s*(confirmed|pending|waitlist|wait\s*list)$/i,
+  /\s*[–—−‐‑‒―-]\s*(confirmed|pending|waitlist|wait\s*list)$/i,
   /\s*\((confirmed|pending|waitlist|wait\s*list)\)$/i,
-  /\s*[-–—]\s*\d{1,2}:\d{2}\s*(am|pm)?$/i,
+  /\s*[–—−‐‑‒―-]\s*\d{1,2}:\d{2}\s*(am|pm)?$/i,
   /\s*@\s*\d{1,2}:\d{2}\s*(am|pm)?$/i,
   /\s*on\s+\w+\s*,\s*\w+\s+\d{1,2}(st|nd|rd|th)?\s*,\s*\d{4}\s*,?\s*\d{1,2}:\d{2}\s*(AM|PM)?$/i,
-  /\s*[-–—]\s*\d{1,2}\/\d{1,2}(\/\d{2,4})?$/i,
-  /\s*[-–—]\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}(st|nd|rd|th)?$/i,
+  /\s*[–—−‐‑‒―-]\s*\d{1,2}\/\d{1,2}(\/\d{2,4})?$/i,
+  /\s*[–—−‐‑‒―-]\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}(st|nd|rd|th)?$/i,
   /\s*\((jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{1,2}(st|nd|rd|th)?\)$/i,
-  /\s*[-–—]\s*(conf|confirmation)\s*#?\s*[\w\d]+$/i,
+  /\s*[–—−‐‑‒―-]\s*(conf|confirmation)\s*#?\s*[\w\d]+$/i,
   /\s*\(confirmation\s*:?\s*[\w\d]+\)$/i,
   /\s*\(reservation\s*:?\s*[\w\d]+\)$/i,
   /\s*\(booking\s*:?\s*[\w\d]+\)$/i,
   /\s*#\s*[\w\d]{4,}$/i,
-  /\s*[-–—]\s*w\/?\s+\w+.*$/i,
-  /\s*[-–—]\s*with\s+\w+.*$/i,
+  /\s*[–—−‐‑‒―-]\s*w\/?\s+\w+.*$/i,
+  /\s*[–—−‐‑‒―-]\s*with\s+\w+.*$/i,
   /\s*\(w\/?\s+\w+.*\)$/i,
   /\s*\(with\s+\w+.*\)$/i,
-  /\s*[-–—]\s*via\s+(resy|opentable|tock|yelp|thefork)$/i,
+  /\s*[–—−‐‑‒―-]\s*via\s+(resy|opentable|tock|yelp|thefork)$/i,
   /\s*\(via\s+(resy|opentable|tock|yelp|thefork)\)$/i,
   /\s*\((resy|opentable|tock|yelp|thefork)\)$/i,
-  /\s*[-–—]\s*(downtown|midtown|uptown|westside|eastside)$/i,
-  /\s*[-–—]\s*(main|flagship|original)\s*(location|branch)?$/i,
+  /\s*[–—−‐‑‒―-]\s*(downtown|midtown|uptown|westside|eastside)$/i,
+  /\s*[–—−‐‑‒―-]\s*(main|flagship|original)\s*(location|branch)?$/i,
   /\s+reservation$/i,
   /\s+booking$/i,
 ];
@@ -226,14 +226,8 @@ const INSIGNIFICANT_WORDS = new Set([
   "for",
 ]);
 
-function cleanCalendarEventTitle(title: string): string {
-  if (!title) {
-    return "";
-  }
-  let cleaned = title
-    .trim()
-    .replace(/[–—−‐‑‒―-]/g, " ")
-    .replace(/\s+/g, " ");
+function stripCalendarTitleAffixes(value: string): string {
+  let cleaned = value;
   let previous: string;
   do {
     previous = cleaned;
@@ -246,6 +240,16 @@ function cleanCalendarEventTitle(title: string): string {
     cleaned = cleaned.trim();
   } while (cleaned !== previous);
   return cleaned;
+}
+
+function cleanCalendarEventTitle(title: string): string {
+  if (!title) {
+    return "";
+  }
+  const withOriginalSeparators = title.trim().replace(/\s+/g, " ");
+  const stripped = stripCalendarTitleAffixes(withOriginalSeparators);
+  const normalized = stripped.replace(/[–—−‐‑‒―-]/g, " ").replace(/\s+/g, " ");
+  return stripCalendarTitleAffixes(normalized);
 }
 const memoizedCleanCalendarEventTitle = memoize(cleanCalendarEventTitle);
 

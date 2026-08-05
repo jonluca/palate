@@ -224,6 +224,7 @@ export const useAppStore = create<AppState>()(
           reviewFiltersCollapsed: true,
           hasCompletedOnboarding: false,
           hasCompletedInitialScan: false,
+          googleMapsApiKey: null,
           selectedCalendarIds: null,
           hasSeenAddPhotosAlert: false,
           isScanning: false,

@@ -2,6 +2,7 @@ import * as SQLite from "expo-sqlite";
 import { calculateDistanceMeters } from "@/data/restaurants";
 import type { IgnoredLocationRecord } from "./types";
 import { invalidateRestaurantIndex } from "./michelin-index";
+import { dropApplicationDatabaseTables } from "./reset-core";
 import { syncDefaultFoodKeywords } from "./food-keyword-sync-core";
 import {
   ensureMichelinProviderSpatialIndex,
@@ -377,34 +378,15 @@ export async function rejectVisitsInIgnoredLocationsInternal(database: SQLite.SQ
 export async function nukeDatabase(): Promise<void> {
   const database = await getDatabase();
 
-  // Drop all tables in correct order (respecting foreign keys)
-  await database.execAsync(`
-    PRAGMA foreign_keys = OFF;
-
-    DROP TABLE IF EXISTS michelin_restaurant_spatial_index;
-    DROP TABLE IF EXISTS visit_suggested_restaurants;
-    DROP TABLE IF EXISTS reservation_import_sources;
-    DROP TABLE IF EXISTS photos;
-    DROP TABLE IF EXISTS visits;
-    DROP TABLE IF EXISTS restaurants;
-    DROP TABLE IF EXISTS michelin_restaurants;
-    DROP TABLE IF EXISTS ignored_locations;
-    DROP TABLE IF EXISTS dismissed_reservation_import_sources;
-    DROP TABLE IF EXISTS reservation_import_review_exclusions;
-    DROP TABLE IF EXISTS dismissed_calendar_events;
-    
-    PRAGMA foreign_keys = ON;
-  `);
-
-  // Reset the module-level db reference so initializeDatabase runs again
-  db = null;
-  dbInitPromise = null;
-
-  // Invalidate spatial index since Michelin data is wiped
+  // Invalidate process-local indexes before mutating their backing tables. If
+  // reset fails partway through, subsequent reads will take their repair paths.
   invalidateRestaurantIndex();
+  invalidateMichelinProviderSpatialIndex();
 
-  // Reinitialize the database with fresh tables
-  await getDatabase();
+  await dropApplicationDatabaseTables(database);
+
+  // Reuse the live connection so reset does not leak the previous handle.
+  await initializeDatabase(database);
 }
 
 /**

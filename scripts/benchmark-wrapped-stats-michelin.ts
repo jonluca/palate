@@ -367,13 +367,10 @@ function finiteTimestamp(value: unknown, label: string): number {
 }
 
 function createSyntheticFixture(): Fixture {
-  const restaurants = Array.from(
-    { length: 768 },
-    (_, index): RestaurantSeed => ({
-      id: `restaurant-${index.toString().padStart(4, "0")}`,
-      award: SYNTHETIC_AWARDS[index % SYNTHETIC_AWARDS.length]!,
-    }),
-  );
+  const restaurants = Array.from({ length: 768 }, (_, index): RestaurantSeed => ({
+    id: `restaurant-${index.toString().padStart(4, "0")}`,
+    award: SYNTHETIC_AWARDS[index % SYNTHETIC_AWARDS.length]!,
+  }));
   const visits: VisitSeed[] = [];
   const sourceStatusCounts: Record<string, number> = {};
   for (let index = 0; index < 18_000; index++) {
