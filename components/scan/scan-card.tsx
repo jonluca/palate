@@ -33,6 +33,13 @@ export function ScanCard({
   isComplete,
 }: ScanCardProps) {
   const isInProgress = isScanning || isDeepScanning;
+  const photoCountLabel = isDeepScanning
+    ? "Deep scanning…"
+    : isScanning
+      ? "Scanning…"
+      : isComplete
+        ? "Scan complete"
+        : "Ready to scan";
 
   return (
     <Animated.View entering={FadeInDown.delay(animationDelay).duration(300)}>
@@ -40,8 +47,11 @@ export function ScanCard({
         <View className={"p-5 gap-4"}>
           {/* Photo Count */}
           {cameraRollCount !== null && cameraRollCount !== undefined && (
-            <PhotoCountDisplay label={isScanning ? "Scanning..." : "Ready to scan"} count={cameraRollCount} />
+            <PhotoCountDisplay label={photoCountLabel} count={cameraRollCount} />
           )}
+
+          {/* Progress and completion state */}
+          <AnimatedProgressCard sharedValues={sharedValues} />
 
           {/* Scan Button */}
           {!isInProgress && !isComplete && (
@@ -52,13 +62,10 @@ export function ScanCard({
 
           {/* Deep Scan Button */}
           {showDeepScan && !isInProgress && onDeepScan && (
-            <Button onPress={onDeepScan} variant={"outline"} size={"lg"}>
-              <ButtonText variant={"outline"}>{deepScanButtonText}</ButtonText>
+            <Button onPress={onDeepScan} variant={"secondary"} size={"lg"} accessibilityRole={"button"}>
+              <ButtonText variant={"secondary"}>{deepScanButtonText}</ButtonText>
             </Button>
           )}
-
-          {/* Progress */}
-          <AnimatedProgressCard sharedValues={sharedValues} />
         </View>
       </Card>
     </Animated.View>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, View } from "react-native";
+import { ActivityIndicator, Alert, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import type { SymbolViewProps } from "expo-symbols";
 import { useQueryClient } from "@tanstack/react-query";
@@ -78,8 +78,12 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
   const queryClient = useQueryClient();
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
   const [progress, setProgress] = useState<DeepScanProgress | null>(null);
-  const deepScanMutation = useDeepScan((p) => setProgress(p));
-  const isScanning = deepScanMutation.isPending;
+  const { isPending: isScanning, mutateAsync: mutateDeepScan } = useDeepScan((p) => setProgress(p));
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [hasAutoStartFinished, setHasAutoStartFinished] = useState(false);
+  const isWorking = isPreparing || isScanning;
+  const isAutoStartQueued = autoStart && !hasAutoStartFinished && !isWorking && (unanalyzedPhotoCount ?? 0) > 0;
+  const isBusy = isWorking || isAutoStartQueued;
   const hasAutoStartedRef = useRef(false);
   const isStartingRef = useRef(false);
 
@@ -92,52 +96,51 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
           isVisionVisitFoodValidationModeEnabled(),
         )
       ) {
+        setHasAutoStartFinished(true);
         return;
       }
-      if (isStartingRef.current || deepScanMutation.isPending) {
+      if (isStartingRef.current) {
         return;
       }
 
       isStartingRef.current = true;
-      const photosToScan = await getUnanalyzedPhotoIds().catch((error) => {
-        console.error("Failed to load pending deep scan photos:", error);
-        showToast({ type: "error", message: "Deep scan failed" });
-        return null;
-      });
+      setIsPreparing(true);
 
-      if (!photosToScan) {
-        isStartingRef.current = false;
-        return;
-      }
+      try {
+        const photosToScan = await getUnanalyzedPhotoIds();
 
-      if (photosToScan.length === 0) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
-        if (source === "manual") {
-          showToast({ type: "info", message: "No photos left to deep scan" });
+        if (photosToScan.length === 0) {
+          void queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
+          if (source === "manual") {
+            showToast({ type: "info", message: "No photos left to deep scan" });
+          }
+        } else {
+          await runDeepScan({
+            source,
+            mutateAsync: () => mutateDeepScan(photosToScan),
+            setProgress,
+            showToast,
+          });
         }
-        isStartingRef.current = false;
-        return;
-      }
-
-      await runDeepScan({
-        source,
-        mutateAsync: () => deepScanMutation.mutateAsync(photosToScan),
-        setProgress,
-        showToast,
-      }).catch((error) => {
-        console.error("Unexpected deep scan error:", error);
+      } catch (error) {
+        console.error("Failed to prepare deep scan:", error);
         setProgress(null);
         showToast({ type: "error", message: "Deep scan failed" });
-      });
+      }
+
+      setIsPreparing(false);
       isStartingRef.current = false;
+      if (source === "auto") {
+        setHasAutoStartFinished(true);
+      }
     },
-    [deepScanMutation, queryClient, showToast],
+    [mutateDeepScan, queryClient, showToast],
   );
 
-  const handleDeepScan = useCallback(() => {
+  const handleDeepScan = () => {
     Alert.alert(
       "Deep Scan Photos",
-      "This will analyze ALL photos in your library for food. This may take a while but will find food photos that the quick scan missed.",
+      "This will thoroughly check every remaining photo for food. It may take a while, but it can find photos the quick scan missed.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -148,25 +151,22 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
         },
       ],
     );
-  }, [startDeepScan]);
+  };
 
   useEffect(() => {
-    if (!autoStart || hasAutoStartedRef.current || isScanning || (unanalyzedPhotoCount ?? 0) === 0) {
+    if (!autoStart || hasAutoStartedRef.current || isWorking || (unanalyzedPhotoCount ?? 0) === 0) {
       return;
     }
 
     hasAutoStartedRef.current = true;
-    const autoStartTimer = setTimeout(() => {
-      void startDeepScan("auto");
-    }, 0);
-
-    return () => clearTimeout(autoStartTimer);
-  }, [autoStart, isScanning, startDeepScan, unanalyzedPhotoCount]);
+    void startDeepScan("auto");
+  }, [autoStart, isWorking, startDeepScan, unanalyzedPhotoCount]);
 
   const progressPercent =
     progress && progress.totalPhotos > 0 ? (progress.processedPhotos / progress.totalPhotos) * 100 : 0;
+  const hasProgress = isScanning && progress !== null && progress.totalPhotos > 0;
 
-  if (!isScanning && (unanalyzedPhotoCount ?? 0) === 0) {
+  if (!isBusy && (unanalyzedPhotoCount ?? 0) === 0) {
     return null;
   }
 
@@ -180,15 +180,47 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
               Deep Scan Photos
             </ThemedText>
             <ThemedText variant={"footnote"} color={"secondary"}>
-              {autoStart && isScanning
-                ? "Automatically scanning the rest of your library for missed food photos"
-                : "Slower full-library scan to find missed food photos"}
+              {autoStart && isBusy
+                ? "Automatically checking the rest of your library for missed food photos"
+                : "Thoroughly check remaining photos for missed food"}
             </ThemedText>
           </View>
         </View>
 
-        {isScanning && progress && (
-          <View className={"gap-2"}>
+        {isBusy && !hasProgress && (
+          <View
+            className={"flex-row items-center gap-3 rounded-xl bg-pink-500/10 p-3"}
+            accessible={true}
+            accessibilityRole={"progressbar"}
+            accessibilityLabel={"Preparing photos for deep scan"}
+            accessibilityLiveRegion={"polite"}
+          >
+            <ActivityIndicator color={"#ec4899"} />
+            <View className={"flex-1 gap-0.5"}>
+              <ThemedText variant={"footnote"} className={"font-medium"}>
+                {isPreparing && !isScanning ? "Preparing photos…" : "Starting deep scan…"}
+              </ThemedText>
+              <ThemedText variant={"caption1"} color={"tertiary"}>
+                This can take a moment for a large library.
+              </ThemedText>
+            </View>
+          </View>
+        )}
+
+        {hasProgress && progress && (
+          <View
+            className={"gap-2"}
+            accessible={true}
+            accessibilityRole={"progressbar"}
+            accessibilityLabel={"Deep scan progress"}
+            accessibilityValue={{
+              min: 0,
+              max: progress.totalPhotos,
+              now: progress.processedPhotos,
+              text: `${progress.processedPhotos.toLocaleString()} of ${progress.totalPhotos.toLocaleString()} photos`,
+            }}
+            accessibilityLiveRegion={"polite"}
+          >
             <View className={"h-2 bg-pink-500/20 rounded-full overflow-hidden"}>
               <View className={"h-full bg-pink-500 rounded-full"} style={{ width: `${progressPercent}%` }} />
             </View>
@@ -208,12 +240,18 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
           </View>
         )}
 
-        <Button variant={"secondary"} onPress={handleDeepScan} loading={isScanning} disabled={isScanning}>
-          <IconSymbol name={"eye.fill"} size={16} color={"#ec4899"} />
-          <ButtonText variant={"secondary"} className={"ml-2"}>
-            {isScanning ? "Scanning..." : "Deep Scan All Photos"}
-          </ButtonText>
-        </Button>
+        {!isBusy && (
+          <Button
+            variant={"secondary"}
+            onPress={handleDeepScan}
+            accessibilityRole={"button"}
+            accessibilityLabel={"Deep Scan All Photos"}
+            accessibilityHint={"Analyzes the remaining photos in your library for food"}
+          >
+            <IconSymbol name={"eye.fill"} size={16} color={"#ec4899"} />
+            <ButtonText variant={"secondary"}>Deep Scan All Photos</ButtonText>
+          </Button>
+        )}
       </View>
     </Card>
   );
