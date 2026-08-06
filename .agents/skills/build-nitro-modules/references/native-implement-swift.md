@@ -11,7 +11,6 @@ Covers Steps 8–9 (Swift path): creating the Swift implementation class that im
 ## Quick Pattern
 
 **Incorrect** — subclassing NSObject directly:
-
 ```swift
 import Foundation
 class HybridMath: NSObject {
@@ -20,7 +19,6 @@ class HybridMath: NSObject {
 ```
 
 **Correct** — implementing the generated spec:
-
 ```swift
 import Foundation
 import NitroModules
@@ -118,26 +116,26 @@ For any type uncertainty, consult the canonical Swift test implementation:
 
 ### Type reference table
 
-| TypeScript          | Swift Type              | Notes                                                                                                      |
-| ------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `number`            | `Double`                | Always `Double`                                                                                            |
-| `string`            | `String`                |                                                                                                            |
-| `boolean`           | `Bool`                  |                                                                                                            |
-| `bigint` (signed)   | `Int64`                 |                                                                                                            |
-| `bigint` (unsigned) | `UInt64`                |                                                                                                            |
-| `T[]`               | `[T]`                   | e.g. `[Double]`, `[String]`, `[Person]`                                                                    |
-| `Promise<T>`        | `Promise<T>`            | `Promise.parallel(queue) { }`, `Promise.async { }`, `Promise.resolved(withResult:)`, or manual `Promise()` |
-| `Promise<void>`     | `Promise<Void>`         | Swift `Void`, not `Unit`                                                                                   |
-| `T \| undefined`    | `T?`                    | Swift optional                                                                                             |
-| `T \| U`            | `Variant_T_U`           | Generated type, e.g. `Variant_String_Double`                                                               |
-| `(x: T) -> void`    | `@escaping (T) -> Void` | Must be `@escaping` for stored callbacks                                                                   |
-| `() -> T`           | `@escaping () -> T`     |                                                                                                            |
-| `ArrayBuffer`       | `ArrayBuffer`           | From NitroModules                                                                                          |
-| `AnyMap`            | `AnyMap`                | From NitroModules                                                                                          |
-| `Record<string, T>` | `[String: T]`           | Swift dictionary literal syntax                                                                            |
-| `HybridObject`      | `any HybridSpec`        | Protocol existential, e.g. `any HybridMathSpec`                                                            |
-| `null` / `NullType` | `NullType`              | `.null` value                                                                                              |
-| `Date`              | `Date`                  | Foundation `Date`                                                                                          |
+| TypeScript | Swift Type | Notes |
+|-----------|-----------|-------|
+| `number` | `Double` | Always `Double` |
+| `string` | `String` | |
+| `boolean` | `Bool` | |
+| `bigint` (signed) | `Int64` | |
+| `bigint` (unsigned) | `UInt64` | |
+| `T[]` | `[T]` | e.g. `[Double]`, `[String]`, `[Person]` |
+| `Promise<T>` | `Promise<T>` | `Promise.parallel(queue) { }`, `Promise.async { }`, `Promise.resolved(withResult:)`, or manual `Promise()` |
+| `Promise<void>` | `Promise<Void>` | Swift `Void`, not `Unit` |
+| `T \| undefined` | `T?` | Swift optional |
+| `T \| U` | `Variant_T_U` | Generated type, e.g. `Variant_String_Double` |
+| `(x: T) -> void` | `@escaping (T) -> Void` | Must be `@escaping` for stored callbacks |
+| `() -> T` | `@escaping () -> T` | |
+| `ArrayBuffer` | `ArrayBuffer` | From NitroModules |
+| `AnyMap` | `AnyMap` | From NitroModules |
+| `Record<string, T>` | `[String: T]` | Swift dictionary literal syntax |
+| `HybridObject` | `any HybridSpec` | Protocol existential, e.g. `any HybridMathSpec` |
+| `null` / `NullType` | `NullType` | `.null` value |
+| `Date` | `Date` | Foundation `Date` |
 
 ### Async with Promise
 
@@ -208,7 +206,6 @@ func promiseThatResolvesToUndefined() throws -> Promise<Double?> {
 HybridObject methods and property access can be called synchronously from JS, including from multiple JS runtimes such as worklets. Do not model HybridObject implementations as Swift `actor`s by default; actors make sync generated methods awkward and can hide where serialization happens.
 
 Prefer one of these patterns:
-
 - Keep cheap readonly state synchronous.
 - Put mutable native/session state behind a private serial `DispatchQueue`, and run mutating or fallible operations through `Promise.parallel(queue)`.
 - Make operations async when they must serialize, wait for hardware/session state, or cross queues.
@@ -256,7 +253,6 @@ func divide(a: Double, b: Double) throws -> Double {
 Validate invalid values and required behavior early, but do not reject optional cross-platform preferences only because iOS ignores them. If the operation still does its core job, ignore or degrade the preference and report support through the public capabilities or resolved state.
 
 Examples:
-
 - Throw when a requested flash mode cannot work because the device has no flash.
 - Do not throw only because a quality, guidance UI, high-frame-rate, auto-zoom, or region preference is unsupported, unless the API documents that field as a hard requirement.
 

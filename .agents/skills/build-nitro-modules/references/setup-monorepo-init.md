@@ -36,14 +36,14 @@ bun install
 
 Ask the user all of the following before running any command:
 
-| Question                                             | Default                                                        |
-| ---------------------------------------------------- | -------------------------------------------------------------- |
-| What is the library name? (e.g. `react-native-math`) | — required                                                     |
-| Use monorepo with `packages/<name>` folder?          | **yes**                                                        |
-| Create an example app to test the module?            | **yes, `apps/example` unless the repo is intentionally small** |
-| iOS language: `swift` or `cpp`?                      | **swift**                                                      |
-| Android language: `kotlin` or `cpp`?                 | **kotlin**                                                     |
-| What does this module do? (brief description)        | — required                                                     |
+| Question | Default |
+|----------|---------|
+| What is the library name? (e.g. `react-native-math`) | — required |
+| Use monorepo with `packages/<name>` folder? | **yes** |
+| Create an example app to test the module? | **yes, `apps/example` unless the repo is intentionally small** |
+| iOS language: `swift` or `cpp`? | **swift** |
+| Android language: `kotlin` or `cpp`? | **kotlin** |
+| What does this module do? (brief description) | — required |
 
 Only proceed once all questions are answered.
 
@@ -57,7 +57,10 @@ If a root `package.json` does not exist yet, create one:
 {
   "name": "react-native-math-root",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"]
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
 }
 ```
 
@@ -66,7 +69,6 @@ For the shallower layout, use `"example"` instead of `"apps/*"` in `workspaces`.
 ### 3. Confirm the library name
 
 The library name should:
-
 - Follow npm naming: `react-native-<domain>` (e.g. `react-native-math`, `react-native-camera`)
 - Be lowercase, hyphen-separated
 - Reflect the module's purpose
@@ -108,7 +110,10 @@ In the monorepo root `package.json`:
 {
   "name": "react-native-math-root",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "specs": "bun --cwd packages/react-native-math run specs",
     "example": "bun --cwd apps/example"
@@ -136,7 +141,10 @@ Use [repo-structure-and-workflow.md](repo-structure-and-workflow.md) for CI, no-
 {
   "name": "react-native-math-root",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "specs": "bun --cwd packages/react-native-math run specs",
     "example": "bun --cwd apps/example"

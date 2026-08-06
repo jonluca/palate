@@ -18,7 +18,12 @@ my-module/
 Plugin functions follow the `with` prefix naming convention.
 
 ```typescript
-import { ConfigPlugin, withInfoPlist, withAndroidManifest, AndroidConfig } from "expo/config-plugins";
+import {
+  ConfigPlugin,
+  withInfoPlist,
+  withAndroidManifest,
+  AndroidConfig,
+} from "expo/config-plugins";
 
 const withMyConfig: ConfigPlugin<{ apiKey: string }> = (config, { apiKey }) => {
   // iOS: modify Info.plist
@@ -29,8 +34,13 @@ const withMyConfig: ConfigPlugin<{ apiKey: string }> = (config, { apiKey }) => {
 
   // Android: modify AndroidManifest.xml
   config = withAndroidManifest(config, (config) => {
-    const mainApp = AndroidConfig.Manifest.getMainApplicationOrThrow(config.modResults);
-    AndroidConfig.Manifest.addMetaDataItemToMainApplication(mainApp, "MY_API_KEY", apiKey);
+    const mainApp =
+      AndroidConfig.Manifest.getMainApplicationOrThrow(config.modResults);
+    AndroidConfig.Manifest.addMetaDataItemToMainApplication(
+      mainApp,
+      "MY_API_KEY",
+      apiKey
+    );
     return config;
   });
 

@@ -69,11 +69,11 @@ Avoid nullable clusters when an object can be in several distinct states:
 
 ```typescript
 interface ScannedData {
-  position: Point;
-  text?: string;
-  barcode?: string;
-  barcodeType?: BarcodeType;
-  face?: Rect;
+  position: Point
+  text?: string
+  barcode?: string
+  barcodeType?: BarcodeType
+  face?: Rect
 }
 ```
 
@@ -81,23 +81,23 @@ Prefer a base type plus variants with nonoptional state-specific fields:
 
 ```typescript
 interface ScannedData {
-  position: Point;
+  position: Point
 }
 
 interface ScannedText extends ScannedData {
-  text: string;
+  text: string
 }
 
 interface ScannedBarcode extends ScannedData {
-  barcode: string;
-  barcodeType: BarcodeType;
+  barcode: string
+  barcodeType: BarcodeType
 }
 
 interface ScannedFace extends ScannedData {
-  face: Rect;
+  face: Rect
 }
 
-type ScannedResult = ScannedText | ScannedBarcode | ScannedFace;
+type ScannedResult = ScannedText | ScannedBarcode | ScannedFace
 ```
 
 ## Public API Organization

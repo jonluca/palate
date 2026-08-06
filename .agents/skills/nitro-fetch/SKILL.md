@@ -22,7 +22,7 @@ A focused reference for AI coding assistants working in a project that uses the 
 
 The performance story has three moving parts, and most questions end up being about one of them:
 
-1. **Prefetching.** Native code can run _before_ React Native loads. `prefetchOnAppStart(...)` and `prewarmOnAppStart(...)` replay stored requests / socket opens on every cold start, so by the time JS runs the response is already cached or the socket is already `OPEN`.
+1. **Prefetching.** Native code can run *before* React Native loads. `prefetchOnAppStart(...)` and `prewarmOnAppStart(...)` replay stored requests / socket opens on every cold start, so by the time JS runs the response is already cached or the socket is already `OPEN`.
 2. **Importing the native client.** The default approach is explicit imports — `import { fetch } from 'react-native-nitro-fetch'`, `import { NitroWebSocket } from 'react-native-nitro-websockets'`, or plugging into axios via a custom adapter. Alternatively, users can do a **global replace** (`globalThis.fetch = fetch`, etc.) at the top of their entry file — see the [Global Replace docs](https://fetch.margelo.com/docs/global-replace) for setup and trade-offs.
 3. **Seeing what's happening.** `NetworkInspector` records HTTP + WS activity at the JS boundary; native Perfetto / Instruments traces cover everything below that (DNS, TLS, TTFB, body). One is for correctness, the other is for latency.
 
@@ -30,16 +30,16 @@ The performance story has three moving parts, and most questions end up being ab
 
 Load the matching file from `references/` before writing code. Each reference cites real file paths in this repo.
 
-| User is asking about…                                                                                                                    | Read                                                                     |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Warming the cache before a screen mounts, making cold-start GETs feel instant, `prefetch`, `prefetchOnAppStart`, `prefetchKey`           | [`references/prefetching.md`](./references/prefetching.md)               |
-| Routing axios through nitro-fetch (the full custom adapter — `baseURL`, `params`, `timeout`, `signal`, `responseType`, `validateStatus`) | [`references/axios-adapter.md`](./references/axios-adapter.md)           |
-| UTF-8 decoding, slow `TextDecoder`, Hermes polyfill, streaming decode, `NitroTextDecoder`                                                | [`references/text-decoder.md`](./references/text-decoder.md)             |
-| Opening a `wss://` connection before React Native boots, `prewarmOnAppStart`, Android `Application.onCreate` wiring                      | [`references/websocket-prewarm.md`](./references/websocket-prewarm.md)   |
-| The `NitroWebSocket` class, headers, sub-protocols, `wss://`, binary frames, runtime usage                                               | [`references/using-websockets.md`](./references/using-websockets.md)     |
-| Migrating an existing app from React Native's built-in `WebSocket` to `NitroWebSocket`                                                   | [`references/migrate-from-rn-ws.md`](./references/migrate-from-rn-ws.md) |
-| Seeing requests and responses at the JS level, debugging which library made a call, `NetworkInspector`                                   | [`references/network-inspector.md`](./references/network-inspector.md)   |
-| Finding the slow API, DNS / TLS / TTFB breakdowns, native traces, Perfetto, Instruments, Hermes profiler                                 | [`references/perfetto-profiling.md`](./references/perfetto-profiling.md) |
+| User is asking about… | Read |
+|---|---|
+| Warming the cache before a screen mounts, making cold-start GETs feel instant, `prefetch`, `prefetchOnAppStart`, `prefetchKey` | [`references/prefetching.md`](./references/prefetching.md) |
+| Routing axios through nitro-fetch (the full custom adapter — `baseURL`, `params`, `timeout`, `signal`, `responseType`, `validateStatus`) | [`references/axios-adapter.md`](./references/axios-adapter.md) |
+| UTF-8 decoding, slow `TextDecoder`, Hermes polyfill, streaming decode, `NitroTextDecoder` | [`references/text-decoder.md`](./references/text-decoder.md) |
+| Opening a `wss://` connection before React Native boots, `prewarmOnAppStart`, Android `Application.onCreate` wiring | [`references/websocket-prewarm.md`](./references/websocket-prewarm.md) |
+| The `NitroWebSocket` class, headers, sub-protocols, `wss://`, binary frames, runtime usage | [`references/using-websockets.md`](./references/using-websockets.md) |
+| Migrating an existing app from React Native's built-in `WebSocket` to `NitroWebSocket` | [`references/migrate-from-rn-ws.md`](./references/migrate-from-rn-ws.md) |
+| Seeing requests and responses at the JS level, debugging which library made a call, `NetworkInspector` | [`references/network-inspector.md`](./references/network-inspector.md) |
+| Finding the slow API, DNS / TLS / TTFB breakdowns, native traces, Perfetto, Instruments, Hermes profiler | [`references/perfetto-profiling.md`](./references/perfetto-profiling.md) |
 
 If the question doesn't match any row, read [`references/prefetching.md`](./references/prefetching.md) first — most cold-start questions start there, and it links out to the rest.
 
@@ -61,9 +61,9 @@ A correct answer for any of these will cite the API and file path. A wrong / hal
 
 Good test questions:
 
-- _"How do I prewarm a wss connection in this repo?"_ → should mention `prewarmOnAppStart` **and** the Android `Application.onCreate` wiring via `NitroWebSocketAutoPrewarmer.prewarmOnStart(this)`.
-- _"How do I make axios go through nitro-fetch?"_ → should produce an `AxiosAdapter` that respects `baseURL`, `params`, `timeout`, `signal`, and `responseType` — not a 20-line sketch that `JSON.parse`s everything.
-- _"Why is my cold-start GET still slow after adding `prefetch`?"_ → should mention `prefetchKey` and point at `references/prefetching.md`.
+- *"How do I prewarm a wss connection in this repo?"* → should mention `prewarmOnAppStart` **and** the Android `Application.onCreate` wiring via `NitroWebSocketAutoPrewarmer.prewarmOnStart(this)`.
+- *"How do I make axios go through nitro-fetch?"* → should produce an `AxiosAdapter` that respects `baseURL`, `params`, `timeout`, `signal`, and `responseType` — not a 20-line sketch that `JSON.parse`s everything.
+- *"Why is my cold-start GET still slow after adding `prefetch`?"* → should mention `prefetchKey` and point at `references/prefetching.md`.
 
 ## Pointers
 

@@ -1,6 +1,6 @@
 ---
 name: build-nitro-modules
-description: Builds and designs React Native Nitro Modules with Nitrogen, HybridObject TypeScript specs, generated native implementations, zero-copy and native-state APIs, Swift/Kotlin/C++ bindings, example apps, and testing. Use when creating a Nitro Module, adding or reviewing HybridObjects, designing Nitro-specific public APIs, implementing native functionality, or setting up the nitrogen codegen pipeline. Pair with api-design for general library API shape.
+description: Builds and designs React Native Nitro Modules with Nitrogen, HybridObject TypeScript specs, Nitro View components, generated native implementations, zero-copy and native-state APIs, Swift/Kotlin/C++ bindings, example apps, and testing. Use when creating a Nitro Module, adding or reviewing HybridObjects, building a Nitro View (HybridView) component, designing Nitro-specific public APIs, implementing native functionality, or setting up the nitrogen codegen pipeline. Pair with api-design for general library API shape.
 license: MIT
 metadata:
   author: margelo
@@ -79,7 +79,7 @@ Load [release-it-publishing.md][release-it-publishing] only when setting up or r
 - Use a `setOn...(callback | undefined)`-style API only for single hot-path callbacks owned by an object, where replacing or removing the callback is the natural operation. The `set` verb and docs must make the replacement semantics clear.
 - If the native API exposes only one delegate/callback but the JS API is a repeated event, prefer multiplexing internally and exposing additive listeners unless doing so would be unsafe or too expensive for the hot path.
 - Use `Sync<(...) => ...>` callbacks only for rare thread-bound hot paths that must synchronously execute on a specific JS runtime or worklet thread.
-- For Nitro Views, expose the raw `getHostComponent` wrapper. Add React components or hooks only when they remove repeated setup code while staying layered over the same native objects and refs.
+- For Nitro Views, expose the raw `getHostComponent` wrapper. Add React components or hooks only when they remove repeated setup code while staying layered over the same native objects and refs. Load [spec-hybrid-view.md][spec-hybrid-view] when creating or reviewing a Nitro View component.
 - Follow `api-design` for naming, platform abstraction, sync/async boundaries, listener cleanup, errors, variants, TypeScript facades, and JSDoc contracts.
 
 ## Nitro Native Implementation Rules
@@ -116,7 +116,7 @@ Load [release-it-publishing.md][release-it-publishing] only when setting up or r
 - Avoid chains of `Task`, `DispatchQueue`, coroutine dispatcher, executor, and JS/Nitro runtime hops inside one operation. Pick a native owner queue/thread/dispatcher for each HybridObject or session and cross into it once at the Promise, lifecycle, or callback boundary. Repeated hops are a sign the HybridObject boundaries or lifecycle handles are wrong.
 - Never fix Nitro lifecycle, readiness, or race bugs with `setTimeout`, sleeps, artificial delays, extra thread hops, or calling native methods twice. Model readiness with a Promise, listener/event, returned configured HybridObject, explicit state transition, or native completion callback. Use retries only for external hardware, OS service, remote service, or network uncertainty, with bounded/cancellable/idempotent behavior.
 - Implement `memorySize` for HybridObjects that own native resources or large allocations so the JS VM can collect them under memory pressure.
-- For Nitro Views, implement `prepareForRecycle` when the view owns state that should be reset before reuse.
+- For Nitro Views, implement `prepareForRecycle` when the view owns state that should be reset before reuse. See [spec-hybrid-view.md][spec-hybrid-view] for the full view spec, implementation, registration, and recycling workflow.
 - Mix C++ HybridObjects with Swift/Kotlin HybridObjects in one library. Use C++ for shared or hot code, such as OpenCV/frame processing/storage engines, and Swift/Kotlin for platform services, permissions, file paths, camera/session APIs, and OS integration.
 - C++ HybridObjects can accept Swift/Kotlin-implemented HybridObjects and call their generated C++ spec API. Example: a C++ `StorageFactory` can accept a Swift/Kotlin `PlatformContext` and call `getTemporaryDirectory()` or `writeFile(...)` through the generated C++ interface. C++ can access only the public spec API, not private Swift/Kotlin fields.
 - Do not rely on Swift/Kotlin calling into C++-implemented HybridObjects unless current Nitrogen support has been verified for that direction.
@@ -138,8 +138,8 @@ Load [release-it-publishing.md][release-it-publishing] only when setting up or r
 ### If creating a new library — ask all of these before any command:
 
 1. **Library name** — What should the library be called? (e.g. `react-native-math`)
-2. **Monorepo with `packages/` folder** — Should the library live in `packages/<name>` inside a monorepo? _(Strongly recommended — default: yes)_
-3. **Example app** — Should an example app be created to test the module, and where should it live? _(Recommended — default: yes; `apps/example` when multiple examples are needed or likely, `example` only for a small single-example repo that should stay close to generated RN config)_
+2. **Monorepo with `packages/` folder** — Should the library live in `packages/<name>` inside a monorepo? *(Strongly recommended — default: yes)*
+3. **Example app** — Should an example app be created to test the module, and where should it live? *(Recommended — default: yes; `apps/example` when multiple examples are needed or likely, `example` only for a small single-example repo that should stay close to generated RN config)*
 4. **Native languages** — Which platforms and languages?
    - iOS: `swift` (default) or `cpp`
    - Android: `kotlin` (default) or `cpp`
@@ -155,6 +155,8 @@ Do not proceed past Step 1 of the build sequence until all five questions are an
 3. **Purpose** — What does this HybridObject do?
 
 Then skip directly to [spec-hybrid-object.md][spec-hybrid-object] (write the spec), [spec-nitro-json.md][spec-nitro-json] (add autolinking entry), [native-nitrogen-codegen.md][native-nitrogen-codegen] (re-run nitrogen), and the relevant native implementation file. Skip all setup, monorepo, and example app steps.
+
+If the new HybridObject is a **renderable view component**, use [spec-hybrid-view.md][spec-hybrid-view] instead of the plain HybridObject spec reference — it covers the `HybridView` spec, native `view` implementation, Android view manager registration, and the `getHostComponent` JS wiring.
 
 ## Typical Build Sequence
 
@@ -184,7 +186,6 @@ Full step-by-step references below.
 ## When to Apply
 
 Reference these guidelines when:
-
 - Creating any new React Native native module using the Nitro framework
 - Checking Nitro minimum platform requirements
 - Verifying current Nitro, React Native, and native-toolchain requirements before making implementation decisions
@@ -202,45 +203,46 @@ Reference these guidelines when:
 
 ## Priority-Ordered Guidelines
 
-| Priority | Category                                  | Impact   | Reference                                                         |
-| -------- | ----------------------------------------- | -------- | ----------------------------------------------------------------- |
-| 0        | General public API shape                  | CRITICAL | `api-design`                                                      |
-| 0        | Nitro API constraints                     | CRITICAL | This SKILL.md                                                     |
-| 1        | Repo structure and workflow               | HIGH     | [repo-structure-and-workflow.md][repo-structure-and-workflow]     |
-| 2        | Nitrogen scaffold                         | CRITICAL | [setup-monorepo-init.md][setup-monorepo-init]                     |
-| 3        | HybridObject spec                         | CRITICAL | [spec-hybrid-object.md][spec-hybrid-object]                       |
-| 4        | nitro.json autolinking                    | CRITICAL | [spec-nitro-json.md][spec-nitro-json]                             |
-| 5        | Nitrogen codegen                          | HIGH     | [native-nitrogen-codegen.md][native-nitrogen-codegen]             |
-| 6        | C++ implementation                        | HIGH     | [native-implement-cpp.md][native-implement-cpp]                   |
-| 7        | Kotlin implementation                     | HIGH     | [native-implement-kotlin.md][native-implement-kotlin]             |
-| 8        | Swift implementation                      | HIGH     | [native-implement-swift.md][native-implement-swift]               |
-| 9        | Example app setup _(if requested)_        | HIGH     | [example-app-setup.md][example-app-setup]                         |
-| 10       | Android Gradle paths _(if example app)_   | HIGH     | [example-android-config.md][example-android-config]               |
-| 11       | Metro + install + test _(if example app)_ | HIGH     | [example-metro-install.md][example-metro-install]                 |
-| 12       | npm publish readiness                     | MEDIUM   | [spec-package-publish.md][spec-package-publish]                   |
-| 13       | release-it publishing                     | MEDIUM   | [release-it-publishing.md][release-it-publishing]                 |
-| 14       | VisionCamera-style full library patterns  | MEDIUM   | [vision-camera-golden-standard.md][vision-camera-golden-standard] |
+| Priority | Category | Impact | Reference |
+|----------|----------|--------|-----------|
+| 0 | General public API shape | CRITICAL | `api-design` |
+| 0 | Nitro API constraints | CRITICAL | This SKILL.md |
+| 1 | Repo structure and workflow | HIGH | [repo-structure-and-workflow.md][repo-structure-and-workflow] |
+| 2 | Nitrogen scaffold | CRITICAL | [setup-monorepo-init.md][setup-monorepo-init] |
+| 3 | HybridObject spec | CRITICAL | [spec-hybrid-object.md][spec-hybrid-object] |
+| 3 | Hybrid View components *(if building a view)* | HIGH | [spec-hybrid-view.md][spec-hybrid-view] |
+| 4 | nitro.json autolinking | CRITICAL | [spec-nitro-json.md][spec-nitro-json] |
+| 5 | Nitrogen codegen | HIGH | [native-nitrogen-codegen.md][native-nitrogen-codegen] |
+| 6 | C++ implementation | HIGH | [native-implement-cpp.md][native-implement-cpp] |
+| 7 | Kotlin implementation | HIGH | [native-implement-kotlin.md][native-implement-kotlin] |
+| 8 | Swift implementation | HIGH | [native-implement-swift.md][native-implement-swift] |
+| 9 | Example app setup *(if requested)* | HIGH | [example-app-setup.md][example-app-setup] |
+| 10 | Android Gradle paths *(if example app)* | HIGH | [example-android-config.md][example-android-config] |
+| 11 | Metro + install + test *(if example app)* | HIGH | [example-metro-install.md][example-metro-install] |
+| 12 | npm publish readiness | MEDIUM | [spec-package-publish.md][spec-package-publish] |
+| 13 | release-it publishing | MEDIUM | [release-it-publishing.md][release-it-publishing] |
+| 14 | VisionCamera-style full library patterns | MEDIUM | [vision-camera-golden-standard.md][vision-camera-golden-standard] |
 
 ## Quick Reference
 
 ### Minimum HybridObject Spec (`src/specs/Math.nitro.ts`)
 
 ```typescript
-import type { HybridObject } from "react-native-nitro-modules";
+import type { HybridObject } from 'react-native-nitro-modules'
 
-export interface Math extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  add(a: number, b: number): number;
+export interface Math extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  add(a: number, b: number): number
 }
 ```
 
 ### Minimum Runtime + Type Exports (`src/index.ts`)
 
 ```typescript
-import { NitroModules } from "react-native-nitro-modules";
-import type { Math } from "./specs/Math.nitro";
+import { NitroModules } from 'react-native-nitro-modules'
+import type { Math } from './specs/Math.nitro'
 
-export const math = NitroModules.createHybridObject<Math>("Math");
-export type { Math } from "./specs/Math.nitro";
+export const math = NitroModules.createHybridObject<Math>('Math')
+export type { Math } from './specs/Math.nitro'
 ```
 
 Package entry points such as `src/index.ts`, `index.ts`, `index.js`, and `index.tsx` must stay barrels. They may contain direct re-exports and a one-line Nitro root export such as `export const camera = NitroModules.createHybridObject<Camera>('Camera')`, but no actual implementation logic, functions, classes, hooks, components, branching, side effects, or helper definitions. Move real definitions to focused files and re-export them.
@@ -288,48 +290,53 @@ Run: `bun example android`, `bun example ios`, `bun specs`
 
 ## References
 
-| File                                                              | Description                                                                                             |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| [repo-structure-and-workflow.md][repo-structure-and-workflow]     | Root layout, README/docs, packages/apps/config/scripts, CI, branch, draft PR, and squash-merge workflow |
-| [setup-monorepo-init.md][setup-monorepo-init]                     | Collecting scaffold inputs and running `nitrogen init`                                                  |
-| [spec-hybrid-object.md][spec-hybrid-object]                       | Writing `*.nitro.ts` specs and exporting HybridObjects                                                  |
-| [spec-nitro-json.md][spec-nitro-json]                             | `nitro.json` all fields, autolinking, namespace configuration                                           |
-| [native-nitrogen-codegen.md][native-nitrogen-codegen]             | Running Nitrogen and verifying generated files                                                          |
-| [native-implement-cpp.md][native-implement-cpp]                   | Implementing HybridObjects in C++                                                                       |
-| [native-implement-kotlin.md][native-implement-kotlin]             | Implementing HybridObjects in Kotlin (Android)                                                          |
-| [native-implement-swift.md][native-implement-swift]               | Implementing HybridObjects in Swift (iOS)                                                               |
-| [example-app-setup.md][example-app-setup]                         | RN CLI example app init, workspace wiring, version alignment                                            |
-| [example-android-config.md][example-android-config]               | `settings.gradle` and `build.gradle` monorepo path fixes                                                |
-| [example-metro-install.md][example-metro-install]                 | Metro watchFolders, library install, App.tsx usage, test runs                                           |
-| [spec-package-publish.md][spec-package-publish]                   | `package.json` author, `files` field, and npm publish readiness                                         |
-| [release-it-publishing.md][release-it-publishing]                 | One-command releases with `release-it` and `bun release`                                                |
-| [vision-camera-golden-standard.md][vision-camera-golden-standard] | Package layout, API layering, Nitro object modeling, and publishing patterns inspired by VisionCamera   |
+| File | Description |
+|------|-------------|
+| [repo-structure-and-workflow.md][repo-structure-and-workflow] | Root layout, README/docs, packages/apps/config/scripts, CI, branch, draft PR, and squash-merge workflow |
+| [setup-monorepo-init.md][setup-monorepo-init] | Collecting scaffold inputs and running `nitrogen init` |
+| [spec-hybrid-object.md][spec-hybrid-object] | Writing `*.nitro.ts` specs and exporting HybridObjects |
+| [spec-hybrid-view.md][spec-hybrid-view] | Building Nitro View components: `HybridView` specs, native views, `getHostComponent`, `hybridRef`, callbacks, recycling |
+| [spec-nitro-json.md][spec-nitro-json] | `nitro.json` all fields, autolinking, namespace configuration |
+| [native-nitrogen-codegen.md][native-nitrogen-codegen] | Running Nitrogen and verifying generated files |
+| [native-implement-cpp.md][native-implement-cpp] | Implementing HybridObjects in C++ |
+| [native-implement-kotlin.md][native-implement-kotlin] | Implementing HybridObjects in Kotlin (Android) |
+| [native-implement-swift.md][native-implement-swift] | Implementing HybridObjects in Swift (iOS) |
+| [example-app-setup.md][example-app-setup] | RN CLI example app init, workspace wiring, version alignment |
+| [example-android-config.md][example-android-config] | `settings.gradle` and `build.gradle` monorepo path fixes |
+| [example-metro-install.md][example-metro-install] | Metro watchFolders, library install, App.tsx usage, test runs |
+| [spec-package-publish.md][spec-package-publish] | `package.json` author, `files` field, and npm publish readiness |
+| [release-it-publishing.md][release-it-publishing] | One-command releases with `release-it` and `bun release` |
+| [vision-camera-golden-standard.md][vision-camera-golden-standard] | Package layout, API layering, Nitro object modeling, and publishing patterns inspired by VisionCamera |
 
 ## Problem → Skill Mapping
 
-| Problem                                      | Reference                                                         | Action                                                                                                                              |
-| -------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Need to design the public API first          | `api-design` + this SKILL.md                                      | Shape the TS/React API, then apply Nitro constraints                                                                                |
-| Need latest general APIs                     | `api-design`                                                      | Check official docs, release notes, source repos, package metadata, or `llms-full.txt` before deciding                              |
-| Need a recommended repo structure            | [repo-structure-and-workflow.md][repo-structure-and-workflow]     | Use `main`, a strong README, `packages/`, `apps/` or `example/`, optional Fumadocs, `scripts/`, `config/`, and `.github/workflows/` |
-| Unsure static module vs instance API         | This SKILL.md                                                     | Prefer HybridObjects for native state, resources, prewarming, and zero-copy data                                                    |
-| Don't know where to start                    | [setup-monorepo-init.md][setup-monorepo-init]                     | Scaffold with `nitrogen init`                                                                                                       |
-| Spec file syntax error                       | [spec-hybrid-object.md][spec-hybrid-object]                       | Fix `*.nitro.ts` interface                                                                                                          |
-| Autolinking not working                      | [spec-nitro-json.md][spec-nitro-json]                             | Check `nitro.json` autolinking block                                                                                                |
-| Nitrogen generates no files                  | [native-nitrogen-codegen.md][native-nitrogen-codegen]             | Verify spec file extension and run command from right dir                                                                           |
-| C++ types unclear                            | [native-implement-cpp.md][native-implement-cpp]                   | Follow type reference links to canonical examples                                                                                   |
-| Kotlin compilation error                     | [native-implement-kotlin.md][native-implement-kotlin]             | Check annotations and `override` modifiers                                                                                          |
-| Swift compilation error                      | [native-implement-swift.md][native-implement-swift]               | Check class inheritance and property signatures                                                                                     |
-| Example app won't build (Android)            | [example-android-config.md][example-android-config]               | Fix Gradle monorepo path configuration                                                                                              |
-| Metro can't resolve library                  | [example-metro-install.md][example-metro-install]                 | Add `watchFolders` to `metro.config.js`                                                                                             |
-| Version mismatch between example and package | [example-app-setup.md][example-app-setup]                         | Align `react-native` versions across workspaces                                                                                     |
-| Package missing files on npm                 | [spec-package-publish.md][spec-package-publish]                   | Fix `files` field in `package.json`                                                                                                 |
-| Need one-command releases                    | [release-it-publishing.md][release-it-publishing]                 | Configure `release-it` behind `bun release`                                                                                         |
-| Need a full-featured library structure       | [vision-camera-golden-standard.md][vision-camera-golden-standard] | Use the VisionCamera-inspired package, API, hooks, views, and Nitro object model                                                    |
+| Problem | Reference | Action |
+|---------|-----------|--------|
+| Need to design the public API first | `api-design` + this SKILL.md | Shape the TS/React API, then apply Nitro constraints |
+| Need latest general APIs | `api-design` | Check official docs, release notes, source repos, package metadata, or `llms-full.txt` before deciding |
+| Need a recommended repo structure | [repo-structure-and-workflow.md][repo-structure-and-workflow] | Use `main`, a strong README, `packages/`, `apps/` or `example/`, optional Fumadocs, `scripts/`, `config/`, and `.github/workflows/` |
+| Unsure static module vs instance API | This SKILL.md | Prefer HybridObjects for native state, resources, prewarming, and zero-copy data |
+| Don't know where to start | [setup-monorepo-init.md][setup-monorepo-init] | Scaffold with `nitrogen init` |
+| Spec file syntax error | [spec-hybrid-object.md][spec-hybrid-object] | Fix `*.nitro.ts` interface |
+| Need a native view component | [spec-hybrid-view.md][spec-hybrid-view] | Write a `HybridView` spec, implement `view`, register the Android manager, wire `getHostComponent` |
+| View callback prop arrives as `true` / never fires | [spec-hybrid-view.md][spec-hybrid-view] | Wrap every function prop (including `hybridRef`) with `callback(...)` |
+| Android "view manager not found" for a Nitro View | [spec-hybrid-view.md][spec-hybrid-view] | Add the generated `Hybrid*ViewManager` in `createViewManagers` |
+| Autolinking not working | [spec-nitro-json.md][spec-nitro-json] | Check `nitro.json` autolinking block |
+| Nitrogen generates no files | [native-nitrogen-codegen.md][native-nitrogen-codegen] | Verify spec file extension and run command from right dir |
+| C++ types unclear | [native-implement-cpp.md][native-implement-cpp] | Follow type reference links to canonical examples |
+| Kotlin compilation error | [native-implement-kotlin.md][native-implement-kotlin] | Check annotations and `override` modifiers |
+| Swift compilation error | [native-implement-swift.md][native-implement-swift] | Check class inheritance and property signatures |
+| Example app won't build (Android) | [example-android-config.md][example-android-config] | Fix Gradle monorepo path configuration |
+| Metro can't resolve library | [example-metro-install.md][example-metro-install] | Add `watchFolders` to `metro.config.js` |
+| Version mismatch between example and package | [example-app-setup.md][example-app-setup] | Align `react-native` versions across workspaces |
+| Package missing files on npm | [spec-package-publish.md][spec-package-publish] | Fix `files` field in `package.json` |
+| Need one-command releases | [release-it-publishing.md][release-it-publishing] | Configure `release-it` behind `bun release` |
+| Need a full-featured library structure | [vision-camera-golden-standard.md][vision-camera-golden-standard] | Use the VisionCamera-inspired package, API, hooks, views, and Nitro object model |
 
 [repo-structure-and-workflow]: references/repo-structure-and-workflow.md
 [setup-monorepo-init]: references/setup-monorepo-init.md
 [spec-hybrid-object]: references/spec-hybrid-object.md
+[spec-hybrid-view]: references/spec-hybrid-view.md
 [spec-nitro-json]: references/spec-nitro-json.md
 [native-nitrogen-codegen]: references/native-nitrogen-codegen.md
 [native-implement-cpp]: references/native-implement-cpp.md

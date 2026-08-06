@@ -43,7 +43,7 @@ cd ios && pod install
 ## API
 
 ```ts
-import { TextDecoder } from "react-native-nitro-text-decoder";
+import { TextDecoder } from 'react-native-nitro-text-decoder';
 
 class TextDecoder {
   constructor(label?: string, options?: { fatal?: boolean; ignoreBOM?: boolean });
@@ -52,18 +52,21 @@ class TextDecoder {
   readonly fatal: boolean;
   readonly ignoreBOM: boolean;
 
-  decode(input?: ArrayBuffer | ArrayBufferView, options?: { stream?: boolean }): string;
+  decode(
+    input?: ArrayBuffer | ArrayBufferView,
+    options?: { stream?: boolean }
+  ): string;
 }
 ```
 
 What's actually supported:
 
-| Knob                            | Behaviour                                                                                |
-| ------------------------------- | ---------------------------------------------------------------------------------------- |
-| `label`                         | `'utf-8'` (default) and aliases (`'utf8'`, `'unicode-1-1-utf-8'`). Anything else throws. |
-| `fatal: true`                   | Invalid UTF-8 throws instead of yielding U+FFFD.                                         |
-| `ignoreBOM: true`               | A leading byte-order mark is dropped instead of being included.                          |
-| `decode(buf, { stream: true })` | Holds incomplete code points until the next call so you can chunk binary input.          |
+| Knob | Behaviour |
+|---|---|
+| `label` | `'utf-8'` (default) and aliases (`'utf8'`, `'unicode-1-1-utf-8'`). Anything else throws. |
+| `fatal: true` | Invalid UTF-8 throws instead of yielding U+FFFD. |
+| `ignoreBOM: true` | A leading byte-order mark is dropped instead of being included. |
+| `decode(buf, { stream: true })` | Holds incomplete code points until the next call so you can chunk binary input. |
 
 Source: [`packages/react-native-nitro-text-decoder/src/TextDecoder.ts`](https://github.com/margelo/react-native-nitro-fetch/tree/main/packages/react-native-nitro-text-decoder/src/TextDecoder.ts).
 
@@ -72,26 +75,26 @@ Source: [`packages/react-native-nitro-text-decoder/src/TextDecoder.ts`](https://
 ### Decode a binary fetch body
 
 ```ts
-import { fetch } from "react-native-nitro-fetch";
-import { TextDecoder } from "react-native-nitro-text-decoder";
+import { fetch } from 'react-native-nitro-fetch';
+import { TextDecoder } from 'react-native-nitro-text-decoder';
 
-const decoder = new TextDecoder("utf-8"); // create once, reuse
+const decoder = new TextDecoder('utf-8'); // create once, reuse
 
-const res = await fetch("https://api.example.com/snapshot.bin");
-const buf = await res.arrayBuffer();
+const res  = await fetch('https://api.example.com/snapshot.bin');
+const buf  = await res.arrayBuffer();
 const data = JSON.parse(decoder.decode(buf));
 ```
 
 ### Decode WebSocket binary frames
 
-For _text_ frames `react-native-nitro-websockets` already decodes for you (`e.data` is a string). You only need a decoder for **binary** frames:
+For *text* frames `react-native-nitro-websockets` already decodes for you (`e.data` is a string). You only need a decoder for **binary** frames:
 
 ```ts
-import { NitroWebSocket } from "react-native-nitro-websockets";
-import { TextDecoder } from "react-native-nitro-text-decoder";
+import { NitroWebSocket } from 'react-native-nitro-websockets';
+import { TextDecoder } from 'react-native-nitro-text-decoder';
 
-const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
-const ws = new NitroWebSocket("wss://stream.example.com/ticks");
+const decoder = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
+const ws = new NitroWebSocket('wss://stream.example.com/ticks');
 
 ws.onmessage = (e) => {
   if (e.isBinary && e.binaryData) {
@@ -108,8 +111,8 @@ ws.onmessage = (e) => {
 Pass `{ stream: true }` for every chunk except the final one. The trailing call (with no argument) flushes any incomplete sequence:
 
 ```ts
-const decoder = new TextDecoder("utf-8");
-let acc = "";
+const decoder = new TextDecoder('utf-8');
+let acc = '';
 
 for await (const chunk of someAsyncByteIterator) {
   acc += decoder.decode(chunk, { stream: true });
@@ -129,7 +132,7 @@ Prefer one of:
 
 ## Gotchas
 
-- **Subarrays of larger buffers.** `decoder.decode(uint8.subarray(0, 16))` works, but if you pass the _backing_ `ArrayBuffer` directly you'll decode from offset 0 of the parent. Pass the typed-array view, not its `.buffer`.
+- **Subarrays of larger buffers.** `decoder.decode(uint8.subarray(0, 16))` works, but if you pass the *backing* `ArrayBuffer` directly you'll decode from offset 0 of the parent. Pass the typed-array view, not its `.buffer`.
 - **Forgetting `pod install`.** The iOS build will fail to find the module. Always run `pod install` after adding the package.
 - **Allocating a decoder per call.** The constructor goes through JSI, the decode call is the cheap one. Hold a module-level instance and reuse it.
 - **Reaching for `TextEncoder`.** Not exported here. Use `Buffer.from(str, 'utf8')` from `buffer`, or another package.

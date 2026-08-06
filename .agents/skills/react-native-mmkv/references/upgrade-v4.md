@@ -33,14 +33,14 @@ MMKV is now a purely native HybridObject and cannot be instantiated with `new`.
 
 ```ts
 // BEFORE (V3)
-import { MMKV } from "react-native-mmkv";
-const storage = new MMKV();
-const storage = new MMKV({ id: "my-store", encryptionKey: "secret" });
+import { MMKV } from 'react-native-mmkv'
+const storage = new MMKV()
+const storage = new MMKV({ id: 'my-store', encryptionKey: 'secret' })
 
 // AFTER (V4)
-import { createMMKV } from "react-native-mmkv";
-const storage = createMMKV();
-const storage = createMMKV({ id: "my-store", encryptionKey: "secret" });
+import { createMMKV } from 'react-native-mmkv'
+const storage = createMMKV()
+const storage = createMMKV({ id: 'my-store', encryptionKey: 'secret' })
 ```
 
 ### 3. `.delete()` → `.remove()`
@@ -49,10 +49,10 @@ The method was renamed because `delete` is a reserved keyword in C++ (which Nitr
 
 ```ts
 // BEFORE (V3)
-storage.delete("user.name");
+storage.delete('user.name')
 
 // AFTER (V4)
-storage.remove("user.name");
+storage.remove('user.name')
 ```
 
 ### 4. `Mode` enum → string literals
@@ -61,12 +61,12 @@ The `Mode` enum import no longer exists. Use string literals instead:
 
 ```ts
 // BEFORE (V3)
-import { MMKV, Mode } from "react-native-mmkv";
-const storage = new MMKV({ id: "shared", mode: Mode.MULTI_PROCESS });
+import { MMKV, Mode } from 'react-native-mmkv'
+const storage = new MMKV({ id: 'shared', mode: Mode.MULTI_PROCESS })
 
 // AFTER (V4)
-import { createMMKV } from "react-native-mmkv";
-const storage = createMMKV({ id: "shared", mode: "multi-process" });
+import { createMMKV } from 'react-native-mmkv'
+const storage = createMMKV({ id: 'shared', mode: 'multi-process' })
 ```
 
 ### 5. `AppGroup` → `AppGroupIdentifier`

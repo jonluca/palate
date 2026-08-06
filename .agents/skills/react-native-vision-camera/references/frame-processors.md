@@ -17,7 +17,7 @@ import { Camera, useFrameOutput, useCameraDevice } from 'react-native-vision-cam
 
 const device = useCameraDevice('back')
 const frameOutput = useFrameOutput({
-  pixelFormat: 'yuv',           // default, fastest; 'rgb' forces conversion; 'native' = zero-conv
+  pixelFormat: 'yuv',           // NOTE: default is 'native' (zero-copy). 'yuv' = CPU-accessible YUV; 'rgb' forces conversion. source: useFrameOutput.ts:123
   targetResolution: CommonResolutions.VGA_16_9, // start small
   onFrame(frame) {
     'worklet'
@@ -50,36 +50,37 @@ The same rule applies to `Depth` frames from `useDepthOutput`.
 
 ## Pixel format decision
 
-| Format     | When                                                                                                                                                |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `'yuv'`    | Default. OpenCV, native camera pipelines, MLKit. A 4K YUV frame is ~12MB vs ~31MB RGB.                                                              |
-| `'rgb'`    | ML frameworks that hard-require RGB and don't convert internally. Prefer using the GPU **Resizer** instead of paying RGB conversion on every frame. |
-| `'native'` | GPU pipelines (Metal/Vulkan) that accept the native format. Verify actual format via `frame.pixelFormat`.                                           |
+| Format | When |
+|---|---|
+| `'native'` | **Default.** Zero-copy GPU path — streams the session's negotiated `nativePixelFormat`. Resolved format may be YUV, RGB, RAW, or `'private'` — verify via `frame.pixelFormat`. |
+| `'yuv'` | Best CPU-accessible choice: OpenCV, native camera pipelines, MLKit, Skia. A 4K YUV frame is ~12MB vs ~31MB RGB. |
+| `'rgb'` | ML frameworks that hard-require RGB and don't convert internally. Prefer the GPU **Resizer** over paying RGB conversion on every frame. |
+<!-- source: useFrameOutput.ts:123 (default 'native'); CameraFrameOutput.nitro.ts:71-95; VideoPixelFormat.ts:52-62 -->
 
 ## Async frame work (backpressure)
 
 Any processing that can't keep up with the capture rate must run on an `AsyncRunner`:
 
 ```tsx
-import { useAsyncRunner } from "react-native-vision-camera";
+import { useAsyncRunner } from 'react-native-vision-camera'
 
-const asyncRunner = useAsyncRunner();
+const asyncRunner = useAsyncRunner()
 const frameOutput = useFrameOutput({
   onFrame(frame) {
-    "worklet";
+    'worklet'
     const accepted = asyncRunner.runAsync(() => {
-      "worklet";
+      'worklet'
       try {
-        const detections = runMlModel(frame);
+        const detections = runMlModel(frame)
         // update Reanimated SharedValues directly — no runOnJS needed in v5
-        detectionsShared.value = detections;
+        detectionsShared.value = detections
       } finally {
-        frame.dispose();
+        frame.dispose()
       }
-    });
-    if (!accepted) frame.dispose(); // runner full; drop and keep camera flowing
+    })
+    if (!accepted) frame.dispose() // runner full; drop and keep camera flowing
   },
-});
+})
 ```
 
 - `runAsync` returns `boolean`. `true` = accepted, dispose **inside** the async callback. `false` = busy, dispose **immediately**.
@@ -91,20 +92,18 @@ const frameOutput = useFrameOutput({
 Worklets in v5 can mutate Reanimated `SharedValue`s directly. No `runOnJS` round-trip:
 
 ```tsx
-import { useSharedValue } from "react-native-reanimated";
+import { useSharedValue } from 'react-native-reanimated'
 
-const faces = useSharedValue<Face[]>([]);
+const faces = useSharedValue<Face[]>([])
 
 const frameOutput = useFrameOutput({
   onFrame(frame) {
-    "worklet";
+    'worklet'
     try {
-      faces.value = detectFaces(frame); // drives Reanimated animations on UI thread
-    } finally {
-      frame.dispose();
-    }
+      faces.value = detectFaces(frame) // drives Reanimated animations on UI thread
+    } finally { frame.dispose() }
   },
-});
+})
 ```
 
 For overlays (bounding boxes, face meshes), combine with coordinate-system conversions — see below.
@@ -115,16 +114,15 @@ Frames stream in native sensor orientation and mirroring, not preview-view space
 
 ```ts
 // Inside a worklet:
-const cameraPoint = frame.convertFramePointToCameraPoint(framePoint);
+const cameraPoint = frame.convertFramePointToCameraPoint(framePoint)
 // Inside a regular JS context (with a PreviewViewMethods ref):
-const viewPoint = previewView.convertCameraPointToViewPoint(cameraPoint);
+const viewPoint = previewView.convertCameraPointToViewPoint(cameraPoint)
 
 // ScannedObject convenience:
-const viewObj = previewView.convertScannedObjectCoordinatesToViewCoordinates(scannedObject);
+const viewObj = previewView.convertScannedObjectCoordinatesToViewCoordinates(scannedObject)
 ```
 
 ## Creating native plugins — Nitro only
-
 Native Frame processor plugin requires to be created in nitro modules. Use build-nitro-modules skill or ask user to install that
 
 ### C++ cross-platform plugin
@@ -137,7 +135,7 @@ Same pattern: accept a `Depth` in the spec, cast to `NativeDepth` to get `AVDept
 
 ## Best-practice checklist
 
-- [ ] `pixelFormat: 'yuv'` unless you have a specific reason otherwise.
+- [ ] `pixelFormat`: keep the default `'native'` (zero-copy) for GPU pipelines; pass `'yuv'` when you need CPU pixel access (MLKit/OpenCV); `'rgb'` only if a consumer hard-requires it. <!-- source: useFrameOutput.ts:123 -->
 - [ ] `targetResolution` on the frame output — smaller is faster. VGA or 720p is enough for most ML models.
 - [ ] Every `onFrame` wrapped in `try { ... } finally { frame.dispose() }`.
 - [ ] Heavy work via `useAsyncRunner` + explicit accepted/rejected disposal.

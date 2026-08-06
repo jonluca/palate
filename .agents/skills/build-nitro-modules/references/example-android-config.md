@@ -17,7 +17,6 @@ Treat these edits as narrow layout adaptations, not a place to accumulate workar
 Two files need path corrections for the `apps/example` layout:
 
 **`apps/example/android/settings.gradle`** — fix React Native Gradle plugin paths:
-
 ```groovy
 pluginManagement { includeBuild("../../../node_modules/@react-native/gradle-plugin") }
 plugins { id("com.facebook.react.settings") }
@@ -30,7 +29,6 @@ includeBuild("../../../node_modules/@react-native/gradle-plugin")
 Replace the generated `settings.gradle` block with this. Do not keep older `example/android` paths, `includeBuild("../../node_modules/...")`, `native_modules.gradle`, or `applyNativeModulesSettingsGradle(...)` lines.
 
 **`apps/example/android/app/build.gradle`** — fix react{} block paths:
-
 ```groovy
 react {
     reactNativeDir = file("../../../../node_modules/react-native")
@@ -56,7 +54,6 @@ react {
 ## Path Depth Reference
 
 For a monorepo structured as:
-
 ```
 <root>/                        ← node_modules/ lives here
   apps/

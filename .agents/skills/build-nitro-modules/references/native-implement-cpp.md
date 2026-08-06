@@ -11,7 +11,6 @@ Covers Steps 8–9 (C++ path): creating the C++ implementation class that inheri
 ## Quick Pattern
 
 Implement in a separate file that inherits from the generated spec:
-
 ```cpp
 // cpp/HybridMath.hpp
 #pragma once
@@ -45,13 +44,15 @@ C++ HybridObjects can accept HybridObjects implemented in Swift/Kotlin and call 
 Example spec shape:
 
 ```typescript
-export interface PlatformContext extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  getTemporaryDirectory(): string;
-  writeFile(content: ArrayBuffer, path: string): Promise<void>;
+export interface PlatformContext
+  extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  getTemporaryDirectory(): string
+  writeFile(content: ArrayBuffer, path: string): Promise<void>
 }
 
-export interface StorageFactory extends HybridObject<{ ios: "c++"; android: "c++" }> {
-  createStorage(context: PlatformContext): Storage;
+export interface StorageFactory
+  extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
+  createStorage(context: PlatformContext): Storage
 }
 ```
 
@@ -179,26 +180,26 @@ For any type uncertainty, consult the canonical C++ test implementation:
 
 ### Type reference table
 
-| TypeScript          | C++ Type                                              | Notes                                                  |
-| ------------------- | ----------------------------------------------------- | ------------------------------------------------------ |
-| `number`            | `double`                                              | Always `double`, never `float`                         |
-| `string`            | `const std::string&` (param) / `std::string` (return) |                                                        |
-| `boolean`           | `bool`                                                |                                                        |
-| `bigint` (signed)   | `int64_t`                                             |                                                        |
-| `bigint` (unsigned) | `uint64_t`                                            |                                                        |
-| `T[]`               | `std::vector<T>`                                      | e.g. `std::vector<double>`, `std::vector<std::string>` |
-| `Promise<T>`        | `std::shared_ptr<Promise<T>>`                         | Use `Promise<T>::async(lambda)`                        |
-| `Promise<void>`     | `std::shared_ptr<Promise<void>>`                      |                                                        |
-| `T \| undefined`    | `std::optional<T>`                                    |                                                        |
-| `T \| U`            | `std::variant<T, U>`                                  | e.g. `std::variant<std::string, double>`               |
-| `(x: T) => void`    | `std::function<void(T)>`                              |                                                        |
-| `() => T`           | `std::function<T()>`                                  |                                                        |
-| `ArrayBuffer`       | `std::shared_ptr<ArrayBuffer>`                        |                                                        |
-| `AnyMap` / `Record` | `std::shared_ptr<AnyMap>`                             | Nitro's generic map type                               |
-| `Record<string, T>` | `std::unordered_map<std::string, T>`                  | For simple typed maps                                  |
-| `HybridObject`      | `std::shared_ptr<HybridSpec>`                         | e.g. `std::shared_ptr<HybridMathSpec>`                 |
-| `null` / `NullType` | `NullType`                                            | Use `nitro::null` constant                             |
-| `Date`              | `std::chrono::system_clock::time_point`               |                                                        |
+| TypeScript | C++ Type | Notes |
+|-----------|----------|-------|
+| `number` | `double` | Always `double`, never `float` |
+| `string` | `const std::string&` (param) / `std::string` (return) | |
+| `boolean` | `bool` | |
+| `bigint` (signed) | `int64_t` | |
+| `bigint` (unsigned) | `uint64_t` | |
+| `T[]` | `std::vector<T>` | e.g. `std::vector<double>`, `std::vector<std::string>` |
+| `Promise<T>` | `std::shared_ptr<Promise<T>>` | Use `Promise<T>::async(lambda)` |
+| `Promise<void>` | `std::shared_ptr<Promise<void>>` | |
+| `T \| undefined` | `std::optional<T>` | |
+| `T \| U` | `std::variant<T, U>` | e.g. `std::variant<std::string, double>` |
+| `(x: T) => void` | `std::function<void(T)>` | |
+| `() => T` | `std::function<T()>` | |
+| `ArrayBuffer` | `std::shared_ptr<ArrayBuffer>` | |
+| `AnyMap` / `Record` | `std::shared_ptr<AnyMap>` | Nitro's generic map type |
+| `Record<string, T>` | `std::unordered_map<std::string, T>` | For simple typed maps |
+| `HybridObject` | `std::shared_ptr<HybridSpec>` | e.g. `std::shared_ptr<HybridMathSpec>` |
+| `null` / `NullType` | `NullType` | Use `nitro::null` constant |
+| `Date` | `std::chrono::system_clock::time_point` | |
 
 ### Throwing errors
 

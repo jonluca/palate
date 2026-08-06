@@ -57,7 +57,10 @@ For `apps/example`:
 {
   "name": "react-native-math-root",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "specs": "bun --cwd packages/react-native-math run specs",
     "example": "bun --cwd apps/example"
@@ -69,7 +72,10 @@ For top-level `example/`, use:
 
 ```json
 {
-  "workspaces": ["packages/*", "example"],
+  "workspaces": [
+    "packages/*",
+    "example"
+  ],
   "scripts": {
     "example": "bun --cwd example"
   }

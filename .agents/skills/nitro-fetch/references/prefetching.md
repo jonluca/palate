@@ -11,14 +11,14 @@ keywords: prefetch, cold start, cache, performance, app launch, prefetchKey, POS
 
 Prefetching means: **fire the request before the JS code that consumes it actually runs.** nitro-fetch supports two flavours of this, and they answer different questions.
 
-- _In-session prefetch_ — "the user is on the list screen; they're probably about to tap a row." → `prefetch(...)`. Fires now, completes into the native cache, and any later `fetch(sameUrl)` with the same `prefetchKey` returns from cache.
-- _Cross-launch prefetch_ — "every cold start, before React Native is even loaded, fire this request." → `prefetchOnAppStart(...)`. Persists the request to disk; the native bootstrap replays it on every subsequent launch.
+- *In-session prefetch* — "the user is on the list screen; they're probably about to tap a row." → `prefetch(...)`. Fires now, completes into the native cache, and any later `fetch(sameUrl)` with the same `prefetchKey` returns from cache.
+- *Cross-launch prefetch* — "every cold start, before React Native is even loaded, fire this request." → `prefetchOnAppStart(...)`. Persists the request to disk; the native bootstrap replays it on every subsequent launch.
 
 The key idea is the **`prefetchKey`**. It's how the native cache identifies a stored response and how the consuming `fetch()` looks it up. Forget the key and you've just made a wasted request.
 
 ## Why prefetch
 
-- Cross-launch prefetches start _before React Native loads_, so the response is usually sitting in cache by the time the first screen mounts. Cold-start time-to-first-render drops by hundreds of milliseconds on real networks.
+- Cross-launch prefetches start *before React Native loads*, so the response is usually sitting in cache by the time the first screen mounts. Cold-start time-to-first-render drops by hundreds of milliseconds on real networks.
 - In-session prefetches let a list screen warm the next detail screen — taps feel instant.
 - It's free for callers: the consuming `fetch()` is the same call you were already making, just with a `prefetchKey` header.
 - The native cache is shared across any code path that imports `fetch` from `react-native-nitro-fetch`, so wrappers around that import (e.g. the [axios adapter](./axios-adapter.md)) automatically benefit.
@@ -58,7 +58,7 @@ import {
   prefetchOnAppStart,
   removeFromAutoPrefetch,
   removeAllFromAutoprefetch,
-} from "react-native-nitro-fetch";
+} from 'react-native-nitro-fetch';
 ```
 
 ### Prewarm a detail screen from the list screen
@@ -89,13 +89,13 @@ const res = await fetch(`https://api.example.com/items/${id}`, {
 Call this once after sign-in:
 
 ```ts
-await prefetchOnAppStart("https://api.example.com/feed", {
-  prefetchKey: "home-feed",
+await prefetchOnAppStart('https://api.example.com/feed', {
+  prefetchKey: 'home-feed',
   headers: { Authorization: `Bearer ${token}` },
 });
 ```
 
-On the _next_ launch, the request fires while React Native is still booting. By the time `Home` mounts and calls `fetch('https://api.example.com/feed', { headers: { prefetchKey: 'home-feed' } })`, the response is already sitting in the cache.
+On the *next* launch, the request fires while React Native is still booting. By the time `Home` mounts and calls `fetch('https://api.example.com/feed', { headers: { prefetchKey: 'home-feed' } })`, the response is already sitting in the cache.
 
 ### Prefetch a POST request (JSON or FormData)
 
@@ -103,33 +103,33 @@ On the _next_ launch, the request fires while React Native is still booting. By 
 
 ```ts
 // JSON body — the Content-Type header is persisted and replayed verbatim
-await prefetchOnAppStart("https://api.example.com/open-app", {
-  method: "POST",
-  body: JSON.stringify({ appId: "home", userId: 42 }),
-  headers: { "Content-Type": "application/json" },
-  prefetchKey: "open-app",
+await prefetchOnAppStart('https://api.example.com/open-app', {
+  method: 'POST',
+  body: JSON.stringify({ appId: 'home', userId: 42 }),
+  headers: { 'Content-Type': 'application/json' },
+  prefetchKey: 'open-app',
 });
 
 // FormData — string fields and React Native file refs ({ uri, type, name })
 const fd = new FormData();
-fd.append("user", "alice");
-fd.append("avatar", { uri: avatarUri, type: "image/jpeg", name: "a.jpg" } as any);
-await prefetchOnAppStart("https://api.example.com/upload", {
-  method: "POST",
+fd.append('user', 'alice');
+fd.append('avatar', { uri: avatarUri, type: 'image/jpeg', name: 'a.jpg' } as any);
+await prefetchOnAppStart('https://api.example.com/upload', {
+  method: 'POST',
   body: fd,
-  prefetchKey: "upload-avatar",
+  prefetchKey: 'upload-avatar',
 });
 ```
 
 The consuming `fetch()` must use the same `method` + `body` shape (the server has to actually receive a matching request) and reference the entry by `prefetchKey`:
 
 ```ts
-const res = await fetch("https://api.example.com/open-app", {
-  method: "POST",
-  body: JSON.stringify({ appId: "home", userId: 42 }),
+const res = await fetch('https://api.example.com/open-app', {
+  method: 'POST',
+  body: JSON.stringify({ appId: 'home', userId: 42 }),
   headers: {
-    "Content-Type": "application/json",
-    prefetchKey: "open-app",
+    'Content-Type': 'application/json',
+    prefetchKey: 'open-app',
   },
 });
 // res.headers.get('nitroPrefetched') === 'true' on the second cold launch onward
@@ -141,7 +141,7 @@ const res = await fetch("https://api.example.com/open-app", {
 
 ### First-launch prefetches via native registration
 
-`prefetchOnAppStart` runs from JS, so its earliest possible firing is the _second_ cold launch after install (JS has to run once to seed the queue). To prefetch on the very first launch, register URLs from native code. Both APIs share the same persistent queue, so JS-side `removeFromAutoPrefetch()` works on natively-registered entries too.
+`prefetchOnAppStart` runs from JS, so its earliest possible firing is the *second* cold launch after install (JS has to run once to seed the queue). To prefetch on the very first launch, register URLs from native code. Both APIs share the same persistent queue, so JS-side `removeFromAutoPrefetch()` works on natively-registered entries too.
 
 **Android** — `AutoPrefetcher.registerPrefetch` is `@JvmOverloads`, so the existing 4-arg call keeps compiling and the new args slot in by name:
 
@@ -216,10 +216,10 @@ The skill code accepts the key in either place — pick whichever is convenient 
 
 ```ts
 // As a header (it also goes on the wire)
-prefetch(url, { headers: { prefetchKey: "home-feed" } });
+prefetch(url, { headers: { prefetchKey: 'home-feed' } });
 
 // As a non-standard init field (added to headers under the hood)
-prefetchOnAppStart(url, { prefetchKey: "home-feed" });
+prefetchOnAppStart(url, { prefetchKey: 'home-feed' });
 ```
 
 The header name is case-insensitive — `prefetchKey`, `prefetchkey`, and `PrefetchKey` are all the same thing.
@@ -235,27 +235,27 @@ async function onLogout() {
 }
 
 // Or, if you only want to drop one entry:
-await removeFromAutoPrefetch("home-feed");
+await removeFromAutoPrefetch('home-feed');
 ```
 
 If you don't, the next cold start will fire the prefetch with stale credentials.
 
 ### Configuring cache TTL
 
-A cached prefetch is fresh for **5 seconds** by default. The lookup is at _read time_ — `fetch()` evicts and skips any entry older than the TTL. Five seconds is fine for "user is about to tap this row," but too short for a cross-launch prefetch that has to survive the JS bundle boot or a list screen reached via a slow route.
+A cached prefetch is fresh for **5 seconds** by default. The lookup is at *read time* — `fetch()` evicts and skips any entry older than the TTL. Five seconds is fine for "user is about to tap this row," but too short for a cross-launch prefetch that has to survive the JS bundle boot or a list screen reached via a slow route.
 
 Pass `prefetchCacheTtlMs` on **both** the prefetch and the consuming `fetch()` (each call brings its own TTL — there is no global default to set):
 
 ```ts
 // In-session: warm a screen up to 60s before it's mounted.
-await prefetch("https://api.example.com/items/42", {
-  headers: { prefetchKey: "item-42" },
+await prefetch('https://api.example.com/items/42', {
+  headers: { prefetchKey: 'item-42' },
   prefetchCacheTtlMs: 60_000,
 });
 
 // Consume — same TTL so the cache hit doesn't get skipped.
-const res = await fetch("https://api.example.com/items/42", {
-  headers: { prefetchKey: "item-42" },
+const res = await fetch('https://api.example.com/items/42', {
+  headers: { prefetchKey: 'item-42' },
   prefetchCacheTtlMs: 60_000,
 });
 ```
@@ -263,8 +263,8 @@ const res = await fetch("https://api.example.com/items/42", {
 For cross-launch prefetches, the TTL is persisted alongside the request in the MMKV queue, so the next cold start honors it:
 
 ```ts
-await prefetchOnAppStart("https://api.example.com/feed", {
-  prefetchKey: "home-feed",
+await prefetchOnAppStart('https://api.example.com/feed', {
+  prefetchKey: 'home-feed',
   prefetchCacheTtlMs: 5 * 60_000, // 5 minutes
 });
 ```
@@ -295,7 +295,6 @@ NitroAutoPrefetcher.registerPrefetch(
 ```
 
 Notes:
-
 - Omitting the option keeps the historical 5-second behavior. There's no backward-incompat.
 - A long TTL amplifies the "Stale prefetches after deploys" risk below — bump `prefetchKey` on schema changes regardless of TTL.
 - A value `<= 0` disables cache hits for that key — `getResultIfFresh`/`hasFreshResult` check `age <= maxAgeMs`, so any positive age fails.
@@ -305,23 +304,28 @@ Notes:
 A `prefetchOnAppStart` entry is replayed by **native code, before JS runs**. That's the whole point — but it means there's no JS runtime around to mint a fresh access token. The package solves this with `registerTokenRefresh`: you describe a refresh endpoint and how to map its response into headers, and the native bootstrap calls it on cold start before replaying the queue.
 
 ```ts
-import { registerTokenRefresh, prefetchOnAppStart } from "react-native-nitro-fetch";
+import {
+  registerTokenRefresh,
+  prefetchOnAppStart,
+} from 'react-native-nitro-fetch';
 
 // 1. Tell nitro how to mint a fresh token at cold start.
 registerTokenRefresh({
-  target: "fetch", // or 'all' to also cover WebSockets
-  url: "https://api.example.com/oauth/token",
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ grant_type: "refresh_token", refresh_token: longLived }),
-  responseType: "json",
-  mappings: [{ jsonPath: "access_token", header: "Authorization", valueTemplate: "Bearer {{value}}" }],
-  onFailure: "useStoredHeaders", // fall back to last-known good headers if refresh fails
+  target: 'fetch',                            // or 'all' to also cover WebSockets
+  url:    'https://api.example.com/oauth/token',
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body:   JSON.stringify({ grant_type: 'refresh_token', refresh_token: longLived }),
+  responseType: 'json',
+  mappings: [
+    { jsonPath: 'access_token', header: 'Authorization', valueTemplate: 'Bearer {{value}}' },
+  ],
+  onFailure: 'useStoredHeaders', // fall back to last-known good headers if refresh fails
 });
 
 // 2. Schedule the prefetches that need that header.
-await prefetchOnAppStart("https://api.example.com/feed", {
-  prefetchKey: "home-feed",
+await prefetchOnAppStart('https://api.example.com/feed', {
+  prefetchKey: 'home-feed',
   // No Authorization here — it'll be injected by the token refresh response.
 });
 ```
@@ -339,16 +343,22 @@ Headers are the default destination, but the same refresh response can also be w
 
 ```ts
 registerTokenRefresh({
-  target: "fetch",
-  url: "https://api.example.com/oauth/token",
-  method: "POST",
-  body: JSON.stringify({ grant_type: "refresh_token", refresh_token: longLived }),
-  responseType: "json",
-  mappings: [{ jsonPath: "access_token", header: "Authorization", valueTemplate: "Bearer {{value}}" }],
+  target: 'fetch',
+  url:    'https://api.example.com/oauth/token',
+  method: 'POST',
+  body:   JSON.stringify({ grant_type: 'refresh_token', refresh_token: longLived }),
+  responseType: 'json',
+  mappings: [
+    { jsonPath: 'access_token', header: 'Authorization', valueTemplate: 'Bearer {{value}}' },
+  ],
   // JSON body: sets a (possibly nested) dot-path key in the prefetch's bodyString
-  bodyMappings: [{ jsonPath: "access_token", bodyPath: "auth.token" }],
+  bodyMappings: [
+    { jsonPath: 'access_token', bodyPath: 'auth.token' },
+  ],
   // form-data: replaces (or appends) a part by name
-  formDataMappings: [{ jsonPath: "access_token", field: "token" }],
+  formDataMappings: [
+    { jsonPath: 'access_token', field: 'token' },
+  ],
 });
 ```
 
@@ -367,23 +377,26 @@ The native auto-prefetcher merges refreshed values into **headers** (and, via `b
 
 ```ts
 function refreshHomeFeedPrefetch(token: string) {
-  return prefetchOnAppStart(`https://api.example.com/feed?token=${encodeURIComponent(token)}`, {
-    prefetchKey: "home-feed",
-  });
+  return prefetchOnAppStart(
+    `https://api.example.com/feed?token=${encodeURIComponent(token)}`,
+    { prefetchKey: 'home-feed' },
+  );
 }
 ```
 
-This is fine for tokens with multi-day TTLs. It's the wrong fit for short-lived ones because the _next_ cold start will replay the _previous_ token.
+This is fine for tokens with multi-day TTLs. It's the wrong fit for short-lived ones because the *next* cold start will replay the *previous* token.
 
 **Option B — use a `compositeHeaders` mapping and have the backend accept the header form.** If you can change the server to read the token from a header instead of the query string, you keep the cold-start refresh path working without any JS code on launch.
 
 ```ts
 registerTokenRefresh({
-  target: "fetch",
-  url: "https://api.example.com/oauth/token",
-  method: "POST",
-  body: JSON.stringify({ grant_type: "refresh_token", refresh_token: longLived }),
-  mappings: [{ jsonPath: "access_token", header: "X-Token", valueTemplate: "{{value}}" }],
+  target: 'fetch',
+  url:    'https://api.example.com/oauth/token',
+  method: 'POST',
+  body:   JSON.stringify({ grant_type: 'refresh_token', refresh_token: longLived }),
+  mappings: [
+    { jsonPath: 'access_token', header: 'X-Token', valueTemplate: '{{value}}' },
+  ],
 });
 ```
 
@@ -396,7 +409,7 @@ If you don't register a refresh config, the bootstrap reuses whatever headers we
 ## Gotchas
 
 - **No `prefetchKey` → throws.** The error is literal: `prefetch requires a "prefetchKey" header`. Both `prefetch` and `prefetchOnAppStart` enforce this.
-- **Mismatched keys → cold cache.** A prefetch with `prefetchKey: 'home'` and a fetch with `prefetchKey: 'home-feed'` are unrelated. The URL alone is _not_ the cache key.
+- **Mismatched keys → cold cache.** A prefetch with `prefetchKey: 'home'` and a fetch with `prefetchKey: 'home-feed'` are unrelated. The URL alone is *not* the cache key.
 - **Android wiring missing.** `prefetchOnAppStart` writes silently; only the missing `Application.onCreate` line gives it away. Double-check it.
 - **Prefetch loops.** The native side doesn't throttle. Don't call `prefetchOnAppStart` for fifty endpoints — you're just slowing down boot.
 - **POST/PUT prefetches.** Fully supported — `method` and body (`string`, `bodyBytes`, FormData) are persisted alongside the URL and replayed exactly. The cache lookup is still by `prefetchKey`, not by request body, so only schedule POST prefetches for endpoints where replaying the same payload returns the same response (idempotent or read-modeled-as-write).

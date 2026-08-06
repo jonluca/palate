@@ -51,10 +51,10 @@ bun example ios
 Open `apps/example/metro.config.js` and add the monorepo root to `watchFolders`:
 
 ```javascript
-const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
-const path = require("node:path");
+const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const path = require('node:path');
 
-const root = path.resolve(__dirname, "..", "..");
+const root = path.resolve(__dirname, '..', '..');
 
 const config = {
   watchFolders: [root],
@@ -68,7 +68,7 @@ Without `watchFolders`, Metro only watches the example app directory and can't f
 For a shallower `example/` layout, the monorepo root is one level up instead:
 
 ```javascript
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(__dirname, '..');
 ```
 
 ### 2. Install the library
@@ -117,9 +117,9 @@ Run this after any new native dependency is added.
 Replace the default `apps/example/App.tsx` with a test implementation:
 
 ```tsx
-import React, { useState } from "react";
-import { Button, StyleSheet, Text, View } from "react-native";
-import { math } from "react-native-math";
+import React, { useState } from 'react';
+import { Button, StyleSheet, Text, View } from 'react-native';
+import { math } from 'react-native-math';
 
 function App(): React.JSX.Element {
   const [result, setResult] = useState<number | null>(null);
@@ -127,15 +127,20 @@ function App(): React.JSX.Element {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Math Module Test</Text>
-      <Button title="Add 5 + 7" onPress={() => setResult(math.add(5, 7))} />
-      {result !== null && <Text style={styles.result}>Result: {result}</Text>}
+      <Button
+        title="Add 5 + 7"
+        onPress={() => setResult(math.add(5, 7))}
+      />
+      {result !== null && (
+        <Text style={styles.result}>Result: {result}</Text>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", alignItems: "center" },
-  title: { fontSize: 24, fontWeight: "bold", marginBottom: 20 },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
   result: { fontSize: 32, marginTop: 20 },
 });
 
@@ -156,7 +161,6 @@ In the monorepo root `package.json`:
 ```
 
 This enables:
-
 - `bun example android` — runs the example on Android
 - `bun example ios` — runs the example on iOS
 - `bun example start` — starts the Metro bundler
@@ -184,10 +188,10 @@ cd apps/example && bun ios
 ### `apps/example/metro.config.js` (complete)
 
 ```javascript
-const { getDefaultConfig, mergeConfig } = require("@react-native/metro-config");
-const path = require("node:path");
+const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const path = require('node:path');
 
-const root = path.resolve(__dirname, "..", "..");
+const root = path.resolve(__dirname, '..', '..');
 
 /**
  * Metro configuration

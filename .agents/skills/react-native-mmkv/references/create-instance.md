@@ -16,7 +16,7 @@ MMKV instances are created with the `createMMKV()` factory function. Each instan
 ## Imports
 
 ```ts
-import { createMMKV, existsMMKV, deleteMMKV } from "react-native-mmkv";
+import { createMMKV, existsMMKV, deleteMMKV } from 'react-native-mmkv'
 ```
 
 ## Recipes
@@ -24,7 +24,7 @@ import { createMMKV, existsMMKV, deleteMMKV } from "react-native-mmkv";
 ### Default instance (simplest)
 
 ```ts
-export const storage = createMMKV();
+export const storage = createMMKV()
 ```
 
 ### Customized instance
@@ -33,12 +33,12 @@ export const storage = createMMKV();
 export const storage = createMMKV({
   id: `user-${userId}-storage`,
   path: `${USER_DIRECTORY}/storage`,
-  encryptionKey: "hunter2",
-  encryptionType: "AES-256",
-  mode: "multi-process",
+  encryptionKey: 'hunter2',
+  encryptionType: 'AES-256',
+  mode: 'multi-process',
   readOnly: false,
   compareBeforeSet: false,
-});
+})
 ```
 
 ### Per-user storage pattern
@@ -48,33 +48,33 @@ function createUserStorage(userId: string) {
   return createMMKV({
     id: `user-${userId}-storage`,
     encryptionKey: userEncryptionKey,
-  });
+  })
 }
 ```
 
 ### Check if an instance exists on disk
 
 ```ts
-const exists = existsMMKV("my-instance");
+const exists = existsMMKV('my-instance')
 ```
 
 ### Delete an instance from disk
 
 ```ts
-const wasDeleted = deleteMMKV("my-instance");
+const wasDeleted = deleteMMKV('my-instance')
 ```
 
 ## Configuration options
 
-| Option             | Type                                  | Default            | Description                                                                                                                               |
-| ------------------ | ------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`               | `string`                              | `'mmkv.default'`   | Unique identifier for this instance. Maps to a file on disk.                                                                              |
-| `path`             | `string`                              | `undefined`        | Custom root directory for the storage file. When unset, MMKV uses `$(Documents)/mmkv/` (or the App Group directory on iOS if configured). |
-| `encryptionKey`    | `string`                              | `undefined`        | Encryption key. Enables AES encryption when set.                                                                                          |
-| `encryptionType`   | `'AES-128' \| 'AES-256'`              | `'AES-128'`        | Encryption algorithm. Only used when `encryptionKey` is set.                                                                              |
-| `mode`             | `'single-process' \| 'multi-process'` | `'single-process'` | Set to `'multi-process'` if another process (e.g. a widget or app extension) reads/writes the same instance.                              |
-| `readOnly`         | `boolean`                             | `false`            | When `true`, all write operations throw.                                                                                                  |
-| `compareBeforeSet` | `boolean`                             | `false`            | When `true`, compares the new value with the existing one before writing. Avoids unnecessary disk writes.                                 |
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `id` | `string` | `'mmkv.default'` | Unique identifier for this instance. Maps to a file on disk. |
+| `path` | `string` | `undefined` | Custom root directory for the storage file. When unset, MMKV uses `$(Documents)/mmkv/` (or the App Group directory on iOS if configured). |
+| `encryptionKey` | `string` | `undefined` | Encryption key. Enables AES encryption when set. |
+| `encryptionType` | `'AES-128' \| 'AES-256'` | `'AES-128'` | Encryption algorithm. Only used when `encryptionKey` is set. |
+| `mode` | `'single-process' \| 'multi-process'` | `'single-process'` | Set to `'multi-process'` if another process (e.g. a widget or app extension) reads/writes the same instance. |
+| `readOnly` | `boolean` | `false` | When `true`, all write operations throw. |
+| `compareBeforeSet` | `boolean` | `false` | When `true`, compares the new value with the existing one before writing. Avoids unnecessary disk writes. |
 
 ## iOS App Groups
 
@@ -87,11 +87,11 @@ To share MMKV data between your main app and an extension (widget, share extensi
 
 ## Rule of Thumb — how many instances?
 
-| App size             | Recommended instances                |
-| -------------------- | ------------------------------------ |
-| Small / simple       | 1 (default)                          |
-| Medium               | 2–3 (e.g., usercache, auth, session) |
-| Large / multi-module | 3–5, grouped by domain               |
+| App size | Recommended instances |
+|----------|----------------------|
+| Small / simple | 1 (default) |
+| Medium | 2–3 (e.g., usercache, auth, session) |
+| Large / multi-module | 3–5, grouped by domain |
 
 **Why not more?** Each MMKV instance memory-maps its own file. More instances means more mmap'd regions held open simultaneously, which increases the app's resident memory footprint. On memory-constrained devices this can trigger OS memory warnings or even OOM kills — especially if several instances are large. Consolidating related keys into fewer instances keeps the mmap count low and makes `trim()` / `clearAll()` operations simpler. Only split into a separate instance when you have a clear reason (different encryption keys, different lifecycle like per-user vs global, or App Group sharing).
 

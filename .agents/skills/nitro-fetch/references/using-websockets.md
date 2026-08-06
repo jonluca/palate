@@ -11,11 +11,11 @@ keywords: websocket, wss, tls, libwebsockets, mbedtls, headers, binary
 
 `NitroWebSocket` is a browser-shaped WebSocket class backed by **libwebsockets + mbedTLS** under the hood. It looks and feels like the standard `WebSocket` you're used to, with three concrete differences that exist for good reasons:
 
-| Difference                                                                      | Why                                                                             |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Constructor takes a third `headers` argument                                    | RN's built-in WebSocket can't send custom upgrade headers on iOS. This one can. |
-| `readyState` is a string (`'OPEN'`, etc.) instead of a number                   | Easier to read, no constants to remember.                                       |
-| Binary frames come back as `e.binaryData: ArrayBuffer` (with `e.isBinary` flag) | No `binaryType` setter; binary and text are always distinguishable.             |
+| Difference | Why |
+|---|---|
+| Constructor takes a third `headers` argument | RN's built-in WebSocket can't send custom upgrade headers on iOS. This one can. |
+| `readyState` is a string (`'OPEN'`, etc.) instead of a number | Easier to read, no constants to remember. |
+| Binary frames come back as `e.binaryData: ArrayBuffer` (with `e.isBinary` flag) | No `binaryType` setter; binary and text are always distinguishable. |
 
 For TLS, the package ships its own Mozilla CA bundle and validates against it via mbedTLS. That means `wss://` works the same on physical iOS devices, simulators, emulators, and old Android builds — you don't depend on the system trust store.
 
@@ -51,24 +51,31 @@ cd ios && pod install
 ## API at a glance
 
 ```ts
-import { NitroWebSocket } from "react-native-nitro-websockets";
-import type { WebSocketMessageEvent, WebSocketCloseEvent } from "react-native-nitro-websockets";
+import { NitroWebSocket } from 'react-native-nitro-websockets';
+import type {
+  WebSocketMessageEvent,
+  WebSocketCloseEvent,
+} from 'react-native-nitro-websockets';
 
 class NitroWebSocket {
-  constructor(url: string, protocols?: string | string[], headers?: Record<string, string>);
+  constructor(
+    url: string,
+    protocols?: string | string[],
+    headers?: Record<string, string>,
+  );
 
   // State (all read-only)
-  readonly readyState: "CONNECTING" | "OPEN" | "CLOSING" | "CLOSED";
+  readonly readyState: 'CONNECTING' | 'OPEN' | 'CLOSING' | 'CLOSED';
   readonly url: string;
   readonly protocol: string;
   readonly bufferedAmount: number;
   readonly extensions: string;
 
   // Handlers — assignment, not addEventListener
-  onopen: (() => void) | null;
+  onopen:    (() => void) | null;
   onmessage: ((e: WebSocketMessageEvent) => void) | null;
-  onclose: ((e: WebSocketCloseEvent) => void) | null;
-  onerror: ((error: string) => void) | null;
+  onclose:   ((e: WebSocketCloseEvent) => void) | null;
+  onerror:   ((error: string) => void) | null;
 
   // Methods
   send(data: string | ArrayBuffer): void;
@@ -76,7 +83,7 @@ class NitroWebSocket {
 }
 
 type WebSocketMessageEvent = {
-  data: string; // decoded UTF-8 (empty when binary)
+  data: string;             // decoded UTF-8 (empty when binary)
   isBinary: boolean;
   binaryData?: ArrayBuffer; // present iff isBinary
 };
@@ -91,14 +98,14 @@ Source: [`packages/react-native-nitro-websockets/src/index.ts`](https://github.c
 ### `ws://` echo client
 
 ```ts
-import { NitroWebSocket } from "react-native-nitro-websockets";
+import { NitroWebSocket } from 'react-native-nitro-websockets';
 
-const ws = new NitroWebSocket("ws://localhost:8080/echo");
+const ws = new NitroWebSocket('ws://localhost:8080/echo');
 
-ws.onopen = () => ws.send("hello");
-ws.onmessage = (e) => console.log("text:", e.data);
-ws.onclose = (e) => console.log("closed", e.code, e.reason);
-ws.onerror = (err) => console.warn("ws error", err);
+ws.onopen    = () => ws.send('hello');
+ws.onmessage = (e) => console.log('text:', e.data);
+ws.onclose   = (e) => console.log('closed', e.code, e.reason);
+ws.onerror   = (err) => console.warn('ws error', err);
 ```
 
 ### `wss://` with auth headers
@@ -107,11 +114,11 @@ The constructor's third argument is the reason most teams reach for this package
 
 ```ts
 const ws = new NitroWebSocket(
-  "wss://stream.example.com/feed",
-  ["v1.feed.proto"], // optional subprotocols
+  'wss://stream.example.com/feed',
+  ['v1.feed.proto'],          // optional subprotocols
   {
     Authorization: `Bearer ${token}`,
-    "X-Tenant": "acme",
+    'X-Tenant':   'acme',
   },
 );
 ```
@@ -131,7 +138,7 @@ ws.onmessage = (e) => {
 };
 
 // Sending: ArrayBuffer → binary frame, string → text frame
-ws.send("hello");
+ws.send('hello');
 
 const buf = new Uint8Array([0x01, 0x02, 0x03, 0x04]).buffer;
 ws.send(buf);
@@ -156,15 +163,15 @@ For long-lived sockets that should outlive a single screen, hoist the instance t
 
 ## Differences from `WebSocket` (cheat sheet)
 
-|                        | Standard `WebSocket` | `NitroWebSocket`                              |
-| ---------------------- | -------------------- | --------------------------------------------- |
-| `readyState`           | numeric (0–3)        | string (`'OPEN'` etc.)                        |
-| Custom upgrade headers | not supported on iOS | ✅ third constructor arg                      |
-| Binary frames          | `binaryType` toggle  | `e.isBinary` + `e.binaryData`                 |
-| `addEventListener`     | yes                  | **no** — use property assignment              |
-| `Blob` payloads        | yes                  | no — pass an `ArrayBuffer`                    |
-| TLS roots              | OS trust store       | bundled Mozilla CA via mbedTLS                |
-| Pre-warming            | n/a                  | yes ([prewarm skill](./websocket-prewarm.md)) |
+| | Standard `WebSocket` | `NitroWebSocket` |
+|---|---|---|
+| `readyState` | numeric (0–3) | string (`'OPEN'` etc.) |
+| Custom upgrade headers | not supported on iOS | ✅ third constructor arg |
+| Binary frames | `binaryType` toggle | `e.isBinary` + `e.binaryData` |
+| `addEventListener` | yes | **no** — use property assignment |
+| `Blob` payloads | yes | no — pass an `ArrayBuffer` |
+| TLS roots | OS trust store | bundled Mozilla CA via mbedTLS |
+| Pre-warming | n/a | yes ([prewarm skill](./websocket-prewarm.md)) |
 
 For migrating an existing app, see [`migrate-from-rn-ws.md`](./migrate-from-rn-ws.md).
 
@@ -175,7 +182,7 @@ For migrating an existing app, see [`migrate-from-rn-ws.md`](./migrate-from-rn-w
 - **Reading `e.data` for binary frames.** It's the empty string. Always check `e.isBinary` first.
 - **Sending a `Blob` or `Buffer`.** Throws. Convert: `send(uint8.buffer.slice(uint8.byteOffset, uint8.byteOffset + uint8.byteLength))`.
 - **Forgetting `ws.close()` in `useEffect` cleanup.** The native socket stays alive, the JS object stays referenced, and you slowly leak.
-- **Multiple sockets to the same URL.** Allowed. But pre-warming only adopts the _first_ one — subsequent constructors open fresh connections.
+- **Multiple sockets to the same URL.** Allowed. But pre-warming only adopts the *first* one — subsequent constructors open fresh connections.
 
 ## Pointers
 

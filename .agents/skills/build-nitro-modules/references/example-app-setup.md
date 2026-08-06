@@ -87,7 +87,10 @@ In the root `package.json`:
 
 ```json
 {
-  "workspaces": ["packages/*", "apps/*"]
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
 }
 ```
 
@@ -95,7 +98,10 @@ If the app lives at `example/`, use:
 
 ```json
 {
-  "workspaces": ["packages/*", "example"]
+  "workspaces": [
+    "packages/*",
+    "example"
+  ]
 }
 ```
 
@@ -104,7 +110,6 @@ If the app lives at `example/`, use:
 **This is critical** — two different versions of `react-native` in the same monorepo causes cryptic build failures.
 
 Check the example app's RN version:
-
 ```bash
 cat apps/example/package.json | grep '"react-native"'
 # or, for the shallower layout:
@@ -112,7 +117,6 @@ cat example/package.json | grep '"react-native"'
 ```
 
 Open `packages/react-native-math/package.json` and ensure:
-
 ```json
 {
   "peerDependencies": {
@@ -145,7 +149,10 @@ bun install
 {
   "name": "react-native-math-root",
   "private": true,
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "specs": "bun --cwd packages/react-native-math run specs",
     "example": "bun --cwd apps/example"

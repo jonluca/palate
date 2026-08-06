@@ -120,7 +120,6 @@ For C++ cross-platform (single implementation for iOS + Android):
 ```
 
 Rules:
-
 - The key (`"Math"`) must **exactly match** the string passed to `NitroModules.createHybridObject<Math>('Math')`
 - Each entry requires `language` and `implementationClassName`
 - Use `"all"` for a shared C++ implementation; use `"ios"` / `"android"` for platform-specific Swift/Kotlin

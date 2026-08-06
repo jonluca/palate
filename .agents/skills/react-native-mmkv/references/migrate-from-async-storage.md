@@ -18,47 +18,47 @@ The pattern: read all keys from AsyncStorage, write them into MMKV, delete from 
 ### `storage.ts` — MMKV instance + migration function
 
 ```ts
-import { createMMKV } from "react-native-mmkv";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { createMMKV } from 'react-native-mmkv'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 
-export const storage = createMMKV();
+export const storage = createMMKV()
 
-const MIGRATION_KEY = "mmkv_migration_complete";
+const MIGRATION_KEY = 'mmkv_migration_complete'
 
 export async function migrateFromAsyncStorage(): Promise<void> {
-  if (storage.getBoolean(MIGRATION_KEY)) return;
+  if (storage.getBoolean(MIGRATION_KEY)) return
 
-  console.log("Migrating from AsyncStorage to MMKV...");
-  const start = Date.now();
+  console.log('Migrating from AsyncStorage to MMKV...')
+  const start = Date.now()
 
   try {
-    const keys = await AsyncStorage.getAllKeys();
+    const keys = await AsyncStorage.getAllKeys()
     if (keys.length === 0) {
-      storage.set(MIGRATION_KEY, true);
-      return;
+      storage.set(MIGRATION_KEY, true)
+      return
     }
 
-    const entries = await AsyncStorage.multiGet(keys);
+    const entries = await AsyncStorage.multiGet(keys)
 
     for (const [key, value] of entries) {
-      if (key == null || value == null) continue;
+      if (key == null || value == null) continue
 
       // Handle booleans stored as strings (common AsyncStorage pattern)
-      if (value === "true" || value === "false") {
-        storage.set(key, value === "true");
+      if (value === 'true' || value === 'false') {
+        storage.set(key, value === 'true')
       } else {
-        storage.set(key, value);
+        storage.set(key, value)
       }
     }
 
     // Remove migrated data from AsyncStorage
-    await AsyncStorage.multiRemove(keys);
+    await AsyncStorage.multiRemove(keys)
 
-    storage.set(MIGRATION_KEY, true);
-    console.log(`Migration complete in ${Date.now() - start}ms (${keys.length} keys)`);
+    storage.set(MIGRATION_KEY, true)
+    console.log(`Migration complete in ${Date.now() - start}ms (${keys.length} keys)`)
   } catch (error) {
-    console.error("Migration failed:", error);
-    throw error;
+    console.error('Migration failed:', error)
+    throw error
   }
 }
 ```
@@ -66,35 +66,35 @@ export async function migrateFromAsyncStorage(): Promise<void> {
 ### `App.tsx` — run migration before app renders
 
 ```tsx
-import { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
-import { InteractionManager } from "react-native";
-import { migrateFromAsyncStorage } from "./storage";
+import { useEffect, useState } from 'react'
+import { ActivityIndicator, View } from 'react-native'
+import { InteractionManager } from 'react-native'
+import { migrateFromAsyncStorage } from './storage'
 
 export default function App() {
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
     InteractionManager.runAfterInteractions(async () => {
       try {
-        await migrateFromAsyncStorage();
+        await migrateFromAsyncStorage()
       } catch {
         // TODO: decide on fallback — retry, ignore, or crash
       } finally {
-        setReady(true);
+        setReady(true)
       }
-    });
-  }, []);
+    })
+  }, [])
 
   if (!ready) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator />
       </View>
-    );
+    )
   }
 
-  return <MainApp />;
+  return <MainApp />
 }
 ```
 
@@ -104,16 +104,15 @@ After migration, replace all AsyncStorage usage:
 
 ```ts
 // BEFORE
-const value = await AsyncStorage.getItem("user.name");
-await AsyncStorage.setItem("user.name", "Marc");
+const value = await AsyncStorage.getItem('user.name')
+await AsyncStorage.setItem('user.name', 'Marc')
 
 // AFTER
-const value = storage.getString("user.name");
-storage.set("user.name", "Marc");
+const value = storage.getString('user.name')
+storage.set('user.name', 'Marc')
 ```
 
 Key differences:
-
 - No `await` — everything is synchronous
 - `getItem` → `getString` / `getNumber` / `getBoolean` (type-specific)
 - `setItem` → `set` (accepts string, number, boolean, ArrayBuffer)

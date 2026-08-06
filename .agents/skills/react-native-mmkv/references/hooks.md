@@ -15,16 +15,16 @@ All hooks accept an optional second argument: a specific MMKV instance. If omitt
 
 ## Available hooks
 
-| Hook                                   | Returns                                                             | Description                                 |
-| -------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------- |
-| `useMMKVString(key, instance?)`        | `[string \| undefined, (v: string \| undefined) => void]`           | Reactive string value                       |
-| `useMMKVNumber(key, instance?)`        | `[number \| undefined, (v: number \| undefined) => void]`           | Reactive number value                       |
-| `useMMKVBoolean(key, instance?)`       | `[boolean \| undefined, (v: boolean \| undefined) => void]`         | Reactive boolean value                      |
-| `useMMKVBuffer(key, instance?)`        | `[ArrayBuffer \| undefined, (v: ArrayBuffer \| undefined) => void]` | Reactive buffer value                       |
-| `useMMKVObject<T>(key, instance?)`     | `[T \| undefined, (v: T \| undefined) => void]`                     | Reactive JSON object (auto stringify/parse) |
-| `useMMKV(config?)`                     | `MMKV`                                                              | Creates/returns an MMKV instance reactively |
-| `useMMKVListener(callback, instance?)` | `void`                                                              | Fires callback on any key change            |
-| `useMMKVKeys(instance?)`               | `string[]`                                                          | Reactive list of all keys                   |
+| Hook | Returns | Description |
+|------|---------|-------------|
+| `useMMKVString(key, instance?)` | `[string \| undefined, (v: string \| undefined) => void]` | Reactive string value |
+| `useMMKVNumber(key, instance?)` | `[number \| undefined, (v: number \| undefined) => void]` | Reactive number value |
+| `useMMKVBoolean(key, instance?)` | `[boolean \| undefined, (v: boolean \| undefined) => void]` | Reactive boolean value |
+| `useMMKVBuffer(key, instance?)` | `[ArrayBuffer \| undefined, (v: ArrayBuffer \| undefined) => void]` | Reactive buffer value |
+| `useMMKVObject<T>(key, instance?)` | `[T \| undefined, (v: T \| undefined) => void]` | Reactive JSON object (auto stringify/parse) |
+| `useMMKV(config?)` | `MMKV` | Creates/returns an MMKV instance reactively |
+| `useMMKVListener(callback, instance?)` | `void` | Fires callback on any key change |
+| `useMMKVKeys(instance?)` | `string[]` | Reactive list of all keys |
 
 All value-hook setters also accept a **functional update** (like `useState`): `setValue(prev => ...)`.
 
@@ -34,16 +34,12 @@ All value-hook setters also accept a **functional update** (like `useState`): `s
 
 ```tsx
 function App() {
-  const [username, setUsername] = useMMKVString("user.name");
-  const [age, setAge] = useMMKVNumber("user.age");
-  const [isPremium, setIsPremium] = useMMKVBoolean("user.isPremium");
-  const [privateKey, setPrivateKey] = useMMKVBuffer("user.privateKey");
+  const [username, setUsername] = useMMKVString('user.name')
+  const [age, setAge] = useMMKVNumber('user.age')
+  const [isPremium, setIsPremium] = useMMKVBoolean('user.isPremium')
+  const [privateKey, setPrivateKey] = useMMKVBuffer('user.privateKey')
 
-  return (
-    <Text>
-      {username} is {age} years old
-    </Text>
-  );
+  return <Text>{username} is {age} years old</Text>
 }
 ```
 
@@ -52,11 +48,11 @@ function App() {
 Setters accept a function of the previous value, just like `useState`:
 
 ```tsx
-const [age, setAge] = useMMKVNumber("user.age");
+const [age, setAge] = useMMKVNumber('user.age')
 
 const onBirthday = useCallback(() => {
-  setAge((prev) => (prev ?? 0) + 1);
-}, [setAge]);
+  setAge((prev) => (prev ?? 0) + 1)
+}, [setAge])
 ```
 
 ### Clearing a key
@@ -64,27 +60,27 @@ const onBirthday = useCallback(() => {
 Pass `undefined` to the setter to remove the key:
 
 ```tsx
-const [username, setUsername] = useMMKVString("user.name");
+const [username, setUsername] = useMMKVString('user.name')
 
 const onLogout = useCallback(() => {
-  setUsername(undefined); // removes 'user.name' from storage
-}, [setUsername]);
+  setUsername(undefined) // removes 'user.name' from storage
+}, [setUsername])
 ```
 
 ### Typed objects
 
 ```tsx
 type User = {
-  id: string;
-  username: string;
-  age: number;
-};
+  id: string
+  username: string
+  age: number
+}
 
 function App() {
-  const [user, setUser] = useMMKVObject<User>("user");
+  const [user, setUser] = useMMKVObject<User>('user')
 
-  if (user == null) return <Text>Loading...</Text>;
-  return <Text>{user.username}</Text>;
+  if (user == null) return <Text>Loading...</Text>
+  return <Text>{user.username}</Text>
 }
 ```
 
@@ -94,14 +90,11 @@ function App() {
 
 ```tsx
 function App() {
-  const storage = useMMKV();
+  const storage = useMMKV()
 
-  const onLogin = useCallback(
-    (username: string) => {
-      storage.set("user.name", username);
-    },
-    [storage],
-  );
+  const onLogin = useCallback((username: string) => {
+    storage.set('user.name', username)
+  }, [storage])
 }
 ```
 
@@ -109,10 +102,10 @@ function App() {
 
 ```tsx
 function App() {
-  const userStorage = useMMKV({ id: `${userId}.storage` });
-  const [username, setUsername] = useMMKVString("user.name", userStorage);
+  const userStorage = useMMKV({ id: `${userId}.storage` })
+  const [username, setUsername] = useMMKVString('user.name', userStorage)
 
-  return <Text>{username}</Text>;
+  return <Text>{username}</Text>
 }
 ```
 
@@ -121,8 +114,8 @@ function App() {
 ```tsx
 function App() {
   useMMKVListener((key) => {
-    console.log(`Value for "${key}" changed!`);
-  });
+    console.log(`Value for "${key}" changed!`)
+  })
 }
 ```
 
@@ -130,11 +123,11 @@ With a specific instance:
 
 ```tsx
 function App() {
-  const storage = useMMKV({ id: `${userId}.storage` });
+  const storage = useMMKV({ id: `${userId}.storage` })
 
   useMMKVListener((key) => {
-    console.log(`Value for "${key}" changed in user storage!`);
-  }, storage);
+    console.log(`Value for "${key}" changed in user storage!`)
+  }, storage)
 }
 ```
 
@@ -142,10 +135,10 @@ function App() {
 
 ```tsx
 function App() {
-  const storage = useMMKV();
-  const keys = useMMKVKeys(storage);
+  const storage = useMMKV()
+  const keys = useMMKVKeys(storage)
 
-  return <Text>Stored keys: {keys.join(", ")}</Text>;
+  return <Text>Stored keys: {keys.join(', ')}</Text>
 }
 ```
 

@@ -11,11 +11,11 @@ keywords: perfetto, instruments, os_signpost, atrace, profiling, slow, hermes, p
 
 You have three tools at progressively higher levels of detail. Start with the cheapest and escalate as needed — each layer answers a different question.
 
-| Tool                                   | Question it answers                                                       | Cost                                               |
-| -------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------- |
-| `NetworkInspector`                     | "Which requests are slow on this device?"                                 | None — JS only, always available                   |
-| `profileFetch` (Hermes)                | "Why is the JS thread blocked when this request finishes?"                | Sampling profiler overhead during the wrapped call |
-| Perfetto (Android) / Instruments (iOS) | "Where in the request lifecycle is the time going? DNS? TLS? TTFB? Body?" | Free at runtime when enabled at _build_ time       |
+| Tool | Question it answers | Cost |
+|---|---|---|
+| `NetworkInspector` | "Which requests are slow on this device?" | None — JS only, always available |
+| `profileFetch` (Hermes) | "Why is the JS thread blocked when this request finishes?" | Sampling profiler overhead during the wrapped call |
+| Perfetto (Android) / Instruments (iOS) | "Where in the request lifecycle is the time going? DNS? TLS? TTFB? Body?" | Free at runtime when enabled at *build* time |
 
 The usual flow is: triage with the inspector → if the slowness looks JS-side, wrap the call in `profileFetch` → if it's native or you need stage-level attribution, capture a Perfetto/Instruments trace.
 
@@ -25,10 +25,10 @@ The usual flow is: triage with the inspector → if the slowness looks JS-side, 
 
 ## Layer 1 — `NetworkInspector` for triage
 
-This is _always_ the first move. It takes ten seconds, no rebuild, no flags.
+This is *always* the first move. It takes ten seconds, no rebuild, no flags.
 
 ```ts
-import { NetworkInspector } from "react-native-nitro-fetch";
+import { NetworkInspector } from 'react-native-nitro-fetch';
 
 NetworkInspector.enable();
 
@@ -38,26 +38,24 @@ const slow = NetworkInspector.getHttpEntries()
   .filter((e) => e.duration > 500)
   .sort((a, b) => b.duration - a.duration);
 
-console.table(
-  slow.map((e) => ({
-    method: e.method,
-    url: e.url.slice(0, 60),
-    status: e.status,
-    ms: Math.round(e.duration),
-    reqBytes: e.requestBodySize,
-    resBytes: e.responseBodySize,
-  })),
-);
+console.table(slow.map((e) => ({
+  method:   e.method,
+  url:      e.url.slice(0, 60),
+  status:   e.status,
+  ms:       Math.round(e.duration),
+  reqBytes: e.requestBodySize,
+  resBytes: e.responseBodySize,
+})));
 ```
 
 Reading the output:
 
-| Pattern                                  | What it suggests                                                        |
-| ---------------------------------------- | ----------------------------------------------------------------------- |
-| One endpoint always slow                 | Server-side or routing/CDN issue — the rest of the stack is fine        |
-| Same `prefetchKey` URL appearing twice   | Your prefetch isn't being adopted — see [prefetching](./prefetching.md) |
-| Large `responseBodySize` ↔ high duration | Bandwidth-bound; consider pagination or compression                     |
-| Every request from one domain is slow    | DNS or TLS issue — escalate to a native trace                           |
+| Pattern | What it suggests |
+|---|---|
+| One endpoint always slow | Server-side or routing/CDN issue — the rest of the stack is fine |
+| Same `prefetchKey` URL appearing twice | Your prefetch isn't being adopted — see [prefetching](./prefetching.md) |
+| Large `responseBodySize` ↔ high duration | Bandwidth-bound; consider pagination or compression |
+| Every request from one domain is slow | DNS or TLS issue — escalate to a native trace |
 
 What this layer **can't** tell you: DNS vs TLS vs TTFB vs body breakdown, JS-thread time after the response arrives, time spent on the JS thread vs the native networking thread. For those, escalate.
 
@@ -70,14 +68,14 @@ Full inspector docs: [`network-inspector.md`](./network-inspector.md).
 `profileFetch` wraps a function in the Hermes sampling profiler and dumps a `.cpuprofile` you can drop into Chrome DevTools.
 
 ```ts
-import { profileFetch, fetch } from "react-native-nitro-fetch";
+import { profileFetch, fetch } from 'react-native-nitro-fetch';
 
 const { result, profilePath } = await profileFetch(async () => {
-  const res = await fetch("https://api.example.com/big.json");
-  return res.json(); // ← if THIS is the slow part, the profile reveals it
-}, "/tmp/big-json.cpuprofile");
+  const res = await fetch('https://api.example.com/big.json');
+  return res.json();           // ← if THIS is the slow part, the profile reveals it
+}, '/tmp/big-json.cpuprofile');
 
-console.log("profile written to", profilePath);
+console.log('profile written to', profilePath);
 ```
 
 Pull the file off the device:
@@ -142,21 +140,21 @@ A protobuf config alternative for `adb shell perfetto` is in [`docs-website/docs
 3. Target your app process, hit **record**, exercise the app, hit **stop**.
 4. Look for these subsystems:
 
-   | Subsystem                      | Category  | Traces                                   |
-   | ------------------------------ | --------- | ---------------------------------------- |
-   | `com.margelo.nitrofetch`       | `network` | HTTP fetch (intervals)                   |
+   | Subsystem | Category | Traces |
+   |---|---|---|
+   | `com.margelo.nitrofetch` | `network` | HTTP fetch (intervals) |
    | `com.margelo.nitro.websockets` | `NitroWS` | WebSocket lifecycle (intervals + events) |
 
    For each fetch, the interval **begin** annotation is `<METHOD> <path>` and the **end** is `status=<code> bytes=<count>`. The interval length is the wall-clock duration.
 
 ### Reading a trace
 
-| You see                                                                     | It means                                                                  |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Long `NitroFetch GET /x` interval, JS thread mostly idle underneath it      | Slow at the network layer — DNS, TLS, server, or transport                |
-| Long interval that ends right when the JS thread spikes                     | Body parsing is the real cost — go back to `profileFetch` to confirm      |
-| Two intervals for the same URL that don't overlap                           | Cache miss — the prefetch isn't being adopted                             |
-| `NitroWS connect <url>` interval much longer than expected                  | TLS handshake is slow — pre-warm the socket                               |
+| You see | It means |
+|---|---|
+| Long `NitroFetch GET /x` interval, JS thread mostly idle underneath it | Slow at the network layer — DNS, TLS, server, or transport |
+| Long interval that ends right when the JS thread spikes | Body parsing is the real cost — go back to `profileFetch` to confirm |
+| Two intervals for the same URL that don't overlap | Cache miss — the prefetch isn't being adopted |
+| `NitroWS connect <url>` interval much longer than expected | TLS handshake is slow — pre-warm the socket |
 | `NitroWS receive` events bursting at launch with no JS handler attached yet | Connection is open before JS is ready; events buffer and replay correctly |
 
 Trace point definitions: [`packages/react-native-nitro-websockets/cpp/WsTrace.hpp`](https://github.com/margelo/react-native-nitro-fetch/tree/main/packages/react-native-nitro-websockets/cpp/WsTrace.hpp).

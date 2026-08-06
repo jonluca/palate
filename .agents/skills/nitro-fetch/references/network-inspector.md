@@ -11,13 +11,13 @@ keywords: networkinspector, devtools, debugging, in-app, curl, websocket
 
 `NetworkInspector` is a singleton that lives inside your JS bundle. When enabled, every nitro-fetch HTTP call and every `NitroWebSocket` connection becomes an entry in a ring buffer that you can read, subscribe to, or render in your own UI.
 
-It is _not_:
+It is *not*:
 
 - a Chrome DevTools / Flipper / RN DevTools integration,
 - a wire protocol,
 - a binary you ship separately.
 
-It _is_:
+It *is*:
 
 - a Set of entries, a few methods, and a callback fan-out.
 - always available — no special build flags, no native side to enable.
@@ -25,7 +25,7 @@ It _is_:
 
 ## Two visibility boundaries you should understand
 
-Two important things this inspector deliberately _doesn't_ do. They confuse people, so spell them out before you start:
+Two important things this inspector deliberately *doesn't* do. They confuse people, so spell them out before you start:
 
 1. **HTTP calls made by anything other than nitro-fetch are not visible here, and they are not in your Perfetto / Instruments traces either.** RN's built-in `fetch`, raw `XMLHttpRequest`, OkHttp/`URLSession` calls inside third-party SDKs, native Cronet calls outside this package — none of them go through nitro's recording path. They live in the OS network stack and are entirely invisible to both the inspector and the native trace points. If you want a specific caller visible, migrate that caller to import `fetch` from `react-native-nitro-fetch` — or plug axios in via the [axios adapter](./axios-adapter.md). Don't monkey-patch `globalThis.fetch`.
 2. **nitro-fetch's own HTTP calls are not pushed to React Native DevTools / Chrome DevTools network panel.** RN's DevTools network panel hooks `XMLHttpRequest`. nitro-fetch bypasses XHR entirely and goes through Nitro / JSI to native code, so its requests will never appear in DevTools. The `NetworkInspector` is the replacement view — and the curl export and `onEntry` listener are how you reach traffic that DevTools can't see.
@@ -70,7 +70,7 @@ Once at app startup. Gating on `__DEV__` is the usual move:
 
 ```ts
 // src/setupInspector.ts
-import { NetworkInspector } from "react-native-nitro-fetch";
+import { NetworkInspector } from 'react-native-nitro-fetch';
 
 if (__DEV__) {
   NetworkInspector.enable({
@@ -82,7 +82,7 @@ if (__DEV__) {
 
 ```js
 // index.js
-import "./src/setupInspector";
+import './src/setupInspector';
 // ...
 ```
 
@@ -97,25 +97,23 @@ const slow = NetworkInspector.getHttpEntries()
   .filter((e) => e.duration > 1000) // ms
   .sort((a, b) => b.duration - a.duration);
 
-console.table(
-  slow.map((e) => ({
-    method: e.method,
-    url: e.url.slice(0, 60),
-    status: e.status,
-    ms: Math.round(e.duration),
-  })),
-);
+console.table(slow.map((e) => ({
+  method: e.method,
+  url:    e.url.slice(0, 60),
+  status: e.status,
+  ms:     Math.round(e.duration),
+})));
 ```
 
 ### React to entries in real time
 
 ```ts
 const unsub = NetworkInspector.onEntry((entry) => {
-  if (entry.type === "http") {
-    if (entry.error) console.warn("✗", entry.method, entry.url, entry.error);
-    else if (entry.status >= 400) console.warn("!", entry.status, entry.url);
+  if (entry.type === 'http') {
+    if (entry.error)            console.warn('✗', entry.method, entry.url, entry.error);
+    else if (entry.status >= 400) console.warn('!', entry.status, entry.url);
   } else {
-    console.log("WS", entry.readyState, entry.url);
+    console.log('WS', entry.readyState, entry.url);
   }
 });
 
@@ -131,7 +129,7 @@ Each `NetworkEntry` carries an auto-generated `curl` field:
 
 ```ts
 const entry = NetworkInspector.getEntry(id);
-if (entry?.type === "http") {
+if (entry?.type === 'http') {
   Clipboard.setString(entry.curl);
 }
 ```
@@ -141,9 +139,12 @@ You can also build curl strings yourself with `generateCurl` (also exported from
 ### Build a debug screen
 
 ```tsx
-import React, { useEffect, useState } from "react";
-import { FlatList, Text } from "react-native";
-import { NetworkInspector, type InspectorEntry } from "react-native-nitro-fetch";
+import React, { useEffect, useState } from 'react';
+import { FlatList, Text } from 'react-native';
+import {
+  NetworkInspector,
+  type InspectorEntry,
+} from 'react-native-nitro-fetch';
 
 export function NetworkLogScreen() {
   const [entries, setEntries] = useState<readonly InspectorEntry[]>([]);
@@ -161,14 +162,12 @@ export function NetworkLogScreen() {
       data={entries}
       keyExtractor={(e) => e.id}
       renderItem={({ item }) =>
-        item.type === "http" ? (
+        item.type === 'http' ? (
           <Text>
             {item.method} {item.url} → {item.status} ({Math.round(item.duration)}ms)
           </Text>
         ) : (
-          <Text>
-            WS {item.url} — {item.messagesSent + item.messagesReceived} msgs
-          </Text>
+          <Text>WS {item.url} — {item.messagesSent + item.messagesReceived} msgs</Text>
         )
       }
     />
@@ -182,34 +181,34 @@ A full reference implementation (filter tabs, detail view, curl export, live con
 
 ### HTTP — `NetworkEntry`
 
-| Field                              | Type                                  | Notes                         |
-| ---------------------------------- | ------------------------------------- | ----------------------------- |
-| `id`                               | `string`                              | Unique request id             |
-| `type`                             | `'http'`                              | Discriminator                 |
-| `url`, `method`                    | `string`                              |                               |
-| `requestHeaders`                   | `Array<{ key, value }>`               |                               |
-| `requestBody`                      | `string \| undefined`                 | Truncated to `maxBodyCapture` |
-| `requestBodySize`                  | `number`                              | Full size in bytes            |
-| `status`, `statusText`             | `number`, `string`                    | `0` while in flight           |
-| `responseHeaders`                  | `Array<{ key, value }>`               |                               |
-| `responseBody`                     | `string \| undefined`                 | Truncated                     |
-| `responseBodySize`                 | `number`                              | Full size                     |
-| `startTime`, `endTime`, `duration` | `number` (ms via `performance.now()`) |                               |
-| `curl`                             | `string`                              | Auto-generated                |
-| `error`                            | `string \| undefined`                 | Set on failure                |
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | Unique request id |
+| `type` | `'http'` | Discriminator |
+| `url`, `method` | `string` | |
+| `requestHeaders` | `Array<{ key, value }>` | |
+| `requestBody` | `string \| undefined` | Truncated to `maxBodyCapture` |
+| `requestBodySize` | `number` | Full size in bytes |
+| `status`, `statusText` | `number`, `string` | `0` while in flight |
+| `responseHeaders` | `Array<{ key, value }>` | |
+| `responseBody` | `string \| undefined` | Truncated |
+| `responseBodySize` | `number` | Full size |
+| `startTime`, `endTime`, `duration` | `number` (ms via `performance.now()`) | |
+| `curl` | `string` | Auto-generated |
+| `error` | `string \| undefined` | Set on failure |
 
 ### WebSocket — `WebSocketEntry`
 
-| Field                                                            | Type                                 | Notes            |
-| ---------------------------------------------------------------- | ------------------------------------ | ---------------- |
-| `id`                                                             | `string`                             |                  |
-| `type`                                                           | `'websocket'`                        |                  |
-| `url`, `protocols`, `requestHeaders`                             |                                      | Captured at open |
-| `readyState`                                                     | `'CONNECTING' \| 'OPEN' \| 'CLOSED'` |                  |
-| `messages`                                                       | `WebSocketMessage[]`                 |                  |
-| `messagesSent`, `messagesReceived`, `bytesSent`, `bytesReceived` | `number`                             |                  |
-| `closeCode`, `closeReason`, `error`                              | optional                             |                  |
-| `startTime`, `endTime`, `duration`                               | `number`                             |                  |
+| Field | Type | Notes |
+|---|---|---|
+| `id` | `string` | |
+| `type` | `'websocket'` | |
+| `url`, `protocols`, `requestHeaders` | | Captured at open |
+| `readyState` | `'CONNECTING' \| 'OPEN' \| 'CLOSED'` | |
+| `messages` | `WebSocketMessage[]` | |
+| `messagesSent`, `messagesReceived`, `bytesSent`, `bytesReceived` | `number` | |
+| `closeCode`, `closeReason`, `error` | optional | |
+| `startTime`, `endTime`, `duration` | `number` | |
 
 `WebSocketMessage` = `{ direction, data, size, isBinary, timestamp }`. For binary frames, `data` is the literal placeholder string `[binary N bytes]` — only `size` is meaningful. Decode at the call site if you need the contents.
 

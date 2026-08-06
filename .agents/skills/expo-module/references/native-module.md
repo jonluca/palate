@@ -123,20 +123,20 @@ OnStopObserving("onChange") {
 
 ### Primitives
 
-| Swift                 | Kotlin                             | JS                             |
-| --------------------- | ---------------------------------- | ------------------------------ |
-| `Bool`                | `Boolean`                          | `boolean`                      |
-| `Int`, `Int32`        | `Int`                              | `number`                       |
-| `Int64`               | `Long`                             | `number`                       |
-| `Float`, `Float32`    | `Float`                            | `number`                       |
-| `Double`              | `Double`                           | `number`                       |
-| `String`              | `String`                           | `string`                       |
-| `URL`                 | `java.net.URL` / `android.net.Uri` | `string`                       |
-| `CGPoint`             | -                                  | `{ x, y }`                     |
-| `CGSize`              | -                                  | `{ width, height }`            |
-| `CGRect`              | -                                  | `{ x, y, width, height }`      |
-| `UIColor` / `CGColor` | `android.graphics.Color`           | `string` (ProcessedColorValue) |
-| `Data`                | `kotlin.ByteArray`                 | `Uint8Array`                   |
+| Swift | Kotlin | JS |
+|-------|--------|----|
+| `Bool` | `Boolean` | `boolean` |
+| `Int`, `Int32` | `Int` | `number` |
+| `Int64` | `Long` | `number` |
+| `Float`, `Float32` | `Float` | `number` |
+| `Double` | `Double` | `number` |
+| `String` | `String` | `string` |
+| `URL` | `java.net.URL` / `android.net.Uri` | `string` |
+| `CGPoint` | - | `{ x, y }` |
+| `CGSize` | - | `{ width, height }` |
+| `CGRect` | - | `{ x, y, width, height }` |
+| `UIColor` / `CGColor` | `android.graphics.Color` | `string` (ProcessedColorValue) |
+| `Data` | `kotlin.ByteArray` | `Uint8Array` |
 
 ### Records (Struct-like types)
 

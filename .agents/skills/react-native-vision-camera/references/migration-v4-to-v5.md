@@ -4,24 +4,24 @@ V5 is a ground-up Nitro rewrite. Do not try to incrementally upgrade — most su
 
 ## The cheat sheet
 
-| Concern                         | v4                                                                                                                                | v5                                                                                                                                                                                         |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Enable photo                    | `<Camera photo={true} />`                                                                                                         | `const photoOutput = usePhotoOutput()` then `outputs={[photoOutput]}`                                                                                                                      |
-| Enable video                    | `<Camera video={true} audio={true} />`                                                                                            | `const videoOutput = useVideoOutput({ enableAudio: true })` then `outputs={[videoOutput]}`                                                                                                 |
-| Enable frame processor          | `frameProcessor={useFrameProcessor(...)}`                                                                                         | `const frameOutput = useFrameOutput({ onFrame })` then `outputs={[frameOutput]}`                                                                                                           |
-| Enable code scanner             | `codeScanner={useCodeScanner(...)}`                                                                                               | Separate package `react-native-vision-camera-barcode-scanner` → `const barcodeOutput = useBarcodeScannerOutput(...)` then `outputs={[barcodeOutput]}` OR iOS-only native `useObjectOutput` |
-| Format / resolution / fps / HDR | `useCameraFormat(device, [...])` + `format`, `fps`, `videoHdr`, `photoHdr` props                                                  | `constraints={[...]}` prop — priority-ordered, auto-negotiated                                                                                                                             |
-| Take photo                      | `await cameraRef.current.takePhoto({ flash: 'on' })`                                                                              | `await photoOutput.capturePhoto({ flashMode: 'on' }, {})` — returns in-memory `Photo`                                                                                                      |
-| Save photo to file              | takePhoto returned a file path already                                                                                            | `await photoOutput.capturePhotoToFile(...)` returns `{ filePath }`                                                                                                                         |
-| Start recording                 | `cameraRef.current.startRecording({ onRecordingFinished, onRecordingError })`                                                     | `const recorder = await videoOutput.createRecorder({}); await recorder.startRecording(onFinished, onError)`                                                                                |
-| Stop recording                  | `cameraRef.current.stopRecording()`                                                                                               | `recorder.stopRecording()`                                                                                                                                                                 |
-| Focus                           | `cameraRef.current.focus({ x, y })`                                                                                               | `cameraRef.current.focusTo({ x, y })` or `controller.focusTo(meteringPoint, { modes, adaptiveness, autoResetAfter, responsiveness })`                                                      |
-| Pinch-to-zoom                   | Manual `Gesture.Pinch()` + `animatedProps` + `addWhitelistedNativeProps`                                                          | `<Camera enableNativeZoomGesture />` (or still-manual with `zoom={sharedValue}`)                                                                                                           |
-| Tap-to-focus                    | Manual `Gesture.Tap()` + `camera.focus(point)`                                                                                    | `<Camera enableNativeTapToFocusGesture />`                                                                                                                                                 |
-| Pixel format                    | `pixelFormat` on `<Camera />`                                                                                                     | Per-output: `useFrameOutput({ pixelFormat: 'yuv' })`                                                                                                                                       |
-| Worklets engine                 | `react-native-worklets-core` + babel plugin                                                                                       | `react-native-worklets` (Software Mansion) + `react-native-vision-camera-worklets`; no separate babel plugin (Reanimated plugin covers it)                                                 |
-| Native frame processor plugin   | Swift class extends `FrameProcessorPlugin`, registered via `VISION_EXPORT_SWIFT_FRAME_PROCESSOR` macro + `[String: Any?]` options | Nitro `HybridObject` spec, platforms in Swift/Kotlin, full typed params                                                                                                                    |
-| Expo config plugin flag         | `"enableFrameProcessors": false` in app.json                                                                                      | Worklets are opt-in by installing the package; no flag required                                                                                                                            |
+| Concern | v4 | v5 |
+|---|---|---|
+| Enable photo | `<Camera photo={true} />` | `const photoOutput = usePhotoOutput()` then `outputs={[photoOutput]}` |
+| Enable video | `<Camera video={true} audio={true} />` | `const videoOutput = useVideoOutput({ enableAudio: true })` then `outputs={[videoOutput]}` |
+| Enable frame processor | `frameProcessor={useFrameProcessor(...)}` | `const frameOutput = useFrameOutput({ onFrame })` then `outputs={[frameOutput]}` |
+| Enable code scanner | `codeScanner={useCodeScanner(...)}` | Separate package `react-native-vision-camera-barcode-scanner` → `const barcodeOutput = useBarcodeScannerOutput(...)` then `outputs={[barcodeOutput]}` OR iOS-only native `useObjectOutput` |
+| Format / resolution / fps / HDR | `useCameraFormat(device, [...])` + `format`, `fps`, `videoHdr`, `photoHdr` props | `constraints={[...]}` prop — priority-ordered, auto-negotiated |
+| Take photo | `await cameraRef.current.takePhoto({ flash: 'on' })` | `await photoOutput.capturePhoto({ flashMode: 'on' }, {})` — returns in-memory `Photo` |
+| Save photo to file | takePhoto returned a file path already | `await photoOutput.capturePhotoToFile(...)` returns `{ filePath }` |
+| Start recording | `cameraRef.current.startRecording({ onRecordingFinished, onRecordingError })` | `const recorder = await videoOutput.createRecorder({}); await recorder.startRecording(onFinished, onError)` |
+| Stop recording | `cameraRef.current.stopRecording()` | `recorder.stopRecording()` |
+| Focus | `cameraRef.current.focus({ x, y })` | `cameraRef.current.focusTo({ x, y })` or `controller.focusTo(meteringPoint, { modes, adaptiveness, autoResetAfter, responsiveness })` |
+| Pinch-to-zoom | Manual `Gesture.Pinch()` + `animatedProps` + `addWhitelistedNativeProps` | `<Camera enableNativeZoomGesture />` (or still-manual with `zoom={sharedValue}`) |
+| Tap-to-focus | Manual `Gesture.Tap()` + `camera.focus(point)` | `<Camera enableNativeTapToFocusGesture />` |
+| Pixel format | `pixelFormat` on `<Camera />` | Per-output: `useFrameOutput({ pixelFormat: 'yuv' })` |
+| Worklets engine | `react-native-worklets-core` + babel plugin | `react-native-worklets` (Software Mansion) + `react-native-vision-camera-worklets`; no separate babel plugin (Reanimated plugin covers it) |
+| Native frame processor plugin | Swift class extends `FrameProcessorPlugin`, registered via `VISION_EXPORT_SWIFT_FRAME_PROCESSOR` macro + `[String: Any?]` options | Nitro `HybridObject` spec, platforms in Swift/Kotlin, full typed params |
+| Expo config plugin flag | `"enableFrameProcessors": false` in app.json | Worklets are opt-in by installing the package; no flag required |
 
 ## 1. Packages
 
@@ -160,28 +160,26 @@ const photoOutput = usePhotoOutput({ targetResolution: CommonResolutions.UHD_16_
 ```tsx
 // ❌ V4
 const file = await cameraRef.current.takePhoto({
-  flash: "on",
+  flash: 'on',
   enableAutoRedEyeReduction: true,
   enableShutterSound: false,
-});
-const uri = `file://${file.path}`;
+})
+const uri = `file://${file.path}`
 
 // ✅ V5 — in-memory (preferred)
 const photo = await photoOutput.capturePhoto(
-  { flashMode: "on" },
+  { flashMode: 'on' },
   {
     onWillBeginCapture: () => {},
     onWillCapturePhoto: () => {},
     onDidCapturePhoto: () => {},
-    onPreviewImageAvailable: (image) => {
-      /* thumbnail for instant UI */
-    },
-  },
-);
-const image = await photo.toImageAsync(); // render with react-native-nitro-image
+    onPreviewImageAvailable: (image) => { /* thumbnail for instant UI */ },
+  }
+)
+const image = await photo.toImageAsync() // render with react-native-nitro-image
 
 // ✅ V5 — if you genuinely need a file
-const { filePath } = await photoOutput.capturePhotoToFile({ flashMode: "on" }, {});
+const { filePath } = await photoOutput.capturePhotoToFile({ flashMode: 'on' }, {})
 ```
 
 Behavioral changes:
@@ -189,7 +187,7 @@ Behavioral changes:
 - `takePhoto` wrote to a temp file on every call. `capturePhoto` skips that entirely. Prefer it — it is faster and uses less I/O and disk.
 - Callbacks that used to fire on the Camera are now passed as a second argument object on every capture call (`onWillBeginCapture`, `onWillCapturePhoto`, `onDidCapturePhoto`, `onPreviewImageAvailable`).
 - Thumbnail preview: in v5, configure `previewImageTargetSize` on `usePhotoOutput(...)` and receive via `onPreviewImageAvailable`, rather than showing the saved file.
-- `photoQualityBalance` prop is gone. Pass `qualityPrioritization: 'speed' | 'balanced' | 'quality'` in the capture settings (per-call) or the photo output options.
+- `photoQualityBalance` prop is gone. Pass `qualityPrioritization: 'speed' | 'balanced' | 'quality'` on the photo **output** options (`usePhotoOutput({ qualityPrioritization })`) — it is NOT a per-capture `CapturePhotoSettings` field. <!-- source: PhotoOutputOptions.qualityPrioritization (CameraPhotoOutput.nitro.ts:68); CapturePhotoSettings (:137-225) has none -->
 - Shutter sound / red-eye options live on `CapturePhotoSettings`. Note the renames: `flash` → `flashMode`, `enableAutoRedEyeReduction` → `enableRedEyeReduction`.
 
 ## 5. Recording video
@@ -260,29 +258,25 @@ const frameOutput = useFrameOutput({
 ```tsx
 // ❌ V4 runAsync
 const frameProcessor = useFrameProcessor((frame) => {
-  "worklet";
+  'worklet'
   runAsync(frame, () => {
-    "worklet";
-    doHeavyWork(frame);
-  });
-}, []);
+    'worklet'
+    doHeavyWork(frame)
+  })
+}, [])
 
 // ✅ V5 AsyncRunner with explicit backpressure
-const asyncRunner = useAsyncRunner();
+const asyncRunner = useAsyncRunner()
 const frameOutput = useFrameOutput({
   onFrame(frame) {
-    "worklet";
+    'worklet'
     const accepted = asyncRunner.runAsync(() => {
-      "worklet";
-      try {
-        doHeavyWork(frame);
-      } finally {
-        frame.dispose();
-      }
-    });
-    if (!accepted) frame.dispose(); // dropped — still must dispose
+      'worklet'
+      try { doHeavyWork(frame) } finally { frame.dispose() }
+    })
+    if (!accepted) frame.dispose() // dropped — still must dispose
   },
-});
+})
 ```
 
 `runAsync` returns a boolean. `true` = work accepted; dispose inside the async callback. `false` = runner full; dispose immediately. Always handle both branches.
@@ -315,11 +309,11 @@ V5 (Nitro) — the only supported path:
 
 ```ts
 // spec.ts
-import type { HybridObject } from "react-native-nitro-modules";
-import type { Frame } from "react-native-vision-camera";
+import type { HybridObject } from 'react-native-nitro-modules'
+import type { Frame } from 'react-native-vision-camera'
 
-export interface MyNativePlugin extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  call(frame: Frame): void;
+export interface MyNativePlugin extends HybridObject<{ ios: 'swift', android: 'kotlin' }> {
+  call(frame: Frame): void
 }
 ```
 
@@ -353,19 +347,19 @@ class HybridMyNativePlugin : HybridMyNativePluginSpec() {
 
 ```ts
 // JS call site
-import { NitroModules } from "react-native-nitro-modules";
-const plugin = NitroModules.createHybridObject<MyNativePlugin>("MyNativePlugin");
+import { NitroModules } from 'react-native-nitro-modules'
+const plugin = NitroModules.createHybridObject<MyNativePlugin>('MyNativePlugin')
 
 const frameOutput = useFrameOutput({
   onFrame(frame) {
-    "worklet";
-    plugin.call(frame);
-    frame.dispose();
+    'worklet'
+    plugin.call(frame)
+    frame.dispose()
   },
-});
+})
 ```
 
-For full Nitro scaffolding (nitrogen codegen, podspec, CMake, linking VisionCamera), delegate to the `build-nitro-modules` skill.
+For full Nitro scaffolding (nitrogen codegen, podspec, CMake, linking VisionCamera), delegate to the `build-nitro-modules` skill. 
 
 ## 7. Code scanning
 
@@ -388,7 +382,7 @@ const barcodeOutput = useBarcodeScannerOutput({
 
 // Or use the simple drop-in view:
 import { CodeScanner } from 'react-native-vision-camera-barcode-scanner'
-<CodeScanner isActive barcodeFormats={['qr-code']} onBarcodeScanned={(barcodes) => {}} onError={(e) => {}} />
+<CodeScanner style={{ flex: 1 }} isActive barcodeFormats={['qr-code']} onBarcodeScanned={(barcodes) => {}} onError={(e) => {}} /> {/* style is required */}
 
 // Or, iOS-only, no ML dependency, native AVCaptureMetadataOutput:
 import { useObjectOutput, isScannedCode } from 'react-native-vision-camera'
@@ -448,7 +442,7 @@ const zoom = useSharedValue(device.minZoom)
 
 // Imperative:
 await controller.setZoom(2)
-await controller.startZoomAnimation(5, 2) // zoom to 5x over 2s
+await controller.startZoomAnimation(5, 2) // animate to 5x; 2nd arg is `rate`, not a duration in seconds
 await controller.cancelZoomAnimation()
 ```
 
@@ -459,27 +453,28 @@ await controller.cancelZoomAnimation()
 No v4 equivalent — these didn't exist. Pro-camera controls:
 
 ```ts
-await controller.setFocusLocked(0.3); // lens pos 0..1
-await controller.setExposureLocked(minDuration, maxISO);
-await controller.setWhiteBalanceLocked({ redGain: 1, greenGain: 0.1, blueGain: 0.1 });
+await controller.setFocusLocked(0.3)                                   // lens pos 0..1
+await controller.setExposureLocked(minDuration, maxISO)
+await controller.setWhiteBalanceLocked({ redGain: 1, greenGain: 0.1, blueGain: 0.1 })
 // or lock current auto values:
-await controller.lockCurrentExposure();
-await controller.lockCurrentFocus();
-await controller.lockCurrentWhiteBalance();
+await controller.lockCurrentExposure()
+await controller.lockCurrentFocus()
+await controller.lockCurrentWhiteBalance()
 ```
 
 ## 11. Pixel formats
 
-v4 `pixelFormat` was on the Camera (`"yuv" | "rgb"`). In v5 it moves to the Frame/Depth output, and `"native"` is supported:
+v4 `pixelFormat` was on the Camera (`"yuv" | "rgb"`). In v5 it moves to the **Frame output** (`useFrameOutput`), where the default is `"native"`. (`useDepthOutput` has no `pixelFormat` — read the depth format from `depth.pixelFormat`.)
 
 ```tsx
 const frameOutput = useFrameOutput({
-  pixelFormat: "yuv", // default, faster than RGB
+  // pixelFormat defaults to 'native' (zero-copy GPU path); verify the resolved format via frame.pixelFormat
+  pixelFormat: 'yuv',     // CPU-accessible YUV (MLKit/OpenCV); ~2.6× cheaper than 'rgb'
   // pixelFormat: 'rgb',  // forces YUV→RGB conversion; prefer the Resizer for ML
-  // pixelFormat: 'native' // zero-conversion GPU pipelines - fastest - verify actual format via frame.pixelFormat
   onFrame,
-});
+})
 ```
+<!-- source: useFrameOutput.ts:123 (default 'native'); useDepthOutput.ts:70-77 (no pixelFormat); VideoPixelFormat.ts:52-62 -->
 
 ## 12. Lifecycle
 
@@ -497,32 +492,27 @@ Interruption handling (incoming calls, thermal throttle) is now formalised on al
 For multi-cam or fully programmatic control there's a new low-level API:
 
 ```ts
-const session = await VisionCamera.createCameraSession(/* isMultiCam */ false);
-const device = await getDefaultCameraDevice("back");
-const photoOutput = VisionCamera.createPhotoOutput({});
-const videoOutput = VisionCamera.createVideoOutput({});
+const session = await VisionCamera.createCameraSession(/* isMultiCam */ false)
+const device = await getDefaultCameraDevice('back')
+const photoOutput = VisionCamera.createPhotoOutput({})
+const videoOutput = VisionCamera.createVideoOutput({})
 
-await session.configure(
-  [
-    {
-      input: device,
-      outputs: [
-        { output: photoOutput, mirrorMode: "auto" },
-        { output: videoOutput, mirrorMode: "auto" },
-      ],
-      constraints: [{ fps: 30 }],
-    },
+await session.configure([{
+  input: device,
+  outputs: [
+    { output: photoOutput, mirrorMode: 'auto' },
+    { output: videoOutput, mirrorMode: 'auto' },
   ],
-  {},
-);
+  constraints: [{ fps: 30 }],
+}], {})
 
-await session.start();
+await session.start()
 // ...
-await session.stop();
-await session.dispose();
+await session.stop()
+// No session.dispose() exists — Nitro releases the CameraSession once it is unreferenced. source: CameraSession.nitro.ts
 ```
 
-Multi-cam: `createCameraSession(true)` + one connection per input device. Gate on `device.supportsMultiCamSessions`.
+Multi-cam: `createCameraSession(true)` + one connection per input device. Gate on `VisionCamera.supportsMultiCamSessions` (platform-level) and pick a supported input pair from `deviceFactory.supportedMultiCamDeviceCombinations`. <!-- source: CameraFactory.nitro.ts:71; CameraSession.nitro.ts:70-74,182-186 (no supportsMultiCamSessions on CameraDevice) -->
 
 ## 14. Testing / mocking
 

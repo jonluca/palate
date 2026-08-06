@@ -16,7 +16,9 @@ Covers publish metadata and npm package contents.
   "version": "0.1.0",
   "description": "Fast, type-safe math utilities for React Native powered by Nitro Modules",
   "author": "Your Name <your@email.com>",
-  "contributors": ["Contributor Name <contributor@email.com>"],
+  "contributors": [
+    "Contributor Name <contributor@email.com>"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -26,7 +28,13 @@ Covers publish metadata and npm package contents.
   "bugs": {
     "url": "https://github.com/yourusername/react-native-math/issues"
   },
-  "keywords": ["react-native", "nitro-modules", "ios", "android", "math"],
+  "keywords": [
+    "react-native",
+    "nitro-modules",
+    "ios",
+    "android",
+    "math"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",
@@ -80,9 +88,17 @@ In `packages/react-native-math/package.json`:
 ```json
 {
   "description": "Fast, type-safe math utilities for React Native powered by Nitro Modules",
-  "keywords": ["react-native", "nitro-modules", "ios", "android", "math"],
+  "keywords": [
+    "react-native",
+    "nitro-modules",
+    "ios",
+    "android",
+    "math"
+  ],
   "author": "Your Full Name <your@email.com>",
-  "contributors": ["Contributor Name <contributor@email.com>"],
+  "contributors": [
+    "Contributor Name <contributor@email.com>"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -129,7 +145,6 @@ This controls what gets uploaded to npm. **Missing files = broken package for co
 ```
 
 Critical files that must be included:
-
 - `nitrogen/` — Generated native glue and autolinking files; consumers need these for builds. These files may or may not be committed to git, but they must be published to npm.
 - `nitro.json` — Required for autolinking to work
 - `*.podspec` — Required for iOS CocoaPods integration. Prefer a root podspec named after `ios.iosModuleName`, for example `NitroMath.podspec` with `s.name = "NitroMath"`.
@@ -196,7 +211,9 @@ For one-command release automation, use [release-it-publishing.md](release-it-pu
   "react-native": "src/index",
   "source": "src/index",
   "author": "Your Name <your@email.com>",
-  "contributors": ["Contributor Name <contributor@email.com>"],
+  "contributors": [
+    "Contributor Name <contributor@email.com>"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -206,7 +223,13 @@ For one-command release automation, use [release-it-publishing.md](release-it-pu
   "bugs": {
     "url": "https://github.com/yourusername/react-native-math/issues"
   },
-  "keywords": ["react-native", "nitro-modules", "ios", "android", "math"],
+  "keywords": [
+    "react-native",
+    "nitro-modules",
+    "ios",
+    "android",
+    "math"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc",

@@ -145,7 +145,6 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
 ### 7. Troubleshoot missing files
 
 If no files are generated:
-
 - Verify the spec file ends in `.nitro.ts` (not `.ts`)
 - Verify the interface name in the spec matches the autolinking key in `nitro.json`
 - Check that you ran `bunx nitrogen` from inside the package folder (where `nitro.json` is)

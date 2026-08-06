@@ -16,12 +16,12 @@ Every MMKV instance has a built-in observer registry. When any key's value chang
 ### Register a listener
 
 ```ts
-const storage = createMMKV();
+const storage = createMMKV()
 
 const listener = storage.addOnValueChangedListener((changedKey) => {
-  const newValue = storage.getString(changedKey);
-  console.log(`"${changedKey}" new value: ${newValue}`);
-});
+  const newValue = storage.getString(changedKey)
+  console.log(`"${changedKey}" new value: ${newValue}`)
+})
 ```
 
 ### Remove a listener
@@ -30,7 +30,7 @@ Always clean up when no longer needed:
 
 ```ts
 function onLogout() {
-  listener.remove();
+  listener.remove()
 }
 ```
 
@@ -40,16 +40,16 @@ The `.remove()` call is on the returned `Listener` object — not on the storage
 
 ```ts
 class SettingsManager {
-  private listener: Listener;
+  private listener: Listener
 
   constructor(storage: MMKV) {
     this.listener = storage.addOnValueChangedListener((key) => {
-      this.handleChange(key);
-    });
+      this.handleChange(key)
+    })
   }
 
   destroy() {
-    this.listener.remove();
+    this.listener.remove()
   }
 
   private handleChange(key: string) {
@@ -62,7 +62,7 @@ class SettingsManager {
 
 ```ts
 interface Listener {
-  remove: () => void;
+  remove: () => void
 }
 ```
 

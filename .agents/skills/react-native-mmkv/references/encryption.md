@@ -18,27 +18,27 @@ The underlying engine is Tencent's MMKV C++ library, which handles AES-128 (defa
 ### Create an encrypted instance
 
 ```ts
-import { createMMKV } from "react-native-mmkv";
+import { createMMKV } from 'react-native-mmkv'
 
 const secureStorage = createMMKV({
-  id: "secure-store",
-  encryptionKey: "my-secret-key",
-  encryptionType: "AES-256",
-});
+  id: 'secure-store',
+  encryptionKey: 'my-secret-key',
+  encryptionType: 'AES-256',
+})
 ```
 
 ### Encrypt an existing unencrypted instance
 
 ```ts
-storage.encrypt("my-secret-key");
+storage.encrypt('my-secret-key')
 // or with explicit algorithm:
-storage.encrypt("my-secret-key", "AES-256");
+storage.encrypt('my-secret-key', 'AES-256')
 ```
 
 ### Decrypt (remove encryption)
 
 ```ts
-storage.decrypt();
+storage.decrypt()
 ```
 
 After decrypting, the storage file is rewritten without encryption. All data remains accessible.
@@ -46,9 +46,9 @@ After decrypting, the storage file is rewritten without encryption. All data rem
 ### Re-encrypt with a new key
 
 ```ts
-storage.recrypt("new-secret-key");
+storage.recrypt('new-secret-key')
 // or remove encryption entirely:
-storage.recrypt(undefined);
+storage.recrypt(undefined)
 ```
 
 `recrypt` is equivalent to decrypt + encrypt, but done atomically.
@@ -59,16 +59,16 @@ storage.recrypt(undefined);
 
 ```ts
 if (storage.isEncrypted) {
-  console.log("Storage is encrypted");
+  console.log('Storage is encrypted')
 }
 ```
 
 ## Encryption types
 
-| Type        | Max key length | Description                                     |
-| ----------- | -------------- | ----------------------------------------------- |
-| `'AES-128'` | 16 bytes       | Default. Faster, sufficient for most use cases. |
-| `'AES-256'` | 32 bytes       | Stronger encryption. Slightly slower.           |
+| Type | Max key length | Description |
+|------|----------------|-------------|
+| `'AES-128'` | 16 bytes | Default. Faster, sufficient for most use cases. |
+| `'AES-256'` | 32 bytes | Stronger encryption. Slightly slower. |
 
 ## Gotchas
 

@@ -11,7 +11,6 @@ Covers Steps 8–9 (Kotlin path): creating the Kotlin implementation class that 
 ## Quick Pattern
 
 **Incorrect** — missing required annotations:
-
 ```kotlin
 class HybridMath : HybridMathSpec() {
   override fun add(a: Double, b: Double) = a + b
@@ -19,7 +18,6 @@ class HybridMath : HybridMathSpec() {
 ```
 
 **Correct** — with required annotations:
-
 ```kotlin
 @Keep
 @DoNotStrip
@@ -109,31 +107,30 @@ For any type uncertainty, consult the canonical Kotlin test implementation:
 
 ### Type reference table
 
-| TypeScript          | Kotlin Type         | Notes                                             |
-| ------------------- | ------------------- | ------------------------------------------------- |
-| `number`            | `Double`            | Always `Double`                                   |
-| `string`            | `String`            |                                                   |
-| `boolean`           | `Boolean`           |                                                   |
-| `bigint` (signed)   | `Long`              |                                                   |
-| `bigint` (unsigned) | `ULong`             | Critical: `ULong`, not `Long`                     |
-| `number[]`          | `DoubleArray`       | Primitive array — NOT `Array<Double>`             |
-| `T[]` (non-number)  | `Array<T>`          | e.g. `Array<String>`, `Array<Person>`             |
-| `Promise<T>`        | `Promise<T>`        | Use `Promise.async { }` or `Promise.parallel { }` |
-| `Promise<void>`     | `Promise<Unit>`     | Kotlin `Unit`, not `Void`                         |
-| `T \| undefined`    | `T?`                | Kotlin nullable                                   |
-| `(x: T) => void`    | `(T) -> Unit`       | Lambda type, no `@escaping` needed                |
-| `() => T`           | `() -> T`           |                                                   |
-| `ArrayBuffer`       | `ArrayBuffer`       | From nitro-modules core                           |
-| `AnyMap`            | `AnyMap`            | From nitro-modules core                           |
-| `Record<string, T>` | `Map<String, T>`    |                                                   |
-| `HybridObject`      | `HybridSpec`        | Kotlin class, no `shared_ptr`                     |
-| `null` / `NullType` | `NullType`          | `NullType.NULL` constant                          |
-| `Date`              | `java.time.Instant` |                                                   |
+| TypeScript | Kotlin Type | Notes |
+|-----------|-------------|-------|
+| `number` | `Double` | Always `Double` |
+| `string` | `String` | |
+| `boolean` | `Boolean` | |
+| `bigint` (signed) | `Long` | |
+| `bigint` (unsigned) | `ULong` | Critical: `ULong`, not `Long` |
+| `number[]` | `DoubleArray` | Primitive array — NOT `Array<Double>` |
+| `T[]` (non-number) | `Array<T>` | e.g. `Array<String>`, `Array<Person>` |
+| `Promise<T>` | `Promise<T>` | Use `Promise.async { }` or `Promise.parallel { }` |
+| `Promise<void>` | `Promise<Unit>` | Kotlin `Unit`, not `Void` |
+| `T \| undefined` | `T?` | Kotlin nullable |
+| `(x: T) => void` | `(T) -> Unit` | Lambda type, no `@escaping` needed |
+| `() => T` | `() -> T` | |
+| `ArrayBuffer` | `ArrayBuffer` | From nitro-modules core |
+| `AnyMap` | `AnyMap` | From nitro-modules core |
+| `Record<string, T>` | `Map<String, T>` | |
+| `HybridObject` | `HybridSpec` | Kotlin class, no `shared_ptr` |
+| `null` / `NullType` | `NullType` | `NullType.NULL` constant |
+| `Date` | `java.time.Instant` | |
 
 ### Async with Promise
 
 Use the Promise helper that matches the work:
-
 - Keep quick, deterministic, local work synchronous. Do not introduce `Promise`, coroutines, or dispatchers for simple value construction, cached metadata, or pure transforms.
 - `Promise.async` for suspending or I/O work that should run through coroutines.
 - `Promise.parallel` for CPU-bound synchronous work that should run off the caller thread.
@@ -231,7 +228,6 @@ class HybridStorage : HybridStorageSpec() {
 ```
 
 **Rules:**
-
 - Always use `get()` — never `val context = NitroModules.applicationContext` at class level, it may be null at construction time
 - Always null-check with `?: throw Error(...)` so failures are explicit, not silent NPEs
 - `ReactApplicationContext` is a subclass of Android `Context` — use it for `getSharedPreferences`, `getSystemService`, file access, etc.
@@ -290,7 +286,6 @@ override fun divide(a: Double, b: Double): Double {
 Validate invalid values and required behavior early, but do not reject optional cross-platform preferences only because Android ignores them. If the operation still does its core job, ignore or degrade the preference and report support through the public capabilities or resolved state.
 
 Examples:
-
 - Throw when a requested flash mode cannot work because the device has no flash.
 - Do not throw only because a quality, guidance UI, high-frame-rate, auto-zoom, or region preference is unsupported, unless the API documents that field as a hard requirement.
 

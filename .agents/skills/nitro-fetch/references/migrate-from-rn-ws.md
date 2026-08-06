@@ -9,7 +9,7 @@ keywords: migration, websocket, refactor, wss, addEventListener, binaryType
 
 ## Mental model
 
-Migration is a find-and-replace, but there are five things that _will_ trip you up if you don't fix them deliberately:
+Migration is a find-and-replace, but there are five things that *will* trip you up if you don't fix them deliberately:
 
 1. The constructor takes a third arg.
 2. `readyState` is a string, not a number.
@@ -52,29 +52,33 @@ For more on the new API surface, see [`using-websockets.md`](./using-websockets.
 
 ```ts
 // before
-const ws = new WebSocket("wss://stream.example.com/feed", ["v1.proto"]);
+const ws = new WebSocket('wss://stream.example.com/feed', ['v1.proto']);
 ```
 
 ```ts
 // after
-import { NitroWebSocket } from "react-native-nitro-websockets";
+import { NitroWebSocket } from 'react-native-nitro-websockets';
 
-const ws = new NitroWebSocket("wss://stream.example.com/feed", ["v1.proto"]);
+const ws = new NitroWebSocket('wss://stream.example.com/feed', ['v1.proto']);
 ```
 
 If you have many call sites, a local alias per module is cleanest:
 
 ```ts
-import { NitroWebSocket as WebSocket } from "react-native-nitro-websockets";
+import { NitroWebSocket as WebSocket } from 'react-native-nitro-websockets';
 
 // …unchanged call sites below
-const ws = new WebSocket("wss://stream.example.com/feed", ["v1.proto"]);
+const ws = new WebSocket('wss://stream.example.com/feed', ['v1.proto']);
 ```
 
 New call sites gain the third constructor argument (custom upgrade headers) — previously impossible on iOS:
 
 ```ts
-const ws = new NitroWebSocket("wss://stream.example.com/feed", ["v1.proto"], { Authorization: `Bearer ${token}` });
+const ws = new NitroWebSocket(
+  'wss://stream.example.com/feed',
+  ['v1.proto'],
+  { Authorization: `Bearer ${token}` },
+);
 ```
 
 ### 2. Fix `readyState` comparisons
@@ -96,16 +100,16 @@ The four valid values are `'CONNECTING'`, `'OPEN'`, `'CLOSING'`, `'CLOSED'`.
 
 ```ts
 // before
-ws.addEventListener("open", onOpen);
-ws.addEventListener("message", onMessage);
-ws.addEventListener("close", onClose);
-ws.addEventListener("error", onError);
+ws.addEventListener('open',    onOpen);
+ws.addEventListener('message', onMessage);
+ws.addEventListener('close',   onClose);
+ws.addEventListener('error',   onError);
 
 // after
-ws.onopen = onOpen;
+ws.onopen    = onOpen;
 ws.onmessage = onMessage;
-ws.onclose = onClose;
-ws.onerror = onError;
+ws.onclose   = onClose;
+ws.onerror   = onError;
 ```
 
 Need multiple listeners on a single event? Fan out yourself:
@@ -119,14 +123,14 @@ ws.onmessage = (e) => messageListeners.forEach((fn) => fn(e));
 
 ```ts
 // before — RN's WebSocket with binaryType = 'arraybuffer'
-ws.binaryType = "arraybuffer";
+ws.binaryType = 'arraybuffer';
 ws.onmessage = (e) => {
-  if (typeof e.data === "string") handleText(e.data);
+  if (typeof e.data === 'string') handleText(e.data);
   else handleBinary(e.data); // ArrayBuffer
 };
 
 // after
-import type { WebSocketMessageEvent } from "react-native-nitro-websockets";
+import type { WebSocketMessageEvent } from 'react-native-nitro-websockets';
 
 ws.onmessage = (e: WebSocketMessageEvent) => {
   if (e.isBinary && e.binaryData) handleBinary(e.binaryData);
@@ -148,8 +152,14 @@ ws.send(buffer);
 
 // after
 ws.send(await blob.arrayBuffer());
-ws.send(uint8Array.buffer.slice(uint8Array.byteOffset, uint8Array.byteOffset + uint8Array.byteLength));
-ws.send(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+ws.send(uint8Array.buffer.slice(
+  uint8Array.byteOffset,
+  uint8Array.byteOffset + uint8Array.byteLength,
+));
+ws.send(buffer.buffer.slice(
+  buffer.byteOffset,
+  buffer.byteOffset + buffer.byteLength,
+));
 ```
 
 The `slice` matters when the typed array is a view over a larger backing buffer — without it you'd send the wrong bytes.
@@ -159,7 +169,7 @@ The `slice` matters when the typed array is a view over a larger backing buffer 
 Turn on the inspector and confirm the migrated socket flows through nitro:
 
 ```ts
-import { NetworkInspector } from "react-native-nitro-fetch";
+import { NetworkInspector } from 'react-native-nitro-fetch';
 
 NetworkInspector.enable();
 // ...exercise the WS...
@@ -171,9 +181,9 @@ If your socket isn't in the output, there's still a `new WebSocket(...)` somewhe
 ## Optional — once you're migrated, pre-warm
 
 ```ts
-import { prewarmOnAppStart } from "react-native-nitro-websockets";
+import { prewarmOnAppStart } from 'react-native-nitro-websockets';
 
-prewarmOnAppStart("wss://stream.example.com/feed", ["v1.proto"], {
+prewarmOnAppStart('wss://stream.example.com/feed', ['v1.proto'], {
   Authorization: `Bearer ${token}`,
 });
 ```
@@ -185,16 +195,16 @@ Don't forget the Android `Application.onCreate` wiring — see [`websocket-prewa
 Libraries that accept an injectable `WebSocket` constructor (socket.io-client, centrifuge-js, phoenix in some configurations) can be pointed at `NitroWebSocket` directly:
 
 ```ts
-import { NitroWebSocket } from "react-native-nitro-websockets";
-import { io } from "socket.io-client";
+import { NitroWebSocket } from 'react-native-nitro-websockets';
+import { io } from 'socket.io-client';
 
-const socket = io("wss://example.com", {
-  transports: ["websocket"],
+const socket = io('wss://example.com', {
+  transports: ['websocket'],
   WebSocket: NitroWebSocket, // or whatever field the library uses
 });
 ```
 
-Libraries that _don't_ accept an injection and hard-code `new WebSocket(...)` internally will keep using React Native's built-in WebSocket. You can do a [global replace](https://fetch.margelo.com/docs/global-replace) to route everything through NitroWebSocket.
+Libraries that *don't* accept an injection and hard-code `new WebSocket(...)` internally will keep using React Native's built-in WebSocket. You can do a [global replace](https://fetch.margelo.com/docs/global-replace) to route everything through NitroWebSocket.
 
 ## Checklist
 

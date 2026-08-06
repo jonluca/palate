@@ -14,31 +14,31 @@ MMKV is synchronous, but most state-management persistence layers expect an asyn
 ## Zustand persist middleware
 
 ```ts
-import { StateStorage } from "zustand/middleware";
-import { createMMKV } from "react-native-mmkv";
+import { StateStorage } from 'zustand/middleware'
+import { createMMKV } from 'react-native-mmkv'
 
-const storage = createMMKV();
+const storage = createMMKV()
 
 export const zustandStorage: StateStorage = {
   setItem: (name, value) => {
-    return storage.set(name, value);
+    return storage.set(name, value)
   },
   getItem: (name) => {
-    const value = storage.getString(name);
-    return value ?? null;
+    const value = storage.getString(name)
+    return value ?? null
   },
   removeItem: (name) => {
-    return storage.remove(name);
+    return storage.remove(name)
   },
-};
+}
 ```
 
 Usage in a zustand store:
 
 ```ts
-import { create } from "zustand";
-import { persist, createJSONStorage } from "zustand/middleware";
-import { zustandStorage } from "./storage";
+import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
+import { zustandStorage } from './storage'
 
 const useStore = create(
   persist(
@@ -47,80 +47,83 @@ const useStore = create(
       increment: () => set((s) => ({ count: s.count + 1 })),
     }),
     {
-      name: "my-store",
+      name: 'my-store',
       storage: createJSONStorage(() => zustandStorage),
     },
   ),
-);
+)
 ```
 
 ## Redux persist
 
 ```ts
-import { Storage } from "redux-persist";
-import { createMMKV } from "react-native-mmkv";
+import { Storage } from 'redux-persist'
+import { createMMKV } from 'react-native-mmkv'
 
-const storage = createMMKV();
+const storage = createMMKV()
 
 export const reduxStorage: Storage = {
   setItem: (key, value) => {
-    storage.set(key, value);
-    return Promise.resolve(true);
+    storage.set(key, value)
+    return Promise.resolve(true)
   },
   getItem: (key) => {
-    const value = storage.getString(key);
-    return Promise.resolve(value);
+    const value = storage.getString(key)
+    return Promise.resolve(value)
   },
   removeItem: (key) => {
-    storage.remove(key);
-    return Promise.resolve();
+    storage.remove(key)
+    return Promise.resolve()
   },
-};
+}
 ```
 
 Usage:
 
 ```ts
-import { persistStore, persistReducer } from "redux-persist";
-import { reduxStorage } from "./storage";
+import { persistStore, persistReducer } from 'redux-persist'
+import { reduxStorage } from './storage'
 
 const persistConfig = {
-  key: "root",
+  key: 'root',
   storage: reduxStorage,
-};
+}
 ```
 
 ## Jotai — `atomWithMMKV`
 
 ```ts
-import { atomWithStorage, createJSONStorage } from "jotai/utils";
-import { createMMKV } from "react-native-mmkv";
+import { atomWithStorage, createJSONStorage } from 'jotai/utils'
+import { createMMKV } from 'react-native-mmkv'
 
-const storage = createMMKV();
+const storage = createMMKV()
 
 function getItem(key: string): string | null {
-  const value = storage.getString(key);
-  return value ? value : null;
+  const value = storage.getString(key)
+  return value ? value : null
 }
 
 function setItem(key: string, value: string): void {
-  storage.set(key, value);
+  storage.set(key, value)
 }
 
 function removeItem(key: string): void {
-  storage.remove(key);
+  storage.remove(key)
 }
 
-function subscribe(key: string, callback: (value: string | null) => void): () => void {
+function subscribe(
+  key: string,
+  callback: (value: string | null) => void,
+): () => void {
   const listener = (changedKey: string) => {
     if (changedKey === key) {
-      callback(getItem(key));
+      callback(getItem(key))
     }
-  };
-  const { remove } = storage.addOnValueChangedListener(listener);
+  }
+  const { remove } = storage.addOnValueChangedListener(listener)
   return () => {
-    remove();
-  };
+    remove()
+  }
 }
 
 export const atomWithMMKV = <T>(key: string, initialValue: T) =>
@@ -134,13 +137,13 @@ export const atomWithMMKV = <T>(key: string, initialValue: T) =>
       subscribe,
     })),
     { getOnInit: true },
-  );
+  )
 ```
 
 Usage:
 
 ```ts
-const myAtom = atomWithMMKV("my-atom-key", "default-value");
+const myAtom = atomWithMMKV('my-atom-key', 'default-value')
 ```
 
 `createJSONStorage` handles `JSON.stringify`/`JSON.parse` automatically. See [Jotai docs](https://jotai.org/docs/utils/atom-with-storage).
@@ -156,42 +159,45 @@ yarn add @tanstack/query-async-storage-persister @tanstack/react-query-persist-c
 2. Create the persister:
 
 ```ts
-import { createAsyncStoragePersister } from "@tanstack/query-async-storage-persister";
-import { createMMKV } from "react-native-mmkv";
+import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister'
+import { createMMKV } from 'react-native-mmkv'
 
-const storage = createMMKV();
+const storage = createMMKV()
 
 const clientStorage = {
   setItem: (key: string, value: string) => {
-    storage.set(key, value);
+    storage.set(key, value)
   },
   getItem: (key: string) => {
-    const value = storage.getString(key);
-    return value === undefined ? null : value;
+    const value = storage.getString(key)
+    return value === undefined ? null : value
   },
   removeItem: (key: string) => {
-    storage.remove(key);
+    storage.remove(key)
   },
-};
+}
 
 export const clientPersister = createAsyncStoragePersister({
   storage: clientStorage,
-});
+})
 ```
 
 3. Wire it in your root component:
 
 ```tsx
-import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
-import { clientPersister } from "./storage";
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
+import { clientPersister } from './storage'
 
 const App = () => {
   return (
-    <PersistQueryClientProvider client={queryClient} persistOptions={{ persister: clientPersister }}>
+    <PersistQueryClientProvider
+      client={queryClient}
+      persistOptions={{ persister: clientPersister }}
+    >
       {/* your app */}
     </PersistQueryClientProvider>
-  );
-};
+  )
+}
 ```
 
 ## Gotchas

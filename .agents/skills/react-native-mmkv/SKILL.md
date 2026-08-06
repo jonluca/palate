@@ -28,17 +28,17 @@ The three things that trip people up:
 
 Load the matching file from `references/` before writing code. Each reference cites real APIs from the library.
 
-| User is asking about…                                                                                                                                                                        | Read                                                                                     |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Creating an MMKV instance, configuration options (`id`, `path`, `encryptionKey`, `mode`, `readOnly`, `compareBeforeSet`), the `createMMKV()` factory                                         | [`references/create-instance.md`](./references/create-instance.md)                       |
-| Getting/setting values, all data types (string, number, boolean, buffer, objects via JSON), key management (`contains`, `getAllKeys`, `remove`, `clearAll`), `size`, `trim`, `importAllFrom` | [`references/crud-operations.md`](./references/crud-operations.md)                       |
-| React hooks (`useMMKVString`, `useMMKVNumber`, `useMMKVBoolean`, `useMMKVBuffer`, `useMMKVObject`, `useMMKV`, `useMMKVListener`, `useMMKVKeys`), reactive UI                                 | [`references/hooks.md`](./references/hooks.md)                                           |
-| Listening for value changes outside of React, `addOnValueChangedListener`, cleaning up listeners                                                                                             | [`references/listeners.md`](./references/listeners.md)                                   |
-| Encryption (`encrypt`, `decrypt`, `recrypt`), AES-128 vs AES-256, `encryptionKey` config                                                                                                     | [`references/encryption.md`](./references/encryption.md)                                 |
-| Migrating from AsyncStorage, data transfer pattern, completion flag                                                                                                                          | [`references/migrate-from-async-storage.md`](./references/migrate-from-async-storage.md) |
-| zustand persist middleware, redux-persist, jotai `atomWithMMKV`, react-query persister, MobX                                                                                                 | [`references/state-management.md`](./references/state-management.md)                     |
-| V4 upgrade, breaking changes from V3, `new MMKV()` → `createMMKV()`, `.delete()` → `.remove()`                                                                                               | [`references/upgrade-v4.md`](./references/upgrade-v4.md)                                 |
-| Storage size limits, memory warnings, when to use a database instead                                                                                                                         | [`references/limits-and-gotchas.md`](./references/limits-and-gotchas.md)                 |
+| User is asking about… | Read |
+|---|---|
+| Creating an MMKV instance, configuration options (`id`, `path`, `encryptionKey`, `mode`, `readOnly`, `compareBeforeSet`), the `createMMKV()` factory | [`references/create-instance.md`](./references/create-instance.md) |
+| Getting/setting values, all data types (string, number, boolean, buffer, objects via JSON), key management (`contains`, `getAllKeys`, `remove`, `clearAll`), `size`, `trim`, `importAllFrom` | [`references/crud-operations.md`](./references/crud-operations.md) |
+| React hooks (`useMMKVString`, `useMMKVNumber`, `useMMKVBoolean`, `useMMKVBuffer`, `useMMKVObject`, `useMMKV`, `useMMKVListener`, `useMMKVKeys`), reactive UI | [`references/hooks.md`](./references/hooks.md) |
+| Listening for value changes outside of React, `addOnValueChangedListener`, cleaning up listeners | [`references/listeners.md`](./references/listeners.md) |
+| Encryption (`encrypt`, `decrypt`, `recrypt`), AES-128 vs AES-256, `encryptionKey` config | [`references/encryption.md`](./references/encryption.md) |
+| Migrating from AsyncStorage, data transfer pattern, completion flag | [`references/migrate-from-async-storage.md`](./references/migrate-from-async-storage.md) |
+| zustand persist middleware, redux-persist, jotai `atomWithMMKV`, react-query persister, MobX | [`references/state-management.md`](./references/state-management.md) |
+| V4 upgrade, breaking changes from V3, `new MMKV()` → `createMMKV()`, `.delete()` → `.remove()` | [`references/upgrade-v4.md`](./references/upgrade-v4.md) |
+| Storage size limits, memory warnings, when to use a database instead | [`references/limits-and-gotchas.md`](./references/limits-and-gotchas.md) |
 
 If the question doesn't match any row, read [`references/create-instance.md`](./references/create-instance.md) first — most setup questions start there.
 
@@ -50,7 +50,6 @@ cd ios && pod install
 ```
 
 Expo:
-
 ```bash
 npx expo install react-native-mmkv react-native-nitro-modules
 npx expo prebuild
@@ -115,33 +114,33 @@ A mocked MMKV instance is automatically used when testing with Jest or Vitest. U
 
 Good test questions:
 
-- _"How do I persist zustand state with MMKV?"_ → should produce a `StateStorage` adapter using `storage.set`, `storage.getString`, `storage.remove` — not AsyncStorage wrappers.
-- _"How do I migrate from AsyncStorage to MMKV?"_ → should show the batch-copy pattern with a completion flag, not a drop-in replacement.
-- _"What's the storage limit?"_ → should explain there's no fixed limit, but data is memory-mapped so keep it under ~100 MB; use SQLite for larger datasets.
+- *"How do I persist zustand state with MMKV?"* → should produce a `StateStorage` adapter using `storage.set`, `storage.getString`, `storage.remove` — not AsyncStorage wrappers.
+- *"How do I migrate from AsyncStorage to MMKV?"* → should show the batch-copy pattern with a completion flag, not a drop-in replacement.
+- *"What's the storage limit?"* → should explain there's no fixed limit, but data is memory-mapped so keep it under ~100 MB; use SQLite for larger datasets.
 
 ## References
 
-| File                                                                        | Description                                             |
-| --------------------------------------------------------------------------- | ------------------------------------------------------- |
-| [create-instance.md](./references/create-instance.md)                       | `createMMKV()` factory, all configuration options       |
-| [crud-operations.md](./references/crud-operations.md)                       | Set/get all types, key management, objects, buffers     |
-| [hooks.md](./references/hooks.md)                                           | All React hooks for reactive MMKV usage                 |
-| [listeners.md](./references/listeners.md)                                   | `addOnValueChangedListener`, cleanup                    |
-| [encryption.md](./references/encryption.md)                                 | Encrypt/decrypt instances, AES options                  |
-| [migrate-from-async-storage.md](./references/migrate-from-async-storage.md) | Full migration pattern from AsyncStorage                |
-| [state-management.md](./references/state-management.md)                     | zustand, redux-persist, jotai, react-query, MobX        |
-| [upgrade-v4.md](./references/upgrade-v4.md)                                 | V3 → V4 breaking changes and migration                  |
-| [limits-and-gotchas.md](./references/limits-and-gotchas.md)                 | Storage limits, multi-process, logging, common pitfalls |
+| File | Description |
+|------|-------------|
+| [create-instance.md](./references/create-instance.md) | `createMMKV()` factory, all configuration options |
+| [crud-operations.md](./references/crud-operations.md) | Set/get all types, key management, objects, buffers |
+| [hooks.md](./references/hooks.md) | All React hooks for reactive MMKV usage |
+| [listeners.md](./references/listeners.md) | `addOnValueChangedListener`, cleanup |
+| [encryption.md](./references/encryption.md) | Encrypt/decrypt instances, AES options |
+| [migrate-from-async-storage.md](./references/migrate-from-async-storage.md) | Full migration pattern from AsyncStorage |
+| [state-management.md](./references/state-management.md) | zustand, redux-persist, jotai, react-query, MobX |
+| [upgrade-v4.md](./references/upgrade-v4.md) | V3 → V4 breaking changes and migration |
+| [limits-and-gotchas.md](./references/limits-and-gotchas.md) | Storage limits, multi-process, logging, common pitfalls |
 
 ## Problem → Reference Mapping
 
-| Problem                               | Reference                                                                   | Action                                                   |
-| ------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------- |
-| Don't know where to start             | [create-instance.md](./references/create-instance.md)                       | Create instance with `createMMKV()`                      |
-| Need reactive UI updates              | [hooks.md](./references/hooks.md)                                           | Use `useMMKVString` / `useMMKVObject` etc.               |
-| Encrypting sensitive data             | [encryption.md](./references/encryption.md)                                 | Call `storage.encrypt(key)`                              |
-| App uses AsyncStorage, want to switch | [migrate-from-async-storage.md](./references/migrate-from-async-storage.md) | Batch migrate then swap calls                            |
-| Zustand/Redux/Jotai persistence       | [state-management.md](./references/state-management.md)                     | Wire adapter for your state lib                          |
-| Upgrading from V3 to V4               | [upgrade-v4.md](./references/upgrade-v4.md)                                 | `new MMKV()` → `createMMKV()`, `.delete()` → `.remove()` |
-| Storage growing too large             | [limits-and-gotchas.md](./references/limits-and-gotchas.md)                 | Trim or move to SQLite                                   |
-| Multi-process data sharing            | [limits-and-gotchas.md](./references/limits-and-gotchas.md)                 | Set `mode: 'multi-process'`                              |
+| Problem | Reference | Action |
+|---------|-----------|--------|
+| Don't know where to start | [create-instance.md](./references/create-instance.md) | Create instance with `createMMKV()` |
+| Need reactive UI updates | [hooks.md](./references/hooks.md) | Use `useMMKVString` / `useMMKVObject` etc. |
+| Encrypting sensitive data | [encryption.md](./references/encryption.md) | Call `storage.encrypt(key)` |
+| App uses AsyncStorage, want to switch | [migrate-from-async-storage.md](./references/migrate-from-async-storage.md) | Batch migrate then swap calls |
+| Zustand/Redux/Jotai persistence | [state-management.md](./references/state-management.md) | Wire adapter for your state lib |
+| Upgrading from V3 to V4 | [upgrade-v4.md](./references/upgrade-v4.md) | `new MMKV()` → `createMMKV()`, `.delete()` → `.remove()` |
+| Storage growing too large | [limits-and-gotchas.md](./references/limits-and-gotchas.md) | Trim or move to SQLite |
+| Multi-process data sharing | [limits-and-gotchas.md](./references/limits-and-gotchas.md) | Set `mode: 'multi-process'` |

@@ -11,37 +11,35 @@ Covers Steps 4 and 10: deleting the default spec, writing a domain-specific `*.n
 ## Quick Pattern
 
 **Incorrect** — keeping the default stub:
-
 ```typescript
 // src/specs/Example.nitro.ts  ← DELETE THIS
-import { type HybridObject } from "react-native-nitro-modules";
-interface Example extends HybridObject<{ ios: "swift"; android: "kotlin" }> {}
+import { type HybridObject } from 'react-native-nitro-modules'
+interface Example extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {}
 ```
 
 **Correct** — domain-specific spec that exports only the interface:
-
 ```typescript
 // src/specs/Math.nitro.ts
-import type { HybridObject } from "react-native-nitro-modules";
+import type { HybridObject } from 'react-native-nitro-modules'
 
 /**
  * Performs fast native math operations.
  *
  * @see {@linkcode Math.add}
  */
-export interface Math extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
+export interface Math extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
   /**
    * Adds two numbers synchronously.
    */
-  add(a: number, b: number): number;
+  add(a: number, b: number): number
   /**
    * Subtracts the second number from the first.
    */
-  subtract(a: number, b: number): number;
+  subtract(a: number, b: number): number
   /**
    * Multiplies two numbers asynchronously.
    */
-  multiply(a: number, b: number): Promise<number>;
+  multiply(a: number, b: number): Promise<number>
 }
 ```
 
@@ -79,7 +77,6 @@ touch packages/react-native-math/src/specs/Math.nitro.ts
 For non-trivial modules, split specs and shared types into focused files instead of one large catch-all file.
 
 File boundary rules:
-
 - Each primary HybridObject gets its own `.nitro.ts` file.
 - Keep an inheritance family in one `.nitro.ts` file only when the file is named after the base HybridObject and child HybridObjects add few or no members.
 - Put named codegen types in their own `.ts` files: string-literal unions/enums, structs/interfaces, option objects, event objects, callback option structs, and helper types. Nitro needs names for generated native structs and enum-like values.
@@ -91,31 +88,30 @@ File boundary rules:
 ### 3. Write the interface
 
 ```typescript
-import type { HybridObject } from "react-native-nitro-modules";
+import type { HybridObject } from 'react-native-nitro-modules'
 
-export interface Math extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
+export interface Math extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
   // Synchronous methods
-  add(a: number, b: number): number;
-  subtract(a: number, b: number): number;
+  add(a: number, b: number): number
+  subtract(a: number, b: number): number
 
   // Async methods return Promise
-  calculateFibonacci(n: number): Promise<number>;
+  calculateFibonacci(n: number): Promise<number>
 
   // Properties (readable)
-  readonly pi: number;
+  readonly pi: number
 
   // Properties (readable + writable)
-  precision: number;
+  precision: number
 
   // Optional parameters
-  round(value: number, decimals?: number): number;
+  round(value: number, decimals?: number): number
 }
 ```
 
 ### 4. Choose platform languages
 
 In the `HybridObject<{ ... }>` generic:
-
 - `ios: 'swift'` — iOS implemented in Swift
 - `ios: 'c++'` — iOS implemented in C++ (cross-platform)
 - `android: 'kotlin'` — Android implemented in Kotlin
@@ -130,24 +126,26 @@ For C++ only (both platforms): `HybridObject<{ ios: 'c++'; android: 'c++' }>`
 A single Nitro library can mix C++ HybridObjects and platform-language HybridObjects. Use this when most code should be Swift/Kotlin but one subsystem needs shared C++, or when C++ needs platform services through a typed object.
 
 ```typescript
-import type { HybridObject } from "react-native-nitro-modules";
+import type { HybridObject } from 'react-native-nitro-modules'
 
-export interface Storage extends HybridObject<{ ios: "c++"; android: "c++" }> {}
+export interface Storage
+  extends HybridObject<{ ios: 'c++'; android: 'c++' }> {}
 
-export interface PlatformContext extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  getTemporaryDirectory(): string;
-  writeFile(content: ArrayBuffer, path: string): Promise<void>;
+export interface PlatformContext
+  extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  getTemporaryDirectory(): string
+  writeFile(content: ArrayBuffer, path: string): Promise<void>
 }
 
-export interface StorageFactory extends HybridObject<{ ios: "c++"; android: "c++" }> {
-  createStorage(context: PlatformContext): Storage;
+export interface StorageFactory
+  extends HybridObject<{ ios: 'c++'; android: 'c++' }> {
+  createStorage(context: PlatformContext): Storage
 }
 ```
 
 In this pattern, `StorageFactory` is implemented in C++ and can call the generated C++ spec API for `PlatformContext`, even though `PlatformContext` is implemented in Swift/Kotlin. C++ sees public generated methods such as `getTemporaryDirectory()` and `writeFile(...)`; it cannot access private Swift/Kotlin implementation fields.
 
 Use this for patterns such as:
-
 - C++ frame processors using OpenCV while camera/session control stays in Swift/Kotlin.
 - C++ storage, ML, image, audio, or compression engines that need platform paths, files, permissions, or OS handles from Swift/Kotlin objects.
 - Cross-platform C++ pipelines where platform HybridObjects inject OS-specific services.
@@ -160,15 +158,14 @@ After implementing native code, create and export the HybridObject from `src/ind
 
 ```typescript
 // src/index.ts
-import { NitroModules } from "react-native-nitro-modules";
-import type { Math } from "./specs/Math.nitro";
+import { NitroModules } from 'react-native-nitro-modules'
+import type { Math } from './specs/Math.nitro'
 
-export const math = NitroModules.createHybridObject<Math>("Math");
-export type { Math } from "./specs/Math.nitro";
+export const math = NitroModules.createHybridObject<Math>('Math')
+export type { Math } from './specs/Math.nitro'
 ```
 
 **Rules:**
-
 - Always export the runtime HybridObject value from normal TypeScript, such as `export const math = ...`. This is the value app code uses at runtime.
 - Define the spec type in the `.nitro.ts` file with `export interface Math ...`.
 - If consumers should import the spec type from the package root, re-export it from `index.ts` with `export type { Math } from './specs/Math.nitro'`. This is only an additional type export; it does not replace the runtime value export.
@@ -213,39 +210,41 @@ export type { Math } from "./specs/Math.nitro";
 ### Module with properties and listener callbacks
 
 ```typescript
-import type { HybridObject } from "react-native-nitro-modules";
+import type { HybridObject } from 'react-native-nitro-modules'
 
 export interface ListenerSubscription {
   /**
    * Removes the listener owned by this subscription.
    */
-  remove: () => void;
+  remove: () => void
 }
 
-export interface Camera extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
+export interface Camera extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
   // Properties
-  readonly isRecording: boolean;
-  zoom: number;
+  readonly isRecording: boolean
+  zoom: number
 
   // Listener callbacks
-  addOnFrameCapturedListener(listener: (frame: ArrayBuffer) => void): ListenerSubscription;
+  addOnFrameCapturedListener(
+    listener: (frame: ArrayBuffer) => void,
+  ): ListenerSubscription
 
   // Async methods
-  startRecording(): Promise<void>;
-  stopRecording(): Promise<string>; // returns file path
+  startRecording(): Promise<void>
+  stopRecording(): Promise<string>  // returns file path
 
   // Sync methods
-  setFlashMode(mode: "on" | "off" | "auto"): void;
+  setFlashMode(mode: 'on' | 'off' | 'auto'): void
 }
 ```
 
 Then create it in `src/index.ts`:
 
 ```typescript
-import { NitroModules } from "react-native-nitro-modules";
-import type { Camera } from "./specs/Camera.nitro";
+import { NitroModules } from 'react-native-nitro-modules'
+import type { Camera } from './specs/Camera.nitro'
 
-export const camera = NitroModules.createHybridObject<Camera>("Camera");
+export const camera = NitroModules.createHybridObject<Camera>('Camera')
 ```
 
 ### Factory-root pattern for stateful objects
@@ -253,24 +252,27 @@ export const camera = NitroModules.createHybridObject<Camera>("Camera");
 Autolink the public root/factory, then create stateful resource objects through methods:
 
 ```typescript
-import type { HybridObject } from "react-native-nitro-modules";
+import type { HybridObject } from 'react-native-nitro-modules'
 
 export interface VideoOutputOptions {
-  targetBitRate?: number;
+  targetBitRate?: number
 }
 
-export interface Recorder extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  readonly isRecording: boolean;
-  startRecording(onFinished: (filePath: string) => void, onError: (error: Error) => void): Promise<void>;
-  stopRecording(): Promise<void>;
+export interface Recorder extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  readonly isRecording: boolean
+  startRecording(
+    onFinished: (filePath: string) => void,
+    onError: (error: Error) => void,
+  ): Promise<void>
+  stopRecording(): Promise<void>
 }
 
-export interface VideoOutput extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  createRecorder(filePath?: string): Promise<Recorder>;
+export interface VideoOutput extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  createRecorder(filePath?: string): Promise<Recorder>
 }
 
-export interface MediaFactory extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  createVideoOutput(options: VideoOutputOptions): VideoOutput;
+export interface MediaFactory extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  createVideoOutput(options: VideoOutputOptions): VideoOutput
 }
 ```
 
@@ -283,7 +285,6 @@ Use one JS-facing HybridObject spec when multiple native backends should behave 
 Example: `CameraVideoOutput` can be backed by `HybridMovieFileVideoOutput` using a platform movie-file output or by `HybridAssetWriterVideoOutput` using a video data output plus asset writer. Both native classes implement the generated `HybridCameraVideoOutputSpec`, and JS only sees `CameraVideoOutput`.
 
 Rules:
-
 - Keep backend class names native-only unless callers must choose a backend explicitly.
 - Return the shared spec type from factory methods, such as `createVideoOutput(...): Promise<CameraVideoOutput>`.
 - Add one `nitro.json` autolinking entry only for HybridObjects JS creates directly. Do not autolink every concrete backend returned by a factory.
@@ -297,36 +298,38 @@ Do not represent heterogeneous result state as one object with every possible fi
 
 ```typescript
 // Avoid.
-export interface ScannedData extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  readonly position: Point;
-  readonly text?: string;
-  readonly barcode?: string;
-  readonly barcodeType?: BarcodeType;
-  readonly face?: Rect;
+export interface ScannedData
+  extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  readonly position: Point
+  readonly text?: string
+  readonly barcode?: string
+  readonly barcodeType?: BarcodeType
+  readonly face?: Rect
 }
 ```
 
 Use inheritance for result families that carry native identity, lazy fields, common methods, or native resource ownership:
 
 ```typescript
-export type ScannedDataType = "text" | "barcode" | "face";
+export type ScannedDataType = 'text' | 'barcode' | 'face'
 
-export interface ScannedData extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  readonly type: ScannedDataType;
-  readonly position: Point;
+export interface ScannedData
+  extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  readonly type: ScannedDataType
+  readonly position: Point
 }
 
 export interface ScannedText extends ScannedData {
-  readonly text: string;
+  readonly text: string
 }
 
 export interface ScannedBarcode extends ScannedData {
-  readonly barcode: string;
-  readonly barcodeType: BarcodeType;
+  readonly barcode: string
+  readonly barcodeType: BarcodeType
 }
 
 export interface ScannedFace extends ScannedData {
-  readonly face: Rect;
+  readonly face: Rect
 }
 ```
 
@@ -337,34 +340,34 @@ Use a normal TypeScript discriminated union in a `.ts` helper file when the resu
 Use HybridObject inheritance when a feature returns heterogeneous native objects that share identity, lifecycle, coordinates, timestamps, raw native handles, or common methods.
 
 ```typescript
-import type { HybridObject } from "react-native-nitro-modules";
-import type { Bounds } from "../common-types/Bounds";
-import type { BarcodeFormat } from "../barcodes/BarcodeFormat";
+import type { HybridObject } from 'react-native-nitro-modules'
+import type { Bounds } from '../common-types/Bounds'
+import type { BarcodeFormat } from '../barcodes/BarcodeFormat'
 
-export type ScannedItemType = "barcode" | "qr-code" | "face";
+export type ScannedItemType = 'barcode' | 'qr-code' | 'face'
 
-export interface ScannedItem extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  readonly id: string;
-  readonly type: ScannedItemType;
-  readonly bounds: Bounds;
+export interface ScannedItem
+  extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  readonly id: string
+  readonly type: ScannedItemType
+  readonly bounds: Bounds
 }
 
 export interface ScannedBarcode extends ScannedItem {
-  readonly format: BarcodeFormat;
-  readonly rawValue: string;
+  readonly format: BarcodeFormat
+  readonly rawValue: string
 }
 
 export interface ScannedQRCode extends ScannedBarcode {
-  readonly url?: string;
+  readonly url?: string
 }
 
 export interface ScannedFace extends ScannedItem {
-  readonly trackingId?: number;
+  readonly trackingId?: number
 }
 ```
 
 Rules:
-
 - Put common properties and methods on the base HybridObject.
 - Put subtype-only properties and methods on child HybridObjects.
 - Return the base type for heterogeneous collections, such as `ScannedItem[]`.
@@ -378,10 +381,11 @@ Export the factory under a product/domain object name rather than the spec type 
 
 ```typescript
 // src/Media.ts
-import { NitroModules } from "react-native-nitro-modules";
-import type { MediaFactory } from "./specs/MediaFactory.nitro";
+import { NitroModules } from 'react-native-nitro-modules'
+import type { MediaFactory } from './specs/MediaFactory.nitro'
 
-export const Media = NitroModules.createHybridObject<MediaFactory>("MediaFactory");
+export const Media =
+  NitroModules.createHybridObject<MediaFactory>('MediaFactory')
 ```
 
 The autolinking key remains `MediaFactory` because it matches the generated spec and `nitro.json`. The JS export should not mechanically become `mediaFactory`, `MediaFactory`, or `HybridMediaFactory`. Use a product/domain noun such as `VisionCamera`, `Images`, or `Media`.
@@ -394,7 +398,7 @@ Define a small JS-facing base spec that represents what can be passed through JS
 
 ```typescript
 // src/specs/outputs/MediaOutput.nitro.ts
-import type { HybridObject } from "react-native-nitro-modules";
+import type { HybridObject } from 'react-native-nitro-modules'
 
 /**
  * Base interface for outputs that can be connected to a MediaSession.
@@ -402,8 +406,8 @@ import type { HybridObject } from "react-native-nitro-modules";
  * Native implementations can conform to the platform-native
  * `NativeMediaOutput` protocol/interface to expose their real native handle.
  */
-export interface MediaOutput extends HybridObject<{ ios: "swift"; android: "kotlin" }> {
-  readonly mediaType: "video" | "audio";
+export interface MediaOutput extends HybridObject<{ ios: 'swift'; android: 'kotlin' }> {
+  readonly mediaType: 'video' | 'audio'
 }
 ```
 
@@ -457,17 +461,17 @@ This is the same shape VisionCamera uses for `CameraOutput` and `NativeCameraOut
 
 ### TypeScript → Native type mapping
 
-| TypeScript       | C++                            | Kotlin           | Swift              |
-| ---------------- | ------------------------------ | ---------------- | ------------------ |
-| `number`         | `double`                       | `Double`         | `Double`           |
-| `string`         | `std::string`                  | `String`         | `String`           |
-| `boolean`        | `bool`                         | `Boolean`        | `Bool`             |
-| `bigint`         | `int64_t` / `uint64_t`         | `Long` / `ULong` | `Int64` / `UInt64` |
-| `T[]`            | `std::vector<T>`               | `Array<T>`       | `[T]`              |
-| `Promise<T>`     | `std::shared_ptr<Promise<T>>`  | `Promise<T>`     | `Promise<T>`       |
-| `T \| undefined` | `std::optional<T>`             | `T?`             | `T?`               |
-| `(x: T) => void` | `std::function<void(T)>`       | `(T) -> Unit`    | `(T) -> Void`      |
-| `ArrayBuffer`    | `std::shared_ptr<ArrayBuffer>` | `ArrayBuffer`    | `ArrayBuffer`      |
+| TypeScript | C++ | Kotlin | Swift |
+|-----------|-----|--------|-------|
+| `number` | `double` | `Double` | `Double` |
+| `string` | `std::string` | `String` | `String` |
+| `boolean` | `bool` | `Boolean` | `Bool` |
+| `bigint` | `int64_t` / `uint64_t` | `Long` / `ULong` | `Int64` / `UInt64` |
+| `T[]` | `std::vector<T>` | `Array<T>` | `[T]` |
+| `Promise<T>` | `std::shared_ptr<Promise<T>>` | `Promise<T>` | `Promise<T>` |
+| `T \| undefined` | `std::optional<T>` | `T?` | `T?` |
+| `(x: T) => void` | `std::function<void(T)>` | `(T) -> Unit` | `(T) -> Void` |
+| `ArrayBuffer` | `std::shared_ptr<ArrayBuffer>` | `ArrayBuffer` | `ArrayBuffer` |
 
 ## Common Pitfalls
 

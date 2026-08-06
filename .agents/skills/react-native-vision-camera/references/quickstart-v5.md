@@ -21,17 +21,17 @@ npm i react-native-vision-camera-worklets react-native-worklets
 # Barcode/QR (MLKit on iOS + Android, consistent formats)
 npm i react-native-vision-camera-barcode-scanner
 
-# GPU-accelerated frame resize for ML pipelines (Metal/Vulkan, ~5x CPU)
+# GPU-accelerated frame resize for ML pipelines (Metal on iOS, Vulkan on Android)
 npm i react-native-vision-camera-resizer
 
 # GPS/EXIF metadata
 npm i react-native-vision-camera-location
 
-# Skia-based preview + shader effects
-npm i react-native-vision-camera-skia @shopify/react-native-skia
+# Skia-based preview + shader effects.
+npm i react-native-vision-camera-skia @shopify/react-native-skia react-native-vision-camera-worklets react-native-worklets 
 ```
 
-babel plugin is needed for worklet. `react-native-worklets/plugin` must be added in `babel.config.js` . See https://docs.swmansion.com/react-native-worklets/docs/
+babel plugin is needed for  worklet.  `react-native-worklets/plugin` must be added in `babel.config.js` . See https://docs.swmansion.com/react-native-worklets/docs/
 
 ## 2. Permissions
 
@@ -56,12 +56,10 @@ Add `NSLocationWhenInUseUsageDescription` only if using `react-native-vision-cam
 Request permissions in JS before rendering:
 
 ```tsx
-import { useCameraPermission, useMicrophonePermission } from "react-native-vision-camera";
+import { useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera'
 
-const { hasPermission, requestPermission } = useCameraPermission();
-useEffect(() => {
-  if (!hasPermission) requestPermission();
-}, [hasPermission]);
+const { hasPermission, requestPermission } = useCameraPermission()
+useEffect(() => { if (!hasPermission) requestPermission() }, [hasPermission])
 ```
 
 ## 3. First Camera — photo capture
@@ -69,31 +67,41 @@ useEffect(() => {
 The idiomatic v5 screen: hook-based permission → hook-based device → output(s) → `<Camera />`.
 
 ```tsx
-import { useEffect } from "react";
-import { StyleSheet } from "react-native";
-import { useIsFocused } from "@react-navigation/native";
-import { Camera, useCameraDevice, useCameraPermission, usePhotoOutput } from "react-native-vision-camera";
+import { useEffect } from 'react'
+import { StyleSheet } from 'react-native'
+import { useIsFocused } from '@react-navigation/native'
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  usePhotoOutput,
+} from 'react-native-vision-camera'
 
 export function CameraScreen() {
-  const { hasPermission, requestPermission } = useCameraPermission();
-  useEffect(() => {
-    if (!hasPermission) requestPermission();
-  }, [hasPermission, requestPermission]);
+  const { hasPermission, requestPermission } = useCameraPermission()
+  useEffect(() => { if (!hasPermission) requestPermission() }, [hasPermission, requestPermission])
 
-  const device = useCameraDevice("back");
-  const isFocused = useIsFocused();
-  const photoOutput = usePhotoOutput();
+  const device = useCameraDevice('back')
+  const isFocused = useIsFocused()
+  const photoOutput = usePhotoOutput()
 
-  if (!hasPermission || device == null) return null;
+  if (!hasPermission || device == null) return null
 
   const onShutter = async () => {
-    const photo = await photoOutput.capturePhoto({ flashMode: "auto" }, {});
+    const photo = await photoOutput.capturePhoto({ flashMode: 'auto' }, {})
     // Display in-memory without hitting disk:
-    const image = await photo.toImageAsync(); // from react-native-nitro-image
+    const image = await photo.toImageAsync() // from react-native-nitro-image
     // ... render <Image source={image} />
-  };
+  }
 
-  return <Camera style={StyleSheet.absoluteFill} device={device} isActive={isFocused} outputs={[photoOutput]} />;
+  return (
+    <Camera
+      style={StyleSheet.absoluteFill}
+      device={device}
+      isActive={isFocused}
+      outputs={[photoOutput]}
+    />
+  )
 }
 ```
 
@@ -107,23 +115,23 @@ Key differences from v4 in this snippet:
 ## 4. Video recording — minimum
 
 ```tsx
-import { Camera, useCameraDevice, useVideoOutput, usePhotoOutput } from "react-native-vision-camera";
+import { Camera, useCameraDevice, useVideoOutput, usePhotoOutput } from 'react-native-vision-camera'
 
-const device = useCameraDevice("back");
-const videoOutput = useVideoOutput({ enableAudio: true });
-const photoOutput = usePhotoOutput();
+const device = useCameraDevice('back')
+const videoOutput = useVideoOutput({ enableAudio: true })
+const photoOutput = usePhotoOutput()
 
 const record = async () => {
-  const recorder = await videoOutput.createRecorder({});
+  const recorder = await videoOutput.createRecorder({})
   await recorder.startRecording(
-    (filePath, reason) => console.log("finished:", filePath, reason),
+    (filePath, reason) => console.log('finished:', filePath, reason),
     (err) => console.error(err),
-  );
+  )
   // later...
-  await recorder.stopRecording();
-};
+  await recorder.stopRecording()
+}
 
-return <Camera style={StyleSheet.absoluteFill} device={device} isActive={true} outputs={[photoOutput, videoOutput]} />;
+return <Camera style={StyleSheet.absoluteFill} device={device} isActive={true} outputs={[photoOutput, videoOutput]} />
 ```
 
 Notes:
@@ -135,22 +143,22 @@ Notes:
 ## 5. Minimum Frame Processor
 
 ```tsx
-import { Camera, useFrameOutput, useCameraDevice } from "react-native-vision-camera";
+import { Camera, useFrameOutput, useCameraDevice } from 'react-native-vision-camera'
 
-const device = useCameraDevice("back");
+const device = useCameraDevice('back')
 const frameOutput = useFrameOutput({
-  pixelFormat: "yuv",
+  pixelFormat: 'yuv', // optional; default is 'native' (zero-copy). 'yuv' = CPU-accessible YUV (good for MLKit/OpenCV) — source: useFrameOutput.ts:123
   onFrame(frame) {
-    "worklet";
+    'worklet'
     try {
       // ... work with frame.width, frame.height, frame.pixelFormat, native buffer
     } finally {
-      frame.dispose(); // REQUIRED — buffer pool is bounded
+      frame.dispose() // REQUIRED — buffer pool is bounded
     }
   },
-});
+})
 
-return <Camera style={StyleSheet.absoluteFill} device={device} isActive={true} outputs={[frameOutput]} />;
+return <Camera style={StyleSheet.absoluteFill} device={device} isActive={true} outputs={[frameOutput]} />
 ```
 
 Requires `react-native-vision-camera-worklets` + `react-native-worklets`. See [frame-processors.md](frame-processors.md) for async offloading, native plugin authoring, and pixel-format decisions.

@@ -23,7 +23,7 @@ const nitroAxiosAdapter: AxiosAdapter = async (config) => {
     method: config.method?.toUpperCase(),
     headers: config.headers,
     body: config.data,
-    cache: "no-store",
+    cache: 'no-store',
   });
   const text = await response.text();
   const data = text.length > 0 ? JSON.parse(text) : null;
@@ -47,8 +47,14 @@ It works for GET-returning-JSON and **nothing else**. Problems:
 ## Recipe — full adapter
 
 ```ts
-import axios, { AxiosAdapter, AxiosError, AxiosHeaders, AxiosResponse, InternalAxiosRequestConfig } from "axios";
-import { fetch } from "react-native-nitro-fetch";
+import axios, {
+  AxiosAdapter,
+  AxiosError,
+  AxiosHeaders,
+  AxiosResponse,
+  InternalAxiosRequestConfig,
+} from 'axios';
+import { fetch } from 'react-native-nitro-fetch';
 
 const nitroAxiosAdapter: AxiosAdapter = async (config) => {
   const url = buildFullURL(config);
@@ -62,7 +68,7 @@ const nitroAxiosAdapter: AxiosAdapter = async (config) => {
   const onExternalAbort = () => abortWith((external as any)?.reason);
   if (external) {
     if (external.aborted) abortWith((external as any).reason);
-    else external.addEventListener("abort", onExternalAbort, { once: true });
+    else external.addEventListener('abort', onExternalAbort, { once: true });
   }
 
   config.cancelToken?.promise.then((cancel) => abortWith(cancel));
@@ -70,14 +76,23 @@ const nitroAxiosAdapter: AxiosAdapter = async (config) => {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   if (config.timeout && config.timeout > 0) {
     timeoutId = setTimeout(() => {
-      abortWith(new AxiosError(`timeout of ${config.timeout}ms exceeded`, AxiosError.ECONNABORTED, config));
+      abortWith(
+        new AxiosError(
+          `timeout of ${config.timeout}ms exceeded`,
+          AxiosError.ECONNABORTED,
+          config,
+        ),
+      );
     }, config.timeout);
   }
 
   try {
     const response = await fetch(url, {
-      method: (config.method ?? "get").toUpperCase(),
-      headers: AxiosHeaders.from(config.headers as any).toJSON() as Record<string, string>,
+      method: (config.method ?? 'get').toUpperCase(),
+      headers: AxiosHeaders.from(config.headers as any).toJSON() as Record<
+        string,
+        string
+      >,
       // `config.data` is already transformed by axios's transformRequest
       // pipeline by the time the adapter sees it (string / FormData /
       // URLSearchParams / Blob / ArrayBuffer). Don't re-serialize.
@@ -104,54 +119,62 @@ const nitroAxiosAdapter: AxiosAdapter = async (config) => {
 
     throw new AxiosError(
       `Request failed with status code ${response.status}`,
-      Math.floor(response.status / 100) === 4 ? AxiosError.ERR_BAD_REQUEST : AxiosError.ERR_BAD_RESPONSE,
+      Math.floor(response.status / 100) === 4
+        ? AxiosError.ERR_BAD_REQUEST
+        : AxiosError.ERR_BAD_RESPONSE,
       config,
       null,
       axiosResponse,
     );
   } catch (err: any) {
-    if (err?.name === "AbortError" || controller.signal.aborted) {
+    if (err?.name === 'AbortError' || controller.signal.aborted) {
       if (err instanceof AxiosError) throw err;
-      throw new AxiosError(err?.message ?? "canceled", AxiosError.ERR_CANCELED, config);
+      throw new AxiosError(
+        err?.message ?? 'canceled',
+        AxiosError.ERR_CANCELED,
+        config,
+      );
     }
     throw err;
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
-    external?.removeEventListener?.("abort", onExternalAbort);
+    external?.removeEventListener?.('abort', onExternalAbort);
   }
 };
 
 function buildFullURL(config: InternalAxiosRequestConfig): string {
-  let url = config.url ?? "";
+  let url = config.url ?? '';
   const isAbsolute = /^([a-z][a-z\d+\-.]*:)?\/\//i.test(url);
   if (config.baseURL && !isAbsolute) {
-    url = config.baseURL.replace(/\/+$/, "") + "/" + url.replace(/^\/+/, "");
+    url = config.baseURL.replace(/\/+$/, '') + '/' + url.replace(/^\/+/, '');
   }
   if (config.params) {
     const serializer = config.paramsSerializer;
     const qs =
-      typeof serializer === "function"
+      typeof serializer === 'function'
         ? serializer(config.params)
-        : new URLSearchParams(config.params as Record<string, string>).toString();
-    if (qs) url += (url.includes("?") ? "&" : "?") + qs;
+        : new URLSearchParams(
+            config.params as Record<string, string>,
+          ).toString();
+    if (qs) url += (url.includes('?') ? '&' : '?') + qs;
   }
   return url;
 }
 
 async function readBody(
   response: Response,
-  responseType: InternalAxiosRequestConfig["responseType"],
+  responseType: InternalAxiosRequestConfig['responseType'],
 ): Promise<unknown> {
   switch (responseType) {
-    case "arraybuffer":
+    case 'arraybuffer':
       return response.arrayBuffer();
-    case "blob":
+    case 'blob':
       return response.blob();
-    case "stream":
+    case 'stream':
       return response.body;
-    case "text":
+    case 'text':
       return response.text();
-    case "json":
+    case 'json':
     default: {
       const text = await response.text();
       if (!text) return null;
