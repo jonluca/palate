@@ -534,7 +534,7 @@ export default function RestaurantsScreen() {
             return `${item.type}-${item.data.id}`;
           }}
           getItemType={getListItemType}
-          drawDistance={250}
+          drawDistance={1200}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={"#8E8E93"} />}
           contentContainerStyle={{
             paddingTop: restaurants.length > 0 ? 0 : insets.top + 16,

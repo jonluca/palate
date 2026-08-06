@@ -16,7 +16,7 @@ assert.match(feed, /<Image recyclingKey=\{uri\} source=\{\{ uri \}\}/);
 assert.match(feed, /contentFit=\{"cover"\}/);
 assert.doesNotMatch(feed, /cachePolicy=/);
 assert.match(feed, /photos\.slice\(0, 3\)/);
-assert.match(feed, /drawDistance=\{250\}/);
+assert.match(feed, /drawDistance=\{1200\}/);
 assert.match(feed, /"visited-photo" : "visited-plain"/);
 assert.doesNotMatch(feed, /updatePhotoAssetThumbnailPreheat|endPhotoAssetThumbnailPreheat/);
 
