@@ -2,7 +2,7 @@ import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { FilterPills, NoVisitsEmpty, SkeletonVisitCard } from "@/components/ui";
 import { useStats, useVisits, type FilterType, type VisitListItem } from "@/hooks/queries";
-import { useVisitsFilter, useSetVisitsFilter } from "@/store";
+import { useAppStore, useVisitsFilter, useSetVisitsFilter } from "@/store";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { router, Stack, useIsFocused } from "expo-router";
 import React, { useCallback, useMemo, useRef, useState } from "react";
@@ -29,6 +29,7 @@ export default function VisitsScreen() {
   const setFilter = useSetVisitsFilter();
   const listRef = useRef<FlashListRef<VisitListItem>>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const isPhotoScanBusy = useAppStore((state) => state.isScanning || state.isBackgroundPhotoScanRunning);
 
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -194,7 +195,18 @@ export default function VisitsScreen() {
             visitsLoading ? (
               <LoadingState />
             ) : stats && stats.totalVisits === 0 ? (
-              <NoVisitsEmpty onScan={() => router.push("/rescan")} />
+              <NoVisitsEmpty
+                onScan={
+                  isPhotoScanBusy
+                    ? undefined
+                    : () => {
+                        const state = useAppStore.getState();
+                        if (!state.isScanning && !state.isBackgroundPhotoScanRunning) {
+                          router.push("/rescan");
+                        }
+                      }
+                }
+              />
             ) : null
           }
           ItemSeparatorComponent={ItemSeparator}

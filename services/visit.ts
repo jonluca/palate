@@ -26,6 +26,7 @@ import {
   getEnabledFoodKeywords,
   getDatabase,
   getImportedMichelinDatasetVersion,
+  clearAutomaticPhotoQuickPipelineIncomplete,
   type UnvisitedPhotoRecord,
   type VisitRecord,
   type VisitSuggestedRestaurant,
@@ -649,6 +650,7 @@ interface CalendarEnrichmentProgress {
 
 interface CalendarEnrichmentOptions {
   onProgress?: (progress: CalendarEnrichmentProgress) => void;
+  requestPermissionIfNeeded?: boolean;
 }
 
 // ============================================================================
@@ -909,7 +911,7 @@ async function processRank3BulkTailVisitFoodDetection(
 async function enrichVisitsWithCalendarEvents(
   options: CalendarEnrichmentOptions = {},
 ): Promise<CalendarEnrichmentProgress> {
-  const { onProgress } = options;
+  const { onProgress, requestPermissionIfNeeded = true } = options;
 
   const progress: CalendarEnrichmentProgress = {
     totalVisits: 0,
@@ -926,7 +928,7 @@ async function enrichVisitsWithCalendarEvents(
   };
 
   let hasPermission = await hasCalendarPermission();
-  if (!hasPermission) {
+  if (!hasPermission && requestPermissionIfNeeded) {
     hasPermission = await requestCalendarPermission();
   }
 
@@ -1603,6 +1605,13 @@ interface ProcessPhotosResult {
   visitsWithCalendarEvents: number;
 }
 
+export interface ProcessPhotosOptions {
+  /** Keep lifecycle-triggered scans from presenting a permission prompt. */
+  requestCalendarPermissionIfNeeded?: boolean;
+  /** Atomically retain this run's inserted IDs for automatic deep-scan recovery. */
+  enqueueInsertedPhotosForAutomaticDeepScan?: boolean;
+}
+
 let processPhotosPromise: Promise<ProcessPhotosResult> | null = null;
 
 /**
@@ -1611,12 +1620,13 @@ let processPhotosPromise: Promise<ProcessPhotosResult> | null = null;
  */
 export async function processPhotos(
   scanProgress?: (progress: ProcessPhotosProgress) => void,
+  options: ProcessPhotosOptions = {},
 ): Promise<ProcessPhotosResult> {
   if (processPhotosPromise) {
     return processPhotosPromise;
   }
 
-  processPhotosPromise = runProcessPhotos(scanProgress).finally(() => {
+  processPhotosPromise = runProcessPhotos(scanProgress, options).finally(() => {
     processPhotosPromise = null;
   });
 
@@ -1625,11 +1635,13 @@ export async function processPhotos(
 
 async function runProcessPhotos(
   scanProgress?: (progress: ProcessPhotosProgress) => void,
+  options: ProcessPhotosOptions = {},
 ): Promise<ProcessPhotosResult> {
   // Phase 1: Scan photos
   scanProgress?.({ phase: "scanning", detail: "Scanning camera roll..." });
 
   const scanResult = await scanCameraRoll({
+    enqueueInsertedPhotosForAutomaticDeepScan: options.enqueueInsertedPhotosForAutomaticDeepScan,
     onProgress: (p) => {
       scanProgress?.({
         phase: "scanning",
@@ -1666,6 +1678,7 @@ async function runProcessPhotos(
   });
 
   const calendarResult = await enrichVisitsWithCalendarEvents({
+    requestPermissionIfNeeded: options.requestCalendarPermissionIfNeeded,
     onProgress: (p) => {
       if (!p.totalVisits) {
         return;
@@ -1719,6 +1732,7 @@ async function runProcessPhotos(
   });
 
   await performDatabaseMaintenance();
+  await clearAutomaticPhotoQuickPipelineIncomplete();
 
   return {
     visitsCreated: visitResult.visitsCreated,

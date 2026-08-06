@@ -7,7 +7,7 @@ import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys, usePermissions } from "@/hooks/queries";
-import { useResetScan } from "@/store";
+import { useAppStore, useResetScan } from "@/store";
 import { getUnscannedPhotoCount } from "@/services/scanner";
 
 /**
@@ -16,7 +16,7 @@ import { getUnscannedPhotoCount } from "@/services/scanner";
 function useNewPhotosCount() {
   const { data: hasPermission } = usePermissions();
   const { data: newPhotosCount } = useQuery({
-    queryKey: [...queryKeys.photoCount, "unscanned"],
+    queryKey: queryKeys.unscannedPhotoCount,
     queryFn: getUnscannedPhotoCount,
     enabled: hasPermission === true,
     staleTime: 1000 * 60 * 2,
@@ -32,11 +32,18 @@ function useNewPhotosCount() {
 export function NewPhotosCard() {
   const { newPhotosCount, hasPermission, isLoading } = useNewPhotosCount();
   const resetScan = useResetScan();
-  const shouldShow = !isLoading && Boolean(hasPermission) && newPhotosCount > 0;
+  const isScanning = useAppStore((state) => state.isScanning);
+  const isBackgroundPhotoScanRunning = useAppStore((state) => state.isBackgroundPhotoScanRunning);
+  const shouldShow =
+    !isLoading && Boolean(hasPermission) && !isScanning && !isBackgroundPhotoScanRunning && newPhotosCount > 0;
   const formattedNewPhotosCount = newPhotosCount.toLocaleString();
   const displayedNewPhotosCount = newPhotosCount > 999 ? "999+" : formattedNewPhotosCount;
 
   const handlePress = () => {
+    const state = useAppStore.getState();
+    if (state.isScanning || state.isBackgroundPhotoScanRunning) {
+      return;
+    }
     if (Platform.OS === "ios") {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }

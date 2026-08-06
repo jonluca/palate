@@ -4,6 +4,7 @@ import type { IgnoredLocationRecord } from "./types";
 import { invalidateRestaurantIndex } from "./michelin-index";
 import { dropApplicationDatabaseTables } from "./reset-core";
 import { syncDefaultFoodKeywords } from "./food-keyword-sync-core";
+import { CREATE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL } from "./automatic-photo-deep-scan-queue-core";
 import {
   ensureMichelinProviderSpatialIndex,
   invalidateMichelinProviderSpatialIndex,
@@ -171,6 +172,8 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
       foodConfidence REAL,
       FOREIGN KEY (visitId) REFERENCES visits(id)
     );
+
+    ${CREATE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL}
     
     CREATE INDEX IF NOT EXISTS idx_photos_creation_time ON photos(creationTime);
     CREATE INDEX IF NOT EXISTS idx_photos_visit ON photos(visitId);
@@ -277,6 +280,15 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
     );
     CREATE INDEX IF NOT EXISTS idx_food_keywords_enabled ON food_keywords(enabled);
   `);
+
+  // Migration: rotate automatic deep-scan retries fairly when a queue spans multiple batches.
+  try {
+    await database.execAsync(
+      `ALTER TABLE automatic_photo_deep_scan_queue ADD COLUMN attemptCount INTEGER NOT NULL DEFAULT 0`,
+    );
+  } catch {
+    // Column already exists, ignore
+  }
 
   // Migration: Add exportedToCalendarId column to track which calendar we exported events to
   // This allows us to identify and delete exported events later

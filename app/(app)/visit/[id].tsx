@@ -47,7 +47,7 @@ import { logVisitViewed } from "@/services/analytics";
 import { createAlbumWithPhotos } from "@/services/scanner";
 import { ActivityIndicator, View, Alert, Pressable, LayoutAnimation } from "react-native";
 import { useToast } from "@/components/ui/toast";
-import { useHasSeenAddPhotosAlert, useSetHasSeenAddPhotosAlert } from "@/store";
+import { useAppStore, useHasSeenAddPhotosAlert, useSetHasSeenAddPhotosAlert } from "@/store";
 import tzLookup from "tz-lookup";
 
 // Hook to aggregate food labels from photos
@@ -99,6 +99,7 @@ export default function VisitDetailScreen() {
   const [loadingAction, setLoadingAction] = useState<LoadingAction>(null);
   const [isCreatingAlbum, setIsCreatingAlbum] = useState(false);
   const [isNittyGrittyExpanded, setIsNittyGrittyExpanded] = useState(false);
+  const isPhotoScanBusy = useAppStore((state) => state.isScanning || state.isBackgroundPhotoScanRunning);
   const { showToast } = useToast();
   const hasSeenAddPhotosAlert = useHasSeenAddPhotosAlert();
   const setHasSeenAddPhotosAlert = useSetHasSeenAddPhotosAlert();
@@ -310,14 +311,19 @@ export default function VisitDetailScreen() {
   }, [data, ignoreLocation, showToast]);
 
   const handleScanForFood = useCallback(async () => {
-    if (!data?.photos || data.photos.length === 0) {
+    const scanState = useAppStore.getState();
+    if (scanState.isScanning || scanState.isBackgroundPhotoScanRunning) {
+      showToast({ type: "info", message: "A photo scan is already running" });
+      return;
+    }
+    if (photos.length === 0) {
       return;
     }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      const result = await scanForFood.mutateAsync(data.photos.map((p) => ({ id: p.id })));
+      const result = await scanForFood.mutateAsync(photos.map((photo) => ({ id: photo.id })));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       if (result.foodPhotosFound > 0) {
         showToast({
@@ -337,7 +343,7 @@ export default function VisitDetailScreen() {
     } finally {
       setFoodScanProgress(null);
     }
-  }, [data?.photos, scanForFood, showToast]);
+  }, [photos, scanForFood, showToast]);
 
   const handleSaveNotes = useCallback(
     async (notes: string | null) => {
@@ -699,7 +705,7 @@ export default function VisitDetailScreen() {
                           variant={"secondary"}
                           size={"sm"}
                           onPress={handleScanForFood}
-                          disabled={scanForFood.isPending}
+                          disabled={isPhotoScanBusy || scanForFood.isPending}
                         >
                           <ButtonText variant={"secondary"}>
                             {scanForFood.isPending

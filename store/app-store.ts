@@ -61,8 +61,11 @@ interface AppState {
 
   // Scan state
   isScanning: boolean;
+  isBackgroundPhotoScanRunning: boolean;
   scanProgress: ScanProgress;
-  startScan: () => void;
+  startScan: () => boolean;
+  startBackgroundPhotoScan: () => boolean;
+  finishBackgroundPhotoScan: () => void;
   updateScanProgress: (progress: Partial<ScanProgress>) => void;
   completeScan: (message: string) => void;
   failScan: (message: string) => void;
@@ -97,7 +100,7 @@ const initialScanProgress: ScanProgress = {
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       // Hydration state (not persisted)
       hasHydrated: false,
       setHasHydrated: (hydrated) => set({ hasHydrated: hydrated }),
@@ -140,9 +143,14 @@ export const useAppStore = create<AppState>()(
 
       // Scan state
       isScanning: false,
+      isBackgroundPhotoScanRunning: false,
       scanProgress: initialScanProgress,
 
-      startScan: () =>
+      startScan: () => {
+        const state = get();
+        if (state.isScanning || state.isBackgroundPhotoScanRunning) {
+          return false;
+        }
         set({
           isScanning: true,
           scanProgress: {
@@ -151,7 +159,20 @@ export const useAppStore = create<AppState>()(
             photosPerSecond: undefined,
             eta: undefined,
           },
-        }),
+        });
+        return true;
+      },
+
+      startBackgroundPhotoScan: () => {
+        const state = get();
+        if (state.isScanning || state.isBackgroundPhotoScanRunning) {
+          return false;
+        }
+        set({ isBackgroundPhotoScanRunning: true });
+        return true;
+      },
+
+      finishBackgroundPhotoScan: () => set({ isBackgroundPhotoScanRunning: false }),
 
       updateScanProgress: (progress: Partial<ScanProgress>) =>
         set((state) => ({
@@ -228,6 +249,7 @@ export const useAppStore = create<AppState>()(
           selectedCalendarIds: null,
           hasSeenAddPhotosAlert: false,
           isScanning: false,
+          isBackgroundPhotoScanRunning: false,
           scanProgress: initialScanProgress,
           selectedVisitId: null,
           hideUndoBar: false,

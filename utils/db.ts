@@ -44,7 +44,19 @@ export {
   getUnvisitedPhotos,
   getVisitablePhotoCounts,
   insertPhotos,
+  insertPhotosForAutomaticDeepScan,
 } from "./db/photos";
+
+export {
+  claimAutomaticPhotoDeepScanCandidates,
+  clearAutomaticPhotoFoodSyncRequired,
+  clearAutomaticPhotoQuickPipelineIncomplete,
+  getAutomaticPhotoDeepScanQueueCount,
+  isAutomaticPhotoFoodSyncRequired,
+  isAutomaticPhotoQuickPipelineIncomplete,
+  markAutomaticPhotoFoodSyncRequired,
+  pruneAutomaticPhotoDeepScanQueue,
+} from "./db/automatic-photo-deep-scan-queue";
 
 export { batchUpdatePhotoVisits, movePhotosToVisit, removePhotosFromVisit } from "./db/photo-association";
 

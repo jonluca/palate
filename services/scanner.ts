@@ -6,6 +6,7 @@ import {
   getExistingPhotoAssetIdsForIncrementalScan,
   getPhotoDatabasePathForIncrementalScan,
   insertPhotos,
+  insertPhotosForAutomaticDeepScan,
   type PhotoRecord,
 } from "@/utils/db";
 import { getPhotoIngestionFlushCount } from "@/utils/db/photo-ingestion-core";
@@ -55,6 +56,8 @@ export interface ScanOptions {
   batchSize?: number;
   concurrency?: number;
   onProgress?: (progress: ScanProgress) => void;
+  /** Atomically queue only rows inserted by this scan for silent deep analysis. */
+  enqueueInsertedPhotosForAutomaticDeepScan?: boolean;
 }
 
 // Device tier thresholds
@@ -250,6 +253,7 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     batchSize = useNativeBatch ? deviceTier.nativeBatchSize : deviceTier.batchSize,
     concurrency = deviceTier.concurrency,
     onProgress,
+    enqueueInsertedPhotosForAutomaticDeepScan = false,
   } = options;
 
   if (!Number.isSafeInteger(batchSize) || batchSize <= 0) {
@@ -339,7 +343,9 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     while (flushCount > 0) {
       const photos = pendingPhotos.slice(0, flushCount);
       try {
-        progress.newPhotosAdded += await insertPhotos(photos);
+        progress.newPhotosAdded += enqueueInsertedPhotosForAutomaticDeepScan
+          ? await insertPhotosForAutomaticDeepScan(photos)
+          : await insertPhotos(photos);
       } catch (error) {
         pendingInsertFailed = true;
         throw error;

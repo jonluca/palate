@@ -1,13 +1,11 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
-import { DeepScanCard } from "@/components/settings/deep-scan-card";
 import { SkeletonVisitCard, Button, ButtonText, Card, useUndo } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import {
   createLoadedExactCalendarMatches,
   usePendingReviewPages,
   useBatchConfirmVisits,
-  useUnanalyzedPhotoCount,
   type PendingVisitForReview,
   type ExactCalendarConfirmation,
   type ExactCalendarMatch,
@@ -28,14 +26,10 @@ import {
   useSetReviewRestaurantMatchesFilter,
   useReviewFiltersCollapsed,
   useSetReviewFiltersCollapsed,
+  useAppStore,
 } from "@/store";
 import { ReviewModeCard } from "@/components/visit-card/review-mode-card";
 import { refreshReviewQueries } from "@/utils/review-query-policy";
-import {
-  allowsAutomaticDeepScanFollowup,
-  getResolvedVisitFoodDetectionStrategy,
-  isVisionVisitFoodValidationModeEnabled,
-} from "@/modules/batch-asset-info";
 
 type ReviewListItem =
   | {
@@ -67,6 +61,8 @@ function LoadingState() {
 }
 
 function ReviewCompletionCard() {
+  const isPhotoScanBusy = useAppStore((state) => state.isScanning || state.isBackgroundPhotoScanRunning);
+
   return (
     <Card>
       <View className={"p-5 gap-4"}>
@@ -83,7 +79,16 @@ function ReviewCompletionCard() {
             </ThemedText>
           </View>
         </View>
-        <Button onPress={() => router.push("/rescan")} size={"lg"}>
+        <Button
+          onPress={() => {
+            const state = useAppStore.getState();
+            if (!state.isScanning && !state.isBackgroundPhotoScanRunning) {
+              router.push("/rescan");
+            }
+          }}
+          size={"lg"}
+          disabled={isPhotoScanBusy}
+        >
           <ButtonText>Scan for new photos</ButtonText>
         </Button>
       </View>
@@ -147,7 +152,6 @@ export default function ReviewScreen() {
     food: foodFilter,
     restaurantMatches: restaurantMatchesFilter,
   });
-  const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
   const manifest = data?.pages[0]?.manifest ?? null;
   const displayedFoodFilter = isPlaceholderData ? (manifest?.filters.food ?? foodFilter) : foodFilter;
   const displayedRestaurantMatchesFilter = isPlaceholderData
@@ -246,18 +250,6 @@ export default function ReviewScreen() {
       filteredManualCount === 1 ? "visit needs" : "visits need"
     } manual review`;
   }, [isAllCaughtUp, hasExactMatches, exactMatchCount, filteredManualCount]);
-
-  const shouldAutoDeepScan =
-    allowsAutomaticDeepScanFollowup(
-      getResolvedVisitFoodDetectionStrategy(),
-      isVisionVisitFoodValidationModeEnabled(),
-    ) &&
-    !isLoading &&
-    (unanalyzedPhotoCount ?? 0) > 0 &&
-    (isAllCaughtUp ||
-      (displayedFoodFilter === "on" &&
-        (manifest?.summary.reviewableCount ?? 0) > 0 &&
-        manifest?.summary.reviewableFoodCount === 0));
 
   const previousExactMatchCountRef = useRef(0);
 
@@ -464,8 +456,6 @@ export default function ReviewScreen() {
           ListEmptyComponent={
             isLoading ? (
               <LoadingState />
-            ) : shouldAutoDeepScan ? (
-              <DeepScanCard autoStart={true} />
             ) : isAllCaughtUp ? (
               <ReviewCompletionCard />
             ) : (

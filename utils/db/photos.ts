@@ -10,6 +10,10 @@ import {
 import { buildExportPhotoCountsQuery, buildExportPhotosQuery, type ExportPhotoCursor } from "./export-photos-core";
 import { buildPhotoIngestionStatement, PHOTO_INGESTION_FLUSH_SIZE } from "./photo-ingestion-core";
 import { INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL } from "../incremental-photo-scan-core";
+import {
+  ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL,
+  MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL,
+} from "./automatic-photo-deep-scan-queue-core";
 import type { FoodLabel, PhotoRecord, UnvisitedPhotoRecord } from "./types";
 
 // Raw photo record as stored in database (foodLabels and allLabels are JSON strings)
@@ -67,6 +71,39 @@ export async function insertPhotos(
     const result = await database.runAsync(statement.sql, statement.parameters);
     insertedCount += result.changes;
   }
+  return insertedCount;
+}
+
+/** Atomically persist newly inserted photos and enqueue their exact IDs for automatic deep scanning. */
+export async function insertPhotosForAutomaticDeepScan(
+  photos: Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">[],
+): Promise<number> {
+  if (photos.length === 0) {
+    return 0;
+  }
+
+  const database = await getDatabase();
+  let insertedCount = 0;
+  await database.withExclusiveTransactionAsync(async (transaction) => {
+    for (let offset = 0; offset < photos.length; offset += PHOTO_INGESTION_FLUSH_SIZE) {
+      const statement = buildPhotoIngestionStatement(photos.slice(offset, offset + PHOTO_INGESTION_FLUSH_SIZE));
+      if (!statement) {
+        continue;
+      }
+      const insertedRows = await transaction.getAllAsync<{ id: string }>(
+        `${statement.sql} RETURNING id`,
+        statement.parameters,
+      );
+      if (insertedRows.length > 0) {
+        await transaction.runAsync(
+          ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL,
+          JSON.stringify(insertedRows.map((row) => row.id)),
+        );
+        await transaction.runAsync(MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL);
+        insertedCount += insertedRows.length;
+      }
+    }
+  });
   return insertedCount;
 }
 

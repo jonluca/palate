@@ -15,6 +15,7 @@ import {
   getResolvedVisitFoodDetectionStrategy,
   isVisionVisitFoodValidationModeEnabled,
 } from "@/modules/batch-asset-info";
+import { useAppStore } from "@/store";
 
 interface DeepScanCardProps {
   autoStart?: boolean;
@@ -77,6 +78,7 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
+  const isPhotoScanBusy = useAppStore((state) => state.isScanning || state.isBackgroundPhotoScanRunning);
   const [progress, setProgress] = useState<DeepScanProgress | null>(null);
   const { isPending: isScanning, mutateAsync: mutateDeepScan } = useDeepScan((p) => setProgress(p));
   const [isPreparing, setIsPreparing] = useState(false);
@@ -102,42 +104,60 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
       if (isStartingRef.current) {
         return;
       }
+      if (!useAppStore.getState().startScan()) {
+        if (source === "manual") {
+          showToast({ type: "info", message: "A photo scan is already running" });
+        } else {
+          setHasAutoStartFinished(true);
+        }
+        return;
+      }
 
       isStartingRef.current = true;
       setIsPreparing(true);
 
-      try {
-        const photosToScan = await getUnanalyzedPhotoIds();
+      const scanAttempt = (async () => {
+        try {
+          const photosToScan = await getUnanalyzedPhotoIds();
 
-        if (photosToScan.length === 0) {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
-          if (source === "manual") {
-            showToast({ type: "info", message: "No photos left to deep scan" });
+          if (photosToScan.length === 0) {
+            void queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
+            if (source === "manual") {
+              showToast({ type: "info", message: "No photos left to deep scan" });
+            }
+          } else {
+            await runDeepScan({
+              source,
+              mutateAsync: () => mutateDeepScan(photosToScan),
+              setProgress,
+              showToast,
+            });
           }
-        } else {
-          await runDeepScan({
-            source,
-            mutateAsync: () => mutateDeepScan(photosToScan),
-            setProgress,
-            showToast,
-          });
+        } catch (error) {
+          console.error("Failed to prepare deep scan:", error);
+          setProgress(null);
+          showToast({ type: "error", message: "Deep scan failed" });
         }
-      } catch (error) {
-        console.error("Failed to prepare deep scan:", error);
-        setProgress(null);
-        showToast({ type: "error", message: "Deep scan failed" });
-      }
+      })();
 
-      setIsPreparing(false);
-      isStartingRef.current = false;
-      if (source === "auto") {
-        setHasAutoStartFinished(true);
-      }
+      await scanAttempt.finally(() => {
+        setIsPreparing(false);
+        isStartingRef.current = false;
+        useAppStore.getState().resetScan();
+        if (source === "auto") {
+          setHasAutoStartFinished(true);
+        }
+      });
     },
     [mutateDeepScan, queryClient, showToast],
   );
 
   const handleDeepScan = () => {
+    const state = useAppStore.getState();
+    if (state.isScanning || state.isBackgroundPhotoScanRunning) {
+      showToast({ type: "info", message: "A photo scan is already running" });
+      return;
+    }
     Alert.alert(
       "Deep Scan Photos",
       "This will thoroughly check every remaining photo for food. It may take a while, but it can find photos the quick scan missed.",
@@ -244,6 +264,7 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
           <Button
             variant={"secondary"}
             onPress={handleDeepScan}
+            disabled={isPhotoScanBusy}
             accessibilityRole={"button"}
             accessibilityLabel={"Deep Scan All Photos"}
             accessibilityHint={"Analyzes the remaining photos in your library for food"}

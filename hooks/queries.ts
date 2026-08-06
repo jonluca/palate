@@ -9,7 +9,8 @@ import {
 } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/query-core";
 import * as Location from "expo-location";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useAppStore } from "@/store";
 import { logVisitConfirmed, logVisitRejected } from "@/services/analytics";
 import {
   getVisitListPage,
@@ -149,6 +150,11 @@ import { ensureMichelinDataInitialized, MICHELIN_STATIC_QUERY_CACHE_POLICY } fro
 // QUERY INVALIDATION HELPERS
 // ============================================================================
 
+const PHOTO_ANALYSIS_MUTATION_SCOPE = { id: "photo-analysis" } as const;
+export const mutationKeys = {
+  photoAnalysis: ["photoAnalysis"] as const,
+};
+
 /** Invalidate all visit-related queries */
 function invalidateVisitQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
@@ -156,7 +162,7 @@ function invalidateVisitQueries(queryClient: QueryClient) {
 }
 
 /** Reconcile every cache that can reflect incrementally persisted food results. */
-function invalidateFoodDetectionQueries(queryClient: QueryClient) {
+export function invalidateFoodDetectionQueries(queryClient: QueryClient) {
   invalidateVisitStatusQueries(queryClient);
   void invalidatePendingReviewQuery(queryClient);
   queryClient.invalidateQueries({ queryKey: ["visitPhotos"] });
@@ -334,6 +340,7 @@ import {
   dismissCalendarEvents,
   initializeMichelinData,
   type DeepScanProgress,
+  type ProcessPhotosOptions,
   type VisitFoodScanProgress,
   type ImportableCalendarEvent,
 } from "@/services/visit";
@@ -403,6 +410,7 @@ export const queryKeys = {
   permissions: ["permissions"] as const,
   calendarPermissions: ["calendarPermissions"] as const,
   photoCount: ["photoCount"] as const,
+  unscannedPhotoCount: ["photoCount", "unscanned"] as const,
   unanalyzedPhotoCount: reviewQueryKeys.unanalyzedPhotoCount,
   placesConfigured: ["static", "placesConfigured"] as const,
   // Restaurant-centric keys
@@ -1065,11 +1073,13 @@ export function useRequestCalendarPermission() {
 /**
  * Scan camera roll and process photos
  */
-export function useScanPhotos(onProgress?: (progress: ScanProgress) => void) {
+export function useScanPhotos(onProgress?: (progress: ScanProgress) => void, options: ProcessPhotosOptions = {}) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => processPhotos(onProgress),
+    mutationKey: mutationKeys.photoAnalysis,
+    scope: PHOTO_ANALYSIS_MUTATION_SCOPE,
+    mutationFn: () => processPhotos(onProgress, options),
     onSettled: () => {
       invalidateFoodDetectionQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits });
@@ -1984,9 +1994,13 @@ export function useDeepScan(onProgress?: (progress: DeepScanProgress) => void) {
   const queryClient = useQueryClient();
   // Use ref to always call the latest callback
   const onProgressRef = useRef(onProgress);
-  onProgressRef.current = onProgress;
+  useEffect(() => {
+    onProgressRef.current = onProgress;
+  }, [onProgress]);
 
   return useMutation({
+    mutationKey: mutationKeys.photoAnalysis,
+    scope: PHOTO_ANALYSIS_MUTATION_SCOPE,
     mutationFn: (photos?: Array<{ id: string }>) =>
       deepScanAllPhotosForFood({ photos, onProgress: (p) => onProgressRef.current?.(p) }),
     onSettled: () => {
@@ -2005,7 +2019,13 @@ export function useScanVisitForFood(
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: mutationKeys.photoAnalysis,
+    scope: PHOTO_ANALYSIS_MUTATION_SCOPE,
     mutationFn: async (photos: Array<{ id: string }>) => {
+      const state = useAppStore.getState();
+      if (state.isScanning || state.isBackgroundPhotoScanRunning) {
+        throw new Error("Photo analysis is already running");
+      }
       if (!visitId) {
         throw new Error("Visit ID is required");
       }
@@ -2326,7 +2346,13 @@ export function useReclassifyPhotos(onProgress?: (progress: ReclassifyProgress) 
   const queryClient = useQueryClient();
 
   return useMutation({
+    mutationKey: mutationKeys.photoAnalysis,
+    scope: PHOTO_ANALYSIS_MUTATION_SCOPE,
     mutationFn: async () => {
+      const state = useAppStore.getState();
+      if (state.isScanning || state.isBackgroundPhotoScanRunning) {
+        throw new Error("Photo analysis is already running");
+      }
       return reclassifyPhotosWithCurrentKeywords(onProgress);
     },
     onSuccess: () => {

@@ -5,7 +5,7 @@ import Animated, { FadeIn, FadeInDown } from "react-native-reanimated";
 import { useScan, useUnanalyzedPhotoCount } from "@/hooks";
 import { ScanHeader, PermissionCard, ScanCard } from "@/components/scan";
 import { Button, ButtonText } from "@/components/ui";
-import { useResetScan } from "@/store";
+import { useAppStore, useResetScan } from "@/store";
 
 const RESCAN_AUTO_DEEP_SCAN_REMAINING_PHOTO_THRESHOLD = 10_000;
 
@@ -22,6 +22,7 @@ export default function RescanScreen() {
     requestPermission,
     isRequestingPermission,
     isScanning,
+    isBackgroundScanRunning,
     isComplete,
     isDeepScanning,
     scan,
@@ -31,7 +32,9 @@ export default function RescanScreen() {
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
 
   useLayoutEffect(() => {
-    resetScan();
+    if (!useAppStore.getState().isScanning) {
+      resetScan();
+    }
   }, [resetScan]);
 
   const handleGoBack = () => {
@@ -77,6 +80,7 @@ export default function RescanScreen() {
           scanButtonText={"Rescan Now"}
           deepScanButtonText={"Deep Scan All Photos"}
           showDeepScan={shouldShowDeepScan}
+          interactionState={isBackgroundScanRunning ? "background-scan-running" : "available"}
         />
       )}
 

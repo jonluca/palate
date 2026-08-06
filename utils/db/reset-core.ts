@@ -1,6 +1,7 @@
 export const APPLICATION_DATABASE_TABLES = [
   "michelin_restaurant_spatial_index",
   "visit_suggested_restaurants",
+  "automatic_photo_deep_scan_queue",
   "photos",
   "reservation_import_sources",
   "visits",

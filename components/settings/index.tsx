@@ -1150,13 +1150,15 @@ export function DangerZoneCard() {
   const queryClient = useQueryClient();
   const resetAllState = useAppStore((state) => state.resetAllState);
   const isScanning = useAppStore((state) => state.isScanning);
+  const isBackgroundPhotoScanRunning = useAppStore((state) => state.isBackgroundPhotoScanRunning);
   const activeMutationCount = useIsMutating();
   const [isResetting, setIsResetting] = useState(false);
   const { showToast } = useToast();
-  const isDataOperationActive = isScanning || activeMutationCount > 0;
+  const isDataOperationActive = isScanning || isBackgroundPhotoScanRunning || activeMutationCount > 0;
 
   const handleResetAllData = useCallback(() => {
-    if (useAppStore.getState().isScanning || queryClient.isMutating() > 0) {
+    const state = useAppStore.getState();
+    if (state.isScanning || state.isBackgroundPhotoScanRunning || queryClient.isMutating() > 0) {
       showToast({ type: "error", message: "Finish the current scan or data operation before resetting." });
       return;
     }
@@ -1170,7 +1172,8 @@ export function DangerZoneCard() {
           text: "Reset Everything",
           style: "destructive",
           onPress: async () => {
-            if (useAppStore.getState().isScanning || queryClient.isMutating() > 0) {
+            const latestState = useAppStore.getState();
+            if (latestState.isScanning || latestState.isBackgroundPhotoScanRunning || queryClient.isMutating() > 0) {
               showToast({ type: "error", message: "A data operation started. Finish it before resetting." });
               return;
             }
@@ -1231,6 +1234,7 @@ export function DangerZoneCard() {
 
 export function FoodKeywordsCard() {
   const { showToast } = useToast();
+  const isPhotoScanBusy = useAppStore((state) => state.isScanning || state.isBackgroundPhotoScanRunning);
   const { data: keywords = [], isLoading } = useFoodKeywords();
   const { data: photosWithLabelsCount = 0 } = usePhotosWithLabelsCount();
   const addKeywordMutation = useAddFoodKeyword();
@@ -1326,6 +1330,11 @@ export function FoodKeywordsCard() {
   }, [resetKeywordsMutation, showToast]);
 
   const handleReclassify = useCallback(() => {
+    const scanState = useAppStore.getState();
+    if (scanState.isScanning || scanState.isBackgroundPhotoScanRunning) {
+      showToast({ type: "info", message: "Finish the current photo scan before reclassifying." });
+      return;
+    }
     if (photosWithLabelsCount === 0) {
       showToast({ type: "info", message: "No photos to reclassify. Run a scan first." });
       return;
@@ -1339,6 +1348,11 @@ export function FoodKeywordsCard() {
         {
           text: "Reclassify",
           onPress: () => {
+            const latestScanState = useAppStore.getState();
+            if (latestScanState.isScanning || latestScanState.isBackgroundPhotoScanRunning) {
+              showToast({ type: "info", message: "Finish the current photo scan before reclassifying." });
+              return;
+            }
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             setReclassifyProgress({ total: photosWithLabelsCount, processed: 0, updated: 0, isComplete: false });
             reclassifyMutation.mutate(undefined, {
@@ -1471,7 +1485,7 @@ export function FoodKeywordsCard() {
                 variant={"secondary"}
                 size={"sm"}
                 onPress={handleReclassify}
-                disabled={reclassifyMutation.isPending || photosWithLabelsCount === 0}
+                disabled={isPhotoScanBusy || reclassifyMutation.isPending || photosWithLabelsCount === 0}
                 loading={reclassifyMutation.isPending}
               >
                 <IconSymbol name={"arrow.triangle.2.circlepath"} size={14} color={"#f97316"} />

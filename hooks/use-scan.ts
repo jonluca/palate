@@ -27,6 +27,7 @@ export interface UseScanReturn {
 
   // Scan state
   isScanning: boolean;
+  isBackgroundScanRunning: boolean;
   isComplete: boolean;
   isError: boolean;
   isFirstScan: boolean;
@@ -62,6 +63,7 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
     failScan,
     scanProgress,
     isScanning: isStoreScanning,
+    isBackgroundPhotoScanRunning,
   } = useAppStore();
   const activeScanRef = useRef<"scan" | "deep-scan" | null>(null);
 
@@ -141,7 +143,13 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   }, [autoDeepScanPhotoThreshold, autoDeepScanRemainingPhotoThreshold, cameraRollCount, hasCompletedInitialScan]);
 
   const scan = useCallback(async () => {
-    if (activeScanRef.current || isStoreScanning || scanMutation.isPending || deepScanMutation.isPending) {
+    if (
+      activeScanRef.current ||
+      isStoreScanning ||
+      isBackgroundPhotoScanRunning ||
+      scanMutation.isPending ||
+      deepScanMutation.isPending
+    ) {
       return;
     }
 
@@ -150,11 +158,13 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
       return;
     }
 
+    if (!startScan()) {
+      return;
+    }
     activeScanRef.current = "scan";
 
     try {
       start();
-      startScan();
       logScanStarted();
 
       const result = await scanMutation.mutateAsync();
@@ -176,6 +186,7 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   }, [
     hasPermission,
     isStoreScanning,
+    isBackgroundPhotoScanRunning,
     requestPermission,
     start,
     startScan,
@@ -189,7 +200,13 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   ]);
 
   const deepScan = useCallback(async () => {
-    if (activeScanRef.current || isStoreScanning || scanMutation.isPending || deepScanMutation.isPending) {
+    if (
+      activeScanRef.current ||
+      isStoreScanning ||
+      isBackgroundPhotoScanRunning ||
+      scanMutation.isPending ||
+      deepScanMutation.isPending
+    ) {
       return;
     }
 
@@ -198,11 +215,13 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
       return;
     }
 
+    if (!startScan()) {
+      return;
+    }
     activeScanRef.current = "deep-scan";
 
     try {
       start();
-      startScan();
       logScanStarted();
 
       const result = await deepScanMutation.mutateAsync(undefined);
@@ -222,6 +241,7 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   }, [
     hasPermission,
     isStoreScanning,
+    isBackgroundPhotoScanRunning,
     requestPermission,
     start,
     startScan,
@@ -242,6 +262,7 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
 
     // Scan state
     isScanning: scanMutation.isPending || (isStoreScanning && activeScanRef.current !== "deep-scan"),
+    isBackgroundScanRunning: isBackgroundPhotoScanRunning,
     isComplete: scanProgress.phase === "complete",
     isError: scanProgress.phase === "error",
     isFirstScan: !hasCompletedInitialScan,

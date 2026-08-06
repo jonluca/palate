@@ -101,10 +101,23 @@ assert.doesNotMatch(
 );
 
 const reviewSource = readFileSync(join(repositoryRoot, "app/(app)/(tabs)/review.tsx"), "utf8");
-assert.match(
+assert.doesNotMatch(
   reviewSource,
-  /allowsAutomaticDeepScanFollowup\([\s\S]*getResolvedVisitFoodDetectionStrategy\(\)[\s\S]*isVisionVisitFoodValidationModeEnabled\(\)[\s\S]*!isLoading/,
-  "Review auto-start must honor adaptive and validation suppression",
+  /DeepScanCard|allowsAutomaticDeepScanFollowup/,
+  "Review must not own a visible automatic deep-scan lifecycle",
+);
+
+const automaticScanSource = readFileSync(join(repositoryRoot, "hooks/use-automatic-photo-rescan.ts"), "utf8");
+const automaticScanCoreSource = readFileSync(join(repositoryRoot, "utils/automatic-photo-rescan-core.ts"), "utf8");
+assert.match(automaticScanSource, /getUnscannedPhotoCount/);
+assert.match(automaticScanSource, /claimAutomaticPhotoDeepScanCandidates/);
+assert.match(automaticScanSource, /enqueueInsertedPhotosForAutomaticDeepScan: !validationModeEnabled/);
+assert.match(automaticScanSource, /isVisionVisitFoodValidationModeEnabled\(\)/);
+assert.match(automaticScanCoreSource, /deepScanPhotos\(deepScanCandidates\)/);
+assert.doesNotMatch(
+  automaticScanSource,
+  /deepScanPhotos\((?:undefined)?\)/,
+  "background deep scans must stay bounded to explicit newly discovered IDs",
 );
 
 const deepScanCardSource = readFileSync(join(repositoryRoot, "components/settings/deep-scan-card.tsx"), "utf8");

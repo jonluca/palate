@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { register } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { APPLICATION_DATABASE_TABLES, dropApplicationDatabaseTables } from "../utils/db/reset-core.ts";
+import { AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE } from "../utils/db/automatic-photo-deep-scan-queue-core.ts";
 
 interface Deferred<Value> {
   readonly promise: Promise<Value>;
@@ -170,8 +171,10 @@ async function assertDatabaseResetLifecycle(): Promise<void> {
 
 const coreSource = readFileSync(new URL("../utils/db/core.ts", import.meta.url), "utf8");
 const initializedCoreTables = Array.from(
-  coreSource.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_]+)/g),
-  (match) => match[1]!,
+  new Set([
+    ...Array.from(coreSource.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_]+)/g), (match) => match[1]!),
+    AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE,
+  ]),
 ).sort();
 const resetCoreTables = APPLICATION_DATABASE_TABLES.filter(
   (table) => table !== "michelin_restaurant_spatial_index",

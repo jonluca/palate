@@ -16,6 +16,7 @@ interface ScanCardProps {
   scanButtonText?: string;
   deepScanButtonText?: string;
   showDeepScan?: boolean;
+  interactionState?: "available" | "background-scan-running";
   animationDelay?: number;
 }
 
@@ -29,10 +30,12 @@ export function ScanCard({
   scanButtonText = "Start Scanning",
   deepScanButtonText = "Deep Scan for Food",
   showDeepScan = false,
+  interactionState = "available",
   animationDelay = 100,
   isComplete,
 }: ScanCardProps) {
   const isInProgress = isScanning || isDeepScanning;
+  const controlsDisabled = interactionState === "background-scan-running";
   const photoCountLabel = isDeepScanning
     ? "Deep scanning…"
     : isScanning
@@ -55,14 +58,20 @@ export function ScanCard({
 
           {/* Scan Button */}
           {!isInProgress && !isComplete && (
-            <Button onPress={onScan} size={"lg"}>
+            <Button onPress={onScan} size={"lg"} disabled={controlsDisabled}>
               <ButtonText>{scanButtonText}</ButtonText>
             </Button>
           )}
 
           {/* Deep Scan Button */}
           {showDeepScan && !isInProgress && onDeepScan && (
-            <Button onPress={onDeepScan} variant={"secondary"} size={"lg"} accessibilityRole={"button"}>
+            <Button
+              onPress={onDeepScan}
+              variant={"secondary"}
+              size={"lg"}
+              accessibilityRole={"button"}
+              disabled={controlsDisabled}
+            >
               <ButtonText variant={"secondary"}>{deepScanButtonText}</ButtonText>
             </Button>
           )}

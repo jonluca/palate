@@ -19,7 +19,7 @@ import {
   UndoBarCard,
 } from "@/components/settings";
 import { ScreenLayout } from "@/components/screen-layout";
-import { useResetScan } from "@/store";
+import { useAppStore, useResetScan } from "@/store";
 
 function SectionHeader({ children }: { children: string }) {
   return (
@@ -68,13 +68,21 @@ function AdvancedIntroCard() {
 
 function RescanPhotosCard() {
   const resetScan = useResetScan();
+  const isPhotoScanBusy = useAppStore((state) => state.isScanning || state.isBackgroundPhotoScanRunning);
 
   return (
     <Pressable
+      disabled={isPhotoScanBusy}
       onPress={() => {
+        const state = useAppStore.getState();
+        if (state.isScanning || state.isBackgroundPhotoScanRunning) {
+          return;
+        }
         resetScan();
         router.push("/rescan");
       }}
+      accessibilityState={{ disabled: isPhotoScanBusy }}
+      style={{ opacity: isPhotoScanBusy ? 0.5 : 1 }}
     >
       <Card animated={false}>
         <View className={"p-4 gap-3"}>

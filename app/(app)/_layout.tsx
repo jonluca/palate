@@ -3,6 +3,7 @@ import { DarkTheme, Redirect, Stack } from "expo-router";
 import React from "react";
 import { Platform, View, ActivityIndicator } from "react-native";
 import { useHasCompletedInitialScan, useHasHydrated } from "@/store";
+import { useAutomaticPhotoRescan } from "@/hooks";
 
 export default function RootLayoutNav() {
   const navigationTheme = {
@@ -18,6 +19,7 @@ export default function RootLayoutNav() {
   };
   const hasHydrated = useHasHydrated();
   const hasCompletedInitialScan = useHasCompletedInitialScan();
+  useAutomaticPhotoRescan(hasHydrated && hasCompletedInitialScan);
 
   // Wait for store to hydrate before making routing decisions
   if (!hasHydrated) {
