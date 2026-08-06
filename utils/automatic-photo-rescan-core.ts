@@ -1,4 +1,8 @@
 export const AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT = 1_000;
+/** Leave the first foreground interaction window entirely to visible UI work. */
+export const AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS = 5_000;
+/** Keep each automatic queued Vision batch short enough not to monopolize PhotoKit while the app is in use. */
+export const AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE = 24;
 
 export function shouldAutomaticallyRescanPhotos(
   pendingPhotoCount: number,

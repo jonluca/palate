@@ -85,7 +85,7 @@ public struct PreviewCardsBenchmarkRunner: Sendable {
         baselinePhotoKitBehavior:
           "One PHAsset.fetchAssets call per item; PHImageManager.default; current version; highQualityFormat delivery; fast resize; aspectFit request at a source-aspect cover target.",
         candidatePhotoKitBehavior:
-          "PhotoAssetThumbnailStore; batched PHAsset fetch; PHCachingImageManager; opportunistic delivery; exact resize; aspectFill at the card item target.",
+          "PhotoAssetThumbnailStore; batched PHAsset fetch; PHCachingImageManager; highQualityFormat delivery; exact resize; aspectFill at the card item target.",
         cacheParityScope:
           "Cold, globally disjoint underlying PhotoKit behavior only. This does not claim parity with expo-image/SDWebImage warm memory or disk caches.",
         workloadShape:
@@ -291,7 +291,7 @@ public struct PreviewCardsBenchmarkRunner: Sendable {
         callbackQueue: callbackQueue,
         requests: requests,
         cardCount: run.assignment.cards.count,
-        displayDegradedImages: true,
+        displayDegradedImages: false,
         timeoutMilliseconds: timeoutMilliseconds,
         onAllStripRenderable: { sampler.capture(.allStripRenderable) },
         onAllFinal: { sampler.capture(.allFinal) }
@@ -364,6 +364,8 @@ public struct PreviewCardsBenchmarkRunner: Sendable {
       reason = "requested count did not match the assigned card assets"
     } else if load.cardCount != run.assignment.cards.count {
       reason = "card count did not match the assigned visible cards"
+    } else if load.degradedAssetCount != 0 || load.degradedEventCount != 0 {
+      reason = "the high-quality-only card path received a degraded image"
     } else if load.renderableCount != expectedCount || load.allStripRenderableMilliseconds == nil {
       reason = "the full visible card strip did not become renderable"
     } else if load.finalCount != expectedCount || load.allFinalMilliseconds == nil {

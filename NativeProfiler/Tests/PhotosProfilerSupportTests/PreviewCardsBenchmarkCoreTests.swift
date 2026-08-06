@@ -124,7 +124,7 @@ struct PreviewCardsBenchmarkCoreTests {
     }
   }
 
-  @Test("Candidate degraded images make the full strip renderable before finals")
+  @Test("Accumulator retains historical degraded-display timing semantics")
   func allStripRenderableTiming() throws {
     let target = try PhotoAssetThumbnailTarget(pixelWidth: 600, pixelHeight: 320)
     let requests = ["one", "two"].map {
@@ -199,6 +199,49 @@ struct PreviewCardsBenchmarkCoreTests {
     let measurement = accumulator.makeMeasurement(allTerminalMilliseconds: 20)
 
     #expect(measurement.staleEventCount == 1)
+    #expect(throws: PreviewCardsBenchmarkError.self) {
+      try PreviewCardsBenchmarkRunner.validate(measurement, run: run)
+    }
+  }
+
+  @Test("Strict card validation rejects degraded high-quality deliveries")
+  func strictValidationRejectsDegradedDelivery() throws {
+    let plan = try Self.plan()
+    let run = try #require(plan.runs.first { $0.strategy == .photoAssetThumbnailStore })
+    let target = try PhotoAssetThumbnailTarget(pixelWidth: 400, pixelHeight: 320)
+    let requests = run.assignment.assets.map {
+      PreviewCardsAssetRequest(identifier: $0.identifier, target: target)
+    }
+    var accumulator = PreviewCardsMeasurementAccumulator(
+      requests: requests,
+      cardCount: run.assignment.cards.count,
+      displayDegradedImages: false
+    )
+    for (index, request) in requests.enumerated() {
+      if index == 0 {
+        accumulator.record(
+          .image(
+            identifier: request.identifier,
+            pixelWidth: 200,
+            pixelHeight: 160,
+            isDegraded: true
+          ),
+          elapsedMilliseconds: 1
+        )
+      }
+      accumulator.record(
+        .image(
+          identifier: request.identifier,
+          pixelWidth: 400,
+          pixelHeight: 320,
+          isDegraded: false
+        ),
+        elapsedMilliseconds: Double(index + 2)
+      )
+    }
+    let measurement = accumulator.makeMeasurement(allTerminalMilliseconds: 20)
+
+    #expect(measurement.degradedAssetCount == 1)
     #expect(throws: PreviewCardsBenchmarkError.self) {
       try PreviewCardsBenchmarkRunner.validate(measurement, run: run)
     }

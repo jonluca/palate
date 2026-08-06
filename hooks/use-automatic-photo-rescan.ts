@@ -16,7 +16,8 @@ import {
 } from "@/utils/db";
 import { isVisionVisitFoodValidationModeEnabled } from "@/modules/batch-asset-info";
 import {
-  AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT,
+  AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE,
+  AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS,
   createAutomaticPhotoRescanController,
   runAutomaticPhotoScanSequence,
   shouldRunAutomaticPhotoQuickScan,
@@ -27,11 +28,18 @@ import { invalidateFoodDetectionQueries, mutationKeys, queryKeys, useDeepScan, u
 export function useAutomaticPhotoRescan(enabled: boolean): void {
   const queryClient = useQueryClient();
   const validationModeEnabled = isVisionVisitFoodValidationModeEnabled();
-  const { mutateAsync: scanPhotos } = useScanPhotos(undefined, {
-    requestCalendarPermissionIfNeeded: false,
-    enqueueInsertedPhotosForAutomaticDeepScan: !validationModeEnabled,
-  });
-  const { mutateAsync: deepScanPhotos } = useDeepScan();
+  const { mutateAsync: scanPhotos } = useScanPhotos(
+    undefined,
+    {
+      requestCalendarPermissionIfNeeded: false,
+      enqueueInsertedPhotosForAutomaticDeepScan: !validationModeEnabled,
+      runVisitFoodDetection: validationModeEnabled,
+    },
+    {
+      invalidateQueriesOnSettled: false,
+    },
+  );
+  const { mutateAsync: deepScanPhotos } = useDeepScan(undefined, { invalidateQueriesOnSettled: false });
 
   useEffect(() => {
     if (!enabled || Platform.OS === "web") {
@@ -56,7 +64,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
           return;
         }
 
-        try {
+        const runPhotoScan = async () => {
           await queryClient.invalidateQueries({
             queryKey: queryKeys.unscannedPhotoCount,
             exact: true,
@@ -90,7 +98,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
             scanPhotos,
             getDeepScanCandidates: validationModeEnabled
               ? async () => []
-              : () => claimAutomaticPhotoDeepScanCandidates(AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT - 1),
+              : () => claimAutomaticPhotoDeepScanCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE),
             deepScanPhotos: async (photos) => {
               await markAutomaticPhotoFoodSyncRequired();
               const deepScanResult = await deepScanPhotos(photos);
@@ -98,21 +106,50 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
               return deepScanResult;
             },
             finalizeDeepScanQueue: validationModeEnabled ? async () => undefined : pruneAutomaticPhotoDeepScanQueue,
+          }).finally(() => {
+            // Reconcile once after the background sequence instead of rebuilding
+            // the visible feed between its quick- and deep-scan phases.
+            invalidateFoodDetectionQueries(queryClient);
+            if (shouldRunQuickScan) {
+              queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits });
+              queryClient.invalidateQueries({ queryKey: queryKeys.photoCount });
+            }
           });
           logScanCompleted(result?.photosProcessed ?? 0, result?.visitsCreated ?? 0);
-        } finally {
+        };
+
+        await runPhotoScan().finally(() => {
           useAppStore.getState().finishBackgroundPhotoScan();
-        }
+        });
       },
       onError: (error) => {
         console.warn("Automatic photo rescan failed; it will retry on a future app open:", error);
       },
     });
 
-    controller.handleAppStateChange(AppState.currentState);
-    const subscription = AppState.addEventListener("change", controller.handleAppStateChange);
+    let activationTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleAppStateChange = (nextState: string) => {
+      if (activationTimer !== null) {
+        clearTimeout(activationTimer);
+        activationTimer = null;
+      }
+      if (nextState !== "active") {
+        controller.handleAppStateChange(nextState);
+        return;
+      }
+      activationTimer = setTimeout(() => {
+        activationTimer = null;
+        controller.handleAppStateChange(nextState);
+      }, AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS);
+    };
+
+    handleAppStateChange(AppState.currentState);
+    const subscription = AppState.addEventListener("change", handleAppStateChange);
 
     return () => {
+      if (activationTimer !== null) {
+        clearTimeout(activationTimer);
+      }
       controller.dispose();
       subscription.remove();
     };

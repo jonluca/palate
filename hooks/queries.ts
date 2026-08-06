@@ -155,6 +155,10 @@ export const mutationKeys = {
   photoAnalysis: ["photoAnalysis"] as const,
 };
 
+interface PhotoAnalysisMutationOptions {
+  invalidateQueriesOnSettled?: boolean;
+}
+
 /** Invalidate all visit-related queries */
 function invalidateVisitQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: queryKeys.pendingReview });
@@ -1073,7 +1077,11 @@ export function useRequestCalendarPermission() {
 /**
  * Scan camera roll and process photos
  */
-export function useScanPhotos(onProgress?: (progress: ScanProgress) => void, options: ProcessPhotosOptions = {}) {
+export function useScanPhotos(
+  onProgress?: (progress: ScanProgress) => void,
+  options: ProcessPhotosOptions = {},
+  mutationOptions: PhotoAnalysisMutationOptions = {},
+) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -1081,6 +1089,9 @@ export function useScanPhotos(onProgress?: (progress: ScanProgress) => void, opt
     scope: PHOTO_ANALYSIS_MUTATION_SCOPE,
     mutationFn: () => processPhotos(onProgress, options),
     onSettled: () => {
+      if (mutationOptions.invalidateQueriesOnSettled === false) {
+        return;
+      }
       invalidateFoodDetectionQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits });
       queryClient.invalidateQueries({ queryKey: queryKeys.photoCount });
@@ -1990,7 +2001,10 @@ export type { DeepScanProgress, VisitFoodScanProgress };
 /**
  * Deep scan all photos for food detection
  */
-export function useDeepScan(onProgress?: (progress: DeepScanProgress) => void) {
+export function useDeepScan(
+  onProgress?: (progress: DeepScanProgress) => void,
+  mutationOptions: PhotoAnalysisMutationOptions = {},
+) {
   const queryClient = useQueryClient();
   // Use ref to always call the latest callback
   const onProgressRef = useRef(onProgress);
@@ -2004,6 +2018,9 @@ export function useDeepScan(onProgress?: (progress: DeepScanProgress) => void) {
     mutationFn: (photos?: Array<{ id: string }>) =>
       deepScanAllPhotosForFood({ photos, onProgress: (p) => onProgressRef.current?.(p) }),
     onSettled: () => {
+      if (mutationOptions.invalidateQueriesOnSettled === false) {
+        return;
+      }
       invalidateFoodDetectionQueries(queryClient);
     },
   });

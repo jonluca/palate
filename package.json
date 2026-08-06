@@ -20,6 +20,7 @@
     "test:initial-image-preheat-summary": "node --no-warnings --experimental-strip-types scripts/test-initial-image-preheat-profile-summary.ts",
     "test:thumbnail-scroll-profiler": "zsh scripts/test-thumbnail-scroll-profiler-wrapper.sh && swift test --filter 'ThumbnailScrollBenchmarkCoreTests|ProfilerArgumentsTests|PhotosProfilerRunnerTests'",
     "test:preview-cards-profiler": "zsh scripts/test-preview-cards-profiler-wrapper.sh && swift test --filter 'PreviewCardsBenchmarkCoreTests|ProfilerArgumentsTests|PhotosProfilerRunnerTests'",
+    "test:restaurant-feed-images": "node --no-warnings --experimental-strip-types scripts/test-restaurant-feed-images.ts",
     "test:vision-pipeline": "zsh scripts/test-vision-pipeline.sh",
     "test:macos-vision-result-page-harness": "zsh scripts/test-macos-vision-result-page-harness.sh",
     "test:macos-vision-visit-food-summary": "node --no-warnings --experimental-strip-types scripts/test-macos-vision-visit-food-strategy-ab-summary.ts",

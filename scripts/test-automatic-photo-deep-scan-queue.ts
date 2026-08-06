@@ -19,6 +19,7 @@ import {
   validateAutomaticPhotoDeepScanBatchLimit,
 } from "../utils/db/automatic-photo-deep-scan-queue-core.ts";
 import { buildPhotoIngestionStatement } from "../utils/db/photo-ingestion-core.ts";
+import { AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE } from "../utils/automatic-photo-rescan-core.ts";
 
 const database = new DatabaseSync(":memory:");
 try {
@@ -146,6 +147,23 @@ try {
   assert.equal(getStateFlag(IS_AUTOMATIC_PHOTO_FOOD_SYNC_REQUIRED_SQL), 1);
   database.prepare(CLEAR_AUTOMATIC_PHOTO_FOOD_SYNC_REQUIRED_SQL).run();
   assert.equal(getStateFlag(IS_AUTOMATIC_PHOTO_FOOD_SYNC_REQUIRED_SQL), 0);
+
+  database.exec("DELETE FROM automatic_photo_deep_scan_queue; DELETE FROM photos;");
+  const boundedIds = Array.from(
+    { length: AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE + 1 },
+    (_, index) => `bounded-${index.toString().padStart(2, "0")}`,
+  );
+  for (const [index, id] of boundedIds.entries()) {
+    insertPhoto.run(id, `ph://${id}`, index, null);
+  }
+  database.prepare(ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL).run(JSON.stringify(boundedIds));
+  const boundedClaim = claimCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE);
+  assert.equal(boundedClaim.length, AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE);
+  assert.equal(new Set(boundedClaim).size, AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE);
+  assert.ok(
+    boundedIds.some((id) => !boundedClaim.includes(id)),
+    "one queued row must remain outside the bounded claim",
+  );
 
   database.exec("DELETE FROM automatic_photo_deep_scan_queue; DELETE FROM photos;");
   const fairnessIds = Array.from({ length: 1_001 }, (_, index) => `fairness-${index.toString().padStart(4, "0")}`);

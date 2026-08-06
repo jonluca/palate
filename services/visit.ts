@@ -1610,12 +1610,14 @@ export interface ProcessPhotosOptions {
   requestCalendarPermissionIfNeeded?: boolean;
   /** Atomically retain this run's inserted IDs for automatic deep-scan recovery. */
   enqueueInsertedPhotosForAutomaticDeepScan?: boolean;
+  /** Run the visit-wide sampled Vision pass; automatic scans use their bounded durable queue instead. */
+  runVisitFoodDetection?: boolean;
 }
 
 let processPhotosPromise: Promise<ProcessPhotosResult> | null = null;
 
 /**
- * Run scanning, grouping visits, calendar enrichment, calendar-only visits, and food detection in sequence.
+ * Run scanning, grouping visits, calendar enrichment, calendar-only visits, and optional food detection in sequence.
  * Note: Restaurant confirmation is now a separate user-driven process.
  */
 export async function processPhotos(
@@ -1704,26 +1706,30 @@ async function runProcessPhotos(
   // Let the UI paint the final calendar match count before the next phase updates the status.
   await yieldToEventLoop();
 
-  // Phase 4: Detect food in visit photos
-  scanProgress?.({
-    phase: "detecting-food",
-    detail: "Analyzing photos for food...",
-  });
+  let foodVisitsFound = 0;
+  if (options.runVisitFoodDetection !== false) {
+    // Phase 4: Detect food in visit photos
+    scanProgress?.({
+      phase: "detecting-food",
+      detail: "Analyzing photos for food...",
+    });
 
-  const foodResult = await detectFoodInVisits({
-    onProgress: (p) => {
-      if (!p.totalSamples) {
-        return;
-      }
-      scanProgress?.({
-        phase: "detecting-food",
-        detail: `Analyzed ${p.processedSamples.toLocaleString()} of ${p.totalSamples.toLocaleString()} pics for food`,
-        photosPerSecond: p.samplesPerSecond,
-        eta: formatEta(p.etaMs),
-        progress: p.totalSamples > 0 ? p.processedSamples / p.totalSamples : 0,
-      });
-    },
-  });
+    const foodResult = await detectFoodInVisits({
+      onProgress: (p) => {
+        if (!p.totalSamples) {
+          return;
+        }
+        scanProgress?.({
+          phase: "detecting-food",
+          detail: `Analyzed ${p.processedSamples.toLocaleString()} of ${p.totalSamples.toLocaleString()} pics for food`,
+          photosPerSecond: p.samplesPerSecond,
+          eta: formatEta(p.etaMs),
+          progress: p.totalSamples > 0 ? p.processedSamples / p.totalSamples : 0,
+        });
+      },
+    });
+    foodVisitsFound = foodResult.foodVisitsFound;
+  }
 
   // Phase 5: Database maintenance (ANALYZE and WAL checkpoint)
   scanProgress?.({
@@ -1737,7 +1743,7 @@ async function runProcessPhotos(
   return {
     visitsCreated: visitResult.visitsCreated,
     photosProcessed: scanResult.newPhotosAdded,
-    foodVisitsFound: foodResult.foodVisitsFound,
+    foodVisitsFound,
     visitsWithCalendarEvents: calendarResult.visitsWithEvents,
   };
 }

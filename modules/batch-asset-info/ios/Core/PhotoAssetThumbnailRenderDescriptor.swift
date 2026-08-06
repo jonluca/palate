@@ -18,7 +18,7 @@ public struct PhotoAssetThumbnailRenderDescriptor: Hashable, Sendable {
     let options = PHImageRequestOptions()
     options.isSynchronous = false
     options.version = .current
-    options.deliveryMode = .opportunistic
+    options.deliveryMode = .highQualityFormat
     options.resizeMode = .exact
     options.normalizedCropRect = .zero
     options.isNetworkAccessAllowed = true

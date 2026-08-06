@@ -39,7 +39,7 @@ final class ThumbnailScrollWindowMeasurementSession: @unchecked Sendable {
     self.onTerminal = onTerminal
     accumulator = InitialImageMeasurementAccumulator(
       requestedIdentifiers: requestedIdentifiers,
-      displayDegradedImages: true
+      displayDegradedImages: false
     )
   }
 

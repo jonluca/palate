@@ -268,7 +268,7 @@ public struct InitialImagePreheatBenchmarkRunner: Sendable {
       samplePosition: samplePosition,
       timeoutMilliseconds: timeoutMilliseconds,
       requestedIdentifiers: keys.map(\.assetIdentifier),
-      displayDegradedImages: true
+      displayDegradedImages: false
     )
     return await session.runWithTerminalTimestamp { receive in
       loader.request(keys: keys, receive: receive)

@@ -4,8 +4,9 @@ import { Card, SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills } from "@
 import { HomeHeader, NewPhotosCard } from "@/components/home";
 import { MichelinRestaurantCard } from "@/components/restaurants/michelin-restaurant-card";
 import { useConfirmedRestaurants, useMichelinRestaurantSearch, type RestaurantWithVisits } from "@/hooks/queries";
+import { PhotoAssetThumbnail } from "@/modules/batch-asset-info";
 import type { MichelinRestaurantRecord } from "@/utils/db";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList, useMappingHelper } from "@shopify/flash-list";
 import { router } from "expo-router";
 import React, { useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { View, RefreshControl, Pressable, TextInput } from "react-native";
@@ -13,7 +14,6 @@ import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconSymbol } from "@/components/icon-symbol";
-import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
 import { cn } from "@/utils/cn";
 import { normalizeMichelinNameSearchQuery } from "@/utils/db/michelin-name-search-core";
@@ -39,14 +39,15 @@ const starFilterOptions: { value: StarFilter; label: string }[] = [
 ];
 
 const EMPTY_MICHELIN_SEARCH_RESULTS: MichelinRestaurantRecord[] = [];
+const RESTAURANT_FEED_DRAW_DISTANCE = 600;
+const VISIT_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
 
 function formatDate(timestamp: number): string {
-  const date = new Date(timestamp);
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return VISIT_DATE_FORMATTER.format(timestamp);
 }
 
 function getStarCount(award: string | null): number {
@@ -90,15 +91,17 @@ function formatAward(award: string | null): string | null {
 }
 
 function PhotoPreview({ photos }: { photos: string[] }) {
+  const { getMappingKey } = useMappingHelper();
+
   if (photos.length === 0) {
     return null;
   }
 
   return (
     <View className={"flex-row h-32 overflow-hidden border-b border-border"}>
-      {photos.slice(0, 3).map((uri) => (
-        <View key={uri} className={"flex-1"}>
-          <Image recyclingKey={uri} source={{ uri }} style={{ width: "100%", height: 128 }} contentFit={"cover"} />
+      {photos.slice(0, 3).map((uri, index) => (
+        <View key={getMappingKey(uri, index)} className={"flex-1"}>
+          <PhotoAssetThumbnail uri={uri} style={{ width: "100%", height: 128 }} />
         </View>
       ))}
     </View>
@@ -249,6 +252,13 @@ type ListItem =
   | { type: "visited"; data: RestaurantWithVisits }
   | { type: "michelin"; data: MichelinRestaurantRecord }
   | { type: "section-header"; title: string };
+
+function getListItemType(item: ListItem): string {
+  if (item.type === "visited") {
+    return item.data.previewPhotos.length > 0 ? "visited-photo" : "visited-plain";
+  }
+  return item.type;
+}
 
 export default function RestaurantsScreen() {
   const [refreshing, setRefreshing] = useState(false);
@@ -526,8 +536,8 @@ export default function RestaurantsScreen() {
             }
             return `${item.type}-${item.data.id}`;
           }}
-          getItemType={(item) => item.type}
-          drawDistance={250}
+          getItemType={getListItemType}
+          drawDistance={RESTAURANT_FEED_DRAW_DISTANCE}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={"#8E8E93"} />}
           contentContainerStyle={{
             paddingTop: restaurants.length > 0 ? 0 : insets.top + 16,

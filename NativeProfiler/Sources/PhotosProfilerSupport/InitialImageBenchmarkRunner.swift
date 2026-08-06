@@ -156,7 +156,7 @@ public struct InitialImageBenchmarkRunner: Sendable {
       samplePosition: assignment.position,
       timeoutMilliseconds: timeoutMilliseconds,
       requestedIdentifiers: assignment.identifiers,
-      displayDegradedImages: true
+      displayDegradedImages: false
     )
     let measurement = await session.run { receive in
       loader.request(keys: keys, receive: receive)
