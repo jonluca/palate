@@ -540,12 +540,12 @@ function testRealAssetParity(root: string): DestinationDigest {
     seedRealDestination(candidate, conflictSourceId);
     const oracleMeasurement = runCurrentJsOracleImport(oracle, realSourcePath, "real-asset-test-v1");
     const candidateMeasurement = runAttachInsertSelectImport(candidate, realSourcePath, "real-asset-test-v1");
-    assert.equal(oracleMeasurement.sourceRestaurantRows, 28_787);
-    assert.equal(oracleMeasurement.importedRowChanges, 28_785);
-    assert.equal(candidateMeasurement.importedRowChanges, 28_785);
+    assert.equal(oracleMeasurement.sourceRestaurantRows, 29_639);
+    assert.equal(oracleMeasurement.importedRowChanges, 29_637);
+    assert.equal(candidateMeasurement.importedRowChanges, 29_637);
     const oracleDigest = destinationDigest(oracle);
     assert.deepEqual(destinationDigest(candidate), oracleDigest);
-    assert.equal(oracleDigest.restaurantRows, 28_786);
+    assert.equal(oracleDigest.restaurantRows, 29_638);
     assertHealthy(oracle);
     assertHealthy(candidate);
     return oracleDigest;
