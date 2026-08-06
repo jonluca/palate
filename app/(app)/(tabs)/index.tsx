@@ -98,13 +98,7 @@ function PhotoPreview({ photos }: { photos: string[] }) {
     <View className={"flex-row h-32 overflow-hidden border-b border-border"}>
       {photos.slice(0, 3).map((uri) => (
         <View key={uri} className={"flex-1"}>
-          <Image
-            source={{ uri }}
-            recyclingKey={uri}
-            cachePolicy={"memory-disk"}
-            contentFit={"cover"}
-            style={{ width: "100%", height: 128 }}
-          />
+          <Image recyclingKey={uri} source={{ uri }} style={{ width: "100%", height: 128 }} contentFit={"cover"} />
         </View>
       ))}
     </View>
