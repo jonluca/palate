@@ -17,6 +17,24 @@ interface ScanProgress {
   eta?: string;
 }
 
+export type BackgroundPhotoScanStage =
+  | "checking"
+  | "scanning"
+  | "grouping-visits"
+  | "calendar-events"
+  | "calendar-only-visits"
+  | "detecting-food"
+  | "optimizing-database"
+  | "deep-scanning"
+  | "reconciling";
+
+export interface BackgroundPhotoScanProgress {
+  stage: BackgroundPhotoScanStage;
+  detail: string;
+  /** Overall progress from 0-1, or null while the amount of work is still unknown. */
+  progress: number | null;
+}
+
 // App store state
 interface AppState {
   // Hydration state (not persisted)
@@ -62,9 +80,11 @@ interface AppState {
   // Scan state
   isScanning: boolean;
   isBackgroundPhotoScanRunning: boolean;
+  backgroundPhotoScanProgress: BackgroundPhotoScanProgress | null;
   scanProgress: ScanProgress;
   startScan: () => boolean;
   startBackgroundPhotoScan: () => boolean;
+  updateBackgroundPhotoScanProgress: (progress: BackgroundPhotoScanProgress) => void;
   finishBackgroundPhotoScan: () => void;
   updateScanProgress: (progress: Partial<ScanProgress>) => void;
   completeScan: (message: string) => void;
@@ -144,6 +164,7 @@ export const useAppStore = create<AppState>()(
       // Scan state
       isScanning: false,
       isBackgroundPhotoScanRunning: false,
+      backgroundPhotoScanProgress: null,
       scanProgress: initialScanProgress,
 
       startScan: () => {
@@ -168,11 +189,30 @@ export const useAppStore = create<AppState>()(
         if (state.isScanning || state.isBackgroundPhotoScanRunning) {
           return false;
         }
-        set({ isBackgroundPhotoScanRunning: true });
+        set({
+          isBackgroundPhotoScanRunning: true,
+          backgroundPhotoScanProgress: null,
+        });
         return true;
       },
 
-      finishBackgroundPhotoScan: () => set({ isBackgroundPhotoScanRunning: false }),
+      updateBackgroundPhotoScanProgress: (progress) =>
+        set((state) =>
+          state.isBackgroundPhotoScanRunning
+            ? {
+                backgroundPhotoScanProgress: {
+                  ...progress,
+                  progress: progress.progress === null ? null : Math.min(1, Math.max(0, progress.progress)),
+                },
+              }
+            : state,
+        ),
+
+      finishBackgroundPhotoScan: () =>
+        set({
+          isBackgroundPhotoScanRunning: false,
+          backgroundPhotoScanProgress: null,
+        }),
 
       updateScanProgress: (progress: Partial<ScanProgress>) =>
         set((state) => ({
@@ -250,6 +290,7 @@ export const useAppStore = create<AppState>()(
           hasSeenAddPhotosAlert: false,
           isScanning: false,
           isBackgroundPhotoScanRunning: false,
+          backgroundPhotoScanProgress: null,
           scanProgress: initialScanProgress,
           selectedVisitId: null,
           hideUndoBar: false,

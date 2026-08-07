@@ -4,6 +4,67 @@ export const AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS = 5_000;
 /** Keep each automatic queued Vision batch short enough not to monopolize PhotoKit while the app is in use. */
 export const AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE = 24;
 
+export type AutomaticPhotoQuickScanPhase =
+  | "scanning"
+  | "grouping-visits"
+  | "calendar-events"
+  | "calendar-only-visits"
+  | "detecting-food"
+  | "optimizing-database";
+
+type ProgressRange = readonly [start: number, end: number];
+
+const QUICK_SCAN_RANGES_WITH_DEEP_SCAN_RESERVE: Record<AutomaticPhotoQuickScanPhase, ProgressRange> = {
+  scanning: [0.06, 0.36],
+  "grouping-visits": [0.36, 0.52],
+  "calendar-events": [0.52, 0.64],
+  "calendar-only-visits": [0.64, 0.68],
+  "detecting-food": [0.68, 0.7],
+  "optimizing-database": [0.7, 0.72],
+};
+
+const QUICK_SCAN_RANGES_WITH_INLINE_FOOD_DETECTION: Record<AutomaticPhotoQuickScanPhase, ProgressRange> = {
+  scanning: [0.06, 0.43],
+  "grouping-visits": [0.43, 0.6],
+  "calendar-events": [0.6, 0.75],
+  "calendar-only-visits": [0.75, 0.8],
+  "detecting-food": [0.8, 0.95],
+  "optimizing-database": [0.95, 0.98],
+};
+
+function clampProgress(progress: number | undefined): number {
+  if (progress === undefined || !Number.isFinite(progress)) {
+    return 0;
+  }
+  return Math.min(1, Math.max(0, progress));
+}
+
+function scaleProgress(progress: number | undefined, [start, end]: ProgressRange): number {
+  return start + (end - start) * clampProgress(progress);
+}
+
+/** Map per-phase quick-scan progress onto a stable, non-reversing overall bar. */
+export function getAutomaticQuickScanOverallProgress(
+  phase: AutomaticPhotoQuickScanPhase,
+  phaseProgress: number | undefined,
+  reserveForSeparateDeepScan: boolean,
+): number {
+  const ranges = reserveForSeparateDeepScan
+    ? QUICK_SCAN_RANGES_WITH_DEEP_SCAN_RESERVE
+    : QUICK_SCAN_RANGES_WITH_INLINE_FOOD_DETECTION;
+  return scaleProgress(phaseProgress, ranges[phase]);
+}
+
+/** Map durable Vision work after the quick scan, or by itself on a later app open. */
+export function getAutomaticDeepScanOverallProgress(
+  processedPhotos: number,
+  totalPhotos: number,
+  followsQuickScan: boolean,
+): number {
+  const phaseProgress = totalPhotos > 0 ? processedPhotos / totalPhotos : 0;
+  return scaleProgress(phaseProgress, followsQuickScan ? [0.72, 0.96] : [0.08, 0.96]);
+}
+
 export function shouldAutomaticallyRescanPhotos(
   pendingPhotoCount: number,
   exclusiveLimit: number = AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT,

@@ -1,7 +1,8 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { Card, SkeletonRestaurantCard, NoRestaurantsEmpty, FilterPills } from "@/components/ui";
-import { HomeHeader, NewPhotosCard } from "@/components/home";
+import { HomeHeader } from "@/components/home";
+import { BackgroundPhotoUpdateBar } from "@/components/scan";
 import { MichelinRestaurantCard } from "@/components/restaurants/michelin-restaurant-card";
 import { useConfirmedRestaurants, useMichelinRestaurantSearch, type RestaurantWithVisits } from "@/hooks/queries";
 import type { MichelinRestaurantRecord } from "@/utils/db";
@@ -482,40 +483,41 @@ export default function RestaurantsScreen() {
       />
 
       {/* Header controls rendered outside FlashList to prevent keyboard dismissal */}
-      {restaurants.length > 0 && (
-        <View style={{ paddingTop: insets.top + 16, paddingHorizontal: 16 }} className={"gap-3 bg-background"}>
-          {/* Header */}
-          {!searchQuery && <HomeHeader onMapPress={handleOpenMap} />}
+      <View style={{ paddingTop: insets.top + 16, paddingHorizontal: 16 }} className={"gap-3 bg-background"}>
+        {/* Header */}
+        {restaurants.length > 0 && !searchQuery && <HomeHeader onMapPress={handleOpenMap} />}
 
-          {/* New Photos Card */}
-          <NewPhotosCard />
+        <BackgroundPhotoUpdateBar />
 
-          <SearchBar
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onClear={handleClearSearch}
-            filtersExpanded={filtersExpanded}
-            onToggleFilters={handleToggleFilters}
-          />
-          {filtersExpanded && (
-            <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(150)} className={"gap-3"}>
-              <FilterPills options={sortOptions} value={sortBy} onChange={handleSortChange} />
-              <FilterPills options={starFilterOptions} value={starFilter} onChange={handleStarFilterChange} />
-            </Animated.View>
-          )}
+        {restaurants.length > 0 && (
+          <>
+            <SearchBar
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onClear={handleClearSearch}
+              filtersExpanded={filtersExpanded}
+              onToggleFilters={handleToggleFilters}
+            />
+            {filtersExpanded && (
+              <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(150)} className={"gap-3"}>
+                <FilterPills options={sortOptions} value={sortBy} onChange={handleSortChange} />
+                <FilterPills options={starFilterOptions} value={starFilter} onChange={handleStarFilterChange} />
+              </Animated.View>
+            )}
+          </>
+        )}
 
-          {/* Restaurant List Section Title */}
-          {filteredAndSortedRestaurants.length > 0 && (
-            <ThemedText
-              variant={"footnote"}
-              color={"tertiary"}
-              className={"uppercase font-semibold tracking-wide px-1 pt-1"}
-            >
-              My Restaurants ({filteredAndSortedRestaurants.length})
-            </ThemedText>
-          )}
-        </View>
-      )}
+        {/* Restaurant List Section Title */}
+        {filteredAndSortedRestaurants.length > 0 && (
+          <ThemedText
+            variant={"footnote"}
+            color={"tertiary"}
+            className={"uppercase font-semibold tracking-wide px-1 pt-1"}
+          >
+            My Restaurants ({filteredAndSortedRestaurants.length})
+          </ThemedText>
+        )}
+      </View>
 
       <View
         className={"flex-1"}
@@ -537,7 +539,7 @@ export default function RestaurantsScreen() {
           drawDistance={1200}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={"#8E8E93"} />}
           contentContainerStyle={{
-            paddingTop: restaurants.length > 0 ? 0 : insets.top + 16,
+            paddingTop: 0,
             paddingBottom: insets.bottom + 32,
             paddingHorizontal: 16,
           }}

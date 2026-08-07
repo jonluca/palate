@@ -8,6 +8,8 @@ import {
   AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT,
   AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS,
   createAutomaticPhotoRescanController,
+  getAutomaticDeepScanOverallProgress,
+  getAutomaticQuickScanOverallProgress,
   runAutomaticPhotoScanSequence,
   shouldAutomaticallyRescanPhotos,
   shouldRunAutomaticPhotoQuickScan,
@@ -41,6 +43,44 @@ assert.equal(
   "recovery must not bypass the 1,000-new-photo safety threshold",
 );
 assert.equal(shouldRunAutomaticPhotoQuickScan(0, false), false);
+
+{
+  const phases = [
+    "scanning",
+    "grouping-visits",
+    "calendar-events",
+    "calendar-only-visits",
+    "detecting-food",
+    "optimizing-database",
+  ] as const;
+
+  for (const reserveForDeepScan of [true, false]) {
+    let previousEnd = 0;
+    for (const phase of phases) {
+      const start = getAutomaticQuickScanOverallProgress(phase, 0, reserveForDeepScan);
+      const midpoint = getAutomaticQuickScanOverallProgress(phase, 0.5, reserveForDeepScan);
+      const end = getAutomaticQuickScanOverallProgress(phase, 1, reserveForDeepScan);
+      assert.ok(start >= previousEnd, `${phase} must not move the overall bar backwards`);
+      assert.ok(midpoint >= start && midpoint <= end, `${phase} must scale its local progress`);
+      previousEnd = end;
+    }
+  }
+
+  assert.equal(
+    getAutomaticQuickScanOverallProgress("scanning", Number.NaN, true),
+    getAutomaticQuickScanOverallProgress("scanning", 0, true),
+    "invalid phase progress should use the phase start",
+  );
+  assert.equal(
+    getAutomaticQuickScanOverallProgress("scanning", 2, true),
+    getAutomaticQuickScanOverallProgress("scanning", 1, true),
+    "quick-scan progress should clamp above one",
+  );
+  assert.equal(getAutomaticDeepScanOverallProgress(0, 10, false), 0.08);
+  assert.equal(getAutomaticDeepScanOverallProgress(10, 10, false), 0.96);
+  assert.equal(getAutomaticDeepScanOverallProgress(0, 10, true), 0.72);
+  assert.equal(getAutomaticDeepScanOverallProgress(20, 10, true), 0.96);
+}
 
 {
   const events: string[] = [];
@@ -319,10 +359,12 @@ const root = new URL("../", import.meta.url);
 const read = (relativePath: string) => readFileSync(new URL(relativePath, root), "utf8");
 const appLayout = read("app/(app)/_layout.tsx");
 const rescanScreen = read("app/(app)/rescan.tsx");
+const restaurantsScreen = read("app/(app)/(tabs)/index.tsx");
 const reviewScreen = read("app/(app)/(tabs)/review.tsx");
 const automaticHook = read("hooks/use-automatic-photo-rescan.ts");
 const queryHooks = read("hooks/queries.ts");
-const newPhotosCard = read("components/home/new-photos-card.tsx");
+const backgroundPhotoUpdateBar = read("components/scan/background-photo-update-bar.tsx");
+const appStore = read("store/app-store.ts");
 const scannerService = read("services/scanner.ts");
 const visitService = read("services/visit.ts");
 const deepScanCard = read("components/settings/deep-scan-card.tsx");
@@ -332,6 +374,10 @@ const advancedSettings = read("app/(app)/settings-advanced.tsx");
 const visitsScreen = read("app/(app)/visits.tsx");
 const scanHook = read("hooks/use-scan.ts");
 const scanCard = read("components/scan/scan-card.tsx");
+const reviewListHeaderStart = reviewScreen.indexOf("const ReviewListHeader");
+const reviewListHeaderEnd = reviewScreen.indexOf("const listContentStyle", reviewListHeaderStart);
+assert.ok(reviewListHeaderStart >= 0 && reviewListHeaderEnd > reviewListHeaderStart);
+const reviewListHeaderSource = reviewScreen.slice(reviewListHeaderStart, reviewListHeaderEnd);
 
 assert.match(appLayout, /useAutomaticPhotoRescan\(hasHydrated && hasCompletedInitialScan\)/);
 assert.match(rescanScreen, /if \(!useAppStore\.getState\(\)\.isScanning\)/);
@@ -360,8 +406,14 @@ assert.match(automaticHook, /shouldRunAutomaticPhotoQuickScan/);
 assert.match(automaticHook, /markAutomaticPhotoFoodSyncRequired/);
 assert.match(automaticHook, /syncAllVisitsFoodProbable/);
 assert.match(automaticHook, /runAutomaticPhotoScanSequence/);
-assert.match(automaticHook, /useDeepScan\(undefined, \{ invalidateQueriesOnSettled: false \}\)/);
+assert.match(automaticHook, /useScanPhotos\(\s*handleQuickScanProgress/);
+assert.match(automaticHook, /useDeepScan\(handleDeepScanProgress/);
+assert.match(automaticHook, /getAutomaticQuickScanOverallProgress/);
+assert.match(automaticHook, /getAutomaticDeepScanOverallProgress/);
+assert.match(automaticHook, /updateBackgroundPhotoScanProgress/);
 assert.match(automaticHook, /startBackgroundPhotoScan/);
+assert.match(automaticHook, /detail: "Checking for photo updates…"/);
+assert.match(automaticHook, /MINIMUM_PREFLIGHT_FEEDBACK_MS/);
 assert.doesNotMatch(automaticHook, /expo-router|router\.(?:push|replace)|Redirect|Alert\.alert|showToast|Haptics/);
 assert.doesNotMatch(automaticHook, /requestMediaLibraryPermission|useRequestPermission/);
 assert.doesNotMatch(automaticHook, /\.startScan\(\)|\.resetScan\(\)/);
@@ -370,8 +422,33 @@ assert.match(automaticHook, /enqueueInsertedPhotosForAutomaticDeepScan: !validat
 assert.match(automaticHook, /runVisitFoodDetection: validationModeEnabled/);
 assert.match(visitService, /if \(options\.runVisitFoodDetection !== false\)/);
 assert.doesNotMatch(automaticHook, /pendingAssetIds|getPhotosByAssetIds/);
-assert.match(newPhotosCard, /queryKeys\.unscannedPhotoCount/);
-assert.match(newPhotosCard, /!isScanning/);
+assert.doesNotMatch(restaurantsScreen, /NewPhotosCard|new-photos-card/);
+assert.match(restaurantsScreen, /<BackgroundPhotoUpdateBar \/>/);
+assert.match(restaurantsScreen, /contentContainerStyle=\{\{[\s\S]*paddingTop: 0/);
+assert.doesNotMatch(reviewListHeaderSource, /BackgroundPhotoUpdateBar/);
+assert.match(reviewScreen, /<BackgroundPhotoUpdateBar className=\{"mx-4 mb-3"\} \/>[\s\S]*<FlashList/);
+assert.match(backgroundPhotoUpdateBar, /accessibilityRole=\{"progressbar"\}/);
+assert.match(backgroundPhotoUpdateBar, /accessibilityValue=\{accessibilityValue\}/);
+assert.match(backgroundPhotoUpdateBar, /transform: \[\{ scaleX: update\.progress \?\? 0 \}\]/);
+assert.match(backgroundPhotoUpdateBar, /reduceMotion[\s\S]{0,100}transitionProperty: "transform"/);
+assert.match(backgroundPhotoUpdateBar, /useReducedMotion\(\)/);
+assert.doesNotMatch(backgroundPhotoUpdateBar, /accessibilityLiveRegion/);
+assert.doesNotMatch(backgroundPhotoUpdateBar, /Pressable|router|unscannedPhotoCount/);
+assert.match(appStore, /startBackgroundPhotoScan:[\s\S]{0,500}backgroundPhotoScanProgress: null/);
+assert.match(
+  appStore,
+  /updateBackgroundPhotoScanProgress:[\s\S]{0,700}state\.isBackgroundPhotoScanRunning[\s\S]{0,700}: state/,
+);
+assert.match(
+  appStore,
+  /finishBackgroundPhotoScan:[\s\S]{0,300}isBackgroundPhotoScanRunning: false,[\s\S]{0,100}backgroundPhotoScanProgress: null/,
+);
+assert.match(automaticHook, /stage: "reconciling"[\s\S]{0,200}progress: null/);
+assert.match(automaticHook, /Promise\.allSettled\(visibleReconciliations\)/);
+const visibleReconciliationSource =
+  automaticHook.match(/const visibleReconciliations[\s\S]*?Promise\.allSettled\(visibleReconciliations\)/)?.[0] ?? "";
+assert.equal(visibleReconciliationSource.match(/invalidateFoodDetectionQueries/g)?.length, 1);
+assert.doesNotMatch(visibleReconciliationSource, /pendingReview|confirmedRestaurants/);
 assert.match(scannerService, /enqueueInsertedPhotosForAutomaticDeepScan/);
 assert.match(scannerService, /insertPhotosForAutomaticDeepScan\(photos\)/);
 assert.match(photoDatabase, /withExclusiveTransactionAsync/);

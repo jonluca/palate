@@ -51,8 +51,8 @@ export async function refreshAllQueriesWithVisitListPageReset(queryClient: Query
   await queryClient.invalidateQueries({ predicate: (query) => !isVisitListPageQueryKey(query.queryKey) });
 }
 
-function invalidateNonPagedVisitQueries(queryClient: QueryInvalidator): void {
-  void queryClient.invalidateQueries({
+function invalidateNonPagedVisitQueries(queryClient: QueryInvalidator): Promise<void> {
+  return queryClient.invalidateQueries({
     queryKey: ["visits"],
     predicate: (query) => !isVisitListPageQueryKey(query.queryKey),
   });
@@ -64,14 +64,16 @@ function invalidateNonPagedVisitQueries(queryClient: QueryInvalidator): void {
  * mutations either update it exactly or invalidate it explicitly when they
  * cannot. Wrapped queries deliberately stay fresh forever between mutations.
  */
-export function invalidateVisitStatusQueries(queryClient: QueryInvalidator): void {
-  void invalidateVisitListPageQueries(queryClient);
-  invalidateNonPagedVisitQueries(queryClient);
-  void queryClient.invalidateQueries({ queryKey: ["confirmedRestaurants"] });
-  void queryClient.invalidateQueries({ queryKey: ["stats"] });
-  void queryClient.invalidateQueries({ queryKey: WRAPPED_QUERY_KEY });
-  void queryClient.invalidateQueries({ queryKey: ["michelinRestaurantSearch"] });
-  void queryClient.invalidateQueries({ queryKey: ["michelinMapViewport"] });
+export function invalidateVisitStatusQueries(queryClient: QueryInvalidator): Promise<void> {
+  return Promise.all([
+    invalidateVisitListPageQueries(queryClient),
+    invalidateNonPagedVisitQueries(queryClient),
+    queryClient.invalidateQueries({ queryKey: ["confirmedRestaurants"] }),
+    queryClient.invalidateQueries({ queryKey: ["stats"] }),
+    queryClient.invalidateQueries({ queryKey: WRAPPED_QUERY_KEY }),
+    queryClient.invalidateQueries({ queryKey: ["michelinRestaurantSearch"] }),
+    queryClient.invalidateQueries({ queryKey: ["michelinMapViewport"] }),
+  ]).then(() => undefined);
 }
 
 export function invalidateWrappedStatsQueries(queryClient: QueryInvalidator): void {

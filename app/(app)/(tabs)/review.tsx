@@ -30,6 +30,7 @@ import {
 } from "@/store";
 import { ReviewModeCard } from "@/components/visit-card/review-mode-card";
 import { refreshReviewQueries } from "@/utils/review-query-policy";
+import { BackgroundPhotoUpdateBar } from "@/components/scan";
 
 type ReviewListItem =
   | {
@@ -438,6 +439,8 @@ export default function ReviewScreen() {
   return (
     <ScreenLayout scrollable={false} className={"p-0"} style={{ paddingTop: 0, paddingBottom: 0 }}>
       <View style={{ flex: 1, paddingTop: insets.top }}>
+        <BackgroundPhotoUpdateBar className={"mx-4 mb-3"} />
+
         {/* FlashList must own these absolute-positioned cells; animating them leaves gaps while they are recycled. */}
         <FlashList
           ref={reviewListRef}

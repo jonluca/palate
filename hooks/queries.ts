@@ -166,15 +166,14 @@ function invalidateVisitQueries(queryClient: QueryClient) {
 }
 
 /** Reconcile every cache that can reflect incrementally persisted food results. */
-export function invalidateFoodDetectionQueries(queryClient: QueryClient) {
-  invalidateVisitStatusQueries(queryClient);
-  void invalidatePendingReviewQuery(queryClient);
-  queryClient.invalidateQueries({ queryKey: ["visitPhotos"] });
-  queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
-  queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-  queryClient.invalidateQueries({ queryKey: ["wrapped"] });
-  queryClient.invalidateQueries({ queryKey: queryKeys.confirmedRestaurants });
-  queryClient.invalidateQueries({ queryKey: queryKeys.photosWithLabelsCount });
+export function invalidateFoodDetectionQueries(queryClient: QueryClient): Promise<void> {
+  return Promise.all([
+    invalidateVisitStatusQueries(queryClient),
+    invalidatePendingReviewQuery(queryClient),
+    queryClient.invalidateQueries({ queryKey: ["visitPhotos"] }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.photosWithLabelsCount }),
+  ]).then(() => undefined);
 }
 
 function invalidateMichelinRestaurantSearch(queryClient: QueryClient) {
@@ -1092,7 +1091,7 @@ export function useScanPhotos(
       if (mutationOptions.invalidateQueriesOnSettled === false) {
         return;
       }
-      invalidateFoodDetectionQueries(queryClient);
+      void invalidateFoodDetectionQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits });
       queryClient.invalidateQueries({ queryKey: queryKeys.photoCount });
     },
@@ -2021,7 +2020,7 @@ export function useDeepScan(
       if (mutationOptions.invalidateQueriesOnSettled === false) {
         return;
       }
-      invalidateFoodDetectionQueries(queryClient);
+      void invalidateFoodDetectionQueries(queryClient);
     },
   });
 }
@@ -2049,7 +2048,7 @@ export function useScanVisitForFood(
       return scanVisitPhotosForFood(visitId, photos, { onProgress });
     },
     onSettled: () => {
-      invalidateFoodDetectionQueries(queryClient);
+      void invalidateFoodDetectionQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId ?? "") });
       queryClient.invalidateQueries({ queryKey: queryKeys.visitPhotos(visitId ?? "") });
     },
