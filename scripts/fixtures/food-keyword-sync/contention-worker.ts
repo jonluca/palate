@@ -15,6 +15,7 @@ interface WorkerConfiguration {
   readonly reclassifiedKeyword: string;
 }
 
+// SAFETY: runContendingWorkers is this fixture's sole caller and supplies every WorkerConfiguration field as workerData.
 const configuration = workerData as WorkerConfiguration;
 const workerParentPort = parentPort;
 if (!workerParentPort) {
@@ -27,11 +28,13 @@ database.exec("PRAGMA busy_timeout = 10000; PRAGMA journal_mode = WAL");
 let inspectionCount = 0;
 let writeExecutions = 0;
 const connection: FoodKeywordSyncConnection = {
-  async getAllAsync<T>(source: string, parameters: Array<string | number>) {
-    const rows = database.prepare(source).all(...parameters) as T[];
+  async getAllAsync(source: string, parameters: Array<string | number>) {
+    const rows = database
+      .prepare(source)
+      .all(...parameters)
+      .map((row) => ({ keyword: String(row.keyword), isBuiltIn: Number(row.isBuiltIn) }));
     inspectionCount += 1;
     if (inspectionCount === 1) {
-      const keywordRows = rows as Array<{ readonly keyword: string; readonly isBuiltIn: number }>;
       await new Promise<void>((resolve) => {
         workerParentPort.once("message", (message) => {
           if (message !== "release") {
@@ -41,8 +44,8 @@ const connection: FoodKeywordSyncConnection = {
         });
         workerParentPort.postMessage({
           type: "preflight",
-          missingKeywordPresent: keywordRows.some((row) => row.keyword === configuration.missingKeyword),
-          reclassifiedValue: keywordRows.find((row) => row.keyword === configuration.reclassifiedKeyword)?.isBuiltIn,
+          missingKeywordPresent: rows.some((row) => row.keyword === configuration.missingKeyword),
+          reclassifiedValue: rows.find((row) => row.keyword === configuration.reclassifiedKeyword)?.isBuiltIn,
         });
       });
     }

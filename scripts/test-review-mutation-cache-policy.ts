@@ -132,14 +132,14 @@ async function testSuccessfulStatusMutationKeepsOptimisticReviewData(): Promise<
   const queryClient = createQueryClient();
   let pendingReviewCalls = 0;
   let serverVisitIds = ["visit-1", "visit-2"];
-  const statusCalls: Record<StatusProbeName, number> = {
+  const statusCalls = {
     visits: 0,
     confirmedRestaurants: 0,
     stats: 0,
     wrapped: 0,
     michelinRestaurantSearch: 0,
     michelinMapViewport: 0,
-  };
+  } satisfies Record<StatusProbeName, number>;
 
   const pendingMount = await mountAndWait<PendingReviewData>(queryClient, {
     queryKey: reviewQueryKeys.pendingReview,

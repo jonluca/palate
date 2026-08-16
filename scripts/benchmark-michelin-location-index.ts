@@ -2,7 +2,7 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import {
@@ -11,6 +11,9 @@ import {
   type MichelinLocation,
   type MichelinLocationMatch,
 } from "../utils/michelin-location-index.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Restaurant extends MichelinLocation {
   readonly name: string;
@@ -167,13 +170,14 @@ if (queryCount === null) {
 }
 
 const database = new DatabaseSync(fileURLToPath(new URL("../assets/michelin.db", import.meta.url)), { readOnly: true });
+// SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
 const rows = database
   .prepare(
     `SELECT id, name, latitude, longitude
      FROM restaurants
      WHERE latitude IS NOT NULL AND longitude IS NOT NULL AND latitude != '' AND longitude != ''`,
   )
-  .all() as unknown as DatabaseRow[];
+  .all() as BenchmarkSQLiteRow<DatabaseRow>[];
 database.close();
 
 const restaurants = rows

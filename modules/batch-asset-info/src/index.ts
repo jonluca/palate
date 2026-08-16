@@ -180,6 +180,13 @@ interface NativeBatchAssetInfoModule {
   endPhotoAssetThumbnailPreheat?(scopeID: string): boolean;
 }
 
+function hasNativeMethod<Module, MethodName extends keyof Module>(
+  module: Module | null,
+  methodName: MethodName,
+): module is Module & Required<Pick<Module, MethodName>> {
+  return module !== null && module !== undefined && typeof module[methodName] === "function";
+}
+
 export interface FoodDetectionResult {
   assetId: string;
   containsFood: boolean;
@@ -328,7 +335,7 @@ export function getResolvedVisionPageOrchestrationStrategy(): VisionPageOrchestr
 /** Returns the selected result transport, falling back for older native binaries. */
 export function getResolvedVisionResultTransport(): VisionResultTransport {
   return resolveVisionResultTransport(
-    typeof BatchAssetInfoModule?.classifyImageBatchPackedV1 === "function",
+    hasNativeMethod(BatchAssetInfoModule, "classifyImageBatchPackedV1"),
     BatchAssetInfoModule?.resolvedVisionResultTransport,
   );
 }
@@ -352,9 +359,9 @@ export function isVisionVisitFoodValidationModeEnabled(): boolean {
  */
 export function isAssetScanAvailable(): boolean {
   return (
-    typeof BatchAssetInfoModule?.beginAssetScan === "function" &&
-    typeof BatchAssetInfoModule.getAssetScanPage === "function" &&
-    typeof BatchAssetInfoModule.endAssetScan === "function"
+    hasNativeMethod(BatchAssetInfoModule, "beginAssetScan") &&
+    hasNativeMethod(BatchAssetInfoModule, "getAssetScanPage") &&
+    hasNativeMethod(BatchAssetInfoModule, "endAssetScan")
   );
 }
 
@@ -368,7 +375,7 @@ export function isIncrementalAssetScanAvailable(): boolean {
   return (
     isAssetScanAvailable() &&
     getResolvedPhotoScanStrategy() === "incremental" &&
-    typeof BatchAssetInfoModule?.beginIncrementalAssetScan === "function"
+    hasNativeMethod(BatchAssetInfoModule, "beginIncrementalAssetScan")
   );
 }
 
@@ -377,7 +384,7 @@ export function isDatabaseBackedIncrementalAssetScanAvailable(): boolean {
   return (
     isAssetScanAvailable() &&
     getResolvedPhotoScanStrategy() === "incremental" &&
-    typeof BatchAssetInfoModule?.beginDatabaseBackedIncrementalAssetScan === "function"
+    hasNativeMethod(BatchAssetInfoModule, "beginDatabaseBackedIncrementalAssetScan")
   );
 }
 
@@ -392,7 +399,7 @@ export function getResolvedPhotoAssetThumbnailPreheatStrategy(): PhotoAssetThumb
     nativeValue: BatchAssetInfoModule?.resolvedPhotoAssetThumbnailPreheatStrategy,
     nativeMethodAvailable:
       BatchAssetInfoModule?.supportsPhotoAssetThumbnailPreheat === true &&
-      typeof BatchAssetInfoModule.updatePhotoAssetThumbnailPreheat === "function",
+      hasNativeMethod(BatchAssetInfoModule, "updatePhotoAssetThumbnailPreheat"),
   });
 }
 
@@ -411,7 +418,7 @@ export function updatePhotoAssetThumbnailPreheat(
   if (
     !request ||
     getResolvedPhotoAssetThumbnailPreheatStrategy() === DISABLED_PHOTO_ASSET_THUMBNAIL_PREHEAT_STRATEGY ||
-    typeof BatchAssetInfoModule?.updatePhotoAssetThumbnailPreheat !== "function"
+    !hasNativeMethod(BatchAssetInfoModule, "updatePhotoAssetThumbnailPreheat")
   ) {
     return false;
   }
@@ -425,7 +432,7 @@ export function updatePhotoAssetThumbnailPreheat(
 
 /** Ends only this mount's native preheat lease; repeated or stale scope cleanup is harmless. */
 export function endPhotoAssetThumbnailPreheat(scopeID: string): boolean {
-  if (scopeID.length === 0 || typeof BatchAssetInfoModule?.endPhotoAssetThumbnailPreheat !== "function") {
+  if (scopeID.length === 0 || !hasNativeMethod(BatchAssetInfoModule, "endPhotoAssetThumbnailPreheat")) {
     return false;
   }
   return BatchAssetInfoModule.endPhotoAssetThumbnailPreheat(scopeID);
@@ -433,7 +440,7 @@ export function endPhotoAssetThumbnailPreheat(scopeID: string): boolean {
 
 /** Clears the bounded native PhotoKit thumbnail and PHAsset caches when available. */
 export async function clearPhotoAssetThumbnailCache(): Promise<boolean> {
-  if (typeof BatchAssetInfoModule?.clearPhotoAssetThumbnailCache !== "function") {
+  if (!hasNativeMethod(BatchAssetInfoModule, "clearPhotoAssetThumbnailCache")) {
     return false;
   }
   await BatchAssetInfoModule.clearPhotoAssetThumbnailCache();
@@ -460,7 +467,7 @@ export async function beginAssetScan(): Promise<AssetScanSession> {
  */
 export async function beginIncrementalAssetScan(existingAssetIds: string[]): Promise<IncrementalAssetScanSession> {
   const nativeModule = requireBatchAssetInfoModule();
-  if (!isIncrementalAssetScanAvailable() || typeof nativeModule.beginIncrementalAssetScan !== "function") {
+  if (!isIncrementalAssetScanAvailable() || !hasNativeMethod(nativeModule, "beginIncrementalAssetScan")) {
     throw new Error("Incremental asset scanning is unavailable in this native binary");
   }
   return nativeModule.beginIncrementalAssetScan(existingAssetIds);
@@ -473,13 +480,13 @@ export async function beginIncrementalAssetScan(existingAssetIds: string[]): Pro
 export async function beginDatabaseBackedIncrementalAssetScan(
   databasePath: string,
 ): Promise<IncrementalAssetScanSession> {
-  if (typeof databasePath !== "string" || databasePath.trim().length === 0) {
+  if (databasePath.trim().length === 0) {
     throw new TypeError("Incremental photo scan database path must be a non-empty string");
   }
   const nativeModule = requireBatchAssetInfoModule();
   if (
     !isDatabaseBackedIncrementalAssetScanAvailable() ||
-    typeof nativeModule.beginDatabaseBackedIncrementalAssetScan !== "function"
+    !hasNativeMethod(nativeModule, "beginDatabaseBackedIncrementalAssetScan")
   ) {
     throw new Error("Database-backed incremental asset scanning is unavailable in this native binary");
   }
@@ -541,7 +548,8 @@ async function classifyImageBatch(
   assetIds: string[],
   options: ClassificationOptions = {},
 ): Promise<ClassificationResult[]> {
-  if (!BatchAssetInfoModule) {
+  const nativeModule = BatchAssetInfoModule;
+  if (!nativeModule) {
     throw new Error("BatchAssetInfo module is only available on iOS");
   }
 
@@ -555,12 +563,11 @@ async function classifyImageBatch(
   };
 
   return classifyWithVisionResultTransport(assetIds, {
-    resolvedTransport: BatchAssetInfoModule.resolvedVisionResultTransport,
-    classifyLegacy: () => BatchAssetInfoModule.classifyImageBatch(assetIds, opts),
-    classifyPackedV1:
-      typeof BatchAssetInfoModule.classifyImageBatchPackedV1 === "function"
-        ? () => BatchAssetInfoModule.classifyImageBatchPackedV1!(assetIds, opts)
-        : undefined,
+    resolvedTransport: nativeModule.resolvedVisionResultTransport,
+    classifyLegacy: () => nativeModule.classifyImageBatch(assetIds, opts),
+    classifyPackedV1: hasNativeMethod(nativeModule, "classifyImageBatchPackedV1")
+      ? () => nativeModule.classifyImageBatchPackedV1(assetIds, opts)
+      : undefined,
   });
 }
 

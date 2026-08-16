@@ -19,6 +19,12 @@ export interface MediaLibraryScanState {
   readonly nextCursor: string | undefined;
 }
 
+function hasNonEmptyPhotoScanCursor(
+  page: MediaLibraryPageProgress,
+): page is MediaLibraryPageProgress & { readonly endCursor: string } {
+  return typeof page.endCursor === "string" && page.endCursor.length > 0;
+}
+
 /**
  * Validate and reconcile one page from MediaLibrary's estimated, cursor-based
  * pagination. `hasNextPage` is authoritative; `totalCount` is only an estimate.
@@ -57,7 +63,7 @@ export function getValidatedMediaLibraryPageState(
     };
   }
 
-  if (typeof page.endCursor !== "string" || page.endCursor.length === 0) {
+  if (!hasNonEmptyPhotoScanCursor(page)) {
     throw new Error("MediaLibrary returned a nonempty page without a pagination cursor");
   }
   if (page.endCursor === previousCursor) {

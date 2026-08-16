@@ -15,20 +15,20 @@ const getScreenName = (pathname: string, segments: string[]): string => {
   }
 
   // Handle tab routes
-  const screenMap: Record<string, string> = {
-    "/": "Home",
-    "/review": "Review",
-    "/stats": "Stats",
-    "/settings": "Settings",
-    "/visits": "All Visits",
-    "/scan": "Scan",
-    "/rescan": "Rescan",
-    "/quick-actions": "Quick Actions",
-    "/settings-imports": "Reservation Imports",
-    "/calendar-import": "Calendar Import",
-  };
+  const screenMap = new Map<string, string>([
+    ["/", "Home"],
+    ["/review", "Review"],
+    ["/stats", "Stats"],
+    ["/settings", "Settings"],
+    ["/visits", "All Visits"],
+    ["/scan", "Scan"],
+    ["/rescan", "Rescan"],
+    ["/quick-actions", "Quick Actions"],
+    ["/settings-imports", "Reservation Imports"],
+    ["/calendar-import", "Calendar Import"],
+  ]);
 
-  return (screenMap[pathname] ?? segments.join("/")) || "Unknown";
+  return (screenMap.get(pathname) ?? segments.join("/")) || "Unknown";
 };
 
 /**

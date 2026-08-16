@@ -9,11 +9,11 @@ import Animated, {
   FadeInUp,
 } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
-import { IconSymbol } from "@/components/icon-symbol";
+import { IconSymbol, type IconSymbolName } from "@/components/icon-symbol";
 import { Button, ButtonText } from "./button";
 
 interface EmptyStateProps {
-  icon: string;
+  icon: IconSymbolName;
   iconColor?: string;
   title: string;
   description: string;
@@ -25,7 +25,7 @@ interface EmptyStateProps {
   variant?: "default" | "success" | "info";
 }
 
-function AnimatedIcon({ icon, color, variant }: { icon: string; color: string; variant: string }) {
+function AnimatedIcon({ icon, color, variant }: { icon: IconSymbolName; color: string; variant: string }) {
   "use no memo";
 
   const scale = useSharedValue(0.92);
@@ -50,7 +50,7 @@ function AnimatedIcon({ icon, color, variant }: { icon: string; color: string; v
 
   return (
     <Animated.View style={animatedStyle} className={`w-20 h-20 rounded-3xl ${bgColor} items-center justify-center`}>
-      <IconSymbol name={icon as never} size={40} color={color} />
+      <IconSymbol name={icon} size={40} color={color} />
     </Animated.View>
   );
 }

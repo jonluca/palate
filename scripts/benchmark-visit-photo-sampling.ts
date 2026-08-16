@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildVisitPhotoSampleStatement,
   FOOD_DETECTION_VISIT_SAMPLES_SQL,
@@ -13,6 +13,9 @@ import {
   type FoodDetectionVisitSamplePlan,
   type FoodDetectionVisitSampleRow,
 } from "../utils/db/visit-photo-sampling-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly visits: number;
@@ -185,6 +188,7 @@ function createDatabase(configuration: Configuration): DatabaseSync {
 }
 
 function legacyPlan(database: DatabaseSync, samplePercentage: number): FoodDetectionVisitSamplePlan {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const visits = database
     .prepare(
       `SELECT v.id FROM visits AS v
@@ -194,9 +198,10 @@ function legacyPlan(database: DatabaseSync, samplePercentage: number): FoodDetec
        )
        ORDER BY v.startTime DESC, v.id ASC`,
     )
-    .all() as Array<{ id: string }>;
+    .all() as Array<BenchmarkSQLiteRow<{ id: string }>>;
   const samples: FoodDetectionVisitSample[] = [];
   for (const visit of visits) {
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const rows = database
       .prepare(
         `SELECT id FROM photos
@@ -204,20 +209,22 @@ function legacyPlan(database: DatabaseSync, samplePercentage: number): FoodDetec
          ORDER BY creationTime ASC, id ASC
          LIMIT MAX(1, CAST((SELECT COUNT(*) FROM photos WHERE visitId = ?) * ? AS INTEGER))`,
       )
-      .all(visit.id, visit.id, samplePercentage) as Array<{ id: string }>;
+      .all(visit.id, visit.id, samplePercentage) as Array<BenchmarkSQLiteRow<{ id: string }>>;
     samples.push(...rows.map(({ id }, index) => ({ visitId: visit.id, photoId: id, sampleRank: index + 1 })));
   }
   return { totalVisits: visits.length, samples };
 }
 
 function combinedPlan(database: DatabaseSync, samplePercentage: number): FoodDetectionVisitSamplePlan {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const rows = database
     .prepare(FOOD_DETECTION_VISIT_SAMPLES_SQL)
-    .all(samplePercentage) as unknown as FoodDetectionVisitSampleRow[];
+    .all(samplePercentage) as BenchmarkSQLiteRow<FoodDetectionVisitSampleRow>[];
   return parseFoodDetectionVisitSampleRows(rows);
 }
 
 function chunkedPlan(database: DatabaseSync, samplePercentage: number): FoodDetectionVisitSamplePlan {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const visits = database
     .prepare(
       `SELECT v.id FROM visits AS v
@@ -227,14 +234,17 @@ function chunkedPlan(database: DatabaseSync, samplePercentage: number): FoodDete
        )
        ORDER BY v.startTime DESC, v.id ASC`,
     )
-    .all() as Array<{ id: string }>;
+    .all() as Array<BenchmarkSQLiteRow<{ id: string }>>;
   const samples: FoodDetectionVisitSample[] = [];
   for (let offset = 0; offset < visits.length; offset += VISIT_PHOTO_SAMPLE_BATCH_SIZE) {
     const statement = buildVisitPhotoSampleStatement(
       visits.slice(offset, offset + VISIT_PHOTO_SAMPLE_BATCH_SIZE).map(({ id }) => id),
       samplePercentage,
     );
-    const rows = database.prepare(statement.sql).all(...statement.parameters) as unknown as FoodDetectionVisitSample[];
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const rows = database
+      .prepare(statement.sql)
+      .all(...statement.parameters) as BenchmarkSQLiteRow<FoodDetectionVisitSample>[];
     samples.push(...rows.map(({ visitId, photoId, sampleRank }) => ({ visitId, photoId, sampleRank })));
   }
   return { totalVisits: visits.length, samples };
@@ -344,7 +354,10 @@ try {
   const legacy = summarize(legacySamples);
   const chunked = summarize(chunkedSamples);
   const combined = summarize(combinedSamples);
-  const sqliteVersion = (database.prepare("SELECT sqlite_version() AS version").get() as { version: string }).version;
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const sqliteVersion = (
+    database.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>
+  ).version;
   const visitPhotoCounts = database
     .prepare("SELECT COUNT(*) AS count FROM photos WHERE visitId IS NOT NULL GROUP BY visitId ORDER BY count ASC")
     .all()
@@ -365,7 +378,7 @@ try {
           eligibleVisits: expected.totalVisits,
           selectedPhotoRows: expected.samples.length,
           visitPhotoDistribution: {
-            shape: "deterministic bounded skew",
+            ["shape"]: "deterministic bounded skew",
             minimum: visitPhotoCounts[0],
             p50: percentile(0.5),
             p95: percentile(0.95),

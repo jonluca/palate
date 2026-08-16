@@ -2,7 +2,7 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   buildVisitPhotoSampleStatement,
   FOOD_DETECTION_VISIT_SAMPLES_SQL,
@@ -11,6 +11,51 @@ import {
   type FoodDetectionVisitSample,
   type FoodDetectionVisitSampleRow,
 } from "../utils/db/visit-photo-sampling-core.ts";
+
+interface IdRow {
+  readonly id: string;
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function requiredNumber(value: SQLOutputValue | undefined, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function parseIdRow(row: SQLiteRow): IdRow {
+  return { id: requiredString(row.id, "id") };
+}
+
+function parseFoodDetectionVisitSampleRow(row: SQLiteRow): FoodDetectionVisitSampleRow {
+  return {
+    visitId: requiredString(row.visitId, "sample.visitId"),
+    photoId: requiredString(row.photoId, "sample.photoId"),
+    sampleRank: requiredNumber(row.sampleRank, "sample.sampleRank"),
+    totalVisits: requiredNumber(row.totalVisits, "sample.totalVisits"),
+  };
+}
+
+function parseFoodDetectionVisitSample(row: SQLiteRow): FoodDetectionVisitSample {
+  return {
+    visitId: requiredString(row.visitId, "sample.visitId"),
+    photoId: requiredString(row.photoId, "sample.photoId"),
+    sampleRank: requiredNumber(row.sampleRank, "sample.sampleRank"),
+  };
+}
 
 function legacySamplePlan(database: DatabaseSync, samplePercentage: number) {
   const visits = database
@@ -22,7 +67,8 @@ function legacySamplePlan(database: DatabaseSync, samplePercentage: number) {
        )
        ORDER BY v.startTime DESC, v.id ASC`,
     )
-    .all() as Array<{ id: string }>;
+    .all()
+    .map(parseIdRow);
   const samples: FoodDetectionVisitSample[] = [];
   const sampleStatement = database.prepare(
     `SELECT id FROM photos
@@ -31,7 +77,7 @@ function legacySamplePlan(database: DatabaseSync, samplePercentage: number) {
      LIMIT MAX(1, CAST((SELECT COUNT(*) FROM photos WHERE visitId = ?) * ? AS INTEGER))`,
   );
   for (const visit of visits) {
-    const photos = sampleStatement.all(visit.id, visit.id, samplePercentage) as Array<{ id: string }>;
+    const photos = sampleStatement.all(visit.id, visit.id, samplePercentage).map(parseIdRow);
     samples.push(...photos.map(({ id }, index) => ({ visitId: visit.id, photoId: id, sampleRank: index + 1 })));
   }
   return { totalVisits: visits.length, samples };
@@ -40,7 +86,8 @@ function legacySamplePlan(database: DatabaseSync, samplePercentage: number) {
 function combinedSamplePlan(database: DatabaseSync, samplePercentage: number) {
   const rows = database
     .prepare(FOOD_DETECTION_VISIT_SAMPLES_SQL)
-    .all(samplePercentage) as unknown as FoodDetectionVisitSampleRow[];
+    .all(samplePercentage)
+    .map(parseFoodDetectionVisitSampleRow);
   return parseFoodDetectionVisitSampleRows(rows);
 }
 
@@ -54,14 +101,18 @@ function chunkedSamplePlan(database: DatabaseSync, samplePercentage: number) {
        )
        ORDER BY v.startTime DESC, v.id ASC`,
     )
-    .all() as Array<{ id: string }>;
+    .all()
+    .map(parseIdRow);
   const samples: FoodDetectionVisitSample[] = [];
   for (let offset = 0; offset < visits.length; offset += VISIT_PHOTO_SAMPLE_BATCH_SIZE) {
     const statement = buildVisitPhotoSampleStatement(
       visits.slice(offset, offset + VISIT_PHOTO_SAMPLE_BATCH_SIZE).map(({ id }) => id),
       samplePercentage,
     );
-    const rows = database.prepare(statement.sql).all(...statement.parameters) as unknown as FoodDetectionVisitSample[];
+    const rows = database
+      .prepare(statement.sql)
+      .all(...statement.parameters)
+      .map(parseFoodDetectionVisitSample);
     samples.push(...rows.map(({ visitId, photoId, sampleRank }) => ({ visitId, photoId, sampleRank })));
   }
   return { totalVisits: visits.length, samples };

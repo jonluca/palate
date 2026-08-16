@@ -140,13 +140,13 @@ export function parseFoodDetectionVisitSampleRows(
   const samples: FoodDetectionVisitSample[] = [];
 
   for (const [index, row] of rows.entries()) {
-    if (row === null || typeof row !== "object") {
+    if (!isFoodDetectionVisitSampleRow(row)) {
       throw new TypeError(`Food-detection sample row ${index} must be an object.`);
     }
-    if (typeof row.visitId !== "string" || row.visitId.length === 0) {
+    if (!hasFoodDetectionVisitId(row)) {
       throw new TypeError(`Food-detection sample row ${index} has an invalid visitId.`);
     }
-    if (typeof row.photoId !== "string" || row.photoId.length === 0) {
+    if (!hasFoodDetectionPhotoId(row)) {
       throw new TypeError(`Food-detection sample row ${index} has an invalid photoId.`);
     }
     if (!Number.isSafeInteger(row.sampleRank) || row.sampleRank < 1) {
@@ -181,4 +181,16 @@ export function parseFoodDetectionVisitSampleRows(
     totalVisits: firstTotalVisits,
     samples,
   };
+}
+
+function isFoodDetectionVisitSampleRow(row: FoodDetectionVisitSampleRow): row is FoodDetectionVisitSampleRow {
+  return row !== null && typeof row === "object";
+}
+
+function hasFoodDetectionVisitId(row: FoodDetectionVisitSampleRow): row is FoodDetectionVisitSampleRow {
+  return typeof row.visitId === "string" && row.visitId.length > 0;
+}
+
+function hasFoodDetectionPhotoId(row: FoodDetectionVisitSampleRow): row is FoodDetectionVisitSampleRow {
+  return typeof row.photoId === "string" && row.photoId.length > 0;
 }

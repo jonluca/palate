@@ -12,6 +12,7 @@ import {
   ReservationApiError,
   type ImportableReservation,
   type JsonRecord,
+  type JsonValue,
   type ReservationImportProgress,
   type ReservationImportResult,
 } from "@/services/reservation-import";
@@ -21,12 +22,9 @@ const RESY_RESERVATIONS_URL = "https://api.resy.com/3/user/reservations";
 const RESY_PAGE_LIMIT = 50;
 
 interface ResyReservationsPage {
-  reservations?: unknown[];
-  venues?: Record<string, unknown>;
-  metadata?: {
-    total?: number;
-    type?: string;
-  };
+  reservations: JsonValue[];
+  venues: JsonRecord;
+  total: number | null;
 }
 
 export type ResyImportableReservation = ImportableReservation;
@@ -40,7 +38,21 @@ export class ResyApiError extends ReservationApiError {
   }
 }
 
-function getVenueForReservation(reservation: JsonRecord, venues: Record<string, unknown>): JsonRecord | null {
+function isJsonNumber(value: JsonValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function parseResyReservationsPage(payload: JsonValue): ResyReservationsPage {
+  const record = asRecord(payload);
+  const metadata = asRecord(record?.metadata);
+  return {
+    reservations: Array.isArray(record?.reservations) ? record.reservations : [],
+    venues: asRecord(record?.venues) ?? {},
+    total: isJsonNumber(metadata?.total) ? metadata.total : null,
+  };
+}
+
+function getVenueForReservation(reservation: JsonRecord, venues: JsonRecord): JsonRecord | null {
   const reservationVenue = asRecord(reservation.venue);
   const venueId = getString(
     getPath(reservationVenue, ["id", "resy"]),
@@ -81,7 +93,7 @@ function parseReservationEndTime(reservation: JsonRecord, startTime: number): nu
   );
 }
 
-function normalizeReservation(reservation: unknown, venues: Record<string, unknown>): ResyImportableReservation | null {
+function normalizeReservation(reservation: JsonValue, venues: JsonRecord): ResyImportableReservation | null {
   const record = asRecord(reservation);
   if (!record) {
     return null;
@@ -165,14 +177,15 @@ async function fetchReservationsPage(authToken: string, offset: number): Promise
     headers: buildResyHeaders(authToken),
   });
 
-  const data = (await response.json().catch(() => null)) as ResyReservationsPage | null;
+  const payload: JsonValue | null = await response.json().catch(() => null);
+  const payloadRecord = asRecord(payload);
 
   if (!response.ok) {
-    const message = getString(asRecord(data)?.message) ?? `Resy request failed with ${response.status}`;
+    const message = getString(payloadRecord?.message) ?? `Resy request failed with ${response.status}`;
     throw new ResyApiError(message, response.status);
   }
 
-  return data ?? {};
+  return parseResyReservationsPage(payload);
 }
 
 async function fetchPastResyReservationHistory(
@@ -186,8 +199,8 @@ async function fetchPastResyReservationHistory(
 
   while (true) {
     const page = await fetchReservationsPage(authToken, offset);
-    const rawReservations = Array.isArray(page.reservations) ? page.reservations : [];
-    const venues = page.venues ?? {};
+    const rawReservations = page.reservations;
+    const venues = page.venues;
 
     for (const rawReservation of rawReservations) {
       const normalized = normalizeReservation(rawReservation, venues);
@@ -198,7 +211,7 @@ async function fetchPastResyReservationHistory(
       }
     }
 
-    total = typeof page.metadata?.total === "number" ? page.metadata.total : total;
+    total = page.total ?? total;
     options.onProgress?.({
       fetchedCount: reservations.length + invalidCount,
       totalCount: total,

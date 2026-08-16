@@ -1,3 +1,5 @@
+import { isJsonNumber, isJsonObject, type JsonObject, type JsonValue } from "../utils/runtime-json.ts";
+
 export interface InitialImagePreheatProfileArmSummary {
   readonly arm: "control" | "windowedPreheat";
   /** Time measured only inside the lead request session. */
@@ -131,21 +133,21 @@ export interface InitialImagePreheatProfileSummary {
   readonly validationPassed: boolean;
 }
 
-function object(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+function object(value: JsonValue, label: string): JsonObject {
+  if (!isJsonObject(value)) {
     throw new TypeError(`${label} must be an object`);
   }
-  return value as Record<string, unknown>;
+  return value;
 }
 
-function number(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function number(value: JsonValue, label: string): number {
+  if (!isJsonNumber(value) || !Number.isFinite(value)) {
     throw new TypeError(`${label} must be a finite number`);
   }
   return value;
 }
 
-function nonNegativeNumber(value: unknown, label: string): number {
+function nonNegativeNumber(value: JsonValue, label: string): number {
   const parsed = number(value, label);
   if (parsed < 0) {
     throw new TypeError(`${label} must be non-negative`);
@@ -153,7 +155,7 @@ function nonNegativeNumber(value: unknown, label: string): number {
   return parsed;
 }
 
-function integer(value: unknown, label: string): number {
+function integer(value: JsonValue, label: string): number {
   const parsed = number(value, label);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
     throw new TypeError(`${label} must be a non-negative safe integer`);
@@ -161,7 +163,7 @@ function integer(value: unknown, label: string): number {
   return parsed;
 }
 
-function positiveInteger(value: unknown, label: string): number {
+function positiveInteger(value: JsonValue, label: string): number {
   const parsed = integer(value, label);
   if (parsed === 0) {
     throw new TypeError(`${label} must be positive`);
@@ -169,8 +171,12 @@ function positiveInteger(value: unknown, label: string): number {
   return parsed;
 }
 
-function boolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") {
+function isJsonBoolean(value: JsonValue): value is boolean {
+  return typeof value === "boolean";
+}
+
+function boolean(value: JsonValue, label: string): boolean {
+  if (!isJsonBoolean(value)) {
     throw new TypeError(`${label} must be a boolean`);
   }
   return value;
@@ -185,7 +191,7 @@ function median(values: readonly number[]): number {
   return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
 }
 
-function parsePreheatMetrics(value: unknown, label: string): PreheatMetrics {
+function parsePreheatMetrics(value: JsonValue, label: string): PreheatMetrics {
   const metrics = object(value, label);
   return {
     updateCount: integer(metrics.updateCount, `${label}.updateCount`),
@@ -196,7 +202,7 @@ function parsePreheatMetrics(value: unknown, label: string): PreheatMetrics {
   };
 }
 
-function parseAssetFetchSchedulerMetrics(value: unknown, label: string): AssetFetchSchedulerMetrics {
+function parseAssetFetchSchedulerMetrics(value: JsonValue, label: string): AssetFetchSchedulerMetrics {
   const metrics = object(value, label);
   const rawPriority = metrics.activeBatchPriority;
   if (rawPriority !== undefined && rawPriority !== null && rawPriority !== "visible" && rawPriority !== "preheat") {
@@ -249,7 +255,7 @@ function parseAssetFetchSchedulerMetrics(value: unknown, label: string): AssetFe
   };
 }
 
-function parseStoreMetrics(value: unknown, label: string): StoreMetrics {
+function parseStoreMetrics(value: JsonValue, label: string): StoreMetrics {
   const metrics = object(value, label);
   return {
     assetFetchBatchCount: integer(metrics.assetFetchBatchCount, `${label}.assetFetchBatchCount`),
@@ -260,7 +266,7 @@ function parseStoreMetrics(value: unknown, label: string): StoreMetrics {
   };
 }
 
-function parseMeasurement(value: unknown, index: number): Measurement {
+function parseMeasurement(value: JsonValue, index: number): Measurement {
   const label = `measurements[${index}]`;
   const measurement = object(value, label);
   const arm = measurement.arm;
@@ -411,7 +417,7 @@ function scheduleIsValid(
   );
 }
 
-function parseProfileConfiguration(value: unknown): ProfileConfiguration {
+function parseProfileConfiguration(value: JsonValue): ProfileConfiguration {
   const configuration = object(value, "initialImagePreheat.configuration");
   if (!Array.isArray(configuration.imageCounts) || configuration.imageCounts.length === 0) {
     throw new TypeError("initialImagePreheat.configuration.imageCounts must be a non-empty array");
@@ -557,7 +563,7 @@ function timingIsValid(measurement: Measurement): boolean {
   );
 }
 
-export function summarizeInitialImagePreheatProfile(value: unknown): InitialImagePreheatProfileSummary {
+export function summarizeInitialImagePreheatProfile(value: JsonValue): InitialImagePreheatProfileSummary {
   const report = object(value, "report");
   if (report.status !== "ok" || report.authorizationStatus !== "authorized") {
     throw new Error("Profile must be successful and authorized for the real Photos library");

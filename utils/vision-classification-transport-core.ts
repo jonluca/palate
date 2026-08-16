@@ -27,14 +27,14 @@ export type VisionResultTransport = "legacy" | "packed-v1";
 export type PackedVisionClassificationPayload = ArrayBuffer | Uint8Array;
 
 interface VisionClassificationTransportMethods {
-  readonly resolvedTransport?: unknown;
+  readonly resolvedTransport?: string;
   readonly classifyLegacy: () => Promise<VisionClassificationResult[]>;
   readonly classifyPackedV1?: () => Promise<PackedVisionClassificationPayload>;
 }
 
 export function resolveVisionResultTransport(
   hasPackedV1Capability: boolean,
-  resolvedTransport: unknown,
+  resolvedTransport: string | undefined,
 ): VisionResultTransport {
   return hasPackedV1Capability && resolvedTransport === "packed-v1" ? "packed-v1" : "legacy";
 }
@@ -51,8 +51,11 @@ export async function classifyWithVisionResultTransport(
     return [];
   }
   const packedMethod = methods.classifyPackedV1;
-  if (resolveVisionResultTransport(typeof packedMethod === "function", methods.resolvedTransport) === "packed-v1") {
-    const payload = await packedMethod!();
+  if (
+    hasPackedVisionMethod(packedMethod) &&
+    resolveVisionResultTransport(true, methods.resolvedTransport) === "packed-v1"
+  ) {
+    const payload = await packedMethod();
     return decodePackedVisionClassificationResults(assetIds, payload);
   }
   return methods.classifyLegacy();
@@ -60,10 +63,20 @@ export async function classifyWithVisionResultTransport(
 
 export function assertVisionClassificationAssetIds(assetIds: readonly string[]): void {
   for (const [index, assetId] of assetIds.entries()) {
-    if (typeof assetId !== "string") {
+    if (!isVisionAssetId(assetId)) {
       throw new TypeError(`Vision asset ID ${index} must be a string`);
     }
   }
+}
+
+function hasPackedVisionMethod(
+  method: VisionClassificationTransportMethods["classifyPackedV1"],
+): method is () => Promise<PackedVisionClassificationPayload> {
+  return typeof method === "function";
+}
+
+function isVisionAssetId(assetId: string): assetId is string {
+  return typeof assetId === "string";
 }
 
 class PackedVisionReader {

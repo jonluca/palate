@@ -67,8 +67,11 @@ function createSchema(database: DatabaseSync): void {
 
 function createAdapter(database: DatabaseSync): FoodKeywordSyncDatabase {
   const connection: FoodKeywordSyncConnection = {
-    async getAllAsync<T>(source: string, parameters: Array<string | number>) {
-      return database.prepare(source).all(...parameters) as T[];
+    async getAllAsync(source: string, parameters: Array<string | number>) {
+      return database
+        .prepare(source)
+        .all(...parameters)
+        .map((row) => ({ keyword: String(row.keyword), isBuiltIn: Number(row.isBuiltIn) }));
     },
     async runAsync(source, parameters) {
       const result = database.prepare(source).run(...parameters);
@@ -155,7 +158,7 @@ async function runContendingWorkers(
     let preflights = 0;
     let settled = false;
 
-    const fail = (error: unknown): void => {
+    const fail = (cause: unknown): void => {
       if (settled) {
         return;
       }
@@ -163,7 +166,7 @@ async function runContendingWorkers(
       for (const worker of workers) {
         void worker.terminate();
       }
-      reject(error);
+      reject(cause);
     };
 
     for (const worker of workers) {

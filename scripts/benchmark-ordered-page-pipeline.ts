@@ -15,7 +15,7 @@ interface Configuration {
   readonly outputPath: string;
 }
 
-interface DelayShape {
+interface DelayProfile {
   readonly name: string;
   readonly classificationMilliseconds: number;
   readonly consumptionMilliseconds: number;
@@ -42,7 +42,7 @@ const DEFAULT_CONFIGURATION: Configuration = {
   outputPath: ".build/vision-page-orchestration-profile.json",
 };
 const STRATEGIES = ["serial", "lookahead"] as const;
-const DELAY_SHAPES: readonly DelayShape[] = [
+const DELAY_PROFILES: readonly DelayProfile[] = [
   { name: "classification-dominant", classificationMilliseconds: 8, consumptionMilliseconds: 2 },
   { name: "balanced", classificationMilliseconds: 5, consumptionMilliseconds: 5 },
   { name: "persistence-dominant", classificationMilliseconds: 2, consumptionMilliseconds: 8 },
@@ -125,20 +125,24 @@ function summarize(samples: readonly number[]): TimingSummary {
   };
 }
 
-function idealElapsedMilliseconds(pageCount: number, shape: DelayShape, strategy: OrderedPagePipelineStrategy): number {
+function idealElapsedMilliseconds(
+  pageCount: number,
+  profile: DelayProfile,
+  strategy: OrderedPagePipelineStrategy,
+): number {
   if (strategy === "serial") {
-    return pageCount * (shape.classificationMilliseconds + shape.consumptionMilliseconds);
+    return pageCount * (profile.classificationMilliseconds + profile.consumptionMilliseconds);
   }
   return (
-    shape.classificationMilliseconds +
-    (pageCount - 1) * Math.max(shape.classificationMilliseconds, shape.consumptionMilliseconds) +
-    shape.consumptionMilliseconds
+    profile.classificationMilliseconds +
+    (pageCount - 1) * Math.max(profile.classificationMilliseconds, profile.consumptionMilliseconds) +
+    profile.consumptionMilliseconds
   );
 }
 
 async function measure(
   pageCount: number,
-  shape: DelayShape,
+  profile: DelayProfile,
   strategy: OrderedPagePipelineStrategy,
 ): Promise<Measurement> {
   const pages = Array.from({ length: pageCount }, (_, index) => index);
@@ -152,13 +156,13 @@ async function measure(
     pages,
     strategy,
     produce: async (page) => {
-      await delay(shape.classificationMilliseconds);
+      await delay(profile.classificationMilliseconds);
       residentPages += 1;
       maximumResidentPages = Math.max(maximumResidentPages, residentPages);
       return page;
     },
     consume: async (produced) => {
-      await delay(shape.consumptionMilliseconds);
+      await delay(profile.consumptionMilliseconds);
       consumed.push(produced);
       checksum = Math.imul(checksum ^ (produced + 1), 16_777_619) >>> 0;
       residentPages -= 1;
@@ -171,7 +175,7 @@ async function measure(
   return { elapsedMilliseconds: performance.now() - startedAt, maximumResidentPages, checksum };
 }
 
-async function benchmarkShape(shape: DelayShape, configuration: Configuration): Promise<Record<string, unknown>> {
+async function benchmarkProfile(profile: DelayProfile, configuration: Configuration) {
   const samplesByStrategy = new Map<OrderedPagePipelineStrategy, number[]>(
     STRATEGIES.map((strategy) => [strategy, []]),
   );
@@ -182,7 +186,7 @@ async function benchmarkShape(shape: DelayShape, configuration: Configuration): 
   for (let iteration = 0; iteration < totalIterations; iteration++) {
     const order = iteration % 2 === 0 ? STRATEGIES : (["lookahead", "serial"] as const);
     for (const strategy of order) {
-      const measurement = await measure(configuration.pageCount, shape, strategy);
+      const measurement = await measure(configuration.pageCount, profile, strategy);
       expectedChecksum ??= measurement.checksum;
       assert.equal(measurement.checksum, expectedChecksum);
       maximumResidentPagesByStrategy.set(
@@ -195,16 +199,16 @@ async function benchmarkShape(shape: DelayShape, configuration: Configuration): 
     }
   }
 
-  const serialIdeal = idealElapsedMilliseconds(configuration.pageCount, shape, "serial");
-  const lookaheadIdeal = idealElapsedMilliseconds(configuration.pageCount, shape, "lookahead");
+  const serialIdeal = idealElapsedMilliseconds(configuration.pageCount, profile, "serial");
+  const lookaheadIdeal = idealElapsedMilliseconds(configuration.pageCount, profile, "lookahead");
   const serialTiming = summarize(samplesByStrategy.get("serial")!);
   const lookaheadTiming = summarize(samplesByStrategy.get("lookahead")!);
 
   return {
-    name: shape.name,
+    name: profile.name,
     delaysMilliseconds: {
-      classification: shape.classificationMilliseconds,
-      transformAndPersistence: shape.consumptionMilliseconds,
+      classification: profile.classificationMilliseconds,
+      transformAndPersistence: profile.consumptionMilliseconds,
     },
     exactOrderedParity: true,
     checksum: expectedChecksum!.toString(16).padStart(8, "0"),
@@ -234,10 +238,10 @@ if (!configuration) {
   process.exit(0);
 }
 
-const datasets: Record<string, unknown>[] = [];
-for (const shape of DELAY_SHAPES) {
+const datasets = new Array<Awaited<ReturnType<typeof benchmarkProfile>>>();
+for (const profile of DELAY_PROFILES) {
   // Keep every timing sample isolated from the other modeled workloads.
-  datasets.push(await benchmarkShape(shape, configuration));
+  datasets.push(await benchmarkProfile(profile, configuration));
 }
 
 const report = {

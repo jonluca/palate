@@ -2,7 +2,7 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { buildVisitStatusBatchStatement, type VisitStatus } from "../utils/db/visit-status-batch-core.ts";
 
 interface VisitRow {
@@ -10,6 +10,40 @@ interface VisitRow {
   readonly status: string;
   readonly updatedAt: number;
   readonly payload: string;
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function requiredNumber(value: SQLOutputValue | undefined, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function parseVisitRow(row: SQLiteRow): VisitRow {
+  return {
+    id: requiredString(row.id, "visits.id"),
+    status: requiredString(row.status, "visits.status"),
+    updatedAt: requiredNumber(row.updatedAt, "visits.updatedAt"),
+    payload: requiredString(row.payload, "visits.payload"),
+  };
+}
+
+function readCount(row: SQLiteRow | undefined, label: string): number {
+  assert.ok(row, `${label} must return one row`);
+  return requiredNumber(row.count, `${label}.count`);
 }
 
 const EDGE_IDS = ["", "plain", "O'Brien", 'double-"quote"', "back\\slash", "訪問-東京-🍣", "line\nbreak"];
@@ -60,10 +94,7 @@ function applyCandidate(
 }
 
 function snapshot(database: DatabaseSync): VisitRow[] {
-  return database
-    .prepare("SELECT id, status, updatedAt, payload FROM visits ORDER BY id")
-    .all()
-    .map((row) => ({ ...row })) as unknown as VisitRow[];
+  return database.prepare("SELECT id, status, updatedAt, payload FROM visits ORDER BY id").all().map(parseVisitRow);
 }
 
 function assertParity(visitIds: readonly string[], status: VisitStatus, allIds: readonly string[]): void {
@@ -83,12 +114,14 @@ function assertParity(visitIds: readonly string[], status: VisitStatus, allIds: 
 
 assert.equal(buildVisitStatusBatchStatement([], "confirmed", UPDATED_AT), null);
 assert.throws(
-  () => buildVisitStatusBatchStatement(["visit"], "invalid" as VisitStatus, UPDATED_AT),
+  // @ts-expect-error: The boundary test deliberately supplies an unsupported status.
+  () => buildVisitStatusBatchStatement(["visit"], "invalid", UPDATED_AT),
   /Unsupported visit status/,
 );
 assert.throws(() => buildVisitStatusBatchStatement(["visit"], "confirmed", Number.NaN), /must be finite/);
 assert.throws(
-  () => buildVisitStatusBatchStatement(["visit", 42 as unknown as string], "confirmed", UPDATED_AT),
+  // @ts-expect-error: The boundary test deliberately supplies a non-string visit ID.
+  () => buildVisitStatusBatchStatement(["visit", 42], "confirmed", UPDATED_AT),
   /string visit IDs/,
 );
 
@@ -149,19 +182,17 @@ const largeDatabase = createDatabase(largeIds);
 try {
   assert.equal(applyCandidate(largeDatabase, largeSelection, "rejected", UPDATED_AT), 4_000);
   assert.equal(
-    (
-      largeDatabase.prepare("SELECT COUNT(*) AS count FROM visits WHERE status = 'rejected'").get() as {
-        count: number;
-      }
-    ).count,
+    readCount(
+      largeDatabase.prepare("SELECT COUNT(*) AS count FROM visits WHERE status = 'rejected'").get(),
+      "status count",
+    ),
     4_333,
   );
   assert.equal(
-    (
-      largeDatabase.prepare("SELECT COUNT(*) AS count FROM visits WHERE updatedAt = ?").get(UPDATED_AT) as {
-        count: number;
-      }
-    ).count,
+    readCount(
+      largeDatabase.prepare("SELECT COUNT(*) AS count FROM visits WHERE updatedAt = ?").get(UPDATED_AT),
+      "updated count",
+    ),
     4_000,
   );
 } finally {

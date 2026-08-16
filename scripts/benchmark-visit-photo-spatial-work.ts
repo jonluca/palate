@@ -162,8 +162,14 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   await measure("photoGated", 1, guideRows);
 }
 
-const emptySamples: Record<Strategy, Measurement[]> = { legacyEager: [], photoGated: [] };
-const nonEmptySamples: Record<Strategy, Measurement[]> = { legacyEager: [], photoGated: [] };
+const emptySamples = { legacyEager: new Array<Measurement>(), photoGated: new Array<Measurement>() } satisfies Record<
+  Strategy,
+  Measurement[]
+>;
+const nonEmptySamples = {
+  legacyEager: new Array<Measurement>(),
+  photoGated: new Array<Measurement>(),
+} satisfies Record<Strategy, Measurement[]>;
 for (let sample = 0; sample < configuration.samples; sample++) {
   const order: Strategy[] = sample % 2 === 0 ? ["legacyEager", "photoGated"] : ["photoGated", "legacyEager"];
   for (const strategy of order) {

@@ -169,7 +169,7 @@ export const ResizableImage = <T = string,>({
 
   const getPosition = (i?: number) => {
     "worklet";
-    return -(width + emptySpaceWidth) * (typeof i !== "undefined" ? i : index);
+    return -(width + emptySpaceWidth) * (i ?? index);
   };
 
   const getIndexFromPosition = (position: number) => {

@@ -16,6 +16,7 @@ import {
 } from "./visit-list-paging-core";
 import { buildVisitStatusBatchStatement, type VisitStatus } from "./visit-status-batch-core";
 import type { RestaurantVisitWithPreview, VisitPreviewPhoto, VisitRecord, VisitWithDetails } from "./types";
+import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from "../runtime-json.ts";
 
 // Visit operations
 export async function insertVisits(visits: Omit<VisitRecord, "photoCount" | "foodProbable">[]): Promise<void> {
@@ -232,13 +233,13 @@ export async function getRestaurantVisitsWithPreviews(restaurantId: string): Pro
 
     if (previewPhotosJson) {
       try {
-        const parsed = JSON.parse(previewPhotosJson) as VisitPreviewPhoto[];
-        previewPhotos = parsed.map((photo) => ({
-          id: photo.id,
-          uri: photo.uri,
-          mediaType: photo.mediaType === "video" ? "video" : "photo",
-          duration: typeof photo.duration === "number" ? photo.duration : null,
-        }));
+        const decoded = parseJsonValue(previewPhotosJson);
+        previewPhotos = Array.isArray(decoded)
+          ? decoded.flatMap((photo) => {
+              const parsed = parseVisitPreviewPhoto(photo);
+              return parsed ? [parsed] : [];
+            })
+          : [];
       } catch {
         // Skip malformed JSON.
       }
@@ -263,12 +264,25 @@ export interface BatchVisitConfirmation {
 const BUSY_RETRY_ATTEMPTS = 5;
 const BUSY_RETRY_BASE_DELAY_MS = 50;
 
-function isDatabaseBusyError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
+function isDatabaseBusyError(cause: unknown): boolean {
+  if (!(cause instanceof Error)) {
     return false;
   }
-  const message = error.message.toLowerCase();
+  const message = cause.message.toLowerCase();
   return message.includes("database is locked") || message.includes("sqlite_busy");
+}
+
+function parseVisitPreviewPhoto(value: JsonValue): VisitPreviewPhoto | null {
+  if (!isJsonObject(value) || !isJsonString(value.id) || !isJsonString(value.uri)) {
+    return null;
+  }
+  const duration = value.duration;
+  return {
+    id: value.id,
+    uri: value.uri,
+    mediaType: value.mediaType === "video" ? "video" : "photo",
+    duration: duration !== undefined && isJsonNumber(duration) ? duration : null,
+  };
 }
 
 async function delay(ms: number): Promise<void> {

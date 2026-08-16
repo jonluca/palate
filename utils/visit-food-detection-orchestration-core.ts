@@ -71,7 +71,10 @@ export interface Rank3BulkTailVisitFoodDetectionSummary {
   readonly skippedAfterPositive: readonly AdaptiveVisitFoodSample[];
 }
 
-function assertBatchProgress(progress: VisitFoodDetectionBatchProgress, batchSize: number): void {
+function assertBatchProgress(
+  progress: VisitFoodDetectionBatchProgress,
+  batchSize: number,
+): asserts progress is VisitFoodDetectionBatchProgress {
   if (
     progress === null ||
     typeof progress !== "object" ||
@@ -99,10 +102,12 @@ function selectBulkTail(
   );
 }
 
-function summarizeAttempts(attempts: readonly AdaptiveVisitFoodAttempt[]): {
+interface VisitFoodDetectionAttemptSummary {
   readonly foodFoundSamples: number;
   readonly retryableFailures: number;
-} {
+}
+
+function summarizeAttempts(attempts: readonly AdaptiveVisitFoodAttempt[]): VisitFoodDetectionAttemptSummary {
   let foodFoundSamples = 0;
   let retryableFailures = 0;
   for (const attempt of attempts) {
@@ -115,14 +120,9 @@ function summarizeAttempts(attempts: readonly AdaptiveVisitFoodAttempt[]): {
   return { foodFoundSamples, retryableFailures };
 }
 
-/**
- * Runs three adaptive rank waves followed by one stable visit-major bulk tail.
- * One shared persistence lifecycle owns every wave, and each adaptive transition
- * is committed only after its successful native rows pass an awaited checkpoint.
- */
-export async function runRank3BulkTailVisitFoodDetection<PersistedResult>(
+function assertRank3BulkTailOptions<PersistedResult>(
   options: Rank3BulkTailVisitFoodDetectionOptions<PersistedResult>,
-): Promise<Rank3BulkTailVisitFoodDetectionSummary> {
+): asserts options is Rank3BulkTailVisitFoodDetectionOptions<PersistedResult> {
   if (options === null || typeof options !== "object") {
     throw new TypeError("Rank3 bulk-tail visit food-detection options must be an object.");
   }
@@ -138,6 +138,23 @@ export async function runRank3BulkTailVisitFoodDetection<PersistedResult>(
   if (options.onProgress !== undefined && typeof options.onProgress !== "function") {
     throw new TypeError("Rank3 bulk-tail progress must be a function when provided.");
   }
+}
+
+function isVisitFoodDetectionBatchExecution(
+  execution: VisitFoodDetectionBatchExecution,
+): execution is VisitFoodDetectionBatchExecution {
+  return execution !== null && typeof execution === "object";
+}
+
+/**
+ * Runs three adaptive rank waves followed by one stable visit-major bulk tail.
+ * One shared persistence lifecycle owns every wave, and each adaptive transition
+ * is committed only after its successful native rows pass an awaited checkpoint.
+ */
+export async function runRank3BulkTailVisitFoodDetection<PersistedResult>(
+  options: Rank3BulkTailVisitFoodDetectionOptions<PersistedResult>,
+): Promise<Rank3BulkTailVisitFoodDetectionSummary> {
+  assertRank3BulkTailOptions(options);
 
   let state = createAdaptiveVisitFoodState(options.samples);
   let tailAttempts: readonly AdaptiveVisitFoodAttempt[] = [];
@@ -174,7 +191,7 @@ export async function runRank3BulkTailVisitFoodDetection<PersistedResult>(
               });
             },
           });
-          if (execution === null || typeof execution !== "object") {
+          if (!isVisitFoodDetectionBatchExecution(execution)) {
             throw new TypeError("Visit food-detection batch execution must return an object.");
           }
           return execution.outcomes;

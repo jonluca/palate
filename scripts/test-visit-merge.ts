@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildVisitMergePlan,
   VISIT_MERGE_COPY_SUGGESTIONS_SQL,
@@ -39,6 +39,23 @@ interface VirtualRetryClock {
   readonly requestedSleeps: number[];
 }
 
+interface VirtualRetryRuntimeFixture {
+  readonly clock: VirtualRetryClock;
+  readonly runtime: VisitMergeRetryRuntime;
+}
+
+interface SnapshotComparison {
+  readonly exact: boolean;
+  readonly digest: string;
+  readonly maximumCentroidAbsoluteDifference: number;
+}
+
+interface SemanticParityResult {
+  readonly scenarios: number;
+  readonly exact: boolean;
+  readonly digest: string;
+}
+
 function createVirtualRetryRuntime({
   initialMonotonicTimeMs = 0,
   initialWallTimeMs = FIXED_UPDATED_AT,
@@ -49,7 +66,7 @@ function createVirtualRetryRuntime({
   initialWallTimeMs?: number;
   sleepOvershootMs?: number;
   onSleep?: (clock: VirtualRetryClock) => void;
-} = {}): { readonly clock: VirtualRetryClock; readonly runtime: VisitMergeRetryRuntime } {
+} = {}): VirtualRetryRuntimeFixture {
   const clock: VirtualRetryClock = {
     monotonicTimeMs: initialMonotonicTimeMs,
     wallTimeMs: initialWallTimeMs,
@@ -128,14 +145,79 @@ export interface PhotoSeed {
   readonly marker?: string;
 }
 
-const TABLE_QUERIES: Record<TableName, string> = {
+const TABLE_QUERIES = {
   michelin_restaurants: "SELECT * FROM michelin_restaurants ORDER BY id",
   restaurants: "SELECT * FROM restaurants ORDER BY id",
   visits: "SELECT * FROM visits ORDER BY id",
   photos: "SELECT * FROM photos ORDER BY id",
   visit_suggested_restaurants: "SELECT * FROM visit_suggested_restaurants ORDER BY visitId, restaurantId",
   reservation_import_sources: "SELECT * FROM reservation_import_sources ORDER BY sourceEventId",
-};
+} satisfies Record<TableName, string>;
+
+function isSupportedSQLiteValue(value: SQLOutputValue): value is SQLiteValue {
+  return value === null || typeof value === "string" || typeof value === "number";
+}
+
+function parseSQLiteValue(value: SQLOutputValue, context: string): SQLiteValue {
+  if (!isSupportedSQLiteValue(value)) {
+    throw new TypeError(`${context} returned an unsupported SQLite value.`);
+  }
+  return value;
+}
+
+function parseSQLiteRow(row: Record<string, SQLOutputValue> | undefined, context: string): Row | undefined {
+  if (!row) {
+    return undefined;
+  }
+  const parsed: Row = {};
+  for (const [column, value] of Object.entries(row)) {
+    parsed[column] = parseSQLiteValue(value, `${context}.${column}`);
+  }
+  return parsed;
+}
+
+function requireSQLiteRow(row: Record<string, SQLOutputValue> | undefined, context: string): Row {
+  const parsed = parseSQLiteRow(row, context);
+  if (!parsed) {
+    throw new Error(`${context} did not return a row.`);
+  }
+  return parsed;
+}
+
+function isSQLiteNumber(value: SQLiteValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requireSQLiteNumber(value: SQLiteValue | undefined, context: string): number {
+  if (!isSQLiteNumber(value)) {
+    throw new TypeError(`${context} must be a number.`);
+  }
+  return value;
+}
+
+function isSQLiteString(value: SQLiteValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function requireSQLiteString(value: SQLiteValue | undefined, context: string): string {
+  if (!isSQLiteString(value)) {
+    throw new TypeError(`${context} must be a string.`);
+  }
+  return value;
+}
+
+function parseVisitMergePreflightRow(
+  row: Record<string, SQLOutputValue> | undefined,
+): VisitMergePreflightRow | undefined {
+  const parsed = parseSQLiteRow(row, "visit merge preflight");
+  if (!parsed) {
+    return undefined;
+  }
+  return {
+    plannedVisitCount: requireSQLiteNumber(parsed.plannedVisitCount, "visit merge preflight plannedVisitCount"),
+    existingVisitCount: requireSQLiteNumber(parsed.existingVisitCount, "visit merge preflight existingVisitCount"),
+  };
+}
 
 export function createVisitMergeDatabase(): DatabaseSync {
   const database = new DatabaseSync(":memory:");
@@ -346,9 +428,15 @@ export function executeLegacySequential(
 
     for (let index = 1; index < group.visits.length; index++) {
       const sourceVisitId = group.visits[index]!.id;
-      const targetVisit = prepare("SELECT * FROM visits WHERE id = ?").get(targetVisitId) as Row | undefined;
+      const targetVisit = parseSQLiteRow(
+        prepare("SELECT * FROM visits WHERE id = ?").get(targetVisitId),
+        "legacy target visit",
+      );
       executionCalls += 1;
-      const sourceVisit = prepare("SELECT * FROM visits WHERE id = ?").get(sourceVisitId) as Row | undefined;
+      const sourceVisit = parseSQLiteRow(
+        prepare("SELECT * FROM visits WHERE id = ?").get(sourceVisitId),
+        "legacy source visit",
+      );
       executionCalls += 1;
       if (!targetVisit || !sourceVisit) {
         throw new Error("One or both visits not found");
@@ -360,7 +448,15 @@ export function executeLegacySequential(
       const locatedPhotos = prepare(
         `SELECT latitude, longitude FROM photos
          WHERE visitId = ? AND latitude IS NOT NULL AND longitude IS NOT NULL`,
-      ).all(targetVisitId) as Array<{ latitude: number; longitude: number }>;
+      )
+        .all(targetVisitId)
+        .map((row, index) => {
+          const parsed = requireSQLiteRow(row, `located photo ${index}`);
+          return {
+            latitude: requireSQLiteNumber(parsed.latitude, `located photo ${index} latitude`),
+            longitude: requireSQLiteNumber(parsed.longitude, `located photo ${index} longitude`),
+          };
+        });
       executionCalls += 1;
 
       let centerLat = Number(targetVisit.centerLat);
@@ -370,14 +466,18 @@ export function executeLegacySequential(
         centerLon = locatedPhotos.reduce((sum, photo) => sum + photo.longitude, 0) / locatedPhotos.length;
       }
 
-      const countRow = prepare("SELECT COUNT(*) AS count FROM photos WHERE visitId = ?").get(targetVisitId) as {
-        count: number;
-      };
+      const countRow = requireSQLiteRow(
+        prepare("SELECT COUNT(*) AS count FROM photos WHERE visitId = ?").get(targetVisitId),
+        "legacy photo count",
+      );
       executionCalls += 1;
-      const foodRow = prepare(
-        `SELECT MAX(CASE WHEN foodDetected = 1 THEN 1 ELSE 0 END) AS hasFood
+      const foodRow = requireSQLiteRow(
+        prepare(
+          `SELECT MAX(CASE WHEN foodDetected = 1 THEN 1 ELSE 0 END) AS hasFood
          FROM photos WHERE visitId = ?`,
-      ).get(targetVisitId) as { hasFood: number | null };
+        ).get(targetVisitId),
+        "legacy food summary",
+      );
       executionCalls += 1;
 
       prepare(`UPDATE visits SET
@@ -388,7 +488,7 @@ export function executeLegacySequential(
         Math.max(Number(targetVisit.endTime), Number(sourceVisit.endTime)),
         centerLat,
         centerLon,
-        countRow.count,
+        requireSQLiteNumber(countRow.count, "legacy photo count value"),
         foodRow.hasFood === 1 || Number(targetVisit.foodProbable) !== 0 || Number(sourceVisit.foodProbable) !== 0
           ? 1
           : 0,
@@ -437,7 +537,7 @@ export function executeCandidatePlan(
   database.exec("BEGIN IMMEDIATE");
   transactionControlCalls += 1;
   try {
-    const preflight = prepare(VISIT_MERGE_PREFLIGHT_SQL).get(plan.payload) as VisitMergePreflightRow | undefined;
+    const preflight = parseVisitMergePreflightRow(prepare(VISIT_MERGE_PREFLIGHT_SQL).get(plan.payload));
     executionCalls += 1;
     if (
       !preflight ||
@@ -485,7 +585,10 @@ export function executeCandidatePlan(
 
 export function snapshotDatabase(database: DatabaseSync): DatabaseSnapshot {
   const read = (table: TableName): Row[] =>
-    (database.prepare(TABLE_QUERIES[table]).all() as unknown as Row[]).map((row) => ({ ...row }));
+    database
+      .prepare(TABLE_QUERIES[table])
+      .all()
+      .map((row, index) => requireSQLiteRow(row, `${table} snapshot row ${index}`));
   return {
     michelin_restaurants: read("michelin_restaurants"),
     restaurants: read("restaurants"),
@@ -514,7 +617,7 @@ export function assertSnapshotsEquivalent(
   actual: DatabaseSnapshot,
   expected: DatabaseSnapshot,
   coordinateTolerance = 1e-12,
-): { exact: boolean; digest: string; maximumCentroidAbsoluteDifference: number } {
+): SnapshotComparison {
   const exact = JSON.stringify(actual) === JSON.stringify(expected);
   assert.deepEqual(withoutVisitCenters(actual), withoutVisitCenters(expected));
   assert.equal(actual.visits.length, expected.visits.length);
@@ -546,7 +649,7 @@ export function assertSnapshotsEquivalent(
 }
 
 export function assertDatabaseHealth(database: DatabaseSync): void {
-  const quickCheck = database.prepare("PRAGMA quick_check").get() as Record<string, unknown>;
+  const quickCheck = requireSQLiteRow(database.prepare("PRAGMA quick_check").get(), "PRAGMA quick_check");
   assert.deepEqual(Object.values(quickCheck), ["ok"]);
   assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
 }
@@ -723,7 +826,7 @@ export function seedSemanticFixture(database: DatabaseSync): readonly MergeableV
 }
 
 function getVisit(database: DatabaseSync, id: string): Row {
-  const visit = database.prepare("SELECT * FROM visits WHERE id = ?").get(id) as Row | undefined;
+  const visit = parseSQLiteRow(database.prepare("SELECT * FROM visits WHERE id = ?").get(id), "visit lookup");
   assert.ok(visit, `missing visit ${JSON.stringify(id)}`);
   return visit;
 }
@@ -759,23 +862,12 @@ function runPlannerTests(): number {
   assert.deepEqual(JSON.parse(ordered.payload), ordered.entries);
   scenarios += 1;
 
-  assert.throws(
-    () => buildVisitMergePlan([{ ...createGroup("r", ["a", "b"]), visits: null } as unknown as MergeableVisitGroup]),
-    /Invalid visit merge group/,
-  );
-  assert.throws(
-    () =>
-      buildVisitMergePlan([
-        {
-          ...createGroup("r", ["a", "b"]),
-          visits: [
-            { id: 42 as unknown as string, startTime: 0, endTime: 1, photoCount: 0 },
-            { id: "valid", startTime: 2, endTime: 3, photoCount: 0 },
-          ],
-        },
-      ]),
-    /Invalid visit ID/,
-  );
+  const groupWithMissingVisits = createGroup("r", ["a", "b"]);
+  Object.defineProperty(groupWithMissingVisits, "visits", { value: null });
+  assert.throws(() => buildVisitMergePlan([groupWithMissingVisits]), /Invalid visit merge group/);
+  const groupWithInvalidVisitId = createGroup("r", ["invalid", "valid"]);
+  Object.defineProperty(groupWithInvalidVisitId.visits[0], "id", { value: 42 });
+  assert.throws(() => buildVisitMergePlan([groupWithInvalidVisitId]), /Invalid visit ID/);
   assert.throws(() => buildVisitMergePlan([createGroup("r", ["same", "same"])]), /overlap/);
   assert.throws(() => buildVisitMergePlan([createGroup("r1", ["a", "b"]), createGroup("r2", ["c", "b"])]), /overlap/);
   assert.throws(() => buildVisitMergePlan([createGroup("r1", ["a", "b"]), createGroup("r2", ["b", "c"])]), /overlap/);
@@ -783,7 +875,7 @@ function runPlannerTests(): number {
   return scenarios;
 }
 
-function runSemanticParityTest(): { scenarios: number; exact: boolean; digest: string } {
+function runSemanticParityTest(): SemanticParityResult {
   const legacy = createVisitMergeDatabase();
   const candidate = createVisitMergeDatabase();
   try {
@@ -829,9 +921,12 @@ function runSemanticParityTest(): { scenarios: number; exact: boolean; digest: s
 
     for (const sourceId of ["source-first", "source-second", "", "source-no-coordinates"]) {
       assert.equal(candidate.prepare("SELECT 1 FROM visits WHERE id = ?").get(sourceId), undefined);
+      const sourcePhotoCount = requireSQLiteRow(
+        candidate.prepare("SELECT COUNT(*) AS count FROM photos WHERE visitId = ?").get(sourceId),
+        `source ${JSON.stringify(sourceId)} photo count`,
+      );
       assert.equal(
-        (candidate.prepare("SELECT COUNT(*) AS count FROM photos WHERE visitId = ?").get(sourceId) as { count: number })
-          .count,
+        requireSQLiteNumber(sourcePhotoCount.count, `source ${JSON.stringify(sourceId)} photo count value`),
         0,
       );
     }
@@ -840,7 +935,13 @@ function runSemanticParityTest(): { scenarios: number; exact: boolean; digest: s
       .prepare(`SELECT restaurantId, distance FROM visit_suggested_restaurants
         WHERE visitId = ? ORDER BY restaurantId`)
       .all("target-O'Brien-雪")
-      .map((row) => ({ ...row })) as Array<{ restaurantId: string; distance: number }>;
+      .map((row, index) => {
+        const parsed = requireSQLiteRow(row, `suggestion row ${index}`);
+        return {
+          restaurantId: requireSQLiteString(parsed.restaurantId, `suggestion row ${index} restaurantId`),
+          distance: requireSQLiteNumber(parsed.distance, `suggestion row ${index} distance`),
+        };
+      });
     assert.deepEqual(suggestions, [
       { restaurantId: "m-common", distance: 1.1 },
       { restaurantId: "m-empty-only", distance: 4.2 },
@@ -853,7 +954,16 @@ function runSemanticParityTest(): { scenarios: number; exact: boolean; digest: s
     const movedReservations = candidate
       .prepare(`SELECT sourceEventId, visitId, importedAt, marker
         FROM reservation_import_sources ORDER BY sourceEventId`)
-      .all() as Array<{ sourceEventId: string; visitId: string; importedAt: number; marker: string }>;
+      .all()
+      .map((row, index) => {
+        const parsed = requireSQLiteRow(row, `reservation source row ${index}`);
+        return {
+          sourceEventId: requireSQLiteString(parsed.sourceEventId, `reservation source row ${index} sourceEventId`),
+          visitId: requireSQLiteString(parsed.visitId, `reservation source row ${index} visitId`),
+          importedAt: requireSQLiteNumber(parsed.importedAt, `reservation source row ${index} importedAt`),
+          marker: requireSQLiteString(parsed.marker, `reservation source row ${index} marker`),
+        };
+      });
     assert.equal(
       movedReservations.find(({ sourceEventId }) => sourceEventId === "reservation-first")?.visitId,
       "target-O'Brien-雪",
@@ -1083,7 +1193,7 @@ async function runRetryPolicyTests(): Promise<number> {
         finalBusyError = new Error(`Error code 5: database is locked (attempt ${attempts})`);
         throw finalBusyError;
       }, runtime),
-      (error: unknown) => error === finalBusyError,
+      (cause: unknown) => cause === finalBusyError,
     );
     assert.equal(attempts, expectedAttemptOffsets.length);
     assert.equal(clock.monotonicTimeMs, VISIT_MERGE_RETRY_POLICY.retryWindowMs);
@@ -1100,7 +1210,7 @@ async function runRetryPolicyTests(): Promise<number> {
         attempts += 1;
         throw nonBusyError;
       }, runtime),
-      (error: unknown) => error === nonBusyError,
+      (cause: unknown) => cause === nonBusyError,
     );
     assert.equal(attempts, 1);
     assert.deepEqual(clock.requestedSleeps, []);
@@ -1115,7 +1225,7 @@ async function runRetryPolicyTests(): Promise<number> {
         attempts += 1;
         throw androidBusyError;
       }, runtime),
-      (error: unknown) => error === androidBusyError,
+      (cause: unknown) => cause === androidBusyError,
     );
     assert.equal(attempts, 10);
     assert.equal(clock.monotonicTimeMs, VISIT_MERGE_RETRY_POLICY.retryWindowMs + 25);
@@ -1153,8 +1263,11 @@ async function runRealSQLiteContentionTests(): Promise<number> {
   const executeMergeAttempt = async (updatedAt: number): Promise<number> => {
     try {
       candidate.exec("BEGIN");
-      const preflight = candidate.prepare("SELECT COUNT(*) AS count FROM visits").get() as { count: number };
-      assert.equal(preflight.count, 2);
+      const preflight = requireSQLiteRow(
+        candidate.prepare("SELECT COUNT(*) AS count FROM visits").get(),
+        "real SQLite contention preflight",
+      );
+      assert.equal(requireSQLiteNumber(preflight.count, "real SQLite contention preflight count"), 2);
       candidate.prepare("UPDATE visits SET updatedAt = ? WHERE id = 'target'").run(updatedAt);
       candidate.prepare("DELETE FROM visits WHERE id = 'source'").run();
       candidate.exec("COMMIT");
@@ -1170,7 +1283,7 @@ async function runRealSQLiteContentionTests(): Promise<number> {
     candidate
       .prepare("SELECT id, updatedAt, marker FROM visits ORDER BY id")
       .all()
-      .map((row) => ({ ...row }));
+      .map((row, index) => requireSQLiteRow(row, `real SQLite contention row ${index}`));
 
   try {
     locker.exec(`
@@ -1218,7 +1331,7 @@ async function runRealSQLiteContentionTests(): Promise<number> {
         exhaustedAttempts += 1;
         return executeMergeAttempt(updatedAt);
       }, exhausted.runtime),
-      (error: unknown) => error instanceof Error && error.message.toLowerCase().includes("database is locked"),
+      (cause: unknown) => cause instanceof Error && cause.message.toLowerCase().includes("database is locked"),
     );
     assert.equal(exhaustedAttempts, 10);
     assert.deepEqual(readRows(), beforeExhaustion);

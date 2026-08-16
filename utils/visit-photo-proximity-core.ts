@@ -24,7 +24,7 @@ export interface PreparedVisitPhotoDistanceThreshold {
   readonly ordinaryLongitudeRejectDegrees: number | null;
 }
 
-function isValidCoordinateValues(latitude: number, longitude: number): boolean {
+function isValidCoordinateValues(latitude: number, longitude: number): latitude is number {
   return (
     typeof latitude === "number" &&
     latitude >= -90 &&

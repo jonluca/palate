@@ -1,3 +1,5 @@
+import type { ButtonProps as SwiftUIButtonProps } from "@expo/ui/swift-ui";
+
 export interface NativeStatsButtonProps {
   label: string;
   onPress: () => void;
@@ -5,6 +7,6 @@ export interface NativeStatsButtonProps {
   iconOnly?: boolean;
   prominent?: boolean;
   size?: "small" | "regular" | "large";
-  systemImage?: string;
+  systemImage?: SwiftUIButtonProps["systemImage"];
   tintColor?: string;
 }

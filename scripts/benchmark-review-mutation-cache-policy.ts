@@ -24,6 +24,25 @@ interface ModeledReviewRow {
   readonly payload: string;
 }
 
+function isModeledReviewRow<Value>(value: Value): value is Value & ModeledReviewRow {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "id" in value &&
+    typeof value.id === "number" &&
+    "payload" in value &&
+    typeof value.payload === "string"
+  );
+}
+
+function parseModeledReviewRows(payload: string): ModeledReviewRow[] {
+  const parsed: unknown = JSON.parse(payload);
+  if (!Array.isArray(parsed) || !parsed.every(isModeledReviewRow)) {
+    throw new TypeError("Modeled review payload must contain ID/payload rows");
+  }
+  return parsed;
+}
+
 interface TraceMeasurement {
   readonly elapsedMilliseconds: number;
   readonly hydrationCalls: number;
@@ -165,7 +184,7 @@ async function measureMutationTrace(
     queryKey,
     queryFn: async () => {
       hydrationCalls += 1;
-      const fullyParsedRows = JSON.parse(payload) as ModeledReviewRow[];
+      const fullyParsedRows = parseModeledReviewRows(payload);
       return fullyParsedRows.filter((row) => !serverRemovedIds.has(row.id));
     },
     staleTime: Number.POSITIVE_INFINITY,
@@ -253,10 +272,10 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   await measureMutationTrace("isolatedActualKey", configuration, payload);
 }
 
-const measurements: Record<Strategy, TraceMeasurement[]> = {
-  legacyNestedKey: [],
-  isolatedActualKey: [],
-};
+const measurements = {
+  legacyNestedKey: new Array<TraceMeasurement>(),
+  isolatedActualKey: new Array<TraceMeasurement>(),
+} satisfies Record<Strategy, TraceMeasurement[]>;
 let legacyFirstSamples = 0;
 let isolatedFirstSamples = 0;
 for (let sample = 0; sample < configuration.samples; sample++) {
@@ -354,7 +373,7 @@ const report = {
     rowsPerHydration: configuration.rowsPerHydration,
     bytesPerHydration: configuration.bytesPerHydration,
     exactPayloadBytes: Buffer.byteLength(payload),
-    payloadShape: "Synthetic JSON array with one independently allocated object and payload string per row",
+    ["payloadShape"]: "Synthetic JSON array with one independently allocated object and payload string per row",
     provenance:
       "Defaults reproduce the observed live-library row and byte scale; the benchmark reads and emits no Photos, Calendar, or database content.",
   },

@@ -36,12 +36,20 @@ import { buildWrappedStatsSectionPlan, type WrappedStatsSectionDescriptor } from
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+interface SeasonDefinition {
+  key: string;
+  months: number[];
+  symbol: IconSymbolName;
+  color: string;
+  text: string;
+}
+
 const SEASON_DEFS = [
   { key: "Winter", months: [12, 1, 2], symbol: "snowflake", color: "bg-sky-400", text: "text-sky-300" },
   { key: "Spring", months: [3, 4, 5], symbol: "camera.macro", color: "bg-emerald-400", text: "text-emerald-300" },
   { key: "Summer", months: [6, 7, 8], symbol: "sun.max.fill", color: "bg-amber-400", text: "text-amber-300" },
   { key: "Fall", months: [9, 10, 11], symbol: "leaf.fill", color: "bg-orange-400", text: "text-orange-300" },
-];
+] satisfies SeasonDefinition[];
 
 interface MichelinBreakdownItem {
   bucket: MichelinStatsBucket;
@@ -76,6 +84,14 @@ function formatPercent(value: number, decimals = 0): string {
     return "—";
   }
   return `${(value * 100).toFixed(decimals)}%`;
+}
+
+function isNumericStatValue(value: string | number): value is number {
+  return typeof value === "number";
+}
+
+function formatStatValue(value: string | number): string {
+  return isNumericStatValue(value) ? value.toLocaleString() : value;
 }
 
 function getFourthStat(stats: WrappedStats) {
@@ -306,7 +322,7 @@ function SeasonalitySection({ monthlyVisits }: { monthlyVisits: WrappedStats["mo
                 <View className={"flex-row items-center justify-between"}>
                   <View className={"flex-row items-center gap-2"}>
                     <View className={`w-8 h-8 rounded-full items-center justify-center ${season.color}/20`}>
-                      <IconSymbol name={season.symbol as IconSymbolName} size={14} color={"#e5e7eb"} />
+                      <IconSymbol name={season.symbol} size={14} color={"#e5e7eb"} />
                     </View>
                     <ThemedText variant={"subhead"} className={"text-foreground font-medium"}>
                       {season.key}
@@ -443,7 +459,7 @@ function StatCard({
           numberOfLines={1}
           style={{ fontVariant: ["tabular-nums"], letterSpacing: -0.3 }}
         >
-          {typeof value === "number" ? value.toLocaleString() : value}
+          {formatStatValue(value)}
         </ThemedText>
       </View>
     </Animated.View>
@@ -473,7 +489,7 @@ function EditorialStat({
           numberOfLines={1}
           style={{ fontVariant: ["tabular-nums"] }}
         >
-          {typeof value === "number" ? value.toLocaleString() : value}
+          {formatStatValue(value)}
         </ThemedText>
         <ThemedText variant={"caption2"} className={"uppercase tracking-widest text-muted-foreground"}>
           {label}
@@ -1732,6 +1748,12 @@ function SectionHeading({ title, icon, accentClass }: { title: string; icon: Ico
   );
 }
 
+interface StatsStory {
+  id: string;
+  title: string;
+  content: React.ReactNode;
+}
+
 function StatsStoriesModal({
   visible,
   onClose,
@@ -1763,104 +1785,104 @@ function StatsStoriesModal({
     0;
   const hasGreenStar = stats.michelinStats.greenStarVisits > 0;
 
-  const stories = useMemo(
-    () =>
-      [
-        {
-          id: "overview",
-          title: selectedYear ? `${selectedYear} Overview` : "All-Time Overview",
-          content: (
-            <View className={"gap-5"}>
-              <View className={"flex-row gap-3"}>
-                <StatCard icon={"mappin"} value={stats.totalConfirmedVisits} label={"Visits"} accentColor={"amber"} />
-                <StatCard
-                  icon={"fork.knife"}
-                  value={stats.totalUniqueRestaurants}
-                  label={"Restaurants"}
-                  accentColor={"emerald"}
-                />
-              </View>
-              <View className={"flex-row gap-3"}>
-                <StatCard
-                  icon={"building.2.fill"}
-                  value={stats.uniqueCities > 0 ? stats.uniqueCities : "—"}
-                  label={"Cities"}
-                  accentColor={"violet"}
-                />
-                <StatCard
-                  icon={fourthStat.icon}
-                  value={fourthStat.value}
-                  label={fourthStat.label}
-                  accentColor={"rose"}
-                />
-              </View>
-              {hasMonthlyData && (
-                <View className={"gap-5"}>
-                  <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />
-                  <SeasonalitySection monthlyVisits={stats.monthlyVisits} />
-                </View>
-              )}
+  const stories = useMemo(() => {
+    const candidates = [
+      {
+        id: "overview",
+        title: selectedYear ? `${selectedYear} Overview` : "All-Time Overview",
+        content: (
+          <View className={"gap-5"}>
+            <View className={"flex-row gap-3"}>
+              <StatCard icon={"mappin"} value={stats.totalConfirmedVisits} label={"Visits"} accentColor={"amber"} />
+              <StatCard
+                icon={"fork.knife"}
+                value={stats.totalUniqueRestaurants}
+                label={"Restaurants"}
+                accentColor={"emerald"}
+              />
             </View>
-          ),
-        },
-        hasMichelinData
-          ? {
-              id: "michelin",
-              title: "Michelin Moments",
-              content: (
-                <View className={"gap-5"}>
-                  {hasGreenStar && <GreenStarSection greenStarVisits={stats.michelinStats.greenStarVisits} />}
-                  <StarBreakdown stats={stats.michelinStats} selectedYear={selectedYear} />
-                </View>
-              ),
-            }
-          : null,
-        hasLocationData || hasCuisineData
-          ? {
-              id: "places",
-              title: "Where You Dine",
-              content: (
-                <View className={"gap-5"}>
-                  {hasLocationData && <LocationBreakdown locations={stats.topLocations} />}
-                  {hasCuisineData && <CuisineCloud cuisines={stats.topCuisines} />}
-                </View>
-              ),
-            }
-          : null,
-        hasMealTimeData || hasPhotoData
-          ? {
-              id: "habits",
-              title: "Habits & Captures",
-              content: (
-                <View className={"gap-5"}>
-                  {hasMealTimeData && <DiningTimeChart mealTimes={stats.mealTimeBreakdown} />}
-                  <WeekendWeekdayChart weekendVsWeekday={stats.weekendVsWeekday} />
-                  {hasPhotoData && <PhotoStatsSection photoStats={stats.photoStats} />}
-                </View>
-              ),
-            }
-          : null,
-        {
-          id: "deep-dive",
-          title: "Deep Dive",
-          content: <DeepDiveSection stats={stats} selectedYear={selectedYear} />,
-        },
-      ].filter(Boolean) as Array<{ id: string; title: string; content: React.ReactNode }>,
-    [
-      fourthStat.icon,
-      fourthStat.label,
-      fourthStat.value,
-      hasCuisineData,
-      hasGreenStar,
-      hasLocationData,
-      hasMealTimeData,
-      hasMichelinData,
-      hasMonthlyData,
-      hasPhotoData,
-      selectedYear,
-      stats,
-    ],
-  );
+            <View className={"flex-row gap-3"}>
+              <StatCard
+                icon={"building.2.fill"}
+                value={stats.uniqueCities > 0 ? stats.uniqueCities : "—"}
+                label={"Cities"}
+                accentColor={"violet"}
+              />
+              <StatCard icon={fourthStat.icon} value={fourthStat.value} label={fourthStat.label} accentColor={"rose"} />
+            </View>
+            {hasMonthlyData && (
+              <View className={"gap-5"}>
+                <MonthlyVisitsChart monthlyVisits={stats.monthlyVisits} selectedYear={selectedYear} />
+                <SeasonalitySection monthlyVisits={stats.monthlyVisits} />
+              </View>
+            )}
+          </View>
+        ),
+      },
+      hasMichelinData
+        ? {
+            id: "michelin",
+            title: "Michelin Moments",
+            content: (
+              <View className={"gap-5"}>
+                {hasGreenStar && <GreenStarSection greenStarVisits={stats.michelinStats.greenStarVisits} />}
+                <StarBreakdown stats={stats.michelinStats} selectedYear={selectedYear} />
+              </View>
+            ),
+          }
+        : null,
+      hasLocationData || hasCuisineData
+        ? {
+            id: "places",
+            title: "Where You Dine",
+            content: (
+              <View className={"gap-5"}>
+                {hasLocationData && <LocationBreakdown locations={stats.topLocations} />}
+                {hasCuisineData && <CuisineCloud cuisines={stats.topCuisines} />}
+              </View>
+            ),
+          }
+        : null,
+      hasMealTimeData || hasPhotoData
+        ? {
+            id: "habits",
+            title: "Habits & Captures",
+            content: (
+              <View className={"gap-5"}>
+                {hasMealTimeData && <DiningTimeChart mealTimes={stats.mealTimeBreakdown} />}
+                <WeekendWeekdayChart weekendVsWeekday={stats.weekendVsWeekday} />
+                {hasPhotoData && <PhotoStatsSection photoStats={stats.photoStats} />}
+              </View>
+            ),
+          }
+        : null,
+      {
+        id: "deep-dive",
+        title: "Deep Dive",
+        content: <DeepDiveSection stats={stats} selectedYear={selectedYear} />,
+      },
+    ] satisfies Array<StatsStory | null>;
+    const availableStories = new Array<StatsStory>();
+    for (const candidate of candidates) {
+      if (candidate !== null) {
+        availableStories.push(candidate);
+      }
+    }
+    return availableStories;
+  }, [
+    fourthStat.icon,
+    fourthStat.label,
+    fourthStat.value,
+    hasCuisineData,
+    hasGreenStar,
+    hasLocationData,
+    hasMealTimeData,
+    hasMichelinData,
+    hasMonthlyData,
+    hasPhotoData,
+    selectedYear,
+    stats,
+  ]);
 
   const sanitizeForFileName = useCallback((value: string) => {
     return value

@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import type { MergeableVisitGroup } from "../utils/db/types.ts";
 import {
   buildVisitMergePlan,
@@ -37,6 +37,17 @@ import {
   type PhotoSeed,
   type VisitSeed,
 } from "./test-visit-merge.ts";
+
+function isStringValue<Value>(value: Value): value is Extract<Value, string> {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Extract<Value, number> {
+  return typeof value === "number";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly databasePath: string | null;
@@ -114,37 +125,37 @@ const DEFAULT_CONFIGURATION: Configuration = {
 };
 
 interface SourceVisitRow {
-  readonly id: unknown;
-  readonly suggestedRestaurantId: unknown;
-  readonly startTime: unknown;
-  readonly endTime: unknown;
-  readonly centerLat: unknown;
-  readonly centerLon: unknown;
-  readonly photoCount: unknown;
-  readonly foodProbable: unknown;
-  readonly calendarEventId: unknown;
-  readonly calendarEventTitle: unknown;
-  readonly calendarEventLocation: unknown;
-  readonly calendarEventIsAllDay: unknown;
-  readonly exportedToCalendarId: unknown;
-  readonly notes: unknown;
-  readonly updatedAt: unknown;
-  readonly awardAtVisit: unknown;
+  readonly id: SQLiteValue;
+  readonly suggestedRestaurantId: SQLiteValue;
+  readonly startTime: SQLiteValue;
+  readonly endTime: SQLiteValue;
+  readonly centerLat: SQLiteValue;
+  readonly centerLon: SQLiteValue;
+  readonly photoCount: SQLiteValue;
+  readonly foodProbable: SQLiteValue;
+  readonly calendarEventId: SQLiteValue;
+  readonly calendarEventTitle: SQLiteValue;
+  readonly calendarEventLocation: SQLiteValue;
+  readonly calendarEventIsAllDay: SQLiteValue;
+  readonly exportedToCalendarId: SQLiteValue;
+  readonly notes: SQLiteValue;
+  readonly updatedAt: SQLiteValue;
+  readonly awardAtVisit: SQLiteValue;
 }
 
 interface SourcePhotoRow {
-  readonly id: unknown;
-  readonly visitId: unknown;
-  readonly creationTime: unknown;
-  readonly latitude: unknown;
-  readonly longitude: unknown;
-  readonly foodDetected: unknown;
+  readonly id: SQLiteValue;
+  readonly visitId: SQLiteValue;
+  readonly creationTime: SQLiteValue;
+  readonly latitude: SQLiteValue;
+  readonly longitude: SQLiteValue;
+  readonly foodDetected: SQLiteValue;
 }
 
 interface SourceSuggestionRow {
-  readonly visitId: unknown;
-  readonly restaurantId: unknown;
-  readonly distance: unknown;
+  readonly visitId: SQLiteValue;
+  readonly restaurantId: SQLiteValue;
+  readonly distance: SQLiteValue;
 }
 
 function usage(): string {
@@ -224,22 +235,22 @@ function anonymizedVisitId(index: number): string {
   return `profile-visit-${index.toString().padStart(3, "0")}`;
 }
 
-function finiteNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function finiteNumber(value: SQLiteValue | undefined, label: string): number {
+  if (!isNumberValue(value) || !Number.isFinite(value)) {
     throw new TypeError(`${label} must be a finite number.`);
   }
   return value;
 }
 
-function nullableNumber(value: unknown): number | null {
+function nullableNumber(value: SQLiteValue | undefined): number | null {
   return value === null ? null : finiteNumber(value, "SQLite numeric value");
 }
 
-function nullableString(value: unknown): string | null {
+function nullableString(value: SQLiteValue | undefined): string | null {
   if (value === null) {
     return null;
   }
-  if (typeof value !== "string") {
+  if (!isStringValue(value)) {
     throw new TypeError("SQLite text value must be a string or null.");
   }
   return value;
@@ -364,8 +375,9 @@ function createSyntheticFixture(): Fixture {
 }
 
 function assertSourceTable(database: DatabaseSync, table: string): void {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const row = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as
-    | { name?: unknown }
+    | BenchmarkSQLiteRow<{ name?: SQLiteValue }>
     | undefined;
   if (row?.name !== table) {
     throw new Error(`Source database does not contain ${table}.`);
@@ -385,6 +397,7 @@ function createMacDerivedFixture(path: string): Fixture {
       assertSourceTable(source, table);
     }
 
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const sourceVisits = source
       .prepare(`SELECT
         id, suggestedRestaurantId, startTime, endTime, centerLat, centerLon,
@@ -392,33 +405,35 @@ function createMacDerivedFixture(path: string): Fixture {
         calendarEventLocation, calendarEventIsAllDay, exportedToCalendarId,
         notes, updatedAt, awardAtVisit
       FROM visits ORDER BY photoCount DESC, id LIMIT ?`)
-      .all(SELECTED_VISIT_COUNT) as unknown as SourceVisitRow[];
+      .all(SELECTED_VISIT_COUNT) as BenchmarkSQLiteRow<SourceVisitRow>[];
     if (sourceVisits.length !== SELECTED_VISIT_COUNT) {
       throw new Error(`Mac-derived fixture requires at least ${SELECTED_VISIT_COUNT} visits.`);
     }
 
     const rawToAnonymizedVisit = new Map<string, string>();
-    for (const [index, visit] of sourceVisits.entries()) {
-      if (typeof visit.id !== "string") {
+    const rawVisitIds = sourceVisits.map((visit, index) => {
+      if (!isStringValue(visit.id)) {
         throw new TypeError(`Source visit ${index} has a non-string ID.`);
       }
       rawToAnonymizedVisit.set(visit.id, anonymizedVisitId(index));
-    }
-    const rawVisitIds = sourceVisits.map(({ id }) => id as string);
+      return visit.id;
+    });
     const visitPayload = JSON.stringify(rawVisitIds);
 
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const sourcePhotos = source
       .prepare(`SELECT p.id, p.visitId, p.creationTime, p.latitude, p.longitude, p.foodDetected
         FROM photos AS p
         JOIN json_each(?) AS selected ON selected.value = p.visitId
         ORDER BY p.id`)
-      .all(visitPayload) as unknown as SourcePhotoRow[];
+      .all(visitPayload) as BenchmarkSQLiteRow<SourcePhotoRow>[];
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const sourceSuggestions = source
       .prepare(`SELECT s.visitId, s.restaurantId, s.distance
         FROM visit_suggested_restaurants AS s
         JOIN json_each(?) AS selected ON selected.value = s.visitId
         ORDER BY s.visitId, s.restaurantId`)
-      .all(visitPayload) as unknown as SourceSuggestionRow[];
+      .all(visitPayload) as BenchmarkSQLiteRow<SourceSuggestionRow>[];
 
     const visitIds = sourceVisits.map((_, index) => anonymizedVisitId(index));
     const groups = createGroups(visitIds);
@@ -467,7 +482,7 @@ function createMacDerivedFixture(path: string): Fixture {
     });
 
     const photos: PhotoSeed[] = sourcePhotos.map((photo, index) => {
-      if (typeof photo.visitId !== "string") {
+      if (!isStringValue(photo.visitId)) {
         throw new TypeError(`Source photo ${index} has a non-string visit ID.`);
       }
       const visitId = rawToAnonymizedVisit.get(photo.visitId);
@@ -499,7 +514,7 @@ function createMacDerivedFixture(path: string): Fixture {
     );
 
     const suggestions: SuggestionSeed[] = sourceSuggestions.map((suggestion, index) => {
-      if (typeof suggestion.visitId !== "string" || typeof suggestion.restaurantId !== "string") {
+      if (!isStringValue(suggestion.visitId) || !isStringValue(suggestion.restaurantId)) {
         throw new TypeError(`Source suggestion ${index} has invalid identifiers.`);
       }
       const visitId = rawToAnonymizedVisit.get(suggestion.visitId);
@@ -659,9 +674,12 @@ function profileCandidateStatements(fixture: Fixture, expectedSnapshot: Database
     ];
     const explainQueryPlan: Record<string, string[]> = {};
     for (const statement of statements) {
-      const rows = database.prepare(`EXPLAIN QUERY PLAN ${statement.sql}`).all(...statement.parameters) as Array<{
-        detail?: unknown;
-      }>;
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const rows = database.prepare(`EXPLAIN QUERY PLAN ${statement.sql}`).all(...statement.parameters) as Array<
+        BenchmarkSQLiteRow<{
+          detail?: SQLiteValue;
+        }>
+      >;
       explainQueryPlan[statement.name] = rows.map(({ detail }) => String(detail));
     }
 
@@ -677,8 +695,9 @@ function profileCandidateStatements(fixture: Fixture, expectedSnapshot: Database
 
     profile("beginTransaction", () => database.exec("BEGIN IMMEDIATE"));
     try {
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
       const preflight = profile("preflight", () => database.prepare(VISIT_MERGE_PREFLIGHT_SQL).get(plan.payload)) as
-        | VisitMergePreflightRow
+        | BenchmarkSQLiteRow<VisitMergePreflightRow>
         | undefined;
       if (
         !preflight ||
@@ -743,11 +762,7 @@ function profileCandidateStatements(fixture: Fixture, expectedSnapshot: Database
   }
 }
 
-function buildOracle(fixture: Fixture): {
-  readonly snapshot: DatabaseSnapshot;
-  readonly digest: string;
-  readonly counts: ExecutionCounts;
-} {
+function buildOracle(fixture: Fixture) {
   const database = createVisitMergeDatabase();
   try {
     seedDatabase(database, fixture);
@@ -844,10 +859,10 @@ function main(): void {
     }
   }
 
-  const measurements: Record<Strategy, Measurement[]> = {
-    legacySequential11Call: [],
-    productionSetBasedTransaction: [],
-  };
+  const measurements = {
+    legacySequential11Call: new Array<Measurement>(),
+    productionSetBasedTransaction: new Array<Measurement>(),
+  } satisfies Record<Strategy, Measurement[]>;
   for (let iteration = 0; iteration < configuration.samples; iteration++) {
     for (const strategy of strategyOrder(iteration)) {
       measurements[strategy].push(measure(strategy, fixture, oracle.snapshot, oracle.digest));

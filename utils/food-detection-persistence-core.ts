@@ -54,25 +54,25 @@ function flattenUniqueErrors(errors: readonly unknown[]): unknown[] {
   const flattened: unknown[] = [];
   const expandedAggregates = new Set<AggregateError>();
 
-  const appendUnique = (error: unknown): void => {
-    if (!flattened.some((existing) => Object.is(existing, error))) {
-      flattened.push(error);
+  const appendUnique = (cause: unknown): void => {
+    if (!flattened.some((existing) => Object.is(existing, cause))) {
+      flattened.push(cause);
     }
   };
-  const appendFlattened = (error: unknown): void => {
-    if (!(error instanceof AggregateError)) {
-      appendUnique(error);
+  const appendFlattened = (cause: unknown): void => {
+    if (!(cause instanceof AggregateError)) {
+      appendUnique(cause);
       return;
     }
-    if (expandedAggregates.has(error)) {
+    if (expandedAggregates.has(cause)) {
       return;
     }
-    expandedAggregates.add(error);
-    if (error.errors.length === 0) {
-      appendUnique(error);
+    expandedAggregates.add(cause);
+    if (cause.errors.length === 0) {
+      appendUnique(cause);
       return;
     }
-    for (const nestedError of error.errors) {
+    for (const nestedError of cause.errors) {
       appendFlattened(nestedError);
     }
   };
@@ -83,26 +83,16 @@ function flattenUniqueErrors(errors: readonly unknown[]): unknown[] {
   return flattened;
 }
 
-function createAggregateFailure(primaryError: unknown, additionalErrors: readonly unknown[]): AggregateError {
+function createAggregateFailure(cause: unknown, additionalErrors: readonly unknown[]): AggregateError {
   return new AggregateError(
-    flattenUniqueErrors([primaryError, ...additionalErrors]),
+    flattenUniqueErrors([cause, ...additionalErrors]),
     "Buffered result processing failed with additional persistence or synchronization errors.",
   );
 }
 
-/**
- * Runs an ordered producer with bounded persistence and derived-state recovery.
- * A processing failure force-flushes its successful pending prefix. A persistence
- * rejection stops the lifecycle without retrying that batch. If any earlier
- * persistence succeeded, derived state is synchronized before the error escapes.
- *
- * Multiple failures are reported as an `AggregateError`. Nested aggregates are
- * flattened depth-first and repeated error identities are retained only once,
- * with the primary processing or persistence failure first.
- */
-export async function runBufferedResultPersistence<T, Result>(
+function assertBufferedResultPersistenceOptions<T, Result>(
   options: BufferedResultPersistenceOptions<T, Result>,
-): Promise<Result> {
+): asserts options is BufferedResultPersistenceOptions<T, Result> {
   if (options === null || typeof options !== "object") {
     throw new TypeError("Buffered result persistence options must be an object.");
   }
@@ -118,6 +108,22 @@ export async function runBufferedResultPersistence<T, Result>(
   if (options.onComplete !== undefined && typeof options.onComplete !== "function") {
     throw new TypeError("Buffered result completion must be a function when provided.");
   }
+}
+
+/**
+ * Runs an ordered producer with bounded persistence and derived-state recovery.
+ * A processing failure force-flushes its successful pending prefix. A persistence
+ * rejection stops the lifecycle without retrying that batch. If any earlier
+ * persistence succeeded, derived state is synchronized before the error escapes.
+ *
+ * Multiple failures are reported as an `AggregateError`. Nested aggregates are
+ * flattened depth-first and repeated error identities are retained only once,
+ * with the primary processing or persistence failure first.
+ */
+export async function runBufferedResultPersistence<T, Result>(
+  options: BufferedResultPersistenceOptions<T, Result>,
+): Promise<Result> {
+  assertBufferedResultPersistenceOptions(options);
 
   let didPersistenceFail = false;
   let persistenceFailure: unknown;

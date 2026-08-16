@@ -143,7 +143,12 @@ async function loadOverlapVisits(
   );
 }
 
-function getLocalDateRange(timestamp: number): { readonly startTime: number; readonly endTime: number } {
+interface ReservationImportLocalDateRange {
+  readonly startTime: number;
+  readonly endTime: number;
+}
+
+function getLocalDateRange(timestamp: number): ReservationImportLocalDateRange {
   const date = new Date(timestamp);
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
@@ -254,10 +259,14 @@ function reservationMatchesExistingRestaurant(
   const reservationNames = [reservation.restaurant.name, reservation.sourceTitle];
   const existingNames = [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle];
   return reservationNames.some((reservationName) =>
-    existingNames.some(
-      (existingName) => typeof existingName === "string" && restaurantNamesAreSimilar(reservationName, existingName),
-    ),
+    existingNames
+      .filter(isReservationRestaurantName)
+      .some((existingName) => restaurantNamesAreSimilar(reservationName, existingName)),
   );
+}
+
+function isReservationRestaurantName(value: string | null | undefined): value is string {
+  return typeof value === "string";
 }
 
 function scoreReservationOverlap(reservation: ReservationOnlyVisitInput, visit: ReservationOverlapVisit): number {

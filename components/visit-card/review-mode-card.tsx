@@ -53,10 +53,6 @@ export function ReviewModeCard({ visit, match, enableAppleMapsVerification = fal
   const { data: displayRestaurantsUnsorted = [] } = useUnifiedNearbyRestaurants(visit, shouldFetchMapKit);
 
   const visitTimeZone = useMemo(() => {
-    const explicitTimeZone = (visit as { timeZone?: string | null }).timeZone;
-    if (explicitTimeZone) {
-      return explicitTimeZone;
-    }
     if (Number.isFinite(visit.centerLat) && Number.isFinite(visit.centerLon)) {
       try {
         return tzLookup(visit.centerLat, visit.centerLon);

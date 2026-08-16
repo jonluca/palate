@@ -9,7 +9,9 @@ import {
   importReservationVisitHistory,
   sanitizeIdPart,
   type ImportableReservation,
+  type JsonNode,
   type JsonRecord,
+  type JsonValue,
   type ReservationImportResult,
 } from "@/services/reservation-import";
 
@@ -18,32 +20,32 @@ const OPENTABLE_IMPORT_LOG_PREFIX = "[OpenTableImport]";
 const OPENTABLE_DEBUG_SAMPLE_SIZE = 5;
 const MONTH_PATTERN =
   "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
-const OPENTABLE_MONTHS: Record<string, number> = {
-  jan: 0,
-  january: 0,
-  feb: 1,
-  february: 1,
-  mar: 2,
-  march: 2,
-  apr: 3,
-  april: 3,
-  may: 4,
-  jun: 5,
-  june: 5,
-  jul: 6,
-  july: 6,
-  aug: 7,
-  august: 7,
-  sep: 8,
-  sept: 8,
-  september: 8,
-  oct: 9,
-  october: 9,
-  nov: 10,
-  november: 10,
-  dec: 11,
-  december: 11,
-};
+const OPENTABLE_MONTHS = new Map<string, number>([
+  ["jan", 0],
+  ["january", 0],
+  ["feb", 1],
+  ["february", 1],
+  ["mar", 2],
+  ["march", 2],
+  ["apr", 3],
+  ["april", 3],
+  ["may", 4],
+  ["jun", 5],
+  ["june", 5],
+  ["jul", 6],
+  ["july", 6],
+  ["aug", 7],
+  ["august", 7],
+  ["sep", 8],
+  ["sept", 8],
+  ["september", 8],
+  ["oct", 9],
+  ["october", 9],
+  ["nov", 10],
+  ["november", 10],
+  ["dec", 11],
+  ["december", 11],
+]);
 
 export type OpenTableImportableReservation = ImportableReservation;
 export type OpenTableImportResult = ReservationImportResult;
@@ -54,7 +56,7 @@ interface NormalizedOpenTableHistory {
   invalidCount: number;
 }
 
-function logOpenTableImport(message: string, details?: unknown): void {
+function logOpenTableImport<Details>(message: string, details?: Details): void {
   if (!__DEV__) {
     return;
   }
@@ -110,8 +112,38 @@ function extractDateTimeFromText(text: string | null): string | null {
 }
 
 function getOpenTableMonthIndex(monthText: string): number | null {
-  const monthIndex = OPENTABLE_MONTHS[monthText.toLowerCase().replace(/\./g, "")];
+  const monthIndex = OPENTABLE_MONTHS.get(monthText.toLowerCase().replace(/\./g, ""));
   return monthIndex ?? null;
+}
+
+function isJsonNumber(value: JsonNode): value is number {
+  return typeof value === "number";
+}
+
+function isJsonString(value: JsonNode): value is string {
+  return typeof value === "string";
+}
+
+function getJsonNodeType(value: JsonNode): "array" | "boolean" | "null" | "number" | "object" | "string" | "undefined" {
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (asRecord(value)) {
+    return "object";
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (value === undefined) {
+    return "undefined";
+  }
+  if (isJsonNumber(value)) {
+    return "number";
+  }
+  if (isJsonString(value)) {
+    return "string";
+  }
+  return "boolean";
 }
 
 function toOpenTableHour(hourText: string, meridiemText: string | undefined): number | null {
@@ -211,13 +243,12 @@ function parseOpenTableMonthNameTimestamp(text: string): number | null {
   return buildOpenTableLocalTimestamp(year, monthIndex, day, hour, minute);
 }
 
-function parseOpenTableTimestampValue(value: unknown): number | null {
-  const numeric =
-    typeof value === "number"
-      ? value
-      : typeof value === "string" && /^\d{10,13}$/.test(value.trim())
-        ? Number(value.trim())
-        : null;
+function parseOpenTableTimestampValue(value: JsonNode): number | null {
+  const numeric = isJsonNumber(value)
+    ? value
+    : isJsonString(value) && /^\d{10,13}$/.test(value.trim())
+      ? Number(value.trim())
+      : null;
   if (numeric !== null && Number.isFinite(numeric)) {
     if (numeric > 100000000000) {
       return numeric;
@@ -240,7 +271,7 @@ function parseOpenTableTimestampValue(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function parseOpenTableTimestamp(...values: unknown[]): number | null {
+function parseOpenTableTimestamp(...values: JsonNode[]): number | null {
   for (const value of values) {
     const parsed = parseOpenTableTimestampValue(value);
     if (parsed !== null) {
@@ -423,7 +454,7 @@ function getRestaurantAddress(record: JsonRecord, restaurant: JsonRecord | null)
   ]);
 }
 
-function getOpenTableTopLevelReservations(payload: unknown): unknown[] | null {
+function getOpenTableTopLevelReservations(payload: JsonValue): JsonValue[] | null {
   if (Array.isArray(payload)) {
     return payload;
   }
@@ -452,24 +483,24 @@ function getOpenTableTopLevelReservations(payload: unknown): unknown[] | null {
   return null;
 }
 
-function describeOpenTablePayloadForLog(payload: unknown): Record<string, unknown> {
+function describeOpenTablePayloadForLog(payload: JsonValue) {
   if (Array.isArray(payload)) {
     return { type: "array", length: payload.length };
   }
 
-  if (!payload || typeof payload !== "object") {
-    return { type: payload === null ? "null" : typeof payload };
+  const record = asRecord(payload);
+  if (!record) {
+    return { type: getJsonNodeType(payload) };
   }
 
-  const record = payload as Record<string, unknown>;
   return {
     type: "object",
     keys: Object.keys(record).slice(0, 12),
     reservationsLength: Array.isArray(record.reservations) ? record.reservations.length : null,
     resultLength: Array.isArray(record.result) ? record.result.length : null,
-    fetchedCount: typeof record.fetchedCount === "number" ? record.fetchedCount : null,
-    endpoint: typeof record.endpoint === "string" ? record.endpoint : null,
-    detailEndpoint: typeof record.detailEndpoint === "string" ? record.detailEndpoint : null,
+    fetchedCount: isJsonNumber(record.fetchedCount) ? record.fetchedCount : null,
+    endpoint: isJsonString(record.endpoint) ? record.endpoint : null,
+    detailEndpoint: isJsonString(record.detailEndpoint) ? record.detailEndpoint : null,
   };
 }
 
@@ -493,7 +524,7 @@ function getOpenTableRawDateTimeText(record: JsonRecord): string | null {
   );
 }
 
-function getOpenTableCandidateRejectionReason(rawReservation: unknown): string | null {
+function getOpenTableCandidateRejectionReason(rawReservation: JsonValue): string | null {
   const record = asRecord(rawReservation);
   if (!record) {
     return "not-object";
@@ -520,10 +551,10 @@ function getOpenTableCandidateRejectionReason(rawReservation: unknown): string |
   return null;
 }
 
-function summarizeOpenTableRawReservationForLog(rawReservation: unknown): Record<string, unknown> {
+function summarizeOpenTableRawReservationForLog(rawReservation: JsonValue) {
   const record = asRecord(rawReservation);
   if (!record) {
-    return { type: typeof rawReservation };
+    return { type: getJsonNodeType(rawReservation) };
   }
 
   const restaurant = getRestaurantRecord(record);
@@ -555,7 +586,7 @@ function summarizeOpenTableRawReservationForLog(rawReservation: unknown): Record
   };
 }
 
-function summarizeOpenTableTopLevelReservationsForLog(payload: unknown): Record<string, unknown> {
+function summarizeOpenTableTopLevelReservationsForLog(payload: JsonValue) {
   const topLevelReservations = getOpenTableTopLevelReservations(payload);
   if (!topLevelReservations) {
     return {
@@ -578,7 +609,7 @@ function summarizeOpenTableTopLevelReservationsForLog(payload: unknown): Record<
   };
 }
 
-function summarizeOpenTableReservationForLog(reservation: OpenTableImportableReservation): Record<string, unknown> {
+function summarizeOpenTableReservationForLog(reservation: OpenTableImportableReservation) {
   return {
     restaurantName: reservation.restaurantName,
     sourceName: reservation.sourceName,
@@ -590,7 +621,7 @@ function summarizeOpenTableReservationForLog(reservation: OpenTableImportableRes
   };
 }
 
-function normalizeOpenTableCandidate(rawReservation: unknown): OpenTableImportableReservation | null {
+function normalizeOpenTableCandidate(rawReservation: JsonValue): OpenTableImportableReservation | null {
   const record = asRecord(rawReservation);
   if (!record || isCanceledReservation(record)) {
     return null;
@@ -715,7 +746,7 @@ function normalizeOpenTableCandidate(rawReservation: unknown): OpenTableImportab
   };
 }
 
-function looksLikeReservationCandidate(value: unknown): boolean {
+function looksLikeReservationCandidate(value: JsonValue): boolean {
   const record = asRecord(value);
   if (!record) {
     return false;
@@ -731,10 +762,10 @@ function looksLikeReservationCandidate(value: unknown): boolean {
   );
 }
 
-function collectReservationCandidates(payload: unknown): unknown[] {
-  const candidates: unknown[] = [];
-  const stack: unknown[] = [payload];
-  const seen = new Set<unknown>();
+function collectReservationCandidates(payload: JsonValue): JsonValue[] {
+  const candidates: JsonValue[] = [];
+  const stack: JsonValue[] = [payload];
+  const seen = new Set<JsonRecord | JsonValue[]>();
 
   while (stack.length > 0) {
     const current = stack.pop();
@@ -742,22 +773,14 @@ function collectReservationCandidates(payload: unknown): unknown[] {
       continue;
     }
 
-    if (typeof current === "object") {
+    if (Array.isArray(current)) {
       if (seen.has(current)) {
         continue;
       }
       seen.add(current);
-    }
-
-    if (Array.isArray(current)) {
       for (const item of current) {
         stack.push(item);
       }
-      continue;
-    }
-
-    if (looksLikeReservationCandidate(current)) {
-      candidates.push(current);
       continue;
     }
 
@@ -765,9 +788,18 @@ function collectReservationCandidates(payload: unknown): unknown[] {
     if (!record) {
       continue;
     }
+    if (seen.has(record)) {
+      continue;
+    }
+    seen.add(record);
+
+    if (looksLikeReservationCandidate(record)) {
+      candidates.push(record);
+      continue;
+    }
 
     for (const value of Object.values(record)) {
-      if (value && typeof value === "object") {
+      if (value !== undefined && (Array.isArray(value) || asRecord(value))) {
         stack.push(value);
       }
     }
@@ -776,7 +808,7 @@ function collectReservationCandidates(payload: unknown): unknown[] {
   return candidates;
 }
 
-export function normalizeOpenTableVisitHistory(payload: unknown): NormalizedOpenTableHistory {
+export function normalizeOpenTableVisitHistory(payload: JsonValue): NormalizedOpenTableHistory {
   const rawReservations = collectReservationCandidates(payload);
   const reservationsBySourceEventId = new Map<string, OpenTableImportableReservation>();
   let invalidCount = 0;
@@ -809,7 +841,7 @@ export function normalizeOpenTableVisitHistory(payload: unknown): NormalizedOpen
   };
 }
 
-export async function importOpenTableVisitHistory(payload: unknown): Promise<OpenTableImportResult> {
+export async function importOpenTableVisitHistory(payload: JsonValue): Promise<OpenTableImportResult> {
   const history = normalizeOpenTableVisitHistory(payload);
   const result = await importReservationVisitHistory(history.reservations, {
     sourceDisplayName: "OpenTable",

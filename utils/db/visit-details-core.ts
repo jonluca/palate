@@ -1,4 +1,5 @@
 import type { VisitRecord, VisitWithDetails } from "./types";
+import { isJsonString, parseJsonValue } from "../runtime-json.ts";
 
 export type VisitDetailsFilter = "pending" | "confirmed" | "rejected" | "food";
 
@@ -63,8 +64,8 @@ function parsePreviewPhotos(value: string | null): string[] {
   }
 
   try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) && parsed.every((uri) => typeof uri === "string") ? parsed : [];
+    const parsed = parseJsonValue(value);
+    return Array.isArray(parsed) && parsed.every(isJsonString) ? parsed : [];
   } catch {
     return [];
   }

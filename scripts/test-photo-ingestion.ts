@@ -2,7 +2,7 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   buildPhotoIngestionStatement,
   getPhotoIngestionFlushCount,
@@ -23,6 +23,53 @@ interface StoredPhotoRow extends PhotoIngestionRecord {
   readonly foodLabels: string | null;
   readonly foodConfidence: number | null;
   readonly allLabels: string | null;
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue | undefined, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function requiredNumber(value: SQLOutputValue | undefined, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function nullableNumber(value: SQLOutputValue | undefined, column: string): number | null {
+  return value === null ? null : requiredNumber(value, column);
+}
+
+function parseStoredPhotoRow(row: SQLiteRow): StoredPhotoRow {
+  const mediaType = requiredString(row.mediaType, "photos.mediaType");
+  assert.ok(mediaType === "photo" || mediaType === "video", "photos.mediaType must be photo or video");
+  return {
+    id: requiredString(row.id, "photos.id"),
+    uri: requiredString(row.uri, "photos.uri"),
+    creationTime: requiredNumber(row.creationTime, "photos.creationTime"),
+    latitude: nullableNumber(row.latitude, "photos.latitude"),
+    longitude: nullableNumber(row.longitude, "photos.longitude"),
+    visitId: nullableString(row.visitId, "photos.visitId"),
+    foodDetected: nullableNumber(row.foodDetected, "photos.foodDetected"),
+    foodLabels: nullableString(row.foodLabels, "photos.foodLabels"),
+    foodConfidence: nullableNumber(row.foodConfidence, "photos.foodConfidence"),
+    allLabels: nullableString(row.allLabels, "photos.allLabels"),
+    mediaType,
+    duration: nullableNumber(row.duration, "photos.duration"),
+  };
 }
 
 function createDatabase(): DatabaseSync {
@@ -95,7 +142,7 @@ function snapshot(database: DatabaseSync): StoredPhotoRow[] {
        ORDER BY id ASC`,
     )
     .all()
-    .map((row) => ({ ...row })) as unknown as StoredPhotoRow[];
+    .map(parseStoredPhotoRow);
 }
 
 function seedExisting(database: DatabaseSync): void {

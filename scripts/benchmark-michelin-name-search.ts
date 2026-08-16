@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   ACTIVE_MICHELIN_UNICODE_NAME_ROWS_SQL,
@@ -20,6 +20,13 @@ import {
   type MichelinUnicodeNameIndexRow,
   type MichelinUnicodeNameRow,
 } from "../utils/db/michelin-name-search-core.ts";
+
+function isNumberValue<Value>(value: Value): value is Extract<Value, number> {
+  return typeof value === "number";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly measuredRuns: number;
@@ -284,7 +291,7 @@ function snapshotSource(): SourceSnapshot {
   };
 }
 
-function jsonBytes(value: unknown): number {
+function jsonBytes<Value>(value: Value): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
@@ -349,18 +356,17 @@ function transformSourceRow(row: SourceRestaurantRow): MichelinSearchRow | null 
 }
 
 function totalChanges(database: DatabaseSync): number {
-  const result = database.prepare("SELECT total_changes() AS count").get() as { count?: unknown } | undefined;
-  if (typeof result?.count !== "number") {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const result = database.prepare("SELECT total_changes() AS count").get() as
+    | BenchmarkSQLiteRow<{ count?: SQLiteValue }>
+    | undefined;
+  if (!isNumberValue(result?.count)) {
     throw new TypeError("SQLite total_changes() did not return a number");
   }
   return result.count;
 }
 
-function readBundledGuide(): {
-  readonly importedRows: MichelinSearchRow[];
-  readonly selectedSourceRows: number;
-  readonly sourceTableRows: number;
-} {
+function readBundledGuide() {
   if (!existsSync(GUIDE_PATH) || !statSync(GUIDE_PATH).isFile()) {
     throw new Error(`Bundled Michelin guide does not exist: ${GUIDE_PATH}`);
   }
@@ -375,12 +381,17 @@ function readBundledGuide(): {
   try {
     database.exec("PRAGMA query_only = ON");
     const changesBefore = totalChanges(database);
-    const integrity = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+    const integrity = database.prepare("PRAGMA integrity_check").get() as
+      | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
+      | undefined;
     assert.equal(integrity?.integrity_check, "ok", "bundled guide integrity_check must pass");
-    const sourceTableCount = database.prepare("SELECT COUNT(*) AS count FROM restaurants").get() as {
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+    const sourceTableCount = database.prepare("SELECT COUNT(*) AS count FROM restaurants").get() as BenchmarkSQLiteRow<{
       count: number;
-    };
-    const sourceRows = database.prepare(SOURCE_RESTAURANTS_SQL).all() as unknown as SourceRestaurantRow[];
+    }>;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const sourceRows = database.prepare(SOURCE_RESTAURANTS_SQL).all() as BenchmarkSQLiteRow<SourceRestaurantRow>[];
     const importedRows = sourceRows.flatMap((row) => {
       const transformed = transformSourceRow(row);
       return transformed === null ? [] : [transformed];
@@ -496,9 +507,10 @@ function executeLegacy(database: DatabaseSync, normalizedQuery: string): Measure
   const rssBefore = process.memoryUsage().rss;
   const startedAt = performance.now();
   const parameters = [DATASET_KEY, DATASET_KEY] as const;
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const transferredRows = database
     .prepare(LEGACY_ACTIVE_UNVISITED_FULL_ROWS_SQL)
-    .all(...parameters) as unknown as MichelinSearchRow[];
+    .all(...parameters) as BenchmarkSQLiteRow<MichelinSearchRow>[];
   const result = transferredRows
     .filter((restaurant) => restaurant.name.toLowerCase().includes(normalizedQuery))
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
@@ -528,8 +540,9 @@ function executeCandidate(
   let index = cachedIndex;
   let transfer = emptyTransfer();
   const datasetParameters = [DATASET_KEY] as const;
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const datasetRow = database.prepare("SELECT value FROM app_metadata WHERE key = ?").get(...datasetParameters) as
-    | { value: string }
+    | BenchmarkSQLiteRow<{ value: string }>
     | undefined;
   assert.equal(datasetRow?.value, DATASET_VERSION, "candidate cache key must resolve the active dataset version");
   transfer = addTransfer(transfer, {
@@ -540,9 +553,10 @@ function executeCandidate(
   });
   if (index === null) {
     const indexParameters = [DATASET_KEY, DATASET_KEY] as const;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const nameRows = database
       .prepare(ACTIVE_MICHELIN_UNICODE_NAME_ROWS_SQL)
-      .all(...indexParameters) as unknown as MichelinUnicodeNameRow[];
+      .all(...indexParameters) as BenchmarkSQLiteRow<MichelinUnicodeNameRow>[];
     index = createMichelinUnicodeNameIndex(nameRows);
     transfer = addTransfer(transfer, {
       jsToNativeParameterBytes: jsonBytes(indexParameters),
@@ -561,9 +575,10 @@ function executeCandidate(
       DATASET_KEY,
       MAX_MICHELIN_NAME_SEARCH_RESULTS,
     ] as const;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const hydratedRows = database
       .prepare(HYDRATE_UNVISITED_MICHELIN_NAME_SEARCH_SQL)
-      .all(...hydrationParameters) as unknown as MichelinSearchRow[];
+      .all(...hydrationParameters) as BenchmarkSQLiteRow<MichelinSearchRow>[];
     result = hydratedRows.map(canonicalizeRow);
     transfer = addTransfer(transfer, {
       jsToNativeParameterBytes: jsonBytes(hydrationParameters),
@@ -572,8 +587,9 @@ function executeCandidate(
       sqliteCalls: 1,
     });
   }
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const datasetRowAfter = database.prepare("SELECT value FROM app_metadata WHERE key = ?").get(...datasetParameters) as
-    | { value: string }
+    | BenchmarkSQLiteRow<{ value: string }>
     | undefined;
   assert.deepEqual(datasetRowAfter, datasetRow, "candidate must finish on the dataset version used for selection");
   transfer = addTransfer(transfer, {
@@ -591,11 +607,7 @@ function executeCandidate(
   };
 }
 
-function executeCandidateWithCache(
-  database: DatabaseSync,
-  rawQuery: string,
-  cache: CandidateCacheState,
-): { readonly cacheHit: boolean; readonly measurement: Measurement } {
+function executeCandidateWithCache(database: DatabaseSync, rawQuery: string, cache: CandidateCacheState) {
   const normalizedQuery = normalizeMichelinNameSearchQuery(rawQuery);
   const startedAt = performance.now();
   const cachedResult = cache.results.get(normalizedQuery);
@@ -655,7 +667,7 @@ function createStrategySamples(): StrategySamples {
   return { elapsedMilliseconds: [], rssDeltaBytes: [], transfer: null };
 }
 
-function strategyReport(samples: StrategySamples): Record<string, unknown> {
+function strategyReport(samples: StrategySamples) {
   assert.ok(samples.transfer !== null);
   return {
     transfer: samples.transfer,
@@ -734,10 +746,7 @@ function executeCandidateTrace(
   };
 }
 
-function traceReport(
-  legacySamples: readonly TraceMeasurement[],
-  candidateSamples: readonly TraceMeasurement[],
-): Record<string, unknown> {
+function traceReport(legacySamples: readonly TraceMeasurement[], candidateSamples: readonly TraceMeasurement[]) {
   assert.ok(legacySamples.length > 0 && candidateSamples.length > 0);
   const legacy = legacySamples[0]!;
   const candidate = candidateSamples[0]!;
@@ -803,7 +812,7 @@ function assertReportTargetIsSafe(): void {
   }
 }
 
-function writeReport(report: Record<string, unknown>): void {
+function writeReport<Report>(report: Report): void {
   assertReportTargetIsSafe();
   mkdirSync(dirname(REPORT_PATH), { recursive: true, mode: 0o700 });
   writeFileSync(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
@@ -818,256 +827,269 @@ function run(configuration: Configuration): void {
   assert.ok(guide.importedRows.length > 0, "bundled guide must contain importable rows");
 
   const database = createMainDatabase(guide.importedRows);
-  let report: Record<string, unknown>;
-  try {
-    const confirmedVisitExclusions = addSyntheticVisitExclusions(database, guide.importedRows);
-    const allUnicodeNameRows = database
-      .prepare(ACTIVE_MICHELIN_UNICODE_NAME_ROWS_SQL)
-      .all(DATASET_KEY, DATASET_KEY) as unknown as MichelinUnicodeNameRow[];
-    const retainedIndex = createMichelinUnicodeNameIndex(allUnicodeNameRows);
-    const fullActiveRows = database
-      .prepare(
-        `SELECT m.* FROM michelin_restaurants m
+  const report = (() => {
+    try {
+      const confirmedVisitExclusions = addSyntheticVisitExclusions(database, guide.importedRows);
+      // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+      const allUnicodeNameRows = database
+        .prepare(ACTIVE_MICHELIN_UNICODE_NAME_ROWS_SQL)
+        .all(DATASET_KEY, DATASET_KEY) as BenchmarkSQLiteRow<MichelinUnicodeNameRow>[];
+      const retainedIndex = createMichelinUnicodeNameIndex(allUnicodeNameRows);
+      // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+      const fullActiveRows = database
+        .prepare(
+          `SELECT m.* FROM michelin_restaurants m
          WHERE m.datasetVersion = (SELECT value FROM app_metadata WHERE key = ?)`,
-      )
-      .all(DATASET_KEY) as unknown as MichelinSearchRow[];
+        )
+        .all(DATASET_KEY) as BenchmarkSQLiteRow<MichelinSearchRow>[];
 
-    const workloadReports: Record<string, unknown> = {};
-    for (const workload of WORKLOADS) {
-      const normalizedQuery = normalizeMichelinNameSearchQuery(workload.query);
-      assert.ok(isNonAsciiMichelinNameSearchQuery(normalizedQuery), `${workload.label} must exercise Unicode path`);
-      const oracle = executeLegacy(database, normalizedQuery);
-      const coldCandidate = executeCandidate(database, normalizedQuery, null);
-      const warmCandidate = executeCandidate(database, normalizedQuery, retainedIndex);
-      assert.deepEqual(coldCandidate.result, oracle.result, `${workload.label} cold candidate must match legacy`);
-      assert.deepEqual(warmCandidate.result, oracle.result, `${workload.label} warm candidate must match legacy`);
+      const workloadReportEntries = [];
+      for (const workload of WORKLOADS) {
+        const normalizedQuery = normalizeMichelinNameSearchQuery(workload.query);
+        assert.ok(isNonAsciiMichelinNameSearchQuery(normalizedQuery), `${workload.label} must exercise Unicode path`);
+        const oracle = executeLegacy(database, normalizedQuery);
+        const coldCandidate = executeCandidate(database, normalizedQuery, null);
+        const warmCandidate = executeCandidate(database, normalizedQuery, retainedIndex);
+        assert.deepEqual(coldCandidate.result, oracle.result, `${workload.label} cold candidate must match legacy`);
+        assert.deepEqual(warmCandidate.result, oracle.result, `${workload.label} warm candidate must match legacy`);
 
-      const resultCache: CandidateCacheState = { index: retainedIndex, results: new Map() };
-      const miss = executeCandidateWithCache(database, workload.query, resultCache);
-      const hit = executeCandidateWithCache(database, `  ${workload.query}  `, resultCache);
-      assert.equal(miss.cacheHit, false);
-      assert.equal(hit.cacheHit, true);
-      assert.deepEqual(hit.measurement.result, oracle.result);
-      assert.deepEqual(hit.measurement.transfer, emptyTransfer());
+        const resultCache: CandidateCacheState = { index: retainedIndex, results: new Map() };
+        const miss = executeCandidateWithCache(database, workload.query, resultCache);
+        const hit = executeCandidateWithCache(database, `  ${workload.query}  `, resultCache);
+        assert.equal(miss.cacheHit, false);
+        assert.equal(hit.cacheHit, true);
+        assert.deepEqual(hit.measurement.result, oracle.result);
+        assert.deepEqual(hit.measurement.transfer, emptyTransfer());
 
-      const samples = {
-        legacy: createStrategySamples(),
-        candidateCold: createStrategySamples(),
-        candidateWarmIndex: createStrategySamples(),
-        candidateResultCacheHit: createStrategySamples(),
-      };
-      const iterations = configuration.warmupRuns + configuration.measuredRuns;
-      for (let iteration = 0; iteration < iterations; iteration += 1) {
-        const order = ["legacy", "candidateCold", "candidateWarmIndex"] as const;
-        const rotated = order.map((_, index) => order[(index + iteration) % order.length]!);
-        for (const strategy of rotated) {
-          const measurement =
-            strategy === "legacy"
-              ? executeLegacy(database, normalizedQuery)
-              : strategy === "candidateCold"
-                ? executeCandidate(database, normalizedQuery, null)
-                : executeCandidate(database, normalizedQuery, retainedIndex);
-          assert.deepEqual(measurement.result, oracle.result);
+        const samples = {
+          legacy: createStrategySamples(),
+          candidateCold: createStrategySamples(),
+          candidateWarmIndex: createStrategySamples(),
+          candidateResultCacheHit: createStrategySamples(),
+        };
+        const iterations = configuration.warmupRuns + configuration.measuredRuns;
+        for (let iteration = 0; iteration < iterations; iteration += 1) {
+          const order = ["legacy", "candidateCold", "candidateWarmIndex"] as const;
+          const rotated = order.map((_, index) => order[(index + iteration) % order.length]!);
+          for (const strategy of rotated) {
+            const measurement =
+              strategy === "legacy"
+                ? executeLegacy(database, normalizedQuery)
+                : strategy === "candidateCold"
+                  ? executeCandidate(database, normalizedQuery, null)
+                  : executeCandidate(database, normalizedQuery, retainedIndex);
+            assert.deepEqual(measurement.result, oracle.result);
+            if (iteration >= configuration.warmupRuns) {
+              assertStableTransfer(samples[strategy], measurement);
+              samples[strategy].elapsedMilliseconds.push(measurement.elapsedMilliseconds);
+              samples[strategy].rssDeltaBytes.push(measurement.rssDeltaBytes);
+            }
+          }
+
+          const cache: CandidateCacheState = {
+            index: retainedIndex,
+            results: new Map([[normalizedQuery, oracle.result]]),
+          };
+          const cacheHit = executeCandidateWithCache(database, workload.query, cache);
+          assert.equal(cacheHit.cacheHit, true);
+          assert.deepEqual(cacheHit.measurement.result, oracle.result);
           if (iteration >= configuration.warmupRuns) {
-            assertStableTransfer(samples[strategy], measurement);
-            samples[strategy].elapsedMilliseconds.push(measurement.elapsedMilliseconds);
-            samples[strategy].rssDeltaBytes.push(measurement.rssDeltaBytes);
+            assertStableTransfer(samples.candidateResultCacheHit, cacheHit.measurement);
+            samples.candidateResultCacheHit.elapsedMilliseconds.push(cacheHit.measurement.elapsedMilliseconds);
+            samples.candidateResultCacheHit.rssDeltaBytes.push(cacheHit.measurement.rssDeltaBytes);
           }
         }
 
-        const cache: CandidateCacheState = {
-          index: retainedIndex,
-          results: new Map([[normalizedQuery, oracle.result]]),
-        };
-        const cacheHit = executeCandidateWithCache(database, workload.query, cache);
-        assert.equal(cacheHit.cacheHit, true);
-        assert.deepEqual(cacheHit.measurement.result, oracle.result);
+        assert.ok(samples.legacy.transfer !== null && samples.candidateCold.transfer !== null);
+        const coldReduction =
+          ((samples.legacy.transfer.nativeToJsBytes - samples.candidateCold.transfer.nativeToJsBytes) /
+            samples.legacy.transfer.nativeToJsBytes) *
+          100;
+        assert.ok(
+          coldReduction >= 90,
+          `${workload.label} cold candidate must reduce native-to-JS bytes by at least 90%`,
+        );
+        const resultSha256 = sha256(JSON.stringify(oracle.result));
+        const matchingIds = selectSortedMichelinUnicodeMatchIds(retainedIndex, normalizedQuery);
+        const legacyTiming = summarizeTiming(samples.legacy.elapsedMilliseconds);
+        const coldTiming = summarizeTiming(samples.candidateCold.elapsedMilliseconds);
+        const warmTiming = summarizeTiming(samples.candidateWarmIndex.elapsedMilliseconds);
+        workloadReportEntries.push([
+          workload.label,
+          {
+            query: {
+              rawCodePoints: Array.from(
+                workload.query,
+                (character) => `U+${character.codePointAt(0)!.toString(16).toUpperCase()}`,
+              ),
+              normalizedCodePoints: Array.from(
+                normalizedQuery,
+                (character) => `U+${character.codePointAt(0)!.toString(16).toUpperCase()}`,
+              ),
+              rawUtf8Bytes: Buffer.byteLength(workload.query),
+              normalizedUtf8Bytes: Buffer.byteLength(normalizedQuery),
+            },
+            sortedMatchingIdsBeforeVisitExclusion: matchingIds.length,
+            returnedRows: oracle.result.length,
+            exactResultSha256: resultSha256,
+            strategies: {
+              legacyFullActiveTransfer: strategyReport(samples.legacy),
+              candidateColdIndex: strategyReport(samples.candidateCold),
+              candidateWarmIndex: strategyReport(samples.candidateWarmIndex),
+              candidateResultCacheHit: strategyReport(samples.candidateResultCacheHit),
+            },
+            comparison: {
+              coldNativeToJsReductionPercent: coldReduction,
+              coldMedianSpeedup: legacyTiming.medianMilliseconds / coldTiming.medianMilliseconds,
+              warmIndexMedianSpeedup: legacyTiming.medianMilliseconds / warmTiming.medianMilliseconds,
+              exactOrderedResultsMatch: true,
+            },
+          },
+        ] as const);
+      }
+
+      const rapidLegacySamples: TraceMeasurement[] = [];
+      const rapidCandidateSamples: TraceMeasurement[] = [];
+      const backspaceLegacySamples: TraceMeasurement[] = [];
+      const backspaceCandidateSamples: TraceMeasurement[] = [];
+      const traceIterations = configuration.warmupRuns + configuration.measuredRuns;
+      for (let iteration = 0; iteration < traceIterations; iteration += 1) {
+        const rapidLegacy = executeLegacyTrace(database, RAPID_TYPING_EVENTS);
+        const rapidCandidate = executeCandidateTrace(database, RAPID_TYPING_EVENTS, true);
+        assert.deepEqual(
+          rapidCandidate.finalResult,
+          rapidLegacy.finalResult,
+          "debounced rapid trace final result must match",
+        );
+
+        const backspaceLegacy = executeLegacyTrace(database, BACKSPACE_EVENTS);
+        const backspaceCandidate = executeCandidateTrace(database, BACKSPACE_EVENTS, false, ["épi"]);
+        assert.deepEqual(
+          backspaceCandidate.finalResult,
+          backspaceLegacy.finalResult,
+          "backspace final result must match",
+        );
         if (iteration >= configuration.warmupRuns) {
-          assertStableTransfer(samples.candidateResultCacheHit, cacheHit.measurement);
-          samples.candidateResultCacheHit.elapsedMilliseconds.push(cacheHit.measurement.elapsedMilliseconds);
-          samples.candidateResultCacheHit.rssDeltaBytes.push(cacheHit.measurement.rssDeltaBytes);
+          rapidLegacySamples.push(rapidLegacy);
+          rapidCandidateSamples.push(rapidCandidate);
+          backspaceLegacySamples.push(backspaceLegacy);
+          backspaceCandidateSamples.push(backspaceCandidate);
         }
       }
+      assert.equal(rapidCandidateSamples[0]!.logicalSearchExecutions, 1);
+      assert.equal(backspaceCandidateSamples[0]!.cacheMisses, 1);
+      assert.equal(backspaceCandidateSamples[0]!.cacheHits, 2);
 
-      assert.ok(samples.legacy.transfer !== null && samples.candidateCold.transfer !== null);
-      const coldReduction =
-        ((samples.legacy.transfer.nativeToJsBytes - samples.candidateCold.transfer.nativeToJsBytes) /
-          samples.legacy.transfer.nativeToJsBytes) *
-        100;
-      assert.ok(coldReduction >= 90, `${workload.label} cold candidate must reduce native-to-JS bytes by at least 90%`);
-      const resultSha256 = sha256(JSON.stringify(oracle.result));
-      const matchingIds = selectSortedMichelinUnicodeMatchIds(retainedIndex, normalizedQuery);
-      const legacyTiming = summarizeTiming(samples.legacy.elapsedMilliseconds);
-      const coldTiming = summarizeTiming(samples.candidateCold.elapsedMilliseconds);
-      const warmTiming = summarizeTiming(samples.candidateWarmIndex.elapsedMilliseconds);
-      workloadReports[workload.label] = {
-        query: {
-          rawCodePoints: Array.from(
-            workload.query,
-            (character) => `U+${character.codePointAt(0)!.toString(16).toUpperCase()}`,
-          ),
-          normalizedCodePoints: Array.from(
-            normalizedQuery,
-            (character) => `U+${character.codePointAt(0)!.toString(16).toUpperCase()}`,
-          ),
-          rawUtf8Bytes: Buffer.byteLength(workload.query),
-          normalizedUtf8Bytes: Buffer.byteLength(normalizedQuery),
+      const reportSourceAfter = snapshotSource();
+      assert.deepEqual(
+        reportSourceAfter,
+        sourceBefore,
+        "benchmark must leave bundled guide and sidecars byte-identical",
+      );
+      return {
+        schemaVersion: 1,
+        status: "ok",
+        generatedAt: new Date().toISOString(),
+        runtime: {
+          node: process.version,
+          platform: process.platform,
+          architecture: process.arch,
+          locale: new Intl.Collator().resolvedOptions().locale,
         },
-        sortedMatchingIdsBeforeVisitExclusion: matchingIds.length,
-        returnedRows: oracle.result.length,
-        exactResultSha256: resultSha256,
-        strategies: {
-          legacyFullActiveTransfer: strategyReport(samples.legacy),
-          candidateColdIndex: strategyReport(samples.candidateCold),
-          candidateWarmIndex: strategyReport(samples.candidateWarmIndex),
-          candidateResultCacheHit: strategyReport(samples.candidateResultCacheHit),
+        configuration: {
+          measuredRuns: configuration.measuredRuns,
+          warmupRuns: configuration.warmupRuns,
+          maximumResults: MAX_MICHELIN_NAME_SEARCH_RESULTS,
+          debounceMilliseconds: MICHELIN_NAME_SEARCH_DEBOUNCE_MS,
         },
-        comparison: {
-          coldNativeToJsReductionPercent: coldReduction,
-          coldMedianSpeedup: legacyTiming.medianMilliseconds / coldTiming.medianMilliseconds,
-          warmIndexMedianSpeedup: legacyTiming.medianMilliseconds / warmTiming.medianMilliseconds,
-          exactOrderedResultsMatch: true,
+        source: {
+          relativePath: "assets/michelin.db",
+          openOptions: { readOnly: true },
+          pragmaQueryOnly: true,
+          sourceTableRows: guide.sourceTableRows,
+          selectedSourceRows: guide.selectedSourceRows,
+          importedValidRows: guide.importedRows.length,
+          before: sourceBefore,
+          after: reportSourceAfter,
+          byteIdentical: true,
+        },
+        isolatedMainDatabase: {
+          storage: ":memory:",
+          realNamesAndGuideFields: true,
+          syntheticConfirmedVisitExclusions: confirmedVisitExclusions,
+          livePalateDatabaseAccessed: false,
+        },
+        projection: {
+          activeFullRowCount: fullActiveRows.length,
+          activeFullRowsJsonUtf8Bytes: jsonBytes(fullActiveRows),
+          unicodeNameRowCount: allUnicodeNameRows.length,
+          unicodeNameRowsJsonUtf8Bytes: jsonBytes(allUnicodeNameRows),
+          retainedIndexJsonUtf8Bytes: jsonBytes(retainedIndex),
+          unicodeProjectionReductionVersusFullRowsPercent:
+            ((jsonBytes(fullActiveRows) - jsonBytes(allUnicodeNameRows)) / jsonBytes(fullActiveRows)) * 100,
+        },
+        workloads: Object.fromEntries(workloadReportEntries),
+        interactionModels: {
+          rapidTyping: {
+            inputOffsetsMilliseconds: RAPID_TYPING_EVENTS.map((event) => event.atMilliseconds),
+            inputCount: RAPID_TYPING_EVENTS.length,
+            debounceMilliseconds: MICHELIN_NAME_SEARCH_DEBOUNCE_MS,
+            scheduledDebounceWaitExcludedFromWorkTiming: true,
+            finalExactResultSha256: sha256(JSON.stringify(rapidLegacySamples[0]!.finalResult)),
+            ...traceReport(rapidLegacySamples, rapidCandidateSamples),
+          },
+          backspaceAndResultCacheReuse: {
+            inputOffsetsMilliseconds: BACKSPACE_EVENTS.map((event) => event.atMilliseconds),
+            inputCount: BACKSPACE_EVENTS.length,
+            prewarmedNormalizedResultCodePoints: Array.from(
+              normalizeMichelinNameSearchQuery("épi"),
+              (character) => `U+${character.codePointAt(0)!.toString(16).toUpperCase()}`,
+            ),
+            prewarmWorkExcludedFromTimingAndTransfer: true,
+            finalExactResultSha256: sha256(JSON.stringify(backspaceLegacySamples[0]!.finalResult)),
+            ...traceReport(backspaceLegacySamples, backspaceCandidateSamples),
+          },
+        },
+        reproducibility: {
+          bundledGuideSha256: sourceBefore.main.sha256,
+          coreSourceSha256: sha256(readFileSync(CORE_PATH)),
+          benchmarkSourceSha256: sha256(readFileSync(SCRIPT_PATH)),
+        },
+        assertions: {
+          everyCandidateResultExactlyMatchesLiteralLegacyOracle: true,
+          everyColdWorkloadReducesNativeToJsBytesByAtLeast90Percent: true,
+          rapidTypingExecutesOneDebouncedLogicalSearch: true,
+          backspaceReusesNormalizedResultCache: true,
+          bundledGuideAndSidecarsByteIdentical: true,
+          reportMode: "0600",
+        },
+        measurementModel: {
+          includes: [
+            "real bundled Michelin names and imported guide fields",
+            "SQLite statement preparation, execution, and synchronous row decoding",
+            "exact JavaScript toLowerCase/includes/localeCompare selection",
+            "active dataset-version lookups before and after hydration",
+            "ordered JSON-ID hydration and confirmed-visit exclusion",
+            "cold Unicode projection/index creation, warm-index lookup, and result-cache-hit models",
+          ],
+          limitations: [
+            "node:sqlite synchronous in-memory timings do not reproduce Expo SQLite async queueing or JSI bridge cost",
+            "visit exclusions are synthetic and the live Palate database, Photos library, and Calendar are never accessed",
+            "guide initialization/import and React rendering/input latency are outside timed regions",
+            "debounce timing is a deterministic scheduling model; its 200 ms idle wait is reported but excluded from work timings",
+            "RSS deltas are process-wide, allocator-dependent diagnostics and can be zero or negative",
+            "native-to-JS and JS-to-native bytes are JSON UTF-8 payload models, not measured JSI wire bytes",
+          ],
+        },
+        privacy: {
+          aggregateOnly: true,
+          rawRestaurantNamesOrIdsRetainedInReport: false,
         },
       };
+    } finally {
+      database.close();
     }
-
-    const rapidLegacySamples: TraceMeasurement[] = [];
-    const rapidCandidateSamples: TraceMeasurement[] = [];
-    const backspaceLegacySamples: TraceMeasurement[] = [];
-    const backspaceCandidateSamples: TraceMeasurement[] = [];
-    const traceIterations = configuration.warmupRuns + configuration.measuredRuns;
-    for (let iteration = 0; iteration < traceIterations; iteration += 1) {
-      const rapidLegacy = executeLegacyTrace(database, RAPID_TYPING_EVENTS);
-      const rapidCandidate = executeCandidateTrace(database, RAPID_TYPING_EVENTS, true);
-      assert.deepEqual(
-        rapidCandidate.finalResult,
-        rapidLegacy.finalResult,
-        "debounced rapid trace final result must match",
-      );
-
-      const backspaceLegacy = executeLegacyTrace(database, BACKSPACE_EVENTS);
-      const backspaceCandidate = executeCandidateTrace(database, BACKSPACE_EVENTS, false, ["épi"]);
-      assert.deepEqual(
-        backspaceCandidate.finalResult,
-        backspaceLegacy.finalResult,
-        "backspace final result must match",
-      );
-      if (iteration >= configuration.warmupRuns) {
-        rapidLegacySamples.push(rapidLegacy);
-        rapidCandidateSamples.push(rapidCandidate);
-        backspaceLegacySamples.push(backspaceLegacy);
-        backspaceCandidateSamples.push(backspaceCandidate);
-      }
-    }
-    assert.equal(rapidCandidateSamples[0]!.logicalSearchExecutions, 1);
-    assert.equal(backspaceCandidateSamples[0]!.cacheMisses, 1);
-    assert.equal(backspaceCandidateSamples[0]!.cacheHits, 2);
-
-    const reportSourceAfter = snapshotSource();
-    assert.deepEqual(reportSourceAfter, sourceBefore, "benchmark must leave bundled guide and sidecars byte-identical");
-    report = {
-      schemaVersion: 1,
-      status: "ok",
-      generatedAt: new Date().toISOString(),
-      runtime: {
-        node: process.version,
-        platform: process.platform,
-        architecture: process.arch,
-        locale: new Intl.Collator().resolvedOptions().locale,
-      },
-      configuration: {
-        measuredRuns: configuration.measuredRuns,
-        warmupRuns: configuration.warmupRuns,
-        maximumResults: MAX_MICHELIN_NAME_SEARCH_RESULTS,
-        debounceMilliseconds: MICHELIN_NAME_SEARCH_DEBOUNCE_MS,
-      },
-      source: {
-        relativePath: "assets/michelin.db",
-        openOptions: { readOnly: true },
-        pragmaQueryOnly: true,
-        sourceTableRows: guide.sourceTableRows,
-        selectedSourceRows: guide.selectedSourceRows,
-        importedValidRows: guide.importedRows.length,
-        before: sourceBefore,
-        after: reportSourceAfter,
-        byteIdentical: true,
-      },
-      isolatedMainDatabase: {
-        storage: ":memory:",
-        realNamesAndGuideFields: true,
-        syntheticConfirmedVisitExclusions: confirmedVisitExclusions,
-        livePalateDatabaseAccessed: false,
-      },
-      projection: {
-        activeFullRowCount: fullActiveRows.length,
-        activeFullRowsJsonUtf8Bytes: jsonBytes(fullActiveRows),
-        unicodeNameRowCount: allUnicodeNameRows.length,
-        unicodeNameRowsJsonUtf8Bytes: jsonBytes(allUnicodeNameRows),
-        retainedIndexJsonUtf8Bytes: jsonBytes(retainedIndex),
-        unicodeProjectionReductionVersusFullRowsPercent:
-          ((jsonBytes(fullActiveRows) - jsonBytes(allUnicodeNameRows)) / jsonBytes(fullActiveRows)) * 100,
-      },
-      workloads: workloadReports,
-      interactionModels: {
-        rapidTyping: {
-          inputOffsetsMilliseconds: RAPID_TYPING_EVENTS.map((event) => event.atMilliseconds),
-          inputCount: RAPID_TYPING_EVENTS.length,
-          debounceMilliseconds: MICHELIN_NAME_SEARCH_DEBOUNCE_MS,
-          scheduledDebounceWaitExcludedFromWorkTiming: true,
-          finalExactResultSha256: sha256(JSON.stringify(rapidLegacySamples[0]!.finalResult)),
-          ...traceReport(rapidLegacySamples, rapidCandidateSamples),
-        },
-        backspaceAndResultCacheReuse: {
-          inputOffsetsMilliseconds: BACKSPACE_EVENTS.map((event) => event.atMilliseconds),
-          inputCount: BACKSPACE_EVENTS.length,
-          prewarmedNormalizedResultCodePoints: Array.from(
-            normalizeMichelinNameSearchQuery("épi"),
-            (character) => `U+${character.codePointAt(0)!.toString(16).toUpperCase()}`,
-          ),
-          prewarmWorkExcludedFromTimingAndTransfer: true,
-          finalExactResultSha256: sha256(JSON.stringify(backspaceLegacySamples[0]!.finalResult)),
-          ...traceReport(backspaceLegacySamples, backspaceCandidateSamples),
-        },
-      },
-      reproducibility: {
-        bundledGuideSha256: sourceBefore.main.sha256,
-        coreSourceSha256: sha256(readFileSync(CORE_PATH)),
-        benchmarkSourceSha256: sha256(readFileSync(SCRIPT_PATH)),
-      },
-      assertions: {
-        everyCandidateResultExactlyMatchesLiteralLegacyOracle: true,
-        everyColdWorkloadReducesNativeToJsBytesByAtLeast90Percent: true,
-        rapidTypingExecutesOneDebouncedLogicalSearch: true,
-        backspaceReusesNormalizedResultCache: true,
-        bundledGuideAndSidecarsByteIdentical: true,
-        reportMode: "0600",
-      },
-      measurementModel: {
-        includes: [
-          "real bundled Michelin names and imported guide fields",
-          "SQLite statement preparation, execution, and synchronous row decoding",
-          "exact JavaScript toLowerCase/includes/localeCompare selection",
-          "active dataset-version lookups before and after hydration",
-          "ordered JSON-ID hydration and confirmed-visit exclusion",
-          "cold Unicode projection/index creation, warm-index lookup, and result-cache-hit models",
-        ],
-        limitations: [
-          "node:sqlite synchronous in-memory timings do not reproduce Expo SQLite async queueing or JSI bridge cost",
-          "visit exclusions are synthetic and the live Palate database, Photos library, and Calendar are never accessed",
-          "guide initialization/import and React rendering/input latency are outside timed regions",
-          "debounce timing is a deterministic scheduling model; its 200 ms idle wait is reported but excluded from work timings",
-          "RSS deltas are process-wide, allocator-dependent diagnostics and can be zero or negative",
-          "native-to-JS and JS-to-native bytes are JSON UTF-8 payload models, not measured JSI wire bytes",
-        ],
-      },
-      privacy: {
-        aggregateOnly: true,
-        rawRestaurantNamesOrIdsRetainedInReport: false,
-      },
-    };
-  } finally {
-    database.close();
-  }
+  })();
 
   const sourceAfter = snapshotSource();
   assert.deepEqual(sourceAfter, sourceBefore, "closed benchmark must leave bundled guide and sidecars byte-identical");

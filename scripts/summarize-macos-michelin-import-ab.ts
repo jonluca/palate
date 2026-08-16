@@ -155,6 +155,19 @@ interface NumericSummary {
   readonly samples: readonly number[];
 }
 
+interface CounterbalanceValidation {
+  readonly chronologicalRuns: readonly LoadedRun[];
+  readonly executionOrder: readonly Strategy[];
+  readonly firstPositionCounts: Readonly<Record<Strategy, number>>;
+}
+
+type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string;
+type JsonNode = JsonValue | undefined;
+
+interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
+
 const MAX_REPORT_BYTES = 1024 * 1024;
 const SAFE_RUN_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -230,44 +243,75 @@ function parseConfiguration(arguments_: readonly string[]): Configuration | null
   return { legacyPaths, attachPaths, outputPath };
 }
 
-function requireRecord(value: unknown, label: string): asserts value is Record<string, unknown> {
-  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
+function isJsonObject(value: JsonNode): value is JsonObject {
+  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value);
 }
 
-function requireExactKeys(record: Record<string, unknown>, expected: readonly string[], label: string): void {
+function isJsonBoolean(value: JsonNode): value is boolean {
+  return typeof value === "boolean";
+}
+
+function isJsonNumber(value: JsonNode): value is number {
+  return typeof value === "number";
+}
+
+function isJsonString(value: JsonNode): value is string {
+  return typeof value === "string";
+}
+
+function parseJsonValue(source: string): JsonValue {
+  // JSON.parse either throws or returns exactly the recursive JSON domain represented by JsonValue.
+  return JSON.parse(source);
+}
+
+function requireRecord(value: JsonNode, label: string): asserts value is JsonObject {
+  assert.ok(isJsonObject(value), `${label} must be an object`);
+}
+
+function requireExactKeys(record: JsonObject, expected: readonly string[], label: string): void {
   assert.deepEqual(Object.keys(record).sort(), [...expected].sort(), `${label} has an unexpected schema`);
 }
 
-function requireTrue(value: unknown, label: string): void {
-  assert.equal(value, true, `${label} must be true`);
+function requireTrue(value: JsonNode, label: string): asserts value is true {
+  assert.ok(isJsonBoolean(value) && value, `${label} must be true`);
 }
 
-function requireSafeRunId(value: unknown, label: string): asserts value is string {
-  assert.ok(typeof value === "string" && SAFE_RUN_ID_PATTERN.test(value), `${label} must be a safe run ID`);
+function requireString(value: JsonNode, label: string): asserts value is string {
+  assert.ok(isJsonString(value), `${label} must be a string`);
 }
 
-function requireSha256(value: unknown, label: string): asserts value is string {
-  assert.ok(typeof value === "string" && SHA256_PATTERN.test(value), `${label} must be a lowercase SHA-256`);
+function requireSafeRunId(value: JsonNode, label: string): asserts value is string {
+  assert.ok(isJsonString(value) && SAFE_RUN_ID_PATTERN.test(value), `${label} must be a safe run ID`);
 }
 
-function requireInteger(value: unknown, label: string, minimum = 0): asserts value is number {
-  assert.ok(Number.isSafeInteger(value) && (value as number) >= minimum, `${label} must be an integer >= ${minimum}`);
+function requireSha256(value: JsonNode, label: string): asserts value is string {
+  assert.ok(isJsonString(value) && SHA256_PATTERN.test(value), `${label} must be a lowercase SHA-256`);
 }
 
-function requireFinite(value: unknown, label: string, minimum = 0): asserts value is number {
-  assert.ok(Number.isFinite(value) && (value as number) >= minimum, `${label} must be finite and >= ${minimum}`);
+function requireInteger(value: JsonNode, label: string, minimum = 0): asserts value is number {
+  assert.ok(
+    isJsonNumber(value) && Number.isSafeInteger(value) && value >= minimum,
+    `${label} must be an integer >= ${minimum}`,
+  );
 }
 
-function validateSourceComponent(value: unknown, label: string, required: boolean): SourceComponent {
+function requireFinite(value: JsonNode, label: string, minimum = 0): asserts value is number {
+  assert.ok(
+    isJsonNumber(value) && Number.isFinite(value) && value >= minimum,
+    `${label} must be finite and >= ${minimum}`,
+  );
+}
+
+function validateSourceComponent(value: JsonNode, label: string, required: boolean): SourceComponent {
   requireRecord(value, label);
   requireExactKeys(value, ["present", "sha256", "mode", "size"], label);
-  assert.equal(typeof value.present, "boolean", `${label}.present must be boolean`);
+  assert.ok(isJsonBoolean(value.present), `${label}.present must be boolean`);
   if (required) {
     assert.equal(value.present, true, `${label} must be present`);
   }
   if (value.present) {
     requireSha256(value.sha256, `${label}.sha256`);
-    assert.ok(typeof value.mode === "string" && MODE_PATTERN.test(value.mode), `${label}.mode must be octal`);
+    assert.ok(isJsonString(value.mode) && MODE_PATTERN.test(value.mode), `${label}.mode must be octal`);
     requireInteger(value.size, `${label}.size`);
     if (required) {
       assert.ok(value.size > 0, `${label}.size must be positive`);
@@ -277,10 +321,15 @@ function validateSourceComponent(value: unknown, label: string, required: boolea
     assert.equal(value.mode, null, `${label}.mode must be null when absent`);
     assert.equal(value.size, null, `${label}.size must be null when absent`);
   }
-  return value as unknown as SourceComponent;
+  return {
+    present: value.present,
+    sha256: value.sha256,
+    mode: value.mode,
+    size: value.size,
+  };
 }
 
-function validateReportSchema(parsed: unknown, expectedStrategy: Strategy, label: string): ValidatorReport {
+function validateReportSchema(parsed: JsonValue, expectedStrategy: Strategy, label: string): ValidatorReport {
   requireRecord(parsed, label);
   requireExactKeys(
     parsed,
@@ -306,9 +355,9 @@ function validateReportSchema(parsed: unknown, expectedStrategy: Strategy, label
   assert.equal(parsed.status, "ok", `${label}: report status`);
   requireSafeRunId(parsed.runId, `${label}: runId`);
   assert.equal(parsed.strategy, expectedStrategy, `${label}: report strategy`);
+  requireString(parsed.generatedAt, `${label}: generatedAt`);
   assert.ok(
-    typeof parsed.generatedAt === "string" &&
-      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(parsed.generatedAt) &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(parsed.generatedAt) &&
       Number.isFinite(Date.parse(parsed.generatedAt)),
     `${label}: generatedAt must be an ISO UTC timestamp`,
   );
@@ -329,19 +378,18 @@ function validateReportSchema(parsed: unknown, expectedStrategy: Strategy, label
     ],
     `${label}: signedBuild`,
   );
-  assert.ok(
-    typeof signedBuild.appBundleName === "string" && /^[^/\\\0]{1,255}$/.test(signedBuild.appBundleName),
-    `${label}: app bundle name`,
-  );
+  requireString(signedBuild.appBundleName, `${label}: app bundle name`);
+  assert.match(signedBuild.appBundleName, /^[^/\\\0]{1,255}$/, `${label}: app bundle name`);
   assert.equal(signedBuild.schemeRunConfiguration, "Release", `${label}: signed Release configuration`);
   requireTrue(signedBuild.strictCodeSignatureVerified, `${label}: strict code signature`);
   requireTrue(signedBuild.runningBundleMatched, `${label}: running bundle identity`);
   requireSha256(signedBuild.executableSha256, `${label}: executable SHA-256`);
   requireSha256(signedBuild.mainJsBundleSha256, `${label}: JS bundle SHA-256`);
   requireSha256(signedBuild.bundledGuideSha256, `${label}: bundled guide SHA-256`);
-  assert.ok(
-    typeof signedBuild.bundledGuideDatasetVersion === "string" &&
-      DATASET_VERSION_PATTERN.test(signedBuild.bundledGuideDatasetVersion),
+  requireString(signedBuild.bundledGuideDatasetVersion, `${label}: bundled guide dataset version`);
+  assert.match(
+    signedBuild.bundledGuideDatasetVersion,
+    DATASET_VERSION_PATTERN,
     `${label}: bundled guide dataset version`,
   );
 
@@ -376,10 +424,10 @@ function validateReportSchema(parsed: unknown, expectedStrategy: Strategy, label
   requireRecord(sourceGuard.components, `${label}: sourceGuard.components`);
   const components = sourceGuard.components;
   requireExactKeys(components, ["main", "wal", "shm", "journal"], `${label}: sourceGuard.components`);
-  validateSourceComponent(components.main, `${label}: source main`, true);
-  validateSourceComponent(components.wal, `${label}: source WAL`, false);
-  validateSourceComponent(components.shm, `${label}: source SHM`, false);
-  validateSourceComponent(components.journal, `${label}: source journal`, false);
+  const sourceMain = validateSourceComponent(components.main, `${label}: source main`, true);
+  const sourceWal = validateSourceComponent(components.wal, `${label}: source WAL`, false);
+  const sourceShm = validateSourceComponent(components.shm, `${label}: source SHM`, false);
+  const sourceJournal = validateSourceComponent(components.journal, `${label}: source journal`, false);
 
   requireRecord(parsed.fixture, `${label}: fixture`);
   const fixture = parsed.fixture;
@@ -581,7 +629,112 @@ function validateReportSchema(parsed: unknown, expectedStrategy: Strategy, label
   requireTrue(restoration.rawPrivateArtifactsDeleted, `${label}: raw private artifact cleanup`);
   requireTrue(restoration.aggregateOnlyReport, `${label}: aggregate-only input report`);
 
-  return parsed as unknown as ValidatorReport;
+  return {
+    schemaVersion: 1,
+    status: "ok",
+    runId: parsed.runId,
+    generatedAt: parsed.generatedAt,
+    strategy: expectedStrategy,
+    signedBuild: {
+      appBundleName: signedBuild.appBundleName,
+      schemeRunConfiguration: "Release",
+      strictCodeSignatureVerified: true,
+      runningBundleMatched: true,
+      executableSha256: signedBuild.executableSha256,
+      mainJsBundleSha256: signedBuild.mainJsBundleSha256,
+      bundledGuideSha256: signedBuild.bundledGuideSha256,
+      bundledGuideDatasetVersion: signedBuild.bundledGuideDatasetVersion,
+    },
+    materializedSource: {
+      schemaVersion: 1,
+      regularUnaliasedFile: true,
+      byteIdenticalToSignedBundle: true,
+      sha256: materializedSource.sha256,
+      byteSize: materializedSource.byteSize,
+    },
+    sourceGuard: {
+      capturedBeforeSQLiteAccess: true,
+      sharedMutationLock: true,
+      durableStaleRecovery: true,
+      components: {
+        main: sourceMain,
+        wal: sourceWal,
+        shm: sourceShm,
+        journal: sourceJournal,
+      },
+    },
+    fixture: {
+      installedDisposableCopyOnly: true,
+      validationRequestSchemaVersion: 1,
+      staleDatasetMarkerPrimed: true,
+      previousAttestationRemoved: true,
+      requestExpirySeconds: fixture.requestExpirySeconds,
+    },
+    runtimeAttestation: {
+      schemaVersion: runtime.schemaVersion,
+      runIdMatched: true,
+      requestedStrategy: expectedStrategy,
+      resolvedStrategy: expectedStrategy,
+      selectedStrategy: expectedStrategy,
+      fallbackReason: null,
+      datasetVersionMatched: true,
+      sourceRows: runtime.sourceRows,
+      importedRows: runtime.importedRows,
+      observedAtEpochSeconds: runtime.observedAtEpochSeconds,
+      committedAtomicallyWithDatasetMarker: true,
+    },
+    semanticParity: {
+      schemaVersion: 1,
+      status: "ok",
+      encoding: {
+        schema: "length-prefixed-v1",
+        stringEncoding: "utf8",
+        floatingPointEncoding: "ieee754-binary64-be",
+        integerEncoding: "signed-64-be",
+        rowOrder: "id-utf8-binary",
+      },
+      counts: {
+        signedGuideSourceRows: semanticParity.counts.signedGuideSourceRows,
+        expectedActiveRows: semanticParity.counts.expectedActiveRows,
+        actualActiveRows: semanticParity.counts.actualActiveRows,
+      },
+      digests: {
+        expectedCanonicalRowsSha256: semanticParity.digests.expectedCanonicalRowsSha256,
+        actualCanonicalRowsSha256: semanticParity.digests.actualCanonicalRowsSha256,
+      },
+      mismatches: {
+        missingRows: 0,
+        unexpectedRows: 0,
+        contentRows: 0,
+      },
+      correctness: {
+        exactLegacySemanticRows: true,
+        exactIdsAndAllPersistedFields: true,
+        exactFloat64CoordinateBits: true,
+        exactDatasetVersion: true,
+      },
+    },
+    timing: {
+      timestampedManualTrigger: true,
+      triggerEpochSeconds: timing.triggerEpochSeconds,
+      completionObservedEpochSeconds: timing.completionObservedEpochSeconds,
+      triggerToImportCommitSeconds: timing.triggerToImportCommitSeconds,
+      initialRssKib: timing.initialRssKib,
+      maximumObservedRssKib: timing.maximumObservedRssKib,
+    },
+    result: {
+      databaseSha256: result.databaseSha256,
+      activeDatasetRows: result.activeDatasetRows,
+      totalGuideRows: result.totalGuideRows,
+      integrityCheck: "ok",
+      foreignKeyViolationCount: 0,
+    },
+    restoration: {
+      exactMainWalShmJournalBytesAndModes: true,
+      rawPrivateArtifactsDeleted: true,
+      aggregateOnlyReport: true,
+    },
+  };
 }
 
 function sha256(value: string | Buffer): string {
@@ -601,9 +754,9 @@ function loadAndValidate(path: string, expectedStrategy: Strategy): LoadedRun {
     [before.dev, before.ino, before.size, before.mtimeMs, before.mode & 0o7777],
     `${path}: input report changed while reading`,
   );
-  let parsed: unknown;
+  let parsed: JsonValue;
   try {
-    parsed = JSON.parse(bytes.toString("utf8"));
+    parsed = parseJsonValue(bytes.toString("utf8"));
   } catch (error) {
     throw new Error(`${path}: invalid JSON`, { cause: error });
   }
@@ -676,11 +829,7 @@ function validateUniquePaths(configuration: Configuration): void {
 function validateCounterbalance(
   legacyRuns: readonly LoadedRun[],
   attachRuns: readonly LoadedRun[],
-): {
-  readonly chronologicalRuns: readonly LoadedRun[];
-  readonly executionOrder: readonly Strategy[];
-  readonly firstPositionCounts: Readonly<Record<Strategy, number>>;
-} {
+): CounterbalanceValidation {
   const chronologicalRuns = [...legacyRuns, ...attachRuns].sort(
     (left, right) => left.report.timing.triggerEpochSeconds - right.report.timing.triggerEpochSeconds,
   );
@@ -694,10 +843,10 @@ function validateCounterbalance(
   }
 
   let previousFirstStrategy: Strategy | null = null;
-  const firstPositionCounts: Record<Strategy, number> = {
+  const firstPositionCounts = {
     "legacy-js-v1": 0,
     "attach-insert-select-v1": 0,
-  };
+  } satisfies Record<Strategy, number>;
   for (let pairIndex = 0; pairIndex < legacyRuns.length; pairIndex += 1) {
     const pair = [legacyRuns[pairIndex]!, attachRuns[pairIndex]!].sort(
       (left, right) => left.report.timing.triggerEpochSeconds - right.report.timing.triggerEpochSeconds,

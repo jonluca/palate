@@ -9,6 +9,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  parseJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from "../utils/runtime-json.ts";
+
 type Strategy = "legacy-js-v1" | "attach-insert-select-v1";
 
 interface TestReport {
@@ -141,7 +150,7 @@ interface FixtureSet {
 interface SuccessSummary {
   readonly schemaVersion: number;
   readonly status: string;
-  readonly validation: Record<string, boolean>;
+  readonly validation: MichelinImportSummaryValidation;
   readonly design: {
     sampleCountPerStrategy: number;
     preferredSampleCountPerStrategy: number;
@@ -152,9 +161,9 @@ interface SuccessSummary {
   };
   readonly provenance: {
     summarizerSha256: string;
-    signedBuild: Record<string, string | number>;
-    sourceGuardComponents: Record<string, SourceComponent>;
-    workload: Record<string, number | string>;
+    signedBuild: MichelinImportSignedBuildSummary;
+    sourceGuardComponents: MichelinImportSourceGuardSummary;
+    workload: MichelinImportWorkloadSummary;
     chronologicalInputs: Array<{
       ordinal: number;
       runId: string;
@@ -189,7 +198,30 @@ interface SuccessSummary {
       medianPairedObservedGrowth: number;
     };
   };
-  readonly privacy: Record<string, boolean | string>;
+  readonly privacy: MichelinImportPrivacySummary;
+}
+
+interface MichelinImportSummaryValidation {
+  [attestation: string]: boolean;
+}
+
+interface MichelinImportSignedBuildSummary {
+  [field: string]: string | number;
+}
+
+interface MichelinImportSourceGuardSummary {
+  main: SourceComponent;
+  wal: SourceComponent;
+  shm: SourceComponent;
+  journal: SourceComponent;
+}
+
+interface MichelinImportWorkloadSummary {
+  [field: string]: number | string;
+}
+
+interface MichelinImportPrivacySummary {
+  [attestation: string]: boolean | string;
 }
 
 interface StrategySummary {
@@ -400,6 +432,312 @@ function execute(fixtureSet: FixtureSet): SpawnSyncReturns<string> {
   );
 }
 
+function isJsonBoolean(value: JsonValue | undefined): value is boolean {
+  return value === true || value === false;
+}
+
+function hasErrorCode(cause: Error): cause is Error & { code: string } {
+  return "code" in cause && typeof cause.code === "string";
+}
+
+function requiredJsonObject(value: JsonValue | undefined, label: string): JsonObject {
+  if (!isJsonObject(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function requiredJsonNumber(value: JsonValue | undefined, label: string): number {
+  if (!isJsonNumber(value)) {
+    throw new TypeError(`${label} must be a number.`);
+  }
+  return value;
+}
+
+function requiredNullableJsonNumber(value: JsonValue | undefined, label: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredJsonNumber(value, label);
+}
+
+function requiredJsonString(value: JsonValue | undefined, label: string): string {
+  if (!isJsonString(value)) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requiredNullableJsonString(value: JsonValue | undefined, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredJsonString(value, label);
+}
+
+function requiredJsonBoolean(value: JsonValue | undefined, label: string): boolean {
+  if (!isJsonBoolean(value)) {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+  return value;
+}
+
+function requiredJsonNumberArray(value: JsonValue | undefined, label: string): number[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => requiredJsonNumber(entry, `${label}[${index}]`));
+}
+
+function requiredJsonStringArray(value: JsonValue | undefined, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => requiredJsonString(entry, `${label}[${index}]`));
+}
+
+function parseStrategy(value: JsonValue | undefined, label: string): Strategy {
+  if (value === "legacy-js-v1" || value === "attach-insert-select-v1") {
+    return value;
+  }
+  throw new TypeError(`${label} is unsupported.`);
+}
+
+function parseSummaryValidation(value: JsonValue | undefined): MichelinImportSummaryValidation {
+  const object = requiredJsonObject(value, "summary.validation");
+  const validation: MichelinImportSummaryValidation = {};
+  for (const [key, entry] of Object.entries(object)) {
+    validation[key] = requiredJsonBoolean(entry, `summary.validation.${key}`);
+  }
+  return validation;
+}
+
+function parseStringOrNumber(value: JsonValue, label: string): string | number {
+  if (isJsonString(value) || isJsonNumber(value)) {
+    return value;
+  }
+  throw new TypeError(`${label} must be a string or number.`);
+}
+
+function parseSignedBuildSummary(value: JsonValue | undefined): MichelinImportSignedBuildSummary {
+  const object = requiredJsonObject(value, "summary.provenance.signedBuild");
+  const summary: MichelinImportSignedBuildSummary = {};
+  for (const [key, entry] of Object.entries(object)) {
+    summary[key] = parseStringOrNumber(entry, `summary.provenance.signedBuild.${key}`);
+  }
+  return summary;
+}
+
+function parseWorkloadSummary(value: JsonValue | undefined): MichelinImportWorkloadSummary {
+  const object = requiredJsonObject(value, "summary.provenance.workload");
+  const summary: MichelinImportWorkloadSummary = {};
+  for (const [key, entry] of Object.entries(object)) {
+    summary[key] = parseStringOrNumber(entry, `summary.provenance.workload.${key}`);
+  }
+  return summary;
+}
+
+function parsePrivacySummary(value: JsonValue | undefined): MichelinImportPrivacySummary {
+  const object = requiredJsonObject(value, "summary.privacy");
+  const summary: MichelinImportPrivacySummary = {};
+  for (const [key, entry] of Object.entries(object)) {
+    if (isJsonString(entry) || isJsonBoolean(entry)) {
+      summary[key] = entry;
+    } else {
+      throw new TypeError(`summary.privacy.${key} must be a string or boolean.`);
+    }
+  }
+  return summary;
+}
+
+function parseSourceComponent(value: JsonValue | undefined, label: string): SourceComponent {
+  const object = requiredJsonObject(value, label);
+  return {
+    present: requiredJsonBoolean(object.present, `${label}.present`),
+    sha256: requiredNullableJsonString(object.sha256, `${label}.sha256`),
+    mode: requiredNullableJsonString(object.mode, `${label}.mode`),
+    size: requiredNullableJsonNumber(object.size, `${label}.size`),
+  };
+}
+
+function parseSourceGuardSummary(value: JsonValue | undefined): MichelinImportSourceGuardSummary {
+  const object = requiredJsonObject(value, "summary.provenance.sourceGuardComponents");
+  return {
+    main: parseSourceComponent(object.main, "summary.provenance.sourceGuardComponents.main"),
+    wal: parseSourceComponent(object.wal, "summary.provenance.sourceGuardComponents.wal"),
+    shm: parseSourceComponent(object.shm, "summary.provenance.sourceGuardComponents.shm"),
+    journal: parseSourceComponent(object.journal, "summary.provenance.sourceGuardComponents.journal"),
+  };
+}
+
+function parseNumericSummary(value: JsonValue | undefined, label: string): NumericSummary {
+  const object = requiredJsonObject(value, label);
+  return {
+    samples: requiredJsonNumberArray(object.samples, `${label}.samples`),
+    minimum: requiredJsonNumber(object.minimum, `${label}.minimum`),
+    median: requiredJsonNumber(object.median, `${label}.median`),
+    maximum: requiredJsonNumber(object.maximum, `${label}.maximum`),
+  };
+}
+
+function parseStrategySummary(value: JsonValue | undefined, label: string): StrategySummary {
+  const object = requiredJsonObject(value, label);
+  return {
+    strategy: parseStrategy(object.strategy, `${label}.strategy`),
+    sampleCount: requiredJsonNumber(object.sampleCount, `${label}.sampleCount`),
+    runIds: requiredJsonStringArray(object.runIds, `${label}.runIds`),
+    inputReportSha256: requiredJsonStringArray(object.inputReportSha256, `${label}.inputReportSha256`),
+    triggerToImportCommitSeconds: parseNumericSummary(
+      object.triggerToImportCommitSeconds,
+      `${label}.triggerToImportCommitSeconds`,
+    ),
+    initialRssKib: parseNumericSummary(object.initialRssKib, `${label}.initialRssKib`),
+    maximumObservedRssKib: parseNumericSummary(object.maximumObservedRssKib, `${label}.maximumObservedRssKib`),
+    observedRssGrowthKib: parseNumericSummary(object.observedRssGrowthKib, `${label}.observedRssGrowthKib`),
+  };
+}
+
+function parseChronologicalInput(
+  value: JsonValue,
+  index: number,
+): SuccessSummary["provenance"]["chronologicalInputs"][number] {
+  const label = `summary.provenance.chronologicalInputs[${index}]`;
+  const object = requiredJsonObject(value, label);
+  return {
+    ordinal: requiredJsonNumber(object.ordinal, `${label}.ordinal`),
+    runId: requiredJsonString(object.runId, `${label}.runId`),
+    strategy: parseStrategy(object.strategy, `${label}.strategy`),
+    inputReportSha256: requiredJsonString(object.inputReportSha256, `${label}.inputReportSha256`),
+    resultDatabaseSha256: requiredJsonString(object.resultDatabaseSha256, `${label}.resultDatabaseSha256`),
+  };
+}
+
+function parseSuccessSummaryValue(value: JsonValue): SuccessSummary {
+  const object = requiredJsonObject(value, "summary");
+  const design = requiredJsonObject(object.design, "summary.design");
+  const firstPositionCounts = requiredJsonObject(design.firstPositionCounts, "summary.design.firstPositionCounts");
+  const provenance = requiredJsonObject(object.provenance, "summary.provenance");
+  if (!Array.isArray(provenance.chronologicalInputs)) {
+    throw new TypeError("summary.provenance.chronologicalInputs must be an array.");
+  }
+  const strategies = requiredJsonObject(object.strategies, "summary.strategies");
+  const comparison = requiredJsonObject(object.comparison, "summary.comparison");
+  const pairedCounterbalanced = requiredJsonObject(
+    comparison.pairedCounterbalanced,
+    "summary.comparison.pairedCounterbalanced",
+  );
+  const rssDeltaKib = requiredJsonObject(comparison.rssDeltaKib, "summary.comparison.rssDeltaKib");
+  return {
+    schemaVersion: requiredJsonNumber(object.schemaVersion, "summary.schemaVersion"),
+    status: requiredJsonString(object.status, "summary.status"),
+    validation: parseSummaryValidation(object.validation),
+    design: {
+      sampleCountPerStrategy: requiredJsonNumber(
+        design.sampleCountPerStrategy,
+        "summary.design.sampleCountPerStrategy",
+      ),
+      preferredSampleCountPerStrategy: requiredJsonNumber(
+        design.preferredSampleCountPerStrategy,
+        "summary.design.preferredSampleCountPerStrategy",
+      ),
+      usesPreferredThreeByThreeDesign: requiredJsonBoolean(
+        design.usesPreferredThreeByThreeDesign,
+        "summary.design.usesPreferredThreeByThreeDesign",
+      ),
+      pairCount: requiredJsonNumber(design.pairCount, "summary.design.pairCount"),
+      executionOrder: requiredJsonStringArray(design.executionOrder, "summary.design.executionOrder").map(
+        (entry, index) => parseStrategy(entry, `summary.design.executionOrder[${index}]`),
+      ),
+      firstPositionCounts: {
+        "legacy-js-v1": requiredJsonNumber(
+          firstPositionCounts["legacy-js-v1"],
+          "summary.design.firstPositionCounts.legacy-js-v1",
+        ),
+        "attach-insert-select-v1": requiredJsonNumber(
+          firstPositionCounts["attach-insert-select-v1"],
+          "summary.design.firstPositionCounts.attach-insert-select-v1",
+        ),
+      },
+    },
+    provenance: {
+      summarizerSha256: requiredJsonString(provenance.summarizerSha256, "summary.provenance.summarizerSha256"),
+      signedBuild: parseSignedBuildSummary(provenance.signedBuild),
+      sourceGuardComponents: parseSourceGuardSummary(provenance.sourceGuardComponents),
+      workload: parseWorkloadSummary(provenance.workload),
+      chronologicalInputs: provenance.chronologicalInputs.map(parseChronologicalInput),
+    },
+    strategies: {
+      legacyJsV1: parseStrategySummary(strategies.legacyJsV1, "summary.strategies.legacyJsV1"),
+      attachInsertSelectV1: parseStrategySummary(
+        strategies.attachInsertSelectV1,
+        "summary.strategies.attachInsertSelectV1",
+      ),
+    },
+    comparison: {
+      interpretation: requiredJsonString(comparison.interpretation, "summary.comparison.interpretation"),
+      medianDurationSpeedup: requiredJsonNumber(
+        comparison.medianDurationSpeedup,
+        "summary.comparison.medianDurationSpeedup",
+      ),
+      medianDurationReductionPercent: requiredJsonNumber(
+        comparison.medianDurationReductionPercent,
+        "summary.comparison.medianDurationReductionPercent",
+      ),
+      medianDurationSecondsSaved: requiredJsonNumber(
+        comparison.medianDurationSecondsSaved,
+        "summary.comparison.medianDurationSecondsSaved",
+      ),
+      pairedCounterbalanced: {
+        speedups: requiredJsonNumberArray(
+          pairedCounterbalanced.speedups,
+          "summary.comparison.pairedCounterbalanced.speedups",
+        ),
+        reductionsPercent: requiredJsonNumberArray(
+          pairedCounterbalanced.reductionsPercent,
+          "summary.comparison.pairedCounterbalanced.reductionsPercent",
+        ),
+        medianSpeedup: requiredJsonNumber(
+          pairedCounterbalanced.medianSpeedup,
+          "summary.comparison.pairedCounterbalanced.medianSpeedup",
+        ),
+        medianReductionPercent: requiredJsonNumber(
+          pairedCounterbalanced.medianReductionPercent,
+          "summary.comparison.pairedCounterbalanced.medianReductionPercent",
+        ),
+        attachWins: requiredJsonNumber(
+          pairedCounterbalanced.attachWins,
+          "summary.comparison.pairedCounterbalanced.attachWins",
+        ),
+        ties: requiredJsonNumber(pairedCounterbalanced.ties, "summary.comparison.pairedCounterbalanced.ties"),
+        legacyWins: requiredJsonNumber(
+          pairedCounterbalanced.legacyWins,
+          "summary.comparison.pairedCounterbalanced.legacyWins",
+        ),
+      },
+      rssDeltaKib: {
+        medianInitial: requiredJsonNumber(rssDeltaKib.medianInitial, "summary.comparison.rssDeltaKib.medianInitial"),
+        medianMaximumObserved: requiredJsonNumber(
+          rssDeltaKib.medianMaximumObserved,
+          "summary.comparison.rssDeltaKib.medianMaximumObserved",
+        ),
+        medianObservedGrowth: requiredJsonNumber(
+          rssDeltaKib.medianObservedGrowth,
+          "summary.comparison.rssDeltaKib.medianObservedGrowth",
+        ),
+        pairedObservedGrowth: requiredJsonNumberArray(
+          rssDeltaKib.pairedObservedGrowth,
+          "summary.comparison.rssDeltaKib.pairedObservedGrowth",
+        ),
+        medianPairedObservedGrowth: requiredJsonNumber(
+          rssDeltaKib.medianPairedObservedGrowth,
+          "summary.comparison.rssDeltaKib.medianPairedObservedGrowth",
+        ),
+      },
+    },
+    privacy: parsePrivacySummary(object.privacy),
+  };
+}
+
 function expectFailure(
   caseName: string,
   mutate: (fixtureSet: FixtureSet) => void,
@@ -422,11 +760,11 @@ function expectFailure(
 function statIfPresent(path: string): ReturnType<typeof statSync> | null {
   try {
     return statSync(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+  } catch (cause) {
+    if (cause instanceof Error && hasErrorCode(cause) && cause.code === "ENOENT") {
       return null;
     }
-    throw error;
+    throw cause;
   }
 }
 
@@ -438,12 +776,12 @@ function setTiming(report: TestReport, triggerEpochSeconds: number, durationSeco
   report.generatedAt = isoSeconds(triggerEpochSeconds + durationSeconds + 10);
 }
 
-function collectKeys(value: unknown, keys = new Set<string>()): Set<string> {
+function collectKeys(value: JsonValue, keys = new Set<string>()): Set<string> {
   if (Array.isArray(value)) {
     for (const child of value) {
       collectKeys(child, keys);
     }
-  } else if (value !== null && typeof value === "object") {
+  } else if (isJsonObject(value)) {
     for (const [key, child] of Object.entries(value)) {
       keys.add(key);
       collectKeys(child, keys);
@@ -474,7 +812,8 @@ try {
   for (const inputPath of [...success.paths.legacy, ...success.paths.attach]) {
     assert.ok(!outputText.includes(inputPath), "Summary leaked an input report path");
   }
-  const summary = JSON.parse(outputText) as SuccessSummary;
+  const summaryValue = parseJsonValue(outputText);
+  const summary = parseSuccessSummaryValue(summaryValue);
   assert.equal(summary.schemaVersion, 1);
   assert.equal(summary.status, "ok");
   assert.equal(summary.design.sampleCountPerStrategy, 3);
@@ -547,7 +886,7 @@ try {
     "location",
     "cuisine",
   ]);
-  for (const key of collectKeys(summary)) {
+  for (const key of collectKeys(summaryValue)) {
     assert.ok(!forbiddenKeys.has(key), `Summary contains forbidden private/path key: ${key}`);
   }
 
@@ -582,8 +921,12 @@ try {
   expectFailure(
     "fallback-tampering",
     ({ reports }) => {
-      (reports.attach[2]!.runtimeAttestation as unknown as { fallbackReason: string | null }).fallbackReason =
-        "sqlite-uri-unavailable";
+      Object.defineProperty(reports.attach[2]!.runtimeAttestation, "fallbackReason", {
+        configurable: true,
+        enumerable: true,
+        value: "sqlite-uri-unavailable",
+        writable: true,
+      });
     },
     "fallback reason",
   );
@@ -774,7 +1117,12 @@ try {
   expectFailure(
     "private-extra-field",
     ({ reports }) => {
-      (reports.attach[1] as unknown as Record<string, unknown>).privateRestaurantRows = [privateSentinel];
+      Object.defineProperty(reports.attach[1]!, "privateRestaurantRows", {
+        configurable: true,
+        enumerable: true,
+        value: [privateSentinel],
+        writable: true,
+      });
     },
     "unexpected schema",
   );

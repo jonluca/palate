@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   ACTIVE_MICHELIN_CALENDAR_HYDRATION_SQL,
@@ -26,6 +26,25 @@ import {
   type MichelinCalendarNameRow,
 } from "../utils/db/michelin-calendar-match-core.ts";
 import type { MichelinRestaurantRecord } from "../utils/db/types.ts";
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isPackageMetadata<Value>(value: Value): value is Value & { readonly version?: string } {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (!("version" in value) || value.version === undefined || isStringValue(value.version))
+  );
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 type Strategy = "legacyFullGuide" | "twoStageProjection";
 
@@ -174,17 +193,21 @@ function snapshotSource(databasePath: string): Record<string, FileSnapshot> {
 }
 
 function totalChanges(database: DatabaseSync): number {
-  const row = database.prepare("SELECT total_changes() AS count").get() as { count?: unknown } | undefined;
-  if (typeof row?.count !== "number") {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const row = database.prepare("SELECT total_changes() AS count").get() as
+    | BenchmarkSQLiteRow<{ count?: SQLiteValue }>
+    | undefined;
+  if (!isNumberValue(row?.count)) {
     throw new TypeError("SQLite total_changes() did not return a number");
   }
   return row.count;
 }
 
 function snapshotSqliteSequence(database: DatabaseSync): SequenceSnapshot {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const present = database
     .prepare("SELECT 1 AS present FROM sqlite_schema WHERE type = 'table' AND name = 'sqlite_sequence'")
-    .get() as { present?: unknown } | undefined;
+    .get() as BenchmarkSQLiteRow<{ present?: SQLiteValue }> | undefined;
   const rows =
     present?.present === 1 ? database.prepare("SELECT name, seq FROM sqlite_sequence ORDER BY name").all() : [];
   return { rowCount: rows.length, sha256: sha256Bytes(JSON.stringify(rows)) };
@@ -208,7 +231,7 @@ function canonicalizePotentialPath(path: string, seenSymlinks = new Set<string>(
       }
       return resolve(realpathSync(ancestor), ...missing);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw error;
       }
       const parent = dirname(ancestor);
@@ -270,7 +293,7 @@ function immutableDatabaseUri(databasePath: string): string {
   return uri.href;
 }
 
-function installedExpoTransactionAttestation(): Record<string, unknown> {
+function installedExpoTransactionAttestation() {
   const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
   const sourcePath = join(repositoryRoot, "node_modules/expo-sqlite/src/SQLiteDatabase.ts");
   const packagePath = join(repositoryRoot, "node_modules/expo-sqlite/package.json");
@@ -285,9 +308,12 @@ function installedExpoTransactionAttestation(): Record<string, unknown> {
   assert.match(implementation, /transaction\.execAsync\('BEGIN'\)/);
   assert.match(implementation, /transaction\.closeAsync\(\)/);
   assert.doesNotMatch(implementation, /BEGIN (?:IMMEDIATE|EXCLUSIVE)/);
-  const packageMetadata = JSON.parse(readFileSync(packagePath, "utf8")) as { version?: unknown };
+  const packageMetadata: unknown = JSON.parse(readFileSync(packagePath, "utf8"));
+  if (!isPackageMetadata(packageMetadata)) {
+    throw new TypeError("Installed expo-sqlite package metadata must be an object with an optional string version");
+  }
   return {
-    packageVersion: typeof packageMetadata.version === "string" ? packageMetadata.version : null,
+    packageVersion: isStringValue(packageMetadata.version) ? packageMetadata.version : null,
     implementationSha256: sha256Bytes(implementation),
     createsDedicatedTransactionConnection: true,
     executesLiteralDeferredBegin: true,
@@ -353,6 +379,7 @@ function executeLegacy(database: DatabaseSync, requestedNames: ReadonlySet<strin
   const startedAt = performance.now();
   database.exec("BEGIN");
   try {
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const transferredRows = database
       .prepare(
         `SELECT m.*
@@ -363,7 +390,7 @@ function executeLegacy(database: DatabaseSync, requestedNames: ReadonlySet<strin
            SELECT value FROM app_metadata WHERE key = ?
          )`,
       )
-      .all(DATASET_KEY, DATASET_KEY) as unknown as LegacyRow[];
+      .all(DATASET_KEY, DATASET_KEY) as BenchmarkSQLiteRow<LegacyRow>[];
     const result = transferredRows
       .filter((row) => requestedNames.has(normalizeBenchmarkName(row.name)))
       .map(pickDeclaredColumns);
@@ -388,13 +415,19 @@ function executeCandidate(database: DatabaseSync, requestedNames: ReadonlySet<st
   const startedAt = performance.now();
   database.exec("BEGIN");
   try {
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const nameRows = database
       .prepare(ACTIVE_MICHELIN_CALENDAR_NAME_ROWS_SQL)
-      .all(DATASET_KEY, DATASET_KEY) as unknown as MichelinCalendarNameRow[];
+      .all(DATASET_KEY, DATASET_KEY) as BenchmarkSQLiteRow<MichelinCalendarNameRow>[];
     const hydrationIds = selectMichelinCalendarHydrationIds(nameRows, requestedNames, normalizeBenchmarkName);
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const hydratedRows = database
       .prepare(ACTIVE_MICHELIN_CALENDAR_HYDRATION_SQL)
-      .all(JSON.stringify(hydrationIds), DATASET_KEY, DATASET_KEY) as unknown as MichelinCalendarHydrationRow[];
+      .all(
+        JSON.stringify(hydrationIds),
+        DATASET_KEY,
+        DATASET_KEY,
+      ) as BenchmarkSQLiteRow<MichelinCalendarHydrationRow>[];
     assert.equal(hydratedRows.length, hydrationIds.length);
     const result = parseMichelinCalendarHydrationRows(hydratedRows);
     database.exec("COMMIT");
@@ -434,145 +467,157 @@ function run(configuration: Configuration): void {
   const sourceBefore = snapshotSource(configuration.databasePath);
   const expoTransactionAttestation = installedExpoTransactionAttestation();
   const database = new DatabaseSync(immutableDatabaseUri(configuration.databasePath), { readOnly: true });
-  let report: Record<string, unknown>;
   let totalChangesBefore = 0;
   let totalChangesAfter = 0;
   let sequenceBefore: SequenceSnapshot = { rowCount: 0, sha256: "" };
   let sequenceAfter: SequenceSnapshot = { rowCount: 0, sha256: "" };
-  try {
-    database.exec("PRAGMA query_only = ON");
-    totalChangesBefore = totalChanges(database);
-    sequenceBefore = snapshotSqliteSequence(database);
-    const integrity = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
-    if (integrity?.integrity_check !== "ok") {
-      throw new Error(`Source integrity_check failed: ${String(integrity?.integrity_check)}`);
-    }
-    const sourceNameRows = database
-      .prepare(ACTIVE_MICHELIN_CALENDAR_NAME_ROWS_SQL)
-      .all(DATASET_KEY, DATASET_KEY) as unknown as MichelinCalendarNameRow[];
-    if (sourceNameRows.length === 0) {
-      throw new Error("Real-database benchmark requires active Michelin guide rows");
-    }
-    const requestedNames = selectRequestedNames(sourceNameRows, configuration.matchedRowTarget);
-    const oracle = executeLegacy(database, requestedNames);
-    const candidate = executeCandidate(database, requestedNames);
-    assert.deepEqual(candidate.result, oracle.result, "candidate must match the literal full-guide strategy");
-    assert.ok(candidate.result.length >= configuration.matchedRowTarget);
+  const reportBody = (() => {
+    try {
+      database.exec("PRAGMA query_only = ON");
+      totalChangesBefore = totalChanges(database);
+      sequenceBefore = snapshotSqliteSequence(database);
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const integrity = database.prepare("PRAGMA integrity_check").get() as
+        | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
+        | undefined;
+      if (integrity?.integrity_check !== "ok") {
+        throw new Error(`Source integrity_check failed: ${String(integrity?.integrity_check)}`);
+      }
+      // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+      const sourceNameRows = database
+        .prepare(ACTIVE_MICHELIN_CALENDAR_NAME_ROWS_SQL)
+        .all(DATASET_KEY, DATASET_KEY) as BenchmarkSQLiteRow<MichelinCalendarNameRow>[];
+      if (sourceNameRows.length === 0) {
+        throw new Error("Real-database benchmark requires active Michelin guide rows");
+      }
+      const requestedNames = selectRequestedNames(sourceNameRows, configuration.matchedRowTarget);
+      const oracle = executeLegacy(database, requestedNames);
+      const candidate = executeCandidate(database, requestedNames);
+      assert.deepEqual(candidate.result, oracle.result, "candidate must match the literal full-guide strategy");
+      assert.ok(candidate.result.length >= configuration.matchedRowTarget);
 
-    const timings: Record<Strategy, number[]> = { legacyFullGuide: [], twoStageProjection: [] };
-    const payloadBytes: Record<Strategy, number> = {
-      legacyFullGuide: oracle.nativeToJsPayloadBytes,
-      twoStageProjection: candidate.nativeToJsPayloadBytes,
-    };
-    const measuredIterations = configuration.warmupIterations + configuration.samples;
-    for (let iteration = 0; iteration < measuredIterations; iteration++) {
-      const order: readonly Strategy[] =
-        iteration % 2 === 0 ? ["legacyFullGuide", "twoStageProjection"] : ["twoStageProjection", "legacyFullGuide"];
-      for (const strategy of order) {
-        const measurement =
-          strategy === "legacyFullGuide"
-            ? executeLegacy(database, requestedNames)
-            : executeCandidate(database, requestedNames);
-        assert.deepEqual(measurement.result, oracle.result);
-        assert.equal(measurement.nativeToJsPayloadBytes, payloadBytes[strategy]);
-        if (iteration >= configuration.warmupIterations) {
-          timings[strategy].push(measurement.elapsedMilliseconds);
+      const timings = {
+        legacyFullGuide: new Array<number>(),
+        twoStageProjection: new Array<number>(),
+      } satisfies Record<Strategy, number[]>;
+      const payloadBytes = {
+        legacyFullGuide: oracle.nativeToJsPayloadBytes,
+        twoStageProjection: candidate.nativeToJsPayloadBytes,
+      } satisfies Record<Strategy, number>;
+      const measuredIterations = configuration.warmupIterations + configuration.samples;
+      for (let iteration = 0; iteration < measuredIterations; iteration++) {
+        const order: readonly Strategy[] =
+          iteration % 2 === 0 ? ["legacyFullGuide", "twoStageProjection"] : ["twoStageProjection", "legacyFullGuide"];
+        for (const strategy of order) {
+          const measurement =
+            strategy === "legacyFullGuide"
+              ? executeLegacy(database, requestedNames)
+              : executeCandidate(database, requestedNames);
+          assert.deepEqual(measurement.result, oracle.result);
+          assert.equal(measurement.nativeToJsPayloadBytes, payloadBytes[strategy]);
+          if (iteration >= configuration.warmupIterations) {
+            timings[strategy].push(measurement.elapsedMilliseconds);
+          }
         }
       }
-    }
 
-    const legacySummary = summarize(timings.legacyFullGuide);
-    const candidateSummary = summarize(timings.twoStageProjection);
-    const resultDigest = sha256Bytes(JSON.stringify(oracle.result));
-    report = {
-      schemaVersion: 1,
-      status: "ok",
-      generatedAt: new Date().toISOString(),
-      configuration: {
-        matchedRowTarget: configuration.matchedRowTarget,
-        samples: configuration.samples,
-        warmupIterations: configuration.warmupIterations,
-      },
-      measurementModel: {
-        runtime: "Node.js node:sqlite plus benchmark-local JavaScript",
-        scope: "query/normalization/hydration model, not end-to-end Expo helper timing",
-        includes: [
-          "deferred BEGIN and COMMIT",
-          "SQLite statement preparation, execution, and row decoding",
-          "non-memoized benchmark normalization",
-          "ID selection, selective hydration, and result shaping",
-        ],
-        excludes: [
-          "Expo dedicated transaction connection creation and closure",
-          "the real memoized Calendar normalization implementation",
-          "React Native scheduling and JSI/runtime effects",
-        ],
-        installedExpoTransactionAttestation: expoTransactionAttestation,
-      },
-      source: {
-        activeGuideRowCount: sourceNameRows.length,
-        databaseBytes: statSync(configuration.databasePath).size,
-        databaseSha256: sha256File(configuration.databasePath),
-        integrityCheck: "ok",
-      },
-      workload: {
-        matchedNormalizedNameCount: requestedNames.size,
-        matchedRestaurantCount: oracle.result.length,
-        semanticSha256: resultDigest,
-      },
-      strategies: {
-        legacyFullGuide: {
-          sqliteCalls: oracle.sqliteCalls,
-          nativeToJsPayloadBytes: payloadBytes.legacyFullGuide,
-          transactionMode: "Node DatabaseSync deferred BEGIN read transaction",
-          timedRegionIncludesReadTransaction: true,
-          nodeModelTiming: legacySummary,
+      const legacySummary = summarize(timings.legacyFullGuide);
+      const candidateSummary = summarize(timings.twoStageProjection);
+      const resultDigest = sha256Bytes(JSON.stringify(oracle.result));
+      const body = {
+        schemaVersion: 1,
+        status: "ok",
+        generatedAt: new Date().toISOString(),
+        configuration: {
+          matchedRowTarget: configuration.matchedRowTarget,
+          samples: configuration.samples,
+          warmupIterations: configuration.warmupIterations,
         },
-        twoStageProjection: {
-          sqliteCalls: candidate.sqliteCalls,
-          nativeToJsPayloadBytes: payloadBytes.twoStageProjection,
-          transactionMode: "Node DatabaseSync deferred BEGIN read transaction",
-          timedRegionIncludesReadTransaction: true,
-          nodeModelTiming: candidateSummary,
+        measurementModel: {
+          runtime: "Node.js node:sqlite plus benchmark-local JavaScript",
+          scope: "query/normalization/hydration model, not end-to-end Expo helper timing",
+          includes: [
+            "deferred BEGIN and COMMIT",
+            "SQLite statement preparation, execution, and row decoding",
+            "non-memoized benchmark normalization",
+            "ID selection, selective hydration, and result shaping",
+          ],
+          excludes: [
+            "Expo dedicated transaction connection creation and closure",
+            "the real memoized Calendar normalization implementation",
+            "React Native scheduling and JSI/runtime effects",
+          ],
+          installedExpoTransactionAttestation: expoTransactionAttestation,
         },
-      },
-      comparison: {
-        nodeModelMedianMillisecondsSaved: legacySummary.medianMilliseconds - candidateSummary.medianMilliseconds,
-        nodeModelMedianSpeedup: legacySummary.medianMilliseconds / candidateSummary.medianMilliseconds,
-        nativeToJsPayloadBytesSaved: payloadBytes.legacyFullGuide - payloadBytes.twoStageProjection,
-        nativeToJsPayloadReductionPercent:
-          ((payloadBytes.legacyFullGuide - payloadBytes.twoStageProjection) / payloadBytes.legacyFullGuide) * 100,
-      },
-      privacy: {
-        aggregateOnly: true,
-        calendarDataAccessed: false,
-        rawRestaurantFieldsRetainedInReport: false,
-      },
-    };
-    totalChangesAfter = totalChanges(database);
-    sequenceAfter = snapshotSqliteSequence(database);
-    assert.equal(totalChangesAfter, totalChangesBefore, "read-only benchmark must not increment total_changes()");
-    assert.deepEqual(sequenceAfter, sequenceBefore, "read-only benchmark must not change sqlite_sequence");
-  } finally {
-    database.close();
-  }
+        source: {
+          activeGuideRowCount: sourceNameRows.length,
+          databaseBytes: statSync(configuration.databasePath).size,
+          databaseSha256: sha256File(configuration.databasePath),
+          integrityCheck: "ok",
+        },
+        workload: {
+          matchedNormalizedNameCount: requestedNames.size,
+          matchedRestaurantCount: oracle.result.length,
+          semanticSha256: resultDigest,
+        },
+        strategies: {
+          legacyFullGuide: {
+            sqliteCalls: oracle.sqliteCalls,
+            nativeToJsPayloadBytes: payloadBytes.legacyFullGuide,
+            transactionMode: "Node DatabaseSync deferred BEGIN read transaction",
+            timedRegionIncludesReadTransaction: true,
+            nodeModelTiming: legacySummary,
+          },
+          twoStageProjection: {
+            sqliteCalls: candidate.sqliteCalls,
+            nativeToJsPayloadBytes: payloadBytes.twoStageProjection,
+            transactionMode: "Node DatabaseSync deferred BEGIN read transaction",
+            timedRegionIncludesReadTransaction: true,
+            nodeModelTiming: candidateSummary,
+          },
+        },
+        comparison: {
+          nodeModelMedianMillisecondsSaved: legacySummary.medianMilliseconds - candidateSummary.medianMilliseconds,
+          nodeModelMedianSpeedup: legacySummary.medianMilliseconds / candidateSummary.medianMilliseconds,
+          nativeToJsPayloadBytesSaved: payloadBytes.legacyFullGuide - payloadBytes.twoStageProjection,
+          nativeToJsPayloadReductionPercent:
+            ((payloadBytes.legacyFullGuide - payloadBytes.twoStageProjection) / payloadBytes.legacyFullGuide) * 100,
+        },
+        privacy: {
+          aggregateOnly: true,
+          calendarDataAccessed: false,
+          rawRestaurantFieldsRetainedInReport: false,
+        },
+      };
+      totalChangesAfter = totalChanges(database);
+      sequenceAfter = snapshotSqliteSequence(database);
+      assert.equal(totalChangesAfter, totalChangesBefore, "read-only benchmark must not increment total_changes()");
+      assert.deepEqual(sequenceAfter, sequenceBefore, "read-only benchmark must not change sqlite_sequence");
+      return body;
+    } finally {
+      database.close();
+    }
+  })();
 
   const sourceAfter = snapshotSource(configuration.databasePath);
   assert.deepEqual(sourceAfter, sourceBefore, "immutable benchmark must not alter the source or any SQLite sidecar");
-  report.sourceAttestation = { before: sourceBefore, after: sourceAfter, byteIdentical: true };
-  report.writeInvariants = {
-    totalChangesBefore,
-    totalChangesAfter,
-    totalChangesUnchanged: totalChangesAfter === totalChangesBefore,
-    sqliteSequenceBefore: sequenceBefore,
-    sqliteSequenceAfter: sequenceAfter,
-    sqliteSequenceUnchanged: sequenceBefore.sha256 === sequenceAfter.sha256,
-    mainAndSidecarsByteIdentical: true,
-    benchmarkTransactionMode: "deferred BEGIN on the immutable mode=ro source",
-    installedExpoProductionMode: expoTransactionAttestation,
-    productionWriterReservation: false,
-    productionTradeoff:
-      "the SELECT-only snapshot reserves no WAL writer but can retain WAL frames until JS normalization and hydration commit",
+  const report = {
+    ...reportBody,
+    sourceAttestation: { before: sourceBefore, after: sourceAfter, byteIdentical: true },
+    writeInvariants: {
+      totalChangesBefore,
+      totalChangesAfter,
+      totalChangesUnchanged: totalChangesAfter === totalChangesBefore,
+      sqliteSequenceBefore: sequenceBefore,
+      sqliteSequenceAfter: sequenceAfter,
+      sqliteSequenceUnchanged: sequenceBefore.sha256 === sequenceAfter.sha256,
+      mainAndSidecarsByteIdentical: true,
+      benchmarkTransactionMode: "deferred BEGIN on the immutable mode=ro source",
+      installedExpoProductionMode: expoTransactionAttestation,
+      productionWriterReservation: false,
+      productionTradeoff:
+        "the SELECT-only snapshot reserves no WAL writer but can retain WAL frames until JS normalization and hydration commit",
+    },
   };
   const serialized = `${JSON.stringify(report, null, 2)}\n`;
   mkdirSync(dirname(configuration.outputPath), { recursive: true });

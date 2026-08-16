@@ -12,6 +12,14 @@ interface StatRowProps {
   animated?: boolean;
 }
 
+function isNumericStatValue(value: StatRowProps["value"]): value is number {
+  return typeof value === "number";
+}
+
+function formatStatValue(value: StatRowProps["value"]): string {
+  return isNumericStatValue(value) ? value.toLocaleString() : value;
+}
+
 export function StatRow({ label, value, valueColor, delay = 0, animated = true }: StatRowProps) {
   const content = (
     <>
@@ -23,7 +31,7 @@ export function StatRow({ label, value, valueColor, delay = 0, animated = true }
         className={cn("font-semibold", valueColor)}
         style={{ fontVariant: ["tabular-nums"] }}
       >
-        {typeof value === "number" ? value.toLocaleString() : value}
+        {formatStatValue(value)}
       </ThemedText>
     </>
   );

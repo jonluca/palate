@@ -6,6 +6,7 @@ import {
   useScanPhotos,
   useDeepScan,
   type DeepScanProgress,
+  type ScanProgress,
 } from "./queries";
 import { useScanProgress, type ProgressSharedValues } from "./use-progress";
 import { useAppStore, useHasCompletedInitialScan } from "@/store/app-store";
@@ -71,10 +72,10 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
   const { sharedValues, onProgress, start, complete, error } = useScanProgress();
 
   const handleProgress = useCallback(
-    (progress: { phase: string; detail: string; photosPerSecond?: number; eta?: string; progress?: number }) => {
+    (progress: ScanProgress) => {
       onProgress(progress);
       updateScanProgress({
-        phase: progress.phase as "scanning" | "analyzing-visits" | "enriching",
+        phase: progress.phase,
         detail: progress.detail,
         photosPerSecond: progress.photosPerSecond,
         eta: progress.eta,

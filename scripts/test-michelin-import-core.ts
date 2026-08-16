@@ -16,15 +16,19 @@ import {
   resolveMichelinImportStrategy,
   serializeMichelinImportAttestation,
   type MichelinImportAttestation,
-  type MichelinImportValidationRequest,
 } from "../utils/db/michelin-import-core.ts";
 
 const NOW_EPOCH_SECONDS = 1_800_000_000;
 const VALID_RUN_ID = "signed-macos.run_2026-07-10";
 
-function validationRequest(
-  overrides: Partial<Record<keyof MichelinImportValidationRequest, unknown>> = {},
-): Record<keyof MichelinImportValidationRequest, unknown> {
+interface ValidationRequestFixture {
+  schemaVersion?: string | number | boolean | null;
+  runId?: string | number | boolean | null;
+  requestedStrategy?: string | number | boolean | null;
+  expiresAtEpochSeconds?: string | number | boolean | null;
+}
+
+function validationRequest(overrides: ValidationRequestFixture = {}): ValidationRequestFixture {
   return {
     schemaVersion: 1,
     runId: VALID_RUN_ID,
@@ -34,9 +38,7 @@ function validationRequest(
   };
 }
 
-function encodeValidationRequest(
-  overrides: Partial<Record<keyof MichelinImportValidationRequest, unknown>> = {},
-): string {
+function encodeValidationRequest(overrides: ValidationRequestFixture = {}): string {
   return JSON.stringify(validationRequest(overrides));
 }
 
@@ -72,19 +74,20 @@ assert.equal(MICHELIN_IMPORT_ATTACH_STRATEGY, "attach-insert-select-v1");
 assert.equal(DEFAULT_MICHELIN_IMPORT_STRATEGY, MICHELIN_IMPORT_LEGACY_STRATEGY);
 assert.notEqual(MICHELIN_IMPORT_REQUEST_KEY, MICHELIN_IMPORT_ATTESTATION_KEY);
 
-const validAttachRequest = validationRequest();
-assert.deepEqual(
-  parseMichelinImportValidationRequest(JSON.stringify(validAttachRequest), NOW_EPOCH_SECONDS),
-  validAttachRequest,
-);
-const validLegacyRequest = validationRequest({
+const validAttachPayload = validationRequest();
+const validAttachRequest = parseMichelinImportValidationRequest(JSON.stringify(validAttachPayload), NOW_EPOCH_SECONDS);
+assert.ok(validAttachRequest);
+assert.deepEqual(validAttachRequest, validAttachPayload);
+const validLegacyPayload = validationRequest({
   runId: "a".repeat(128),
   requestedStrategy: MICHELIN_IMPORT_LEGACY_STRATEGY,
   expiresAtEpochSeconds: NOW_EPOCH_SECONDS,
 });
+const validLegacyRequest = parseMichelinImportValidationRequest(JSON.stringify(validLegacyPayload), NOW_EPOCH_SECONDS);
+assert.ok(validLegacyRequest);
 assert.deepEqual(
-  parseMichelinImportValidationRequest(JSON.stringify(validLegacyRequest), NOW_EPOCH_SECONDS),
   validLegacyRequest,
+  validLegacyPayload,
   "the 128-character run-id and inclusive expiry boundaries must remain accepted",
 );
 assert.deepEqual(
@@ -156,19 +159,19 @@ assert.deepEqual(resolveMichelinImportStrategy(null, true), {
   fallbackReason: null,
   runId: null,
 });
-assert.deepEqual(resolveMichelinImportStrategy(validAttachRequest as MichelinImportValidationRequest, true), {
+assert.deepEqual(resolveMichelinImportStrategy(validAttachRequest, true), {
   requestedStrategy: MICHELIN_IMPORT_ATTACH_STRATEGY,
   resolvedStrategy: MICHELIN_IMPORT_ATTACH_STRATEGY,
   fallbackReason: null,
   runId: VALID_RUN_ID,
 });
-assert.deepEqual(resolveMichelinImportStrategy(validAttachRequest as MichelinImportValidationRequest, false), {
+assert.deepEqual(resolveMichelinImportStrategy(validAttachRequest, false), {
   requestedStrategy: MICHELIN_IMPORT_ATTACH_STRATEGY,
   resolvedStrategy: MICHELIN_IMPORT_LEGACY_STRATEGY,
   fallbackReason: "sqlite-uri-unavailable",
   runId: VALID_RUN_ID,
 });
-assert.deepEqual(resolveMichelinImportStrategy(validLegacyRequest as MichelinImportValidationRequest, false), {
+assert.deepEqual(resolveMichelinImportStrategy(validLegacyRequest, false), {
   requestedStrategy: MICHELIN_IMPORT_LEGACY_STRATEGY,
   resolvedStrategy: MICHELIN_IMPORT_LEGACY_STRATEGY,
   fallbackReason: null,
@@ -211,7 +214,12 @@ const boundaryAttestation = baseAttestation({
 });
 assert.deepEqual(JSON.parse(serializeMichelinImportAttestation(boundaryAttestation)), boundaryAttestation);
 
-assertRejectedAttestation(baseAttestation({ schemaVersion: 2 as 1 }));
+assertRejectedAttestation(
+  baseAttestation({
+    // @ts-expect-error: The boundary test deliberately supplies an unsupported schema version.
+    schemaVersion: 2,
+  }),
+);
 for (const runId of ["", "unsafe run id", "雪", "a".repeat(129)]) {
   assertRejectedAttestation(baseAttestation({ runId }));
 }
@@ -219,13 +227,22 @@ assertRejectedAttestation(baseAttestation({ datasetVersion: "" }));
 assertRejectedAttestation(baseAttestation({ datasetVersion: "version\0suffix" }));
 assertRejectedAttestation(baseAttestation({ datasetVersion: "v".repeat(513) }));
 assertRejectedAttestation(
-  baseAttestation({ requestedStrategy: "unknown-strategy" as typeof MICHELIN_IMPORT_ATTACH_STRATEGY }),
+  baseAttestation({
+    // @ts-expect-error: The boundary test deliberately supplies an unsupported requested strategy.
+    requestedStrategy: "unknown-strategy",
+  }),
 );
 assertRejectedAttestation(
-  baseAttestation({ resolvedStrategy: "unknown-strategy" as typeof MICHELIN_IMPORT_ATTACH_STRATEGY }),
+  baseAttestation({
+    // @ts-expect-error: The boundary test deliberately supplies an unsupported resolved strategy.
+    resolvedStrategy: "unknown-strategy",
+  }),
 );
 assertRejectedAttestation(
-  baseAttestation({ selectedStrategy: "unknown-strategy" as typeof MICHELIN_IMPORT_ATTACH_STRATEGY }),
+  baseAttestation({
+    // @ts-expect-error: The boundary test deliberately supplies an unsupported selected strategy.
+    selectedStrategy: "unknown-strategy",
+  }),
 );
 assertRejectedAttestation(baseAttestation({ selectedStrategy: MICHELIN_IMPORT_LEGACY_STRATEGY }));
 assertRejectedAttestation(baseAttestation({ resolvedStrategy: MICHELIN_IMPORT_LEGACY_STRATEGY }));

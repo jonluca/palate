@@ -44,12 +44,29 @@ export interface StreamingExportPhotoBatch {
 /** One deterministic batch returned by {@linkcode planExportPhotoBatches}. */
 export type ExportPhotoBatch = BoundedExportPhotoBatch | StreamingExportPhotoBatch;
 
-function resolveBoundedMaximum(value: unknown, defaultValue: number, hardMaximum: number, name: string): number {
+function resolveBoundedMaximum(
+  value: number | undefined,
+  defaultValue: number,
+  hardMaximum: number,
+  name: string,
+): number {
   const resolved = value === undefined ? defaultValue : value;
-  if (!Number.isSafeInteger(resolved) || (resolved as number) <= 0 || (resolved as number) > hardMaximum) {
+  if (!isValidBoundedMaximum(resolved, hardMaximum)) {
     throw new RangeError(`${name} must be a safe integer between 1 and ${hardMaximum}.`);
   }
-  return resolved as number;
+  return resolved;
+}
+
+function isValidBoundedMaximum(value: number, hardMaximum: number): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= hardMaximum;
+}
+
+function isExportStreamPlanOptions(options: ExportStreamPlanOptions): options is ExportStreamPlanOptions {
+  return typeof options === "object" && options !== null && !Array.isArray(options);
+}
+
+function isExportStreamVisitId(value: string): value is string {
+  return typeof value === "string";
 }
 
 /**
@@ -74,7 +91,7 @@ export function planExportPhotoBatches(
   if (!(photoCountsByVisitId instanceof Map)) {
     throw new TypeError("Export stream planning requires a Map of exact photo counts.");
   }
-  if (typeof options !== "object" || options === null || Array.isArray(options)) {
+  if (!isExportStreamPlanOptions(options)) {
     throw new TypeError("Export stream planning options must be an object.");
   }
 
@@ -93,7 +110,7 @@ export function planExportPhotoBatches(
 
   const requestedVisitIds = new Set<string>();
   for (const visitId of orderedVisitIds) {
-    if (typeof visitId !== "string") {
+    if (!isExportStreamVisitId(visitId)) {
       throw new TypeError("Export stream planning requires string visit IDs.");
     }
     if (requestedVisitIds.has(visitId)) {
@@ -103,7 +120,7 @@ export function planExportPhotoBatches(
   }
 
   for (const [visitId, photoCount] of photoCountsByVisitId) {
-    if (typeof visitId !== "string") {
+    if (!isExportStreamVisitId(visitId)) {
       throw new TypeError("Export stream photo count maps require string visit IDs.");
     }
     if (!requestedVisitIds.has(visitId)) {

@@ -18,6 +18,11 @@ interface TestRestaurant {
   readonly award: string;
 }
 
+interface ViewportSelectionIds {
+  readonly ids: string[];
+  readonly totalInView: number;
+}
+
 function restaurant(
   id: string,
   latitude: number,
@@ -37,10 +42,7 @@ function entry(value: TestRestaurant, visited = false): RestaurantViewportEntry<
   return { restaurant: value, visited };
 }
 
-function ids(
-  index: RestaurantViewportIndex<TestRestaurant>,
-  query: RestaurantViewportQuery,
-): { readonly ids: string[]; readonly totalInView: number } {
+function ids(index: RestaurantViewportIndex<TestRestaurant>, query: RestaurantViewportQuery): ViewportSelectionIds {
   const result = index.select(query);
   return {
     ids: result.entries.map(({ restaurant: value }) => value.id),

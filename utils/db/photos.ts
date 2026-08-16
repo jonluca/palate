@@ -15,6 +15,7 @@ import {
   MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL,
 } from "./automatic-photo-deep-scan-queue-core";
 import type { FoodLabel, PhotoRecord, UnvisitedPhotoRecord } from "./types";
+import { parseFoodLabelArrayJson } from "./food-label-json.ts";
 
 // Raw photo record as stored in database (foodLabels and allLabels are JSON strings)
 interface RawPhotoRecord extends Omit<PhotoRecord, "foodLabels" | "foodDetected" | "allLabels" | "mediaType"> {
@@ -24,24 +25,35 @@ interface RawPhotoRecord extends Omit<PhotoRecord, "foodLabels" | "foodDetected"
   mediaType: string | null;
 }
 
+interface ExportPhotoCountRow {
+  readonly visitId: string;
+  readonly photoCount: number;
+}
+
+function isValidExportPhotoCountRow(row: ExportPhotoCountRow): row is ExportPhotoCountRow {
+  return typeof row.visitId === "string" && Number.isSafeInteger(row.photoCount) && row.photoCount >= 0;
+}
+
+function hasValidPhotoAssetId(row: { readonly id: string }): row is { readonly id: string } {
+  return typeof row.id === "string" && row.id.length > 0;
+}
+
+function hasUsablePhotoDatabasePath(
+  database: Awaited<ReturnType<typeof getDatabase>>,
+): database is Awaited<ReturnType<typeof getDatabase>> & { readonly databasePath: string } {
+  return typeof database.databasePath === "string" && database.databasePath.trim().length > 0;
+}
+
 // Helper to parse raw database photo record into proper PhotoRecord
 function parsePhotoRecord(raw: RawPhotoRecord): PhotoRecord {
   let foodLabels: FoodLabel[] | null = null;
   if (raw.foodLabels) {
-    try {
-      foodLabels = JSON.parse(raw.foodLabels) as FoodLabel[];
-    } catch {
-      // Skip malformed JSON
-    }
+    foodLabels = parseFoodLabelArrayJson(raw.foodLabels);
   }
 
   let allLabels: FoodLabel[] | null = null;
   if (raw.allLabels) {
-    try {
-      allLabels = JSON.parse(raw.allLabels) as FoodLabel[];
-    } catch {
-      // Skip malformed JSON
-    }
+    allLabels = parseFoodLabelArrayJson(raw.allLabels);
   }
 
   return {
@@ -49,7 +61,7 @@ function parsePhotoRecord(raw: RawPhotoRecord): PhotoRecord {
     foodDetected: raw.foodDetected === null ? null : raw.foodDetected === 1,
     foodLabels,
     allLabels,
-    mediaType: (raw.mediaType === "video" ? "video" : "photo") as "photo" | "video",
+    mediaType: raw.mediaType === "video" ? "video" : "photo",
   };
 }
 
@@ -145,10 +157,10 @@ export async function getExportPhotoCountsByVisitIds(
   }
 
   const database = databaseOverride ?? (await getDatabase());
-  const rows = await database.getAllAsync<{ visitId: string; photoCount: number }>(query.sql, query.parameters);
+  const rows = await database.getAllAsync<ExportPhotoCountRow>(query.sql, query.parameters);
   const counts = new Map<string, number>();
   for (const row of rows) {
-    if (typeof row.visitId !== "string" || !Number.isSafeInteger(row.photoCount) || row.photoCount < 0) {
+    if (!isValidExportPhotoCountRow(row)) {
       throw new Error("Export photo count query returned an invalid row.");
     }
     counts.set(row.visitId, row.photoCount);
@@ -230,7 +242,7 @@ export async function getExistingPhotoAssetIdsForIncrementalScan(): Promise<stri
   const database = await getDatabase();
   const rows = await database.getAllAsync<{ id: string }>(INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL);
   const ids = rows.map((row, index) => {
-    if (typeof row.id !== "string" || row.id.length === 0) {
+    if (!hasValidPhotoAssetId(row)) {
       throw new Error(`Photo asset ID query returned an invalid ID at row ${index}`);
     }
     return row.id;
@@ -241,7 +253,7 @@ export async function getExistingPhotoAssetIdsForIncrementalScan(): Promise<stri
 /** Return the exact SQLite path for native database-backed PhotoKit exclusion. */
 export async function getPhotoDatabasePathForIncrementalScan(): Promise<string> {
   const database = await getDatabase();
-  if (typeof database.databasePath !== "string" || database.databasePath.trim().length === 0) {
+  if (!hasUsablePhotoDatabasePath(database)) {
     throw new Error("Expo SQLite did not expose a usable photo database path");
   }
   return database.databasePath;

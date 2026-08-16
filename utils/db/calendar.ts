@@ -21,6 +21,7 @@ import {
 import type { CalendarImportSnapshotPlan } from "../calendar-import-plan-core";
 import {
   executeCalendarImportTransaction,
+  type CalendarImportQueryRow,
   type CalendarImportTransactionResult,
 } from "./calendar-import-transaction-core";
 import { executeSetBasedReservationImportTransaction } from "./reservation-import-transaction-core";
@@ -30,6 +31,8 @@ import {
   prepareReservationReviewPrefilter,
   readReservationReviewPrefilterSnapshotRows,
   type ReservationReviewPrefilterCandidate,
+  type ReservationReviewPrefilterConfirmedVisitRow,
+  type ReservationReviewPrefilterFactRow,
   type ReservationReviewPrefilterSnapshot,
   type ReservationReviewPrefilterSnapshotRows,
 } from "./reservation-review-prefilter-core";
@@ -68,7 +71,29 @@ interface ReservationImportReviewExclusionInput {
 
 type ReservationImportReviewExclusionAction = "approved" | "dismissed";
 
-function logReservationImportDb(message: string, details?: unknown): void {
+interface ReservationSourceCounts {
+  [sourceName: string]: number;
+}
+
+interface ReservationImportDbVisitLogDetails {
+  readonly action: string;
+  readonly sourceName: string;
+  readonly restaurantName: string;
+  readonly startTime: string;
+  readonly endTime: string;
+  readonly suggestedRestaurantId: string | null;
+  readonly existingStatus: VisitRecord["status"] | null;
+  readonly existingHasRestaurant: boolean;
+  readonly existingHasCalendarEvent: boolean;
+  readonly overlapScore: number | null;
+}
+
+interface ReservationLocalDateRange {
+  readonly startTime: number;
+  readonly endTime: number;
+}
+
+function logReservationImportDb<Details>(message: string, details?: Details): void {
   if (!__DEV__) {
     return;
   }
@@ -80,8 +105,8 @@ function logReservationImportDb(message: string, details?: unknown): void {
   }
 }
 
-function getReservationSourceCounts(visits: ReservationOnlyVisitInput[]): Record<string, number> {
-  const counts: Record<string, number> = {};
+function getReservationSourceCounts(visits: ReservationOnlyVisitInput[]): ReservationSourceCounts {
+  const counts: ReservationSourceCounts = {};
   for (const visit of visits) {
     counts[visit.sourceName] = (counts[visit.sourceName] ?? 0) + 1;
   }
@@ -93,7 +118,7 @@ function summarizeReservationDbVisitForLog(
   action: string,
   existingVisit?: VisitRecord | null,
   overlapScore?: number | null,
-): Record<string, unknown> {
+): ReservationImportDbVisitLogDetails {
   return {
     action,
     sourceName: visit.sourceName,
@@ -340,8 +365,10 @@ export async function getProviderReservationReviewPrefilterSnapshot(
   await database.withExclusiveTransactionAsync(async (transaction) => {
     snapshotRows = await readReservationReviewPrefilterSnapshotRows(
       {
-        getAllAsync: <Row>(sql: string, parameters: Array<string | number | null>) =>
-          transaction.getAllAsync<Row>(sql, parameters),
+        getFactRowsAsync: (sql: string, parameters: Array<string | number | null>) =>
+          transaction.getAllAsync<ReservationReviewPrefilterFactRow>(sql, parameters),
+        getConfirmedVisitRowsAsync: (sql: string, parameters: Array<string | number | null>) =>
+          transaction.getAllAsync<ReservationReviewPrefilterConfirmedVisitRow>(sql, parameters),
       },
       prepared,
     );
@@ -514,8 +541,8 @@ export async function importCalendarSnapshotPlan(
   await database.withExclusiveTransactionAsync(async (transaction) => {
     result = await executeCalendarImportTransaction(
       {
-        getAllAsync: <Row>(sql: string, parameters: Array<string | number | null>) =>
-          transaction.getAllAsync<Row>(sql, parameters),
+        getAllAsync: (sql: string, parameters: Array<string | number | null>) =>
+          transaction.getAllAsync<CalendarImportQueryRow>(sql, parameters),
         runAsync: (sql: string, parameters: Array<string | number | null>) => transaction.runAsync(sql, parameters),
       },
       plan,
@@ -656,7 +683,7 @@ async function insertReservationOnlyVisitsLegacy(
   let linkedExistingCount = 0;
   let confirmedExistingCount = 0;
   const skippedConflictCount = 0;
-  const decisionSamples: Array<Record<string, unknown>> = [];
+  const decisionSamples: ReservationImportDbVisitLogDetails[] = [];
 
   await database.withExclusiveTransactionAsync(async (tx) => {
     for (let i = 0; i < newVisits.length; i += batchSize) {
@@ -1098,7 +1125,7 @@ async function getReservationOnlyVisitsMappedToSameDateConfirmedRestaurantSource
   return mappedSourceEventIds;
 }
 
-function getLocalDateRange(timestamp: number): { startTime: number; endTime: number } {
+function getLocalDateRange(timestamp: number): ReservationLocalDateRange {
   const date = new Date(timestamp);
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
@@ -1244,11 +1271,9 @@ function doesReservationCandidateMatchExistingRestaurant(
     (Boolean(candidate.suggestedRestaurantId) &&
       (visit.restaurantId === candidate.suggestedRestaurantId ||
         visit.suggestedRestaurantId === candidate.suggestedRestaurantId)) ||
-    [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle].some(
-      (existingName) =>
-        typeof existingName === "string" &&
-        areReservationRestaurantNamesSimilar(candidate.restaurantName, existingName),
-    )
+    [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle]
+      .filter(isReservationDbRestaurantName)
+      .some((existingName) => areReservationRestaurantNamesSimilar(candidate.restaurantName, existingName))
   );
 }
 
@@ -1260,13 +1285,14 @@ function doesReservationMatchExistingRestaurantName(
   const existingNames = [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle];
 
   return reservationNames.some((reservationName) =>
-    existingNames.some(
-      (existingName) =>
-        typeof reservationName === "string" &&
-        typeof existingName === "string" &&
-        areReservationRestaurantNamesSimilar(reservationName, existingName),
-    ),
+    existingNames
+      .filter(isReservationDbRestaurantName)
+      .some((existingName) => areReservationRestaurantNamesSimilar(reservationName, existingName)),
   );
+}
+
+function isReservationDbRestaurantName(value: string | null | undefined): value is string {
+  return typeof value === "string";
 }
 
 function areReservationRestaurantNamesSimilar(a: string, b: string): boolean {

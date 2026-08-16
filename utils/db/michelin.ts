@@ -386,33 +386,36 @@ export async function getMichelinMapViewport(
     {
       getAllAsync: (source, parameters) => database.getAllAsync(source, [...parameters]),
       withReadTransaction: async (task) => {
-        let completed = false;
-        let result: Awaited<ReturnType<typeof task>> | undefined;
+        const completedResults: Array<{ readonly value: Awaited<ReturnType<typeof task>> }> = [];
         if (Platform.OS === "web") {
           // Expo does not expose a dedicated exclusive connection on web.
           // This fallback preserves the unsupported-map screen's List mode,
           // but unrelated web queries may share its deferred transaction.
           await database.withTransactionAsync(async () => {
-            result = await task({
-              getAllAsync: (source, parameters) => database.getAllAsync(source, [...parameters]),
+            completedResults.push({
+              value: await task({
+                getAllAsync: (source, parameters) => database.getAllAsync(source, [...parameters]),
+              }),
             });
-            completed = true;
           });
+          const completed = completedResults[0];
           if (!completed) {
             throw new Error("Michelin map viewport web read transaction did not complete");
           }
-          return result as Awaited<ReturnType<typeof task>>;
+          return completed.value;
         }
         await database.withExclusiveTransactionAsync(async (transaction) => {
-          result = await task({
-            getAllAsync: (source, parameters) => transaction.getAllAsync(source, [...parameters]),
+          completedResults.push({
+            value: await task({
+              getAllAsync: (source, parameters) => transaction.getAllAsync(source, [...parameters]),
+            }),
           });
-          completed = true;
         });
+        const completed = completedResults[0];
         if (!completed) {
           throw new Error("Michelin map viewport read transaction did not complete");
         }
-        return result as Awaited<ReturnType<typeof task>>;
+        return completed.value;
       },
     },
     request,
@@ -441,7 +444,10 @@ export async function selectMichelinProviderSpatialCandidates<Value>(
     inputIndex: number,
   ) => MichelinProviderSpatialSelection<Value> | null,
 ): Promise<Array<MichelinProviderHydratedSelection<Value> | null>> {
-  const output = Array.from({ length: inputs.length }, () => null as MichelinProviderHydratedSelection<Value> | null);
+  const output: Array<MichelinProviderHydratedSelection<Value> | null> = [];
+  for (let index = 0; index < inputs.length; index++) {
+    output.push(null);
+  }
   const validInputs: MichelinProviderSpatialInput[] = [];
   const originalIndices: number[] = [];
   for (let index = 0; index < inputs.length; index++) {

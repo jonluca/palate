@@ -1,3 +1,5 @@
+import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue } from "../runtime-json.ts";
+
 export const MICHELIN_DATASET_VERSION_KEY = "michelin_dataset_version";
 export const MICHELIN_IMPORT_REQUEST_KEY = "michelin_import_validation_request";
 export const MICHELIN_IMPORT_ATTESTATION_KEY = "michelin_import_runtime_attestation";
@@ -54,7 +56,7 @@ export function parseMichelinImportValidationRequest(
   nowEpochSeconds: number,
 ): MichelinImportValidationRequest | null {
   if (
-    typeof value !== "string" ||
+    !isMichelinImportValidationRequestText(value) ||
     value.length === 0 ||
     new TextEncoder().encode(value).byteLength > MAX_VALIDATION_REQUEST_BYTES ||
     !Number.isFinite(nowEpochSeconds)
@@ -62,37 +64,45 @@ export function parseMichelinImportValidationRequest(
     return null;
   }
 
-  let parsed: unknown;
+  let parsed;
   try {
-    parsed = JSON.parse(value);
+    parsed = parseJsonValue(value);
   } catch {
     return null;
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isJsonObject(parsed)) {
     return null;
   }
-  const request = parsed as Record<string, unknown>;
+  const request = parsed;
   const keys = Object.keys(request).sort();
+  const runId = request.runId;
+  const requestedStrategy = request.requestedStrategy;
+  const expiresAtEpochSeconds = request.expiresAtEpochSeconds;
   if (
     keys.join(",") !== "expiresAtEpochSeconds,requestedStrategy,runId,schemaVersion" ||
     request.schemaVersion !== 1 ||
-    typeof request.runId !== "string" ||
-    !SAFE_RUN_ID_PATTERN.test(request.runId) ||
-    (request.requestedStrategy !== MICHELIN_IMPORT_LEGACY_STRATEGY &&
-      request.requestedStrategy !== MICHELIN_IMPORT_ATTACH_STRATEGY) ||
-    typeof request.expiresAtEpochSeconds !== "number" ||
-    !Number.isSafeInteger(request.expiresAtEpochSeconds) ||
-    request.expiresAtEpochSeconds < nowEpochSeconds ||
-    request.expiresAtEpochSeconds > nowEpochSeconds + MAX_VALIDATION_REQUEST_LIFETIME_SECONDS
+    runId === undefined ||
+    !isJsonString(runId) ||
+    !SAFE_RUN_ID_PATTERN.test(runId) ||
+    (requestedStrategy !== MICHELIN_IMPORT_LEGACY_STRATEGY && requestedStrategy !== MICHELIN_IMPORT_ATTACH_STRATEGY) ||
+    expiresAtEpochSeconds === undefined ||
+    !isJsonNumber(expiresAtEpochSeconds) ||
+    !Number.isSafeInteger(expiresAtEpochSeconds) ||
+    expiresAtEpochSeconds < nowEpochSeconds ||
+    expiresAtEpochSeconds > nowEpochSeconds + MAX_VALIDATION_REQUEST_LIFETIME_SECONDS
   ) {
     return null;
   }
   return {
     schemaVersion: 1,
-    runId: request.runId,
-    requestedStrategy: request.requestedStrategy,
-    expiresAtEpochSeconds: request.expiresAtEpochSeconds,
+    runId,
+    requestedStrategy,
+    expiresAtEpochSeconds,
   };
+}
+
+function isMichelinImportValidationRequestText(value: string | null | undefined): value is string {
+  return typeof value === "string";
 }
 
 export function resolveMichelinImportStrategy(

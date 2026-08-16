@@ -9,7 +9,7 @@ import Animated, {
   Extrapolation,
 } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
-import { IconSymbol } from "@/components/icon-symbol";
+import { IconSymbol, type IconSymbolName } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import * as Haptics from "expo-haptics";
 
@@ -21,8 +21,8 @@ interface SwipeableCardProps {
   rightLabel?: string;
   leftColor?: string;
   rightColor?: string;
-  leftIcon?: string;
-  rightIcon?: string;
+  leftIcon?: IconSymbolName;
+  rightIcon?: IconSymbolName;
   threshold?: number;
   enabled?: boolean;
   /** Unique identifier for the card - resets swipe position when this changes */
@@ -188,7 +188,7 @@ export function SwipeableCard({
               className={"w-12 h-12 rounded-full items-center justify-center"}
               style={{ backgroundColor: rightColor }}
             >
-              <IconSymbol name={rightIcon as never} size={24} color={"white"} />
+              <IconSymbol name={rightIcon} size={24} color={"white"} />
             </View>
             <ThemedText variant={"subhead"} className={"font-semibold"} style={{ color: rightColor }}>
               {rightLabel}
@@ -209,7 +209,7 @@ export function SwipeableCard({
               className={"w-12 h-12 rounded-full items-center justify-center"}
               style={{ backgroundColor: leftColor }}
             >
-              <IconSymbol name={leftIcon as never} size={24} color={"white"} />
+              <IconSymbol name={leftIcon} size={24} color={"white"} />
             </View>
           </Animated.View>
         )}

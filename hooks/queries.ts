@@ -362,6 +362,7 @@ import {
   filterProviderReservationReviewCandidates,
   importReservationVisitHistory,
   type ImportableReservation,
+  type JsonValue,
   type ReservationReviewFilterResult,
   type ReservationImportResult,
 } from "@/services/reservation-import";
@@ -468,6 +469,9 @@ export const queryKeys = {
     ["placeTextSearch", query, lat?.toFixed(4), lon?.toFixed(4)] as const,
 };
 
+const INITIAL_VISIT_LIST_PAGE_PARAM: VisitListCursor | null = null;
+const INITIAL_PENDING_REVIEW_PAGE_PARAM: PendingVisitReviewPageRequest | null = null;
+
 // Hooks
 
 /**
@@ -519,7 +523,7 @@ export function useMichelinStatsBucketRestaurants(
 export function useVisits(filter: FilterType, options?: { readonly enabled?: boolean }) {
   return useInfiniteQuery({
     queryKey: queryKeys.visitPages(filter),
-    initialPageParam: null as VisitListCursor | null,
+    initialPageParam: INITIAL_VISIT_LIST_PAGE_PARAM,
     queryFn: async ({ pageParam, signal }): Promise<VisitListPage & { readonly filter: FilterType }> => {
       if (signal.aborted) {
         throw signal.reason ?? new Error("Visit-list page request was cancelled");
@@ -699,7 +703,7 @@ export function usePendingQuickActions() {
 export function usePendingReviewPages(filters: PendingVisitReviewFilters) {
   return useInfiniteQuery({
     queryKey: reviewQueryKeys.pendingReviewPages(filters.food, filters.restaurantMatches),
-    initialPageParam: null as PendingVisitReviewPageRequest | null,
+    initialPageParam: INITIAL_PENDING_REVIEW_PAGE_PARAM,
     queryFn: async ({ pageParam, signal }): Promise<PendingVisitReviewProgressivePage> => {
       if (signal.aborted) {
         throw signal.reason ?? new Error("Pending-review page request was cancelled");
@@ -1502,7 +1506,7 @@ export function useImportTockVisitHistory() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (payload: unknown) => importTockVisitHistory(payload),
+    mutationFn: (payload: JsonValue) => importTockVisitHistory(payload),
     onSuccess: () => {
       invalidateReservationImportQueries(queryClient);
     },
@@ -1516,7 +1520,7 @@ export function useImportOpenTableVisitHistory() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (payload: unknown) => importOpenTableVisitHistory(payload),
+    mutationFn: (payload: JsonValue) => importOpenTableVisitHistory(payload),
     onSuccess: () => {
       invalidateReservationImportQueries(queryClient);
     },

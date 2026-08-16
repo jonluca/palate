@@ -34,7 +34,7 @@ const DEFAULT_CONFIGURATION: Configuration = {
   outputPath: ".build/vision-result-page-profile.json",
 };
 const PAGE_SIZES = [200, 500, 1_000] as const;
-const SHAPES = [
+const DATASETS = [
   { name: "validatedRealFixture", resultCount: 13_059 },
   { name: "deepLibrary", resultCount: 68_027 },
 ] as const;
@@ -135,8 +135,8 @@ function validatePlan(items: readonly number[], pageSize: number): void {
   assert.deepEqual(output, items);
 }
 
-function benchmarkShape(shape: (typeof SHAPES)[number], configuration: Configuration): Record<string, unknown> {
-  const items = Array.from({ length: shape.resultCount }, (_, index) => index);
+function benchmarkDataset(dataset: (typeof DATASETS)[number], configuration: Configuration) {
+  const items = Array.from({ length: dataset.resultCount }, (_, index) => index);
   for (const pageSize of PAGE_SIZES) {
     validatePlan(items, pageSize);
   }
@@ -149,7 +149,7 @@ function benchmarkShape(shape: (typeof SHAPES)[number], configuration: Configura
     const order = [...PAGE_SIZES.slice(rotation), ...PAGE_SIZES.slice(0, rotation)];
     for (const pageSize of order) {
       const measurement = traversePages(items, pageSize);
-      assert.equal(measurement.rowCount, shape.resultCount);
+      assert.equal(measurement.rowCount, dataset.resultCount);
       expectedChecksum ??= measurement.checksum;
       assert.equal(measurement.checksum, expectedChecksum);
       if (iteration >= configuration.warmupIterations) {
@@ -158,10 +158,10 @@ function benchmarkShape(shape: (typeof SHAPES)[number], configuration: Configura
     }
   }
 
-  const baselineCalls = Math.ceil(shape.resultCount / PAGE_SIZES[0]);
+  const baselineCalls = Math.ceil(dataset.resultCount / PAGE_SIZES[0]);
   const strategies = Object.fromEntries(
     PAGE_SIZES.map((pageSize) => {
-      const nativeCalls = Math.ceil(shape.resultCount / pageSize);
+      const nativeCalls = Math.ceil(dataset.resultCount / pageSize);
       return [
         String(pageSize),
         {
@@ -171,10 +171,10 @@ function benchmarkShape(shape: (typeof SHAPES)[number], configuration: Configura
           pipelineSessions: nativeCalls,
           callsEliminatedVersus200: baselineCalls - nativeCalls,
           nativeCallReductionRatio: baselineCalls / nativeCalls,
-          persistenceOperations: Math.ceil(shape.resultCount / DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE),
-          peakBridgeResultRows: Math.min(pageSize, shape.resultCount),
+          persistenceOperations: Math.ceil(dataset.resultCount / DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE),
+          peakBridgeResultRows: Math.min(pageSize, dataset.resultCount),
           maximumBufferedRowsBeforeFlush: calculateVisionResultPeakBufferedRows(
-            shape.resultCount,
+            dataset.resultCount,
             pageSize,
             DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE,
           ),
@@ -185,8 +185,8 @@ function benchmarkShape(shape: (typeof SHAPES)[number], configuration: Configura
   );
 
   return {
-    name: shape.name,
-    resultCount: shape.resultCount,
+    name: dataset.name,
+    resultCount: dataset.resultCount,
     exactOrderedPageParity: true,
     checksum: expectedChecksum!.toString(16).padStart(8, "0"),
     strategies,
@@ -215,7 +215,7 @@ const report = {
   },
   measurementScope:
     "Structural native-call model plus isolated Node/V8 page planning, array copying, and traversal. It excludes PhotoKit, Vision, native/JS serialization, React Native scheduling, SQLite, and app UI time; JS timing is not an end-to-end speedup claim.",
-  datasets: SHAPES.map((shape) => benchmarkShape(shape, configuration)),
+  datasets: DATASETS.map((dataset) => benchmarkDataset(dataset, configuration)),
 };
 
 mkdirSync(dirname(configuration.outputPath), { recursive: true });

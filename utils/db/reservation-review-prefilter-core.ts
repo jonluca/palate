@@ -54,7 +54,14 @@ export interface PreparedReservationReviewPrefilter {
 }
 
 export interface ReservationReviewPrefilterReadBackend {
-  readonly getAllAsync: <Row>(sql: string, parameters: Array<string | number | null>) => Promise<Row[]>;
+  readonly getFactRowsAsync: (
+    sql: string,
+    parameters: Array<string | number | null>,
+  ) => Promise<ReservationReviewPrefilterFactRow[]>;
+  readonly getConfirmedVisitRowsAsync: (
+    sql: string,
+    parameters: Array<string | number | null>,
+  ) => Promise<ReservationReviewPrefilterConfirmedVisitRow[]>;
 }
 
 export interface ReservationReviewPrefilterSnapshotRows {
@@ -150,10 +157,12 @@ export function getReservationReviewLocalDateKey(timestamp: number): string {
   return `${year}-${month}-${day}`;
 }
 
-export function getReservationReviewLocalDateRange(timestamp: number): {
+interface ReservationReviewLocalDateRange {
   readonly startTime: number;
   readonly endTime: number;
-} {
+}
+
+export function getReservationReviewLocalDateRange(timestamp: number): ReservationReviewLocalDateRange {
   const date = new Date(timestamp);
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
@@ -230,11 +239,13 @@ export function prepareReservationReviewPrefilter(
   };
 }
 
-function collectExactFacts(rows: readonly ReservationReviewPrefilterFactRow[]): {
+interface ReservationReviewExactFacts {
   readonly dismissedSourceEventIds: Set<string>;
   readonly excludedSourceEventIds: Set<string>;
   readonly exactConfirmedSourceEventIds: Set<string>;
-} {
+}
+
+function collectExactFacts(rows: readonly ReservationReviewPrefilterFactRow[]): ReservationReviewExactFacts {
   const dismissedSourceEventIds = new Set<string>();
   const excludedSourceEventIds = new Set<string>();
   const exactConfirmedSourceEventIds = new Set<string>();
@@ -285,10 +296,9 @@ export async function readReservationReviewPrefilterSnapshotRows(
     };
   }
 
-  const factRows = await backend.getAllAsync<ReservationReviewPrefilterFactRow>(
-    RESERVATION_REVIEW_PREFILTER_EXACT_FACTS_SQL,
-    [prepared.exactFactsPayload],
-  );
+  const factRows = await backend.getFactRowsAsync(RESERVATION_REVIEW_PREFILTER_EXACT_FACTS_SQL, [
+    prepared.exactFactsPayload,
+  ]);
   const facts = collectExactFacts(factRows);
   const sameDateCandidates = prepared.candidates.filter(
     (candidate) => !facts.excludedSourceEventIds.has(candidate.sourceEventId),
@@ -296,10 +306,9 @@ export async function readReservationReviewPrefilterSnapshotRows(
   const confirmedVisitRows =
     sameDateCandidates.length === 0
       ? []
-      : await backend.getAllAsync<ReservationReviewPrefilterConfirmedVisitRow>(
-          RESERVATION_REVIEW_PREFILTER_CONFIRMED_DAYS_SQL,
-          [buildRequestedDaysPayload(sameDateCandidates)],
-        );
+      : await backend.getConfirmedVisitRowsAsync(RESERVATION_REVIEW_PREFILTER_CONFIRMED_DAYS_SQL, [
+          buildRequestedDaysPayload(sameDateCandidates),
+        ]);
 
   return { ...facts, sameDateCandidates, confirmedVisitRows };
 }
@@ -329,10 +338,9 @@ export function matchReservationReviewCandidatesToSameDateConfirmedVisits(
     if (visit.suggestedRestaurantId) {
       bucket.restaurantIds.add(visit.suggestedRestaurantId);
     }
-    for (const name of [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle]) {
-      if (typeof name !== "string") {
-        continue;
-      }
+    for (const name of [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle].filter(
+      isReservationReviewRestaurantName,
+    )) {
       normalizedNameCount += 1;
       bucket.normalizedNames.add(normalizeReservationReviewRestaurantName(name));
     }
@@ -376,6 +384,10 @@ export function matchReservationReviewCandidatesToSameDateConfirmedVisits(
       fuzzyNameComparisonCount,
     },
   };
+}
+
+function isReservationReviewRestaurantName(value: string | null): value is string {
+  return typeof value === "string";
 }
 
 /** Complete the CPU-only portion after the transaction has committed. */

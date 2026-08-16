@@ -57,7 +57,11 @@ const SECTION_DESCRIPTORS: Readonly<Record<WrappedStatsSectionKind, WrappedStats
   "fun-facts": Object.freeze({ key: "fun-facts", kind: "fun-facts" }),
 });
 
-export function resolveWrappedStatsRenderStrategy(value: unknown): WrappedStatsRenderStrategy {
+export type WrappedStatsRenderStrategySetting = string | null | undefined;
+
+export function resolveWrappedStatsRenderStrategy(
+  value: WrappedStatsRenderStrategySetting,
+): WrappedStatsRenderStrategy {
   return value === VIRTUALIZED_WRAPPED_STATS_RENDER_STRATEGY
     ? VIRTUALIZED_WRAPPED_STATS_RENDER_STRATEGY
     : DEFAULT_WRAPPED_STATS_RENDER_STRATEGY;

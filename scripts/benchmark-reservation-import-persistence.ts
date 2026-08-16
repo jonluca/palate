@@ -176,10 +176,7 @@ function createWorkload(database: DatabaseSync, inputCount: number): Reservation
   return inputs;
 }
 
-function prepareDatabase(
-  path: string,
-  inputCount: number,
-): { database: DatabaseSync; inputs: ReservationOnlyVisitInput[] } {
+function prepareDatabase(path: string, inputCount: number) {
   const database = new DatabaseSync(path);
   database.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;");
   initializeReservationImportPersistenceDatabase(database);
@@ -238,7 +235,10 @@ function timingSummary(samples: readonly ExecutionSample[]): TimingSummary {
   };
 }
 
-function invariantMetric(samples: readonly ExecutionSample[], key: keyof ExecutionSample): unknown {
+function invariantMetric<Key extends keyof ExecutionSample>(
+  samples: readonly ExecutionSample[],
+  key: Key,
+): ExecutionSample[Key] {
   const first = samples[0]![key];
   for (const sample of samples) {
     assert.deepEqual(sample[key], first, `${String(key)} must be invariant`);
@@ -255,10 +255,10 @@ async function measureScale(configuration: Configuration, inputCount: number, sc
     }
   }
 
-  const samples: Record<Strategy, ExecutionSample[]> = {
-    "legacy-row-v1": [],
-    "set-based-json-v1": [],
-  };
+  const samples = {
+    "legacy-row-v1": new Array<ExecutionSample>(),
+    "set-based-json-v1": new Array<ExecutionSample>(),
+  } satisfies Record<Strategy, ExecutionSample[]>;
   const pairOrders: Strategy[][] = [];
   for (let pair = 0; pair < configuration.samples; pair++) {
     const order: Strategy[] =
@@ -361,7 +361,7 @@ async function main(): Promise<void> {
       intervalHours: 5,
       overlapPattern: "every fourth input has one pending visit at identical time and coordinates",
       suggestionPattern: "three of every four inputs carry one Michelin suggestion",
-      capturesEstablished256Shape: configuration.scales.includes(256),
+      ["capturesEstablished256Shape"]: configuration.scales.includes(256),
     },
     measurement: {
       includes: [

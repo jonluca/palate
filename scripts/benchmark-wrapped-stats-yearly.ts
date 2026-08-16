@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   parseWrappedStatsYearlyRows,
@@ -14,6 +14,17 @@ import {
   type WrappedStatsYearlyQueryRow,
   type WrappedStatsYearlyStat,
 } from "../utils/db/wrapped-stats-yearly-core.ts";
+
+function isStringValue<Value>(value: Value): value is Extract<Value, string> {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Extract<Value, number> {
+  return typeof value === "number";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly databasePath: string | null;
@@ -34,10 +45,10 @@ interface VisitSeed {
 }
 
 interface SourceVisitRow {
-  readonly startTime: unknown;
-  readonly status: unknown;
-  readonly restaurantId: unknown;
-  readonly suggestedRestaurantId: unknown;
+  readonly startTime: SQLiteValue;
+  readonly status: SQLiteValue;
+  readonly restaurantId: SQLiteValue;
+  readonly suggestedRestaurantId: SQLiteValue;
 }
 
 interface Fixture {
@@ -247,19 +258,19 @@ function parseConfiguration(arguments_: readonly string[]): Configuration | null
   return configuration;
 }
 
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
+function requiredString(value: SQLiteValue | undefined, label: string): string {
+  if (!isStringValue(value)) {
     throw new TypeError(`${label} must be a string.`);
   }
   return value;
 }
 
-function nullableString(value: unknown, label: string): string | null {
+function nullableString(value: SQLiteValue | undefined, label: string): string | null {
   return value === null ? null : requiredString(value, label);
 }
 
-function finiteTimestamp(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > 8_640_000_000_000_000) {
+function finiteTimestamp(value: SQLiteValue | undefined, label: string): number {
+  if (!isNumberValue(value) || !Number.isFinite(value) || Math.abs(value) > 8_640_000_000_000_000) {
     throw new TypeError(`${label} must be a finite supported timestamp.`);
   }
   return value;
@@ -299,8 +310,9 @@ function createSyntheticFixture(): Fixture {
 }
 
 function assertSourceTable(database: DatabaseSync, table: string): void {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const row = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as
-    | { name?: unknown }
+    | BenchmarkSQLiteRow<{ name?: SQLiteValue }>
     | undefined;
   if (row?.name !== table) {
     throw new Error(`Source database does not contain ${table}.`);
@@ -317,11 +329,12 @@ function createMacDerivedFixture(path: string): Fixture {
   try {
     source.exec("PRAGMA query_only = ON");
     assertSourceTable(source, "visits");
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const rows = source
       .prepare(`SELECT startTime, status, restaurantId, suggestedRestaurantId
         FROM visits
         ORDER BY startTime ASC, id ASC`)
-      .all() as unknown as SourceVisitRow[];
+      .all() as BenchmarkSQLiteRow<SourceVisitRow>[];
     if (rows.length === 0) {
       throw new Error("Mac-derived Wrapped Stats profiling requires at least one source visit.");
     }
@@ -438,10 +451,12 @@ function createRuntimeDatabase(fixture: Fixture): DatabaseSync {
 function executeLegacy(database: DatabaseSync): Measurement {
   const startedAt = performance.now();
   let sqliteCalls = 1;
-  const yearlyRows = database.prepare(LEGACY_YEARLY_SUMMARY_SQL).all() as unknown as LegacyYearlyRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const yearlyRows = database.prepare(LEGACY_YEARLY_SUMMARY_SQL).all() as BenchmarkSQLiteRow<LegacyYearlyRow>[];
   const topStatement = database.prepare(LEGACY_TOP_RESTAURANT_SQL);
   const result = yearlyRows.map((row): WrappedStatsYearlyStat => {
     sqliteCalls += 1;
+    // SAFETY: LEGACY_TOP_RESTAURANT_SQL has a fixed projection validated by the benchmark schema.
     const top = topStatement.get(row.year!.toString()) as LegacyTopRestaurantRow | undefined;
     return {
       year: Number(row.year),
@@ -455,13 +470,15 @@ function executeLegacy(database: DatabaseSync): Measurement {
 
 function executeCandidate(database: DatabaseSync): Measurement {
   const startedAt = performance.now();
-  const rows = database.prepare(WRAPPED_STATS_YEARLY_SQL).all() as unknown as WrappedStatsYearlyQueryRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rows = database.prepare(WRAPPED_STATS_YEARLY_SQL).all() as BenchmarkSQLiteRow<WrappedStatsYearlyQueryRow>[];
   const result = parseWrappedStatsYearlyRows(rows);
   return { elapsedMilliseconds: performance.now() - startedAt, sqliteCalls: 1, result };
 }
 
 function topCandidateNamesByYear(database: DatabaseSync): Map<number, Set<string>> {
-  const rows = database.prepare(RANKED_RESTAURANTS_SQL).all() as unknown as RankedRestaurantRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rows = database.prepare(RANKED_RESTAURANTS_SQL).all() as BenchmarkSQLiteRow<RankedRestaurantRow>[];
   const maximumByYear = new Map<number, number>();
   for (const row of rows) {
     const year = Number(row.year);
@@ -484,7 +501,7 @@ function compareResults(
   legacy: readonly WrappedStatsYearlyStat[],
   candidate: readonly WrappedStatsYearlyStat[],
   topCandidates: ReadonlyMap<number, ReadonlySet<string>>,
-): { readonly exact: boolean; readonly tieOnlyNameDifferences: number } {
+) {
   assert.equal(candidate.length, legacy.length);
   let exact = true;
   let tieOnlyNameDifferences = 0;
@@ -548,7 +565,8 @@ function strategyOrder(iteration: number): readonly Strategy[] {
 }
 
 function explain(database: DatabaseSync, sql: string, ...parameters: (string | number)[]): string[] {
-  return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as unknown as QueryPlanRow[]).map(
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as BenchmarkSQLiteRow<QueryPlanRow>[]).map(
     ({ detail }) => detail,
   );
 }
@@ -585,7 +603,10 @@ function main(): void {
       }
     }
 
-    const samples: Record<Strategy, number[]> = { legacyNPlusOne: [], batchedWindow: [] };
+    const samples = { legacyNPlusOne: new Array<number>(), batchedWindow: new Array<number>() } satisfies Record<
+      Strategy,
+      number[]
+    >;
     for (let iteration = 0; iteration < configuration.samples; iteration++) {
       for (const strategy of strategyOrder(iteration)) {
         const measurement = strategy === "legacyNPlusOne" ? executeLegacy(database) : executeCandidate(database);

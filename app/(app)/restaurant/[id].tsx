@@ -1,7 +1,7 @@
 import { ScreenLayout } from "@/components/screen-layout";
 import { ThemedText } from "@/components/themed-text";
 import { Button, Card } from "@/components/ui";
-import { IconSymbol } from "@/components/icon-symbol";
+import { IconSymbol, type IconSymbolName } from "@/components/icon-symbol";
 import { RestaurantEditModal } from "@/components/restaurant-edit-modal";
 import {
   useRestaurantVisits,
@@ -283,7 +283,12 @@ function RestaurantInfoCard({ restaurant, onEdit }: { restaurant: RestaurantReco
   );
 }
 
-function getAwardIcon(distinction: string): { name: string; color: string } {
+interface AwardIcon {
+  name: IconSymbolName;
+  color: string;
+}
+
+function getAwardIcon(distinction: string): AwardIcon {
   const d = distinction.toLowerCase();
   if (d.includes("3 star")) {
     return { name: "star.fill", color: "#fbbf24" }; // Gold
@@ -339,11 +344,7 @@ function MichelinAwardHistoryCard({ awards }: { awards: MichelinAward[] }) {
                         isFirst ? "bg-yellow-500/20" : "bg-secondary"
                       }`}
                     >
-                      <IconSymbol
-                        name={icon.name as "star.fill"}
-                        size={isFirst ? 16 : 14}
-                        color={isFirst ? icon.color : "#6b7280"}
-                      />
+                      <IconSymbol name={icon.name} size={isFirst ? 16 : 14} color={isFirst ? icon.color : "#6b7280"} />
                     </View>
                     {index < awards.length - 1 && <View className={"w-0.5 h-4 bg-white/10 mt-1"} />}
                   </View>

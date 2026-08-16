@@ -12,13 +12,13 @@ import {
 } from "./wrapped-stats-yearly-core";
 import { calculateLongestDiningStreak } from "./wrapped-stats-streak-core";
 
-const MICHELIN_STATS_BUCKET_WHERE: Record<MichelinStatsBucket, string> = {
+const MICHELIN_STATS_BUCKET_WHERE = {
   "three-stars": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%3 star%'",
   "two-stars": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%2 star%'",
   "one-star": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%1 star%'",
   "bib-gourmand": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%bib%'",
   selected: "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%selected%'",
-};
+} satisfies Record<MichelinStatsBucket, string>;
 
 // Stats
 export async function getStats(): Promise<{

@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   beginPreferredAssetScan,
   getIncrementalPhotoScanInitialProgress,
@@ -41,6 +41,72 @@ interface ScenarioResult {
 
 const PHOTO_COLUMNS = `id, uri, creationTime, latitude, longitude, visitId,
   foodDetected, foodLabels, foodConfidence, allLabels, mediaType, duration`;
+
+type SQLiteRow = Record<string, SQLOutputValue>;
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function readNumberColumn(row: SQLiteRow, column: string, context: string): number {
+  const value = row[column];
+  if (!isNumberValue(value)) {
+    throw new TypeError(`${context} must contain a numeric ${column} column`);
+  }
+  return value;
+}
+
+function readNullableNumberColumn(row: SQLiteRow, column: string, context: string): number | null {
+  const value = row[column];
+  if (value === null) {
+    return null;
+  }
+  if (!isNumberValue(value)) {
+    throw new TypeError(`${context} must contain a numeric or null ${column} column`);
+  }
+  return value;
+}
+
+function readStringColumn(row: SQLiteRow, column: string, context: string): string {
+  const value = row[column];
+  if (!isStringValue(value)) {
+    throw new TypeError(`${context} must contain a text ${column} column`);
+  }
+  return value;
+}
+
+function readNullableStringColumn(row: SQLiteRow, column: string, context: string): string | null {
+  const value = row[column];
+  if (value === null) {
+    return null;
+  }
+  if (!isStringValue(value)) {
+    throw new TypeError(`${context} must contain a text or null ${column} column`);
+  }
+  return value;
+}
+
+function parsePhotoRow(row: SQLiteRow, index: number): PhotoRow {
+  const context = `photo snapshot row ${index}`;
+  return {
+    id: readStringColumn(row, "id", context),
+    uri: readStringColumn(row, "uri", context),
+    creationTime: readNumberColumn(row, "creationTime", context),
+    latitude: readNullableNumberColumn(row, "latitude", context),
+    longitude: readNullableNumberColumn(row, "longitude", context),
+    visitId: readNullableStringColumn(row, "visitId", context),
+    foodDetected: readNullableNumberColumn(row, "foodDetected", context),
+    foodLabels: readNullableStringColumn(row, "foodLabels", context),
+    foodConfidence: readNullableNumberColumn(row, "foodConfidence", context),
+    allLabels: readNullableStringColumn(row, "allLabels", context),
+    mediaType: readNullableStringColumn(row, "mediaType", context),
+    duration: readNullableNumberColumn(row, "duration", context),
+  };
+}
 
 function createDatabase(): DatabaseSync {
   const database = new DatabaseSync(":memory:");
@@ -150,7 +216,7 @@ function seedKnownRows(
 }
 
 function snapshot(database: DatabaseSync): PhotoRow[] {
-  return database.prepare(`SELECT ${PHOTO_COLUMNS} FROM photos ORDER BY id ASC`).all() as unknown as PhotoRow[];
+  return database.prepare(`SELECT ${PHOTO_COLUMNS} FROM photos ORDER BY id ASC`).all().map(parsePhotoRow);
 }
 
 function validLocation(asset: PhotoScanAssetRecord): boolean {
@@ -214,26 +280,21 @@ function summarizeExcluded(assets: readonly PhotoScanAssetRecord[]) {
   return { excludedPhotosWithLocation, excludedSkippedAssets };
 }
 
-function makeIncrementalSession(
-  library: readonly PhotoScanAssetRecord[],
-  existingIds: readonly string[],
-): { readonly session: IncrementalAssetScanSession; readonly unknownAssets: PhotoScanAssetRecord[] } {
+function makeIncrementalSession(library: readonly PhotoScanAssetRecord[], existingIds: readonly string[]) {
   // This Set models native PhotoKit filtering only inside the isolated oracle.
   const existing = new Set(existingIds);
   const unknownAssets = library.filter((asset) => !existing.has(asset.id));
   const excluded = library.filter((asset) => existing.has(asset.id));
   const excludedMetrics = summarizeExcluded(excluded);
-  return {
-    session: {
-      sessionId: "incremental-fixture",
-      totalCount: unknownAssets.length,
-      libraryTotalCount: library.length,
-      excludedVisibleCount: excluded.length,
-      ...excludedMetrics,
-      maxPageSize: 5_000,
-    },
-    unknownAssets,
-  };
+  const session = {
+    sessionId: "incremental-fixture",
+    totalCount: unknownAssets.length,
+    libraryTotalCount: library.length,
+    excludedVisibleCount: excluded.length,
+    ...excludedMetrics,
+    maxPageSize: 5_000,
+  } satisfies IncrementalAssetScanSession;
+  return { session, unknownAssets };
 }
 
 async function runScenario(name: string, knownCount: number, includeStale: boolean): Promise<ScenarioResult> {
@@ -258,7 +319,7 @@ async function runScenario(name: string, knownCount: number, includeStale: boole
         return candidateDatabase
           .prepare(INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL)
           .all()
-          .map((row) => String((row as { id: unknown }).id));
+          .map((row, index) => readStringColumn(row, "id", `existing photo ID row ${index}`));
       },
       beginFullScan: async () => {
         fullBeginCalls++;

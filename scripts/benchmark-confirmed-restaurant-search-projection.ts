@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { DatabaseSync, type StatementSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync, type SQLOutputValue } from "node:sqlite";
 import { performance } from "node:perf_hooks";
 import {
   CONFIRMED_RESTAURANT_SEARCH_SQL,
@@ -8,6 +8,21 @@ import {
   shouldLoadConfirmedRestaurantSearch,
   type ConfirmedRestaurantSearchRow,
 } from "../utils/db/confirmed-restaurant-search-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function parseStringArray(serialized: string, label: string): string[] {
+  const parsed: unknown = JSON.parse(serialized);
+  if (!Array.isArray(parsed) || !parsed.every(isStringValue)) {
+    throw new TypeError(`${label} must contain an array of strings`);
+  }
+  return parsed;
+}
 
 const RESTAURANT_COUNT = 1_200;
 const WARMUP_RUNS = 2;
@@ -217,7 +232,7 @@ function createDatabase(): DatabaseSync {
   return database;
 }
 
-function byteLength(value: unknown): number {
+function byteLength<Value>(value: Value): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
@@ -236,11 +251,12 @@ function toModalRows(rows: readonly ConfirmedRestaurantSearchRow[], query: strin
 
 function runLegacy(statement: StatementSync, query: string): RunResult {
   const start = performance.now();
-  const bridgeRows = statement.all() as unknown as LegacyRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const bridgeRows = statement.all() as BenchmarkSQLiteRow<LegacyRow>[];
   const hydratedRows = bridgeRows.map((row) => {
     let previewPhotos: string[] = [];
     if (row.previewPhotosJson) {
-      previewPhotos = JSON.parse(row.previewPhotosJson) as string[];
+      previewPhotos = parseStringArray(row.previewPhotosJson, `preview photos for ${row.id}`);
     }
     const { previewPhotosJson: _, visitedAward, ...rest } = row;
     return {
@@ -271,7 +287,8 @@ function runCandidate(statement: StatementSync, visible: boolean, query: string)
       matchedRows: [],
     };
   }
-  const bridgeRows = statement.all() as unknown as ConfirmedRestaurantSearchRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const bridgeRows = statement.all() as BenchmarkSQLiteRow<ConfirmedRestaurantSearchRow>[];
   const matchedRows = toModalRows(bridgeRows, query);
   const elapsedMs = performance.now() - start;
   return {

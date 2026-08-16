@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   executeSetBasedReservationImportTransaction,
@@ -25,7 +25,12 @@ export interface ReservationImportPersistenceMetrics {
 
 type Metrics = ReservationImportPersistenceMetrics;
 
-type Row = Record<string, unknown>;
+type Row = ReturnType<StatementSync["all"]>[number];
+
+interface LocalDateRange {
+  readonly startTime: number;
+  readonly endTime: number;
+}
 
 process.env.TZ = "America/Los_Angeles";
 
@@ -38,7 +43,21 @@ const BATCH_SIZE = 1_000;
 const OVERLAP_BUFFER = 30 * 60 * 1_000;
 
 function inputValues(parameters: readonly (string | number | null)[]): SQLInputValue[] {
-  return parameters as SQLInputValue[];
+  return [...parameters];
+}
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function assertDefined<T>(value: T | undefined): T {
+  assert.ok(value !== undefined, "Expected the query to return a row.");
+  return value;
 }
 
 function parameterSize(parameters: readonly (string | number | null)[]): number {
@@ -51,6 +70,7 @@ function backend(database: DatabaseSync, metrics: Metrics): ReservationImportTra
       metrics.calls += 1;
       metrics.reads += 1;
       metrics.parameterBytes += parameterSize(parameters);
+      // SAFETY: the transaction core owns the fixed query projections and Result contracts; this fixture schema mirrors them.
       return database.prepare(sql).all(...inputValues(parameters)) as Result[];
     },
     runAsync: async (sql: string, parameters: Array<string | number | null>) => {
@@ -343,7 +363,7 @@ function matchesRestaurant(reservation: ReservationOnlyVisitInput, visit: Row): 
   }
   return [reservation.restaurant.name, reservation.sourceTitle].some((candidate) =>
     [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle].some(
-      (existing) => typeof existing === "string" && namesAreSimilar(candidate, existing),
+      (existing) => isSQLiteString(existing) && namesAreSimilar(candidate, existing),
     ),
   );
 }
@@ -413,7 +433,7 @@ function sameLocalDate(first: number, second: number): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-function localDateRange(timestamp: number): { startTime: number; endTime: number } {
+function localDateRange(timestamp: number): LocalDateRange {
   const date = new Date(timestamp);
   return {
     startTime: new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime(),
@@ -432,8 +452,8 @@ function sameDateMatch(reservation: ReservationOnlyVisitInput, visits: readonly 
   );
 }
 
-function externalRestaurant(id: unknown): boolean {
-  return typeof id === "string" && (id.startsWith("resy-") || id.startsWith("tock-") || id.startsWith("opentable-"));
+function externalRestaurant(id: SQLOutputValue): boolean {
+  return isSQLiteString(id) && (id.startsWith("resy-") || id.startsWith("tock-") || id.startsWith("opentable-"));
 }
 
 function countCall(metrics: Metrics, kind: "read" | "write", parameters: readonly unknown[]): void {
@@ -475,16 +495,16 @@ export function executeLiteralReservationImportPersistence(
       .prepare(
         `SELECT sourceEventId FROM reservation_import_sources WHERE sourceEventId IN (${placeholders(batch.length)})`,
       )
-      .all(...inputValues(batch)) as { sourceEventId: string }[];
+      .all(...inputValues(batch));
     countCall(metrics, "read", batch);
     const legacy = database
       .prepare(`SELECT calendarEventId FROM visits WHERE calendarEventId IN (${placeholders(batch.length)})`)
-      .all(...inputValues(batch)) as { calendarEventId: string }[];
+      .all(...inputValues(batch));
     for (const row of linked) {
-      existingSourceIds.add(row.sourceEventId);
+      existingSourceIds.add(requiredString(row.sourceEventId, "reservation_import_sources.sourceEventId"));
     }
     for (const row of legacy) {
-      existingSourceIds.add(row.calendarEventId);
+      existingSourceIds.add(requiredString(row.calendarEventId, "visits.calendarEventId"));
     }
   }
   const fresh = unique.filter((visit) => !existingSourceIds.has(visit.sourceEventId));
@@ -510,7 +530,7 @@ export function executeLiteralReservationImportPersistence(
        WHERE v.startTime < ? AND v.endTime > ?
        ORDER BY v.startTime ASC`,
     )
-    .all(maximumEnd, minimumStart) as Row[];
+    .all(maximumEnd, minimumStart);
   const ranges = fresh.map((visit) => localDateRange(visit.startTime));
   const minimumDate = Math.min(...ranges.map((range) => range.startTime));
   const maximumDate = Math.max(...ranges.map((range) => range.endTime));
@@ -524,7 +544,7 @@ export function executeLiteralReservationImportPersistence(
        WHERE v.status = 'confirmed' AND v.startTime >= ? AND v.startTime < ?
        ORDER BY v.startTime ASC`,
     )
-    .all(minimumDate, maximumDate) as Row[];
+    .all(minimumDate, maximumDate);
 
   let insertedCount = 0;
   let linkedExistingCount = 0;
@@ -562,7 +582,7 @@ export function executeLiteralReservationImportPersistence(
 
     for (const visit of fresh) {
       const existing = bestOverlap(visit, overlapVisits) ?? sameDateMatch(visit, sameDateVisits);
-      const targetVisitId = typeof existing?.id === "string" ? existing.id : visit.id;
+      const targetVisitId = isSQLiteString(existing?.id) ? existing.id : visit.id;
       if (existing) {
         const wasConfirmed = existing.status === "confirmed" && Boolean(existing.restaurantId);
         const canUpgrade = Boolean(visit.suggestedRestaurantId) && externalRestaurant(existing.restaurantId);
@@ -734,7 +754,7 @@ export function snapshotReservationImportPersistenceTables(database: DatabaseSyn
           : table === "reservation_import_sources"
             ? "sourceEventId"
             : "id";
-      return [table, database.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all() as Row[]];
+      return [table, database.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all()];
     }),
   );
 }
@@ -742,7 +762,10 @@ export function snapshotReservationImportPersistenceTables(database: DatabaseSyn
 const snapshot = snapshotReservationImportPersistenceTables;
 
 export function assertHealthyReservationImportPersistenceDatabase(database: DatabaseSync): void {
-  assert.equal((database.prepare("PRAGMA quick_check").get() as { quick_check: string }).quick_check, "ok");
+  assert.equal(
+    requiredString(assertDefined(database.prepare("PRAGMA quick_check").get()).quick_check, "quick_check"),
+    "ok",
+  );
   assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
 }
 
@@ -930,44 +953,44 @@ async function assertRichParity(): Promise<void> {
   );
   assert.ok(oracleMetrics.calls > candidateMetrics.calls * 3, "rich fixture should exercise structural call reduction");
 
-  const pending = candidate.prepare("SELECT * FROM visits WHERE id = 'target-pending'").get() as Row;
+  const pending = assertDefined(candidate.prepare("SELECT * FROM visits WHERE id = 'target-pending'").get());
   assert.equal(pending.restaurantId, "michelin-b", "last stale confirmation restaurant wins");
   assert.equal(pending.calendarEventId, "source-pending-b", "last stale calendar assignment wins");
   assert.equal(pending.awardAtVisit, "Award B", "last stale award assignment wins");
   assert.equal(
-    (
+    assertDefined(
       candidate
         .prepare("SELECT visitId FROM reservation_import_sources WHERE sourceEventId = 'source-chain-second'")
-        .get() as Row
+        .get(),
     ).visitId,
     "chain-first",
     "later overlap links to an earlier inserted input",
   );
-  const upgradedChain = candidate.prepare("SELECT * FROM visits WHERE id = 'chain-first'").get() as Row;
+  const upgradedChain = assertDefined(candidate.prepare("SELECT * FROM visits WHERE id = 'chain-first'").get());
   assert.equal(upgradedChain.restaurantId, "michelin-b", "later input updates an earlier planned insert");
   assert.equal(upgradedChain.suggestedRestaurantId, "michelin-b");
   assert.equal(upgradedChain.awardAtVisit, "Chain upgraded award");
   assert.equal(
-    (
+    assertDefined(
       candidate
         .prepare("SELECT visitId FROM reservation_import_sources WHERE sourceEventId = 'source-collision'")
-        .get() as Row
+        .get(),
     ).visitId,
     "collision-id",
     "ID collision retains legacy target mapping",
   );
   assert.equal(
-    (
+    assertDefined(
       candidate
         .prepare(
           "SELECT distance FROM visit_suggested_restaurants WHERE visitId = 'collision-id' AND restaurantId = 'michelin-a'",
         )
-        .get() as Row
+        .get(),
     ).distance,
     5,
     "ID collision still replaces the suggestion",
   );
-  const shared = candidate.prepare("SELECT * FROM restaurants WHERE id = 'shared-provider'").get() as Row;
+  const shared = assertDefined(candidate.prepare("SELECT * FROM restaurants WHERE id = 'shared-provider'").get());
   assert.equal(shared.name, "Shared Second");
   assert.equal(shared.latitude, 11);
   assert.equal(shared.address, "First address", "later null optional restaurant field preserves prior value");
@@ -1099,37 +1122,35 @@ async function assertDstAndBoundaryParity(): Promise<void> {
   assert.deepEqual(actual, expected, "DST/boundary result parity");
   assert.deepEqual(snapshot(candidate), snapshot(oracle), "DST/boundary complete-table parity");
   assert.equal(
-    (
+    assertDefined(
       candidate
         .prepare("SELECT visitId FROM reservation_import_sources WHERE sourceEventId = 'source-dst-spring'")
-        .get() as Row
+        .get(),
     ).visitId,
     "dst-spring-existing",
     "same-local-date fallback spans the 23-hour day",
   );
   assert.equal(
-    (
-      candidate
-        .prepare("SELECT visitId FROM reservation_import_sources WHERE sourceEventId = 'source-dst-fall'")
-        .get() as Row
+    assertDefined(
+      candidate.prepare("SELECT visitId FROM reservation_import_sources WHERE sourceEventId = 'source-dst-fall'").get(),
     ).visitId,
     "dst-fall-existing",
     "same-local-date fallback spans the 25-hour day",
   );
   assert.equal(
-    (
+    assertDefined(
       candidate
         .prepare("SELECT visitId FROM reservation_import_sources WHERE sourceEventId = 'source-boundary-exact'")
-        .get() as Row
+        .get(),
     ).visitId,
     "boundary-exact-input",
     "exact 30-minute separation is not an overlap",
   );
   assert.equal(
-    (
+    assertDefined(
       candidate
         .prepare("SELECT visitId FROM reservation_import_sources WHERE sourceEventId = 'source-boundary-inside'")
-        .get() as Row
+        .get(),
     ).visitId,
     "boundary-inside-existing",
     "one millisecond inside the 30-minute boundary overlaps",

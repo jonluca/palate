@@ -20,7 +20,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { DEFAULT_FOOD_KEYWORDS } from "../utils/db/food-keyword-sync-core.ts";
 import {
@@ -30,6 +30,54 @@ import {
   type VisionClassificationResult,
 } from "../utils/vision-classification-transport-core.ts";
 import { encodePackedVisionClassificationResults } from "./vision-classification-transport-oracle.ts";
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isObjectValue<Value>(value: Value): value is Value & object {
+  return typeof value === "object";
+}
+
+function isVisionClassificationLabel<Value>(value: Value): value is Value & VisionClassificationLabel {
+  return (
+    value !== null &&
+    isObjectValue(value) &&
+    "label" in value &&
+    isStringValue(value.label) &&
+    "confidence" in value &&
+    isNumberValue(value.confidence) &&
+    Number.isFinite(value.confidence)
+  );
+}
+
+function isVisionClassificationResult<Value>(value: Value): value is Value & VisionClassificationResult {
+  return (
+    value !== null &&
+    isObjectValue(value) &&
+    "assetId" in value &&
+    isStringValue(value.assetId) &&
+    "labels" in value &&
+    Array.isArray(value.labels) &&
+    value.labels.every(isVisionClassificationLabel) &&
+    (!("error" in value) || value.error === undefined || isStringValue(value.error))
+  );
+}
+
+function parseVisionClassificationResults(serialized: string, context: string): VisionClassificationResult[] {
+  const parsed: unknown = JSON.parse(serialized);
+  if (!Array.isArray(parsed) || !parsed.every(isVisionClassificationResult)) {
+    throw new TypeError(`${context} must contain valid Vision classification results`);
+  }
+  return parsed;
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 type Strategy =
   | "legacyNestedJsonEncodeDecodeFood"
@@ -45,6 +93,17 @@ type FallbackReason =
   | "photos-schema-unavailable"
   | "no-analyzed-photos";
 
+function isFallbackReason<Value>(value: Value): value is Extract<Value, FallbackReason> {
+  return (
+    value === "database-missing" ||
+    value === "database-not-file" ||
+    value === "database-unreadable" ||
+    value === "nonempty-write-sidecar" ||
+    value === "photos-schema-unavailable" ||
+    value === "no-analyzed-photos"
+  );
+}
+
 interface Configuration {
   readonly databasePath: string;
   readonly databaseSelection: "argument" | "environment" | "default";
@@ -54,9 +113,9 @@ interface Configuration {
 }
 
 interface RawPhotoRow {
-  readonly assetId: unknown;
-  readonly allLabelsJson: unknown;
-  readonly foodLabelsJson: unknown;
+  readonly assetId: SQLiteValue;
+  readonly allLabelsJson: SQLiteValue;
+  readonly foodLabelsJson: SQLiteValue;
 }
 
 interface ClassificationSourceRow {
@@ -72,6 +131,18 @@ interface ClassificationPage {
 }
 
 interface FoodDetectionResult extends VisionClassificationResult {
+  readonly containsFood: boolean;
+  readonly foodConfidence: number;
+  readonly foodLabels: VisionClassificationLabel[];
+}
+
+interface CanonicalVisionResult {
+  readonly assetId: string;
+  readonly labels: VisionClassificationLabel[];
+  error?: string;
+}
+
+interface CanonicalFoodDetectionResult extends CanonicalVisionResult {
   readonly containsFood: boolean;
   readonly foodConfidence: number;
   readonly foodLabels: VisionClassificationLabel[];
@@ -114,7 +185,7 @@ interface Dataset {
   readonly sourceBefore: SourceSnapshot | null;
 }
 
-interface ResultShape {
+interface ResultSummary {
   readonly errorResults: number;
   readonly foodDetectedResults: number;
   readonly foodLabelOccurrences: number;
@@ -264,7 +335,7 @@ function canonicalizePotentialPath(path: string, visitedSymlinks = new Set<strin
       }
       return resolve(realpathSync(ancestor), ...missingComponents);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw error;
       }
       const parent = dirname(ancestor);
@@ -378,11 +449,11 @@ function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }
 
-function parseLabels(value: unknown, context: string): VisionClassificationLabel[] | null {
+function parseLabels(value: SQLiteValue, context: string): VisionClassificationLabel[] | null {
   if (value === null) {
     return null;
   }
-  if (typeof value !== "string") {
+  if (!isStringValue(value)) {
     throw new TypeError(`${context} must be stored as JSON text or NULL`);
   }
   let parsed: unknown;
@@ -395,24 +466,18 @@ function parseLabels(value: unknown, context: string): VisionClassificationLabel
     throw new TypeError(`${context} must contain a JSON array`);
   }
   return parsed.map((entry, index) => {
-    if (
-      entry === null ||
-      typeof entry !== "object" ||
-      typeof (entry as { label?: unknown }).label !== "string" ||
-      typeof (entry as { confidence?: unknown }).confidence !== "number" ||
-      !Number.isFinite((entry as { confidence: number }).confidence)
-    ) {
+    if (!isVisionClassificationLabel(entry)) {
       throw new TypeError(`${context} entry ${index} is malformed`);
     }
     return {
-      label: (entry as { label: string }).label,
-      confidence: (entry as { confidence: number }).confidence,
+      label: entry.label,
+      confidence: entry.confidence,
     };
   });
 }
 
-function canonicalResult(result: VisionClassificationResult): Record<string, unknown> {
-  const canonical: Record<string, unknown> = {
+function canonicalResult(result: VisionClassificationResult) {
+  const canonical: CanonicalVisionResult = {
     assetId: result.assetId,
     labels: result.labels.map((label) => ({ label: label.label, confidence: label.confidence })),
   };
@@ -468,7 +533,7 @@ function transformFoodDetection(
 function canonicalFoodResultsJson(results: readonly FoodDetectionResult[]): string {
   return JSON.stringify(
     results.map((result) => {
-      const canonical: Record<string, unknown> = {
+      const canonical: CanonicalFoodDetectionResult = {
         assetId: result.assetId,
         containsFood: result.containsFood,
         foodConfidence: result.foodConfidence,
@@ -483,7 +548,7 @@ function canonicalFoodResultsJson(results: readonly FoodDetectionResult[]): stri
   );
 }
 
-function resultShape(results: readonly VisionClassificationResult[]): ResultShape {
+function resultSummary(results: readonly VisionClassificationResult[]): ResultSummary {
   let errorResults = 0;
   let labelOccurrences = 0;
   for (const result of results) {
@@ -493,7 +558,7 @@ function resultShape(results: readonly VisionClassificationResult[]): ResultShap
   return { errorResults, foodDetectedResults: 0, foodLabelOccurrences: 0, labelOccurrences, results: results.length };
 }
 
-function foodResultShape(results: readonly FoodDetectionResult[]): ResultShape {
+function foodResultSummary(results: readonly FoodDetectionResult[]): ResultSummary {
   let errorResults = 0;
   let foodDetectedResults = 0;
   let foodLabelOccurrences = 0;
@@ -507,7 +572,7 @@ function foodResultShape(results: readonly FoodDetectionResult[]): ResultShape {
   return { errorResults, foodDetectedResults, foodLabelOccurrences, labelOccurrences, results: results.length };
 }
 
-function addShapes(left: ResultShape, right: ResultShape): ResultShape {
+function addSummaries(left: ResultSummary, right: ResultSummary): ResultSummary {
   return {
     errorResults: left.errorResults + right.errorResults,
     foodDetectedResults: left.foodDetectedResults + right.foodDetectedResults,
@@ -517,7 +582,7 @@ function addShapes(left: ResultShape, right: ResultShape): ResultShape {
   };
 }
 
-function emptyShape(): ResultShape {
+function emptySummary(): ResultSummary {
   return { errorResults: 0, foodDetectedResults: 0, foodLabelOccurrences: 0, labelOccurrences: 0, results: 0 };
 }
 
@@ -535,18 +600,20 @@ function paginate(rows: readonly ClassificationSourceRow[]): ClassificationPage[
 }
 
 function readEnabledKeywords(database: DatabaseSync): Set<string> {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const table = database
     .prepare("SELECT 1 AS present FROM sqlite_schema WHERE type = 'table' AND name = 'food_keywords'")
-    .get() as { present?: unknown } | undefined;
+    .get() as BenchmarkSQLiteRow<{ present?: SQLiteValue }> | undefined;
   if (table?.present !== 1) {
     return new Set(DEFAULT_FOOD_KEYWORDS);
   }
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const rows = database
     .prepare("SELECT keyword FROM food_keywords WHERE enabled = 1 ORDER BY keyword ASC")
-    .all() as Array<{ keyword?: unknown }>;
+    .all() as Array<BenchmarkSQLiteRow<{ keyword?: SQLiteValue }>>;
   const keywords = rows
     .map((row) => row.keyword)
-    .filter((keyword): keyword is string => typeof keyword === "string")
+    .filter((keyword): keyword is string => isStringValue(keyword))
     .map((keyword) => keyword.trim().toLowerCase());
   return new Set(keywords);
 }
@@ -598,7 +665,7 @@ function buildDatasetMetrics(
 
 function loadRealDataset(databasePath: string): Dataset | FallbackReason {
   const openedSource = openValidatedImmutableSource(databasePath);
-  if (typeof openedSource === "string") {
+  if (isFallbackReason(openedSource)) {
     return openedSource;
   }
   const { database, sourceBefore } = openedSource;
@@ -608,15 +675,20 @@ function loadRealDataset(databasePath: string): Dataset | FallbackReason {
   try {
     database.exec("PRAGMA query_only = ON; BEGIN");
     transactionActive = true;
-    const queryOnly = database.prepare("PRAGMA query_only").get() as { query_only?: unknown } | undefined;
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+    const queryOnly = database.prepare("PRAGMA query_only").get() as
+      | BenchmarkSQLiteRow<{ query_only?: SQLiteValue }>
+      | undefined;
     assert.equal(queryOnly?.query_only, 1, "SQLite query_only must be enabled");
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const columns = database
       .prepare("SELECT name FROM pragma_table_info('photos') WHERE name IN ('id', 'allLabels', 'foodLabels')")
-      .all() as Array<{ name?: unknown }>;
+      .all() as Array<BenchmarkSQLiteRow<{ name?: SQLiteValue }>>;
     if (new Set(columns.map((row) => row.name)).size !== 3) {
       outcome = "photos-schema-unavailable";
     } else {
       const enabledKeywords = readEnabledKeywords(database);
+      // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
       const rawRows = database
         .prepare(
           `SELECT id AS assetId, allLabels AS allLabelsJson, foodLabels AS foodLabelsJson
@@ -624,7 +696,7 @@ function loadRealDataset(databasePath: string): Dataset | FallbackReason {
            WHERE allLabels IS NOT NULL
            ORDER BY id ASC`,
         )
-        .all() as unknown as RawPhotoRow[];
+        .all() as BenchmarkSQLiteRow<RawPhotoRow>[];
       if (rawRows.length === 0) {
         outcome = "no-analyzed-photos";
       } else {
@@ -632,10 +704,10 @@ function loadRealDataset(databasePath: string): Dataset | FallbackReason {
         let rawAllLabelsJsonBytes = 0;
         let rawFoodLabelsJsonBytes = 0;
         const rows = rawRows.map((rawRow, index): ClassificationSourceRow => {
-          if (typeof rawRow.assetId !== "string" || typeof rawRow.allLabelsJson !== "string") {
+          if (!isStringValue(rawRow.assetId) || !isStringValue(rawRow.allLabelsJson)) {
             throw new TypeError(`Analyzed photo row ${index} has an invalid identifier or allLabels value`);
           }
-          if (rawRow.foodLabelsJson !== null && typeof rawRow.foodLabelsJson !== "string") {
+          if (rawRow.foodLabelsJson !== null && !isStringValue(rawRow.foodLabelsJson)) {
             throw new TypeError(`Analyzed photo row ${index} has an invalid foodLabels value`);
           }
           rawAssetIdUtf8Bytes += utf8Bytes(rawRow.assetId);
@@ -748,7 +820,7 @@ function loadDataset(configuration: Configuration): Dataset {
     return createSyntheticDataset(fallbackReason);
   }
   const realDataset = loadRealDataset(configuration.databasePath);
-  return typeof realDataset === "string" ? createSyntheticDataset(realDataset) : realDataset;
+  return isFallbackReason(realDataset) ? createSyntheticDataset(realDataset) : realDataset;
 }
 
 function semanticDigest(pages: readonly ClassificationPage[]): string {
@@ -818,7 +890,7 @@ function summarize(values: readonly number[]): MeasurementSummary {
   };
 }
 
-function assertShape(actual: ResultShape, expected: ResultShape, strategy: Strategy): void {
+function assertSummary(actual: ResultSummary, expected: ResultSummary, strategy: Strategy): void {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(`${strategy} produced an aggregate semantic mismatch`);
   }
@@ -837,7 +909,10 @@ function run(configuration: Configuration): void {
   const currentParsedHash = createHash("sha256");
   let exactPageParity = true;
   for (const [pageIndex, page] of dataset.pages.entries()) {
-    const currentParsed = JSON.parse(legacyPayloads[pageIndex]!) as VisionClassificationResult[];
+    const currentParsed = parseVisionClassificationResults(
+      legacyPayloads[pageIndex]!,
+      `legacy parity page ${pageIndex}`,
+    );
     const packedDecoded = decodePackedVisionClassificationResults(page.assetIds, packedPayloads[pageIndex]!);
     const expectedJson = canonicalResultsJson(page.results);
     const currentJson = canonicalResultsJson(currentParsed);
@@ -854,86 +929,96 @@ function run(configuration: Configuration): void {
   assert.equal(currentParsedDigest, sourceDigest, "Legacy decoded semantic digest must match the source");
   assert.equal(packedDecodedDigest, sourceDigest, "Packed decoded semantic digest must match the source");
 
-  const expectedDecodeShape = dataset.pages.reduce(
-    (shape, page) => addShapes(shape, resultShape(page.results)),
-    emptyShape(),
+  const expectedDecodeSummary = dataset.pages.reduce(
+    (summary, page) => addSummaries(summary, resultSummary(page.results)),
+    emptySummary(),
   );
-  const expectedFoodShape = dataset.pages.reduce(
-    (shape, page) => addShapes(shape, foodResultShape(transformFoodDetection(page.results, enabledKeywords))),
-    emptyShape(),
+  const expectedFoodSummary = dataset.pages.reduce(
+    (summary, page) => addSummaries(summary, foodResultSummary(transformFoodDetection(page.results, enabledKeywords))),
+    emptySummary(),
   );
 
-  const operations: Record<Strategy, () => ResultShape> = {
+  const operations = {
     legacyNestedJsonEncodeDecodeFood: () => {
-      let shape = emptyShape();
+      let summary = emptySummary();
       for (const page of dataset.pages) {
-        const decoded = JSON.parse(JSON.stringify(page.results)) as VisionClassificationResult[];
-        shape = addShapes(shape, foodResultShape(transformFoodDetection(decoded, enabledKeywords)));
+        const decoded = parseVisionClassificationResults(
+          JSON.stringify(page.results),
+          "legacy encode/decode measurement",
+        );
+        summary = addSummaries(summary, foodResultSummary(transformFoodDetection(decoded, enabledKeywords)));
       }
-      return shape;
+      return summary;
     },
     packedBinaryEncodeDecodeFood: () => {
-      let shape = emptyShape();
+      let summary = emptySummary();
       for (const page of dataset.pages) {
         const payload = encodePackedVisionClassificationResults(page.assetIds, page.results);
         const decoded = decodePackedVisionClassificationResults(page.assetIds, payload);
-        shape = addShapes(shape, foodResultShape(transformFoodDetection(decoded, enabledKeywords)));
+        summary = addSummaries(summary, foodResultSummary(transformFoodDetection(decoded, enabledKeywords)));
       }
-      return shape;
+      return summary;
     },
     legacyNestedJsonDecodeOnly: () => {
-      let shape = emptyShape();
+      let summary = emptySummary();
       for (const payload of legacyPayloads) {
-        shape = addShapes(shape, resultShape(JSON.parse(payload) as VisionClassificationResult[]));
-      }
-      return shape;
-    },
-    packedBinaryDecodeOnly: () => {
-      let shape = emptyShape();
-      for (const [pageIndex, page] of dataset.pages.entries()) {
-        shape = addShapes(
-          shape,
-          resultShape(decodePackedVisionClassificationResults(page.assetIds, packedPayloads[pageIndex]!)),
+        summary = addSummaries(
+          summary,
+          resultSummary(parseVisionClassificationResults(payload, "legacy decode-only measurement")),
         );
       }
-      return shape;
+      return summary;
     },
-  };
+    packedBinaryDecodeOnly: () => {
+      let summary = emptySummary();
+      for (const [pageIndex, page] of dataset.pages.entries()) {
+        summary = addSummaries(
+          summary,
+          resultSummary(decodePackedVisionClassificationResults(page.assetIds, packedPayloads[pageIndex]!)),
+        );
+      }
+      return summary;
+    },
+  } satisfies Record<Strategy, () => ResultSummary>;
 
-  const expectedShapeByStrategy: Record<Strategy, ResultShape> = {
-    legacyNestedJsonEncodeDecodeFood: expectedFoodShape,
-    packedBinaryEncodeDecodeFood: expectedFoodShape,
-    legacyNestedJsonDecodeOnly: expectedDecodeShape,
-    packedBinaryDecodeOnly: expectedDecodeShape,
-  };
+  const expectedSummaryByStrategy = {
+    legacyNestedJsonEncodeDecodeFood: expectedFoodSummary,
+    packedBinaryEncodeDecodeFood: expectedFoodSummary,
+    legacyNestedJsonDecodeOnly: expectedDecodeSummary,
+    packedBinaryDecodeOnly: expectedDecodeSummary,
+  } satisfies Record<Strategy, ResultSummary>;
   for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
     for (const strategy of counterbalancedOrder(warmup)) {
-      assertShape(operations[strategy](), expectedShapeByStrategy[strategy], strategy);
+      assertSummary(operations[strategy](), expectedSummaryByStrategy[strategy], strategy);
     }
   }
 
-  const samples = Object.fromEntries(STRATEGIES.map((strategy) => [strategy, [] as number[]])) as Record<
-    Strategy,
-    number[]
-  >;
+  const samples = {
+    legacyNestedJsonEncodeDecodeFood: new Array<number>(),
+    packedBinaryEncodeDecodeFood: new Array<number>(),
+    legacyNestedJsonDecodeOnly: new Array<number>(),
+    packedBinaryDecodeOnly: new Array<number>(),
+  } satisfies Record<Strategy, number[]>;
   const measurementOrder: Strategy[][] = [];
   for (let sample = 0; sample < configuration.samples; sample++) {
     const order = counterbalancedOrder(sample + configuration.warmupIterations);
     measurementOrder.push(order);
     for (const strategy of order) {
       const startedAt = performance.now();
-      const shape = operations[strategy]();
+      const summary = operations[strategy]();
       samples[strategy].push(performance.now() - startedAt);
-      assertShape(shape, expectedShapeByStrategy[strategy], strategy);
+      assertSummary(summary, expectedSummaryByStrategy[strategy], strategy);
     }
   }
 
   const legacyPayloadBytes = legacyPayloads.reduce((sum, payload) => sum + utf8Bytes(payload), 0);
   const packedPayloadBytes = packedPayloads.reduce((sum, payload) => sum + payload.byteLength, 0);
-  const timing = Object.fromEntries(STRATEGIES.map((strategy) => [strategy, summarize(samples[strategy])])) as Record<
-    Strategy,
-    MeasurementSummary
-  >;
+  const timing = {
+    legacyNestedJsonEncodeDecodeFood: summarize(samples.legacyNestedJsonEncodeDecodeFood),
+    packedBinaryEncodeDecodeFood: summarize(samples.packedBinaryEncodeDecodeFood),
+    legacyNestedJsonDecodeOnly: summarize(samples.legacyNestedJsonDecodeOnly),
+    packedBinaryDecodeOnly: summarize(samples.packedBinaryDecodeOnly),
+  } satisfies Record<Strategy, MeasurementSummary>;
   const sourceAfterTiming = dataset.mode === "immutable-real" ? snapshotSource(configuration.databasePath) : null;
   if (dataset.mode === "immutable-real") {
     assert.deepEqual(

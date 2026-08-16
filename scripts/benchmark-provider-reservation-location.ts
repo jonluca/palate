@@ -9,6 +9,7 @@ import {
   DEFAULT_PROVIDER_RESERVATION_LOCATION_CONCURRENCY,
   resolveProviderReservationLocations,
   type LocatedProviderReservation,
+  type ProviderReservationLocationDependencies,
   type ProviderReservationLocationCandidate,
   type ProviderReservationLocationInput,
 } from "../utils/provider-reservation-location-core.ts";
@@ -21,6 +22,17 @@ interface BenchmarkReservation extends ProviderReservationLocationInput {
 interface LookupMetrics {
   readonly calls: string[];
   readonly maxInFlight: number;
+}
+
+interface BenchmarkLookup {
+  readonly searchPlaces: ProviderReservationLocationDependencies<BenchmarkReservation>["searchPlaces"];
+  readonly metrics: () => LookupMetrics;
+}
+
+function hasDirectCoordinates<Reservation extends ProviderReservationLocationInput>(
+  reservation: Reservation,
+): reservation is LocatedProviderReservation<Reservation> {
+  return reservation.latitude !== null && reservation.longitude !== null;
 }
 
 interface ScenarioResult {
@@ -173,10 +185,7 @@ function createInputs(scale: number, requestedDuplicateRatio: number): Benchmark
   });
 }
 
-function createLookup(): {
-  readonly searchPlaces: (query: string) => Promise<readonly ProviderReservationLocationCandidate[]>;
-  readonly metrics: () => LookupMetrics;
-} {
+function createLookup(): BenchmarkLookup {
   const calls: string[] = [];
   let inFlight = 0;
   let maxInFlight = 0;
@@ -206,8 +215,8 @@ async function executeLiteralSequentialOracle(
 ): Promise<Array<LocatedProviderReservation<BenchmarkReservation> | null>> {
   const output: Array<LocatedProviderReservation<BenchmarkReservation> | null> = [];
   for (const input of inputs) {
-    if (input.latitude !== null && input.longitude !== null) {
-      output.push(input as LocatedProviderReservation<BenchmarkReservation>);
+    if (hasDirectCoordinates(input)) {
+      output.push(input);
       continue;
     }
 

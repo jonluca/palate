@@ -304,64 +304,678 @@ function parseConfiguration(arguments_: readonly string[]): Configuration | null
   return { fullPlanPaths, rank3BulkTailPaths, outputPath };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string;
+type JsonNode = JsonValue | undefined;
+
+interface JsonObject {
+  readonly [key: string]: JsonValue;
 }
 
-function requireRecord(value: unknown, label: string): asserts value is Record<string, unknown> {
-  assert.ok(isRecord(value), `${label} must be an object`);
+function isJsonObject(value: JsonNode): value is JsonObject {
+  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value);
 }
 
-function nonemptyString(value: unknown, label: string): asserts value is string {
-  assert.ok(typeof value === "string" && value.trim().length > 0, `${label} must be a nonempty string`);
+function isJsonBoolean(value: JsonNode): value is boolean {
+  return typeof value === "boolean";
 }
 
-function safeToken(value: unknown, label: string): asserts value is string {
+function isJsonNumber(value: JsonNode): value is number {
+  return typeof value === "number";
+}
+
+function isJsonString(value: JsonNode): value is string {
+  return typeof value === "string";
+}
+
+function parseJsonValue(source: string): JsonValue {
+  // JSON.parse either throws or returns exactly the recursive JSON domain represented by JsonValue.
+  return JSON.parse(source);
+}
+
+function jsonObject(value: JsonNode, label: string): JsonObject {
+  assert.ok(isJsonObject(value), `${label} must be an object`);
+  return value;
+}
+
+function jsonBoolean(value: JsonNode, label: string): boolean {
+  assert.ok(isJsonBoolean(value), `${label} must be a boolean`);
+  return value;
+}
+
+function jsonNumber(value: JsonNode, label: string): number {
+  assert.ok(isJsonNumber(value), `${label} must be a number`);
+  return value;
+}
+
+function jsonString(value: JsonNode, label: string): string {
+  assert.ok(isJsonString(value), `${label} must be a string`);
+  return value;
+}
+
+function jsonNullableBoolean(value: JsonNode, label: string): boolean | null {
+  return value === null ? null : jsonBoolean(value, label);
+}
+
+function jsonNullableNumber(value: JsonNode, label: string): number | null {
+  return value === null ? null : jsonNumber(value, label);
+}
+
+function jsonNullableString(value: JsonNode, label: string): string | null {
+  return value === null ? null : jsonString(value, label);
+}
+
+function jsonResultTransport(value: JsonNode, label: string): ResultTransport {
+  assert.ok(value === "legacy" || value === "packed-v1", `${label} must be legacy or packed-v1`);
+  return value;
+}
+
+function jsonStrategy(value: JsonNode, label: string): Strategy {
+  assert.ok(value === "full-plan-v1" || value === "rank3-bulk-tail-v1", `${label} must be a visit-food strategy`);
+  return value;
+}
+
+function jsonPageOrchestrationStrategy(value: JsonNode, label: string): PageOrchestrationStrategy {
+  assert.ok(value === "serial" || value === "lookahead", `${label} must be serial or lookahead`);
+  return value;
+}
+
+function jsonTuningMode(value: JsonNode, label: string): TuningMode {
+  assert.ok(value === "native-default" || value === "override", `${label} must be a tuning mode`);
+  return value;
+}
+
+function parseDatabaseComponent(value: JsonNode, label: string): DatabaseComponent {
+  const component = jsonObject(value, label);
+  return {
+    present: jsonBoolean(component.present, `${label}.present`),
+    sha256: jsonNullableString(component.sha256, `${label}.sha256`),
+    mode: jsonNullableString(component.mode, `${label}.mode`),
+  };
+}
+
+function parseSemanticReferenceComponent(value: JsonNode, label: string): SemanticReferenceComponent {
+  const component = jsonObject(value, label);
+  return {
+    ...parseDatabaseComponent(value, label),
+    bytes: jsonNullableNumber(component.bytes, `${label}.bytes`),
+  };
+}
+
+function parseNativeWorkCounters(value: JsonNode, label: string): NativeWorkCounters {
+  const counters = jsonObject(value, label);
+  return {
+    startedBatchCount: jsonNumber(counters.startedBatchCount, `${label}.startedBatchCount`),
+    startedRequestedAssetCount: jsonNumber(counters.startedRequestedAssetCount, `${label}.startedRequestedAssetCount`),
+    completedBatchCount: jsonNumber(counters.completedBatchCount, `${label}.completedBatchCount`),
+    completedRequestedAssetCount: jsonNumber(
+      counters.completedRequestedAssetCount,
+      `${label}.completedRequestedAssetCount`,
+    ),
+    resolvedBatchCount: jsonNumber(counters.resolvedBatchCount, `${label}.resolvedBatchCount`),
+    resolvedRequestedAssetCount: jsonNumber(
+      counters.resolvedRequestedAssetCount,
+      `${label}.resolvedRequestedAssetCount`,
+    ),
+    rejectedBatchCount: jsonNumber(counters.rejectedBatchCount, `${label}.rejectedBatchCount`),
+    rejectedRequestedAssetCount: jsonNumber(
+      counters.rejectedRequestedAssetCount,
+      `${label}.rejectedRequestedAssetCount`,
+    ),
+    cancelledBatchCount: jsonNumber(counters.cancelledBatchCount, `${label}.cancelledBatchCount`),
+    cancelledRequestedAssetCount: jsonNumber(
+      counters.cancelledRequestedAssetCount,
+      `${label}.cancelledRequestedAssetCount`,
+    ),
+    inFlightBatchCount: jsonNumber(counters.inFlightBatchCount, `${label}.inFlightBatchCount`),
+    inFlightRequestedAssetCount: jsonNumber(
+      counters.inFlightRequestedAssetCount,
+      `${label}.inFlightRequestedAssetCount`,
+    ),
+  };
+}
+
+function parseNullableNativeWorkCounters(value: JsonNode, label: string): NativeWorkCounters | null {
+  return value === null ? null : parseNativeWorkCounters(value, label);
+}
+
+function nonemptyString(value: string, label: string): void {
+  assert.ok(value.trim().length > 0, `${label} must be a nonempty string`);
+}
+
+function safeToken(value: string, label: string): void {
   nonemptyString(value, label);
   assert.match(value, /^[A-Za-z0-9._-]+$/, `${label} must be a path-free token`);
 }
 
-function sha256(value: unknown, label: string): asserts value is string {
+function sha256(value: string, label: string): void {
   nonemptyString(value, label);
   assert.match(value, /^[0-9a-f]{64}$/i, `${label} must be a SHA-256 digest`);
 }
 
-function nonnegativeInteger(value: unknown, label: string): asserts value is number {
-  assert.ok(Number.isSafeInteger(value) && (value as number) >= 0, `${label} must be a nonnegative safe integer`);
+function nonnegativeInteger(value: number | null, label: string): asserts value is number {
+  assert.ok(value !== null && Number.isSafeInteger(value) && value >= 0, `${label} must be a nonnegative safe integer`);
 }
 
-function positiveInteger(value: unknown, label: string): asserts value is number {
-  assert.ok(Number.isSafeInteger(value) && (value as number) > 0, `${label} must be a positive safe integer`);
+function positiveInteger(value: number, label: string): void {
+  assert.ok(Number.isSafeInteger(value) && value > 0, `${label} must be a positive safe integer`);
 }
 
-function finiteNonnegative(value: unknown, label: string): asserts value is number {
-  assert.ok(
-    typeof value === "number" && Number.isFinite(value) && value >= 0,
-    `${label} must be finite and nonnegative`,
-  );
+function finiteNonnegative(value: number | null, label: string): asserts value is number {
+  assert.ok(value !== null && Number.isFinite(value) && value >= 0, `${label} must be finite and nonnegative`);
 }
 
-function finitePositive(value: unknown, label: string): asserts value is number {
-  assert.ok(typeof value === "number" && Number.isFinite(value) && value > 0, `${label} must be finite and positive`);
+function finitePositive(value: number, label: string): void {
+  assert.ok(Number.isFinite(value) && value > 0, `${label} must be finite and positive`);
 }
 
-function resultTransport(value: unknown, label: string): asserts value is ResultTransport {
+function resultTransport(value: ResultTransport, label: string): void {
   assert.ok(value === "legacy" || value === "packed-v1", `${label} must be legacy or packed-v1`);
 }
 
-function pageOrchestrationStrategy(value: unknown, label: string): asserts value is PageOrchestrationStrategy {
+function pageOrchestrationStrategy(value: PageOrchestrationStrategy, label: string): void {
   assert.ok(value === "serial" || value === "lookahead", `${label} must be serial or lookahead`);
 }
 
+function parseVisionReport(value: JsonValue, path: string): VisionReport {
+  const report = jsonObject(value, `${path}: report`);
+  const schemaCompatibility = jsonObject(report.schemaCompatibility, `${path}: schemaCompatibility`);
+  const configuration = jsonObject(report.configuration, `${path}: configuration`);
+  const workload = jsonObject(report.workload, `${path}: workload`);
+  const timing = jsonObject(report.timing, `${path}: timing`);
+  const runtimeAttestation = jsonObject(report.runtimeAttestation, `${path}: runtimeAttestation`);
+  const nativeResultTransport = jsonObject(
+    runtimeAttestation.nativeResultTransport,
+    `${path}: runtimeAttestation.nativeResultTransport`,
+  );
+  const triggerBoundary = jsonObject(report.triggerBoundary, `${path}: triggerBoundary`);
+  const buildAttestation = jsonObject(report.buildAttestation, `${path}: buildAttestation`);
+  const validation = jsonObject(report.validation, `${path}: validation`);
+  const originalDatabase = jsonObject(report.originalDatabase, `${path}: originalDatabase`);
+  const semanticReference = jsonObject(report.semanticReference, `${path}: semanticReference`);
+  const semanticComponents = jsonObject(semanticReference.components, `${path}: semanticReference.components`);
+  const resultDatabase = jsonObject(report.resultDatabase, `${path}: resultDatabase`);
+  const rawDatabases = jsonObject(report.rawDatabases, `${path}: rawDatabases`);
+  const restoration = jsonObject(report.restoration, `${path}: restoration`);
+
+  return {
+    schemaVersion: jsonNumber(report.schemaVersion, `${path}: schemaVersion`),
+    schemaCompatibility: {
+      previousSchemaVersion: jsonNumber(
+        schemaCompatibility.previousSchemaVersion,
+        `${path}: schemaCompatibility.previousSchemaVersion`,
+      ),
+      semanticFieldsPreserved: jsonBoolean(
+        schemaCompatibility.semanticFieldsPreserved,
+        `${path}: schemaCompatibility.semanticFieldsPreserved`,
+      ),
+    },
+    status: jsonString(report.status, `${path}: status`),
+    pageSize: jsonNumber(report.pageSize, `${path}: pageSize`),
+    resultTransport: jsonResultTransport(report.resultTransport, `${path}: resultTransport`),
+    requestedResultTransport: jsonResultTransport(report.requestedResultTransport, `${path}: requestedResultTransport`),
+    visitFoodDetectionStrategy: jsonStrategy(report.visitFoodDetectionStrategy, `${path}: visitFoodDetectionStrategy`),
+    pageOrchestrationStrategy: jsonPageOrchestrationStrategy(
+      report.pageOrchestrationStrategy,
+      `${path}: pageOrchestrationStrategy`,
+    ),
+    configuration: {
+      resultPageSize: jsonNumber(configuration.resultPageSize, `${path}: configuration.resultPageSize`),
+      resultTransport: jsonResultTransport(configuration.resultTransport, `${path}: configuration.resultTransport`),
+      requestedResultTransport: jsonResultTransport(
+        configuration.requestedResultTransport,
+        `${path}: configuration.requestedResultTransport`,
+      ),
+      expectedResolvedResultTransport: jsonResultTransport(
+        configuration.expectedResolvedResultTransport,
+        `${path}: configuration.expectedResolvedResultTransport`,
+      ),
+      classificationStrategy: jsonString(
+        configuration.classificationStrategy,
+        `${path}: configuration.classificationStrategy`,
+      ),
+      classificationStrategyMode: jsonString(
+        configuration.classificationStrategyMode,
+        `${path}: configuration.classificationStrategyMode`,
+      ),
+      classificationStrategyEnvironmentValue: jsonNullableString(
+        configuration.classificationStrategyEnvironmentValue,
+        `${path}: configuration.classificationStrategyEnvironmentValue`,
+      ),
+      visitFoodDetectionStrategy: jsonStrategy(
+        configuration.visitFoodDetectionStrategy,
+        `${path}: configuration.visitFoodDetectionStrategy`,
+      ),
+      pageOrchestrationStrategy: jsonPageOrchestrationStrategy(
+        configuration.pageOrchestrationStrategy,
+        `${path}: configuration.pageOrchestrationStrategy`,
+      ),
+      visionConcurrency: jsonNumber(configuration.visionConcurrency, `${path}: configuration.visionConcurrency`),
+      visionConcurrencyMode: jsonTuningMode(
+        configuration.visionConcurrencyMode,
+        `${path}: configuration.visionConcurrencyMode`,
+      ),
+      visionConcurrencyOverridden: jsonBoolean(
+        configuration.visionConcurrencyOverridden,
+        `${path}: configuration.visionConcurrencyOverridden`,
+      ),
+      visionConcurrencyEnvironmentValue: jsonNullableNumber(
+        configuration.visionConcurrencyEnvironmentValue,
+        `${path}: configuration.visionConcurrencyEnvironmentValue`,
+      ),
+      pipelineDepth: jsonNumber(configuration.pipelineDepth, `${path}: configuration.pipelineDepth`),
+      pipelineDepthMode: jsonTuningMode(configuration.pipelineDepthMode, `${path}: configuration.pipelineDepthMode`),
+      pipelineDepthOverridden: jsonBoolean(
+        configuration.pipelineDepthOverridden,
+        `${path}: configuration.pipelineDepthOverridden`,
+      ),
+      pipelineDepthEnvironmentValue: jsonNullableNumber(
+        configuration.pipelineDepthEnvironmentValue,
+        `${path}: configuration.pipelineDepthEnvironmentValue`,
+      ),
+    },
+    fixtureCount: jsonNumber(report.fixtureCount, `${path}: fixtureCount`),
+    expectedFoodCount: jsonNumber(report.expectedFoodCount, `${path}: expectedFoodCount`),
+    actualFoodCount: jsonNumber(report.actualFoodCount, `${path}: actualFoodCount`),
+    expectedFoodVisitCount: jsonNumber(report.expectedFoodVisitCount, `${path}: expectedFoodVisitCount`),
+    actualFoodVisitCount: jsonNumber(report.actualFoodVisitCount, `${path}: actualFoodVisitCount`),
+    workload: {
+      visitFoodDetectionStrategy: jsonStrategy(
+        workload.visitFoodDetectionStrategy,
+        `${path}: workload.visitFoodDetectionStrategy`,
+      ),
+      plannedSamples: jsonNumber(workload.plannedSamples, `${path}: workload.plannedSamples`),
+      attemptedSamples: jsonNumber(workload.attemptedSamples, `${path}: workload.attemptedSamples`),
+      successfulAttempts: jsonNumber(workload.successfulAttempts, `${path}: workload.successfulAttempts`),
+      retryableAttempts: jsonNumber(workload.retryableAttempts, `${path}: workload.retryableAttempts`),
+      skippedSamples: jsonNumber(workload.skippedSamples, `${path}: workload.skippedSamples`),
+      expectedNativeBatchCount: jsonNumber(
+        workload.expectedNativeBatchCount,
+        `${path}: workload.expectedNativeBatchCount`,
+      ),
+      directNativeCountersRequired: jsonBoolean(
+        workload.directNativeCountersRequired,
+        `${path}: workload.directNativeCountersRequired`,
+      ),
+      directNativeCountersAvailable: jsonBoolean(
+        workload.directNativeCountersAvailable,
+        `${path}: workload.directNativeCountersAvailable`,
+      ),
+      attemptAccountingSource: jsonString(
+        workload.attemptAccountingSource,
+        `${path}: workload.attemptAccountingSource`,
+      ),
+      nativeDispatch: parseNullableNativeWorkCounters(workload.nativeDispatch, `${path}: workload.nativeDispatch`),
+    },
+    wallSeconds: jsonNumber(report.wallSeconds, `${path}: wallSeconds`),
+    timing: {
+      firstDurableProgressToCompletionSeconds: jsonNumber(
+        timing.firstDurableProgressToCompletionSeconds,
+        `${path}: timing.firstDurableProgressToCompletionSeconds`,
+      ),
+      triggerToDurableCompletionSeconds: jsonNumber(
+        timing.triggerToDurableCompletionSeconds,
+        `${path}: timing.triggerToDurableCompletionSeconds`,
+      ),
+      triggerToFirstDurableProgressSeconds: jsonNumber(
+        timing.triggerToFirstDurableProgressSeconds,
+        `${path}: timing.triggerToFirstDurableProgressSeconds`,
+      ),
+      samplingIntervalSeconds: jsonNumber(timing.samplingIntervalSeconds, `${path}: timing.samplingIntervalSeconds`),
+    },
+    maxRssKiB: jsonNumber(report.maxRssKiB, `${path}: maxRssKiB`),
+    runtimeAttestation: {
+      runId: jsonString(runtimeAttestation.runId, `${path}: runtimeAttestation.runId`),
+      observedProcessPageSize: jsonNumber(
+        runtimeAttestation.observedProcessPageSize,
+        `${path}: runtimeAttestation.observedProcessPageSize`,
+      ),
+      requestedResultTransport: jsonResultTransport(
+        runtimeAttestation.requestedResultTransport,
+        `${path}: runtimeAttestation.requestedResultTransport`,
+      ),
+      observedProcessResultTransport: jsonResultTransport(
+        runtimeAttestation.observedProcessResultTransport,
+        `${path}: runtimeAttestation.observedProcessResultTransport`,
+      ),
+      expectedResolvedResultTransport: jsonResultTransport(
+        runtimeAttestation.expectedResolvedResultTransport,
+        `${path}: runtimeAttestation.expectedResolvedResultTransport`,
+      ),
+      observedProcessResultTransportEnvironmentValue: jsonResultTransport(
+        runtimeAttestation.observedProcessResultTransportEnvironmentValue,
+        `${path}: runtimeAttestation.observedProcessResultTransportEnvironmentValue`,
+      ),
+      resultTransportEnvironmentPresent: jsonBoolean(
+        runtimeAttestation.resultTransportEnvironmentPresent,
+        `${path}: runtimeAttestation.resultTransportEnvironmentPresent`,
+      ),
+      expectedResolvedClassificationStrategy: jsonString(
+        runtimeAttestation.expectedResolvedClassificationStrategy,
+        `${path}: runtimeAttestation.expectedResolvedClassificationStrategy`,
+      ),
+      observedProcessClassificationStrategyEnvironmentValue: jsonNullableString(
+        runtimeAttestation.observedProcessClassificationStrategyEnvironmentValue,
+        `${path}: runtimeAttestation.observedProcessClassificationStrategyEnvironmentValue`,
+      ),
+      classificationStrategyEnvironmentPresent: jsonBoolean(
+        runtimeAttestation.classificationStrategyEnvironmentPresent,
+        `${path}: runtimeAttestation.classificationStrategyEnvironmentPresent`,
+      ),
+      classificationStrategyAttestationSource: jsonString(
+        runtimeAttestation.classificationStrategyAttestationSource,
+        `${path}: runtimeAttestation.classificationStrategyAttestationSource`,
+      ),
+      expectedResolvedVisitFoodDetectionStrategy: jsonStrategy(
+        runtimeAttestation.expectedResolvedVisitFoodDetectionStrategy,
+        `${path}: runtimeAttestation.expectedResolvedVisitFoodDetectionStrategy`,
+      ),
+      observedProcessVisitFoodDetectionStrategyEnvironmentValue: jsonStrategy(
+        runtimeAttestation.observedProcessVisitFoodDetectionStrategyEnvironmentValue,
+        `${path}: runtimeAttestation.observedProcessVisitFoodDetectionStrategyEnvironmentValue`,
+      ),
+      visitFoodDetectionStrategyEnvironmentPresent: jsonBoolean(
+        runtimeAttestation.visitFoodDetectionStrategyEnvironmentPresent,
+        `${path}: runtimeAttestation.visitFoodDetectionStrategyEnvironmentPresent`,
+      ),
+      visitFoodDetectionStrategyAttestationSource: jsonString(
+        runtimeAttestation.visitFoodDetectionStrategyAttestationSource,
+        `${path}: runtimeAttestation.visitFoodDetectionStrategyAttestationSource`,
+      ),
+      expectedResolvedPageOrchestrationStrategy: jsonPageOrchestrationStrategy(
+        runtimeAttestation.expectedResolvedPageOrchestrationStrategy,
+        `${path}: runtimeAttestation.expectedResolvedPageOrchestrationStrategy`,
+      ),
+      observedProcessPageOrchestrationStrategyEnvironmentValue: jsonPageOrchestrationStrategy(
+        runtimeAttestation.observedProcessPageOrchestrationStrategyEnvironmentValue,
+        `${path}: runtimeAttestation.observedProcessPageOrchestrationStrategyEnvironmentValue`,
+      ),
+      pageOrchestrationStrategyEnvironmentPresent: jsonBoolean(
+        runtimeAttestation.pageOrchestrationStrategyEnvironmentPresent,
+        `${path}: runtimeAttestation.pageOrchestrationStrategyEnvironmentPresent`,
+      ),
+      expectedResolvedVisionConcurrency: jsonNumber(
+        runtimeAttestation.expectedResolvedVisionConcurrency,
+        `${path}: runtimeAttestation.expectedResolvedVisionConcurrency`,
+      ),
+      observedProcessVisionConcurrencyEnvironmentValue: jsonNullableNumber(
+        runtimeAttestation.observedProcessVisionConcurrencyEnvironmentValue,
+        `${path}: runtimeAttestation.observedProcessVisionConcurrencyEnvironmentValue`,
+      ),
+      visionConcurrencyEnvironmentPresent: jsonBoolean(
+        runtimeAttestation.visionConcurrencyEnvironmentPresent,
+        `${path}: runtimeAttestation.visionConcurrencyEnvironmentPresent`,
+      ),
+      expectedResolvedPipelineDepth: jsonNumber(
+        runtimeAttestation.expectedResolvedPipelineDepth,
+        `${path}: runtimeAttestation.expectedResolvedPipelineDepth`,
+      ),
+      observedProcessPipelineDepthEnvironmentValue: jsonNullableNumber(
+        runtimeAttestation.observedProcessPipelineDepthEnvironmentValue,
+        `${path}: runtimeAttestation.observedProcessPipelineDepthEnvironmentValue`,
+      ),
+      pipelineDepthEnvironmentPresent: jsonBoolean(
+        runtimeAttestation.pipelineDepthEnvironmentPresent,
+        `${path}: runtimeAttestation.pipelineDepthEnvironmentPresent`,
+      ),
+      observedAtEpochSeconds: jsonNumber(
+        runtimeAttestation.observedAtEpochSeconds,
+        `${path}: runtimeAttestation.observedAtEpochSeconds`,
+      ),
+      processEnvironmentObservedAtEpochSeconds: jsonNumber(
+        runtimeAttestation.processEnvironmentObservedAtEpochSeconds,
+        `${path}: runtimeAttestation.processEnvironmentObservedAtEpochSeconds`,
+      ),
+      nativeResultTransport: {
+        schemaVersion: jsonNumber(
+          nativeResultTransport.schemaVersion,
+          `${path}: runtimeAttestation.nativeResultTransport.schemaVersion`,
+        ),
+        runId: jsonString(nativeResultTransport.runId, `${path}: runtimeAttestation.nativeResultTransport.runId`),
+        configuredResultTransport: jsonResultTransport(
+          nativeResultTransport.configuredResultTransport,
+          `${path}: runtimeAttestation.nativeResultTransport.configuredResultTransport`,
+        ),
+        resolvedResultTransport: jsonResultTransport(
+          nativeResultTransport.resolvedResultTransport,
+          `${path}: runtimeAttestation.nativeResultTransport.resolvedResultTransport`,
+        ),
+        selectedResultTransport: jsonResultTransport(
+          nativeResultTransport.selectedResultTransport,
+          `${path}: runtimeAttestation.nativeResultTransport.selectedResultTransport`,
+        ),
+        observedAtEpochSeconds: jsonNumber(
+          nativeResultTransport.observedAtEpochSeconds,
+          `${path}: runtimeAttestation.nativeResultTransport.observedAtEpochSeconds`,
+        ),
+        lastObservedAtEpochSeconds: jsonNullableNumber(
+          nativeResultTransport.lastObservedAtEpochSeconds,
+          `${path}: runtimeAttestation.nativeResultTransport.lastObservedAtEpochSeconds`,
+        ),
+        workCountersAvailable: jsonBoolean(
+          nativeResultTransport.workCountersAvailable,
+          `${path}: runtimeAttestation.nativeResultTransport.workCountersAvailable`,
+        ),
+        workCounters: parseNullableNativeWorkCounters(
+          nativeResultTransport.workCounters,
+          `${path}: runtimeAttestation.nativeResultTransport.workCounters`,
+        ),
+      },
+      source: jsonString(runtimeAttestation.source, `${path}: runtimeAttestation.source`),
+    },
+    triggerBoundary: {
+      preparedVisionStateSha256: jsonString(
+        triggerBoundary.preparedVisionStateSha256,
+        `${path}: triggerBoundary.preparedVisionStateSha256`,
+      ),
+      preTriggerVisionStateSha256: jsonString(
+        triggerBoundary.preTriggerVisionStateSha256,
+        `${path}: triggerBoundary.preTriggerVisionStateSha256`,
+      ),
+      unchangedBeforeTrigger: jsonBoolean(
+        triggerBoundary.unchangedBeforeTrigger,
+        `${path}: triggerBoundary.unchangedBeforeTrigger`,
+      ),
+      preTriggerObservedAtEpochSeconds: jsonNumber(
+        triggerBoundary.preTriggerObservedAtEpochSeconds,
+        `${path}: triggerBoundary.preTriggerObservedAtEpochSeconds`,
+      ),
+      triggerEpochSeconds: jsonNumber(
+        triggerBoundary.triggerEpochSeconds,
+        `${path}: triggerBoundary.triggerEpochSeconds`,
+      ),
+      triggerObservedAtEpochSeconds: jsonNumber(
+        triggerBoundary.triggerObservedAtEpochSeconds,
+        `${path}: triggerBoundary.triggerObservedAtEpochSeconds`,
+      ),
+      durableCompletionObservedAtEpochSeconds: jsonNumber(
+        triggerBoundary.durableCompletionObservedAtEpochSeconds,
+        `${path}: triggerBoundary.durableCompletionObservedAtEpochSeconds`,
+      ),
+      maxTriggerAgeSeconds: jsonNumber(
+        triggerBoundary.maxTriggerAgeSeconds,
+        `${path}: triggerBoundary.maxTriggerAgeSeconds`,
+      ),
+      triggerFollowedPreTriggerAttestation: jsonBoolean(
+        triggerBoundary.triggerFollowedPreTriggerAttestation,
+        `${path}: triggerBoundary.triggerFollowedPreTriggerAttestation`,
+      ),
+      triggerWasNotFutureDated: jsonBoolean(
+        triggerBoundary.triggerWasNotFutureDated,
+        `${path}: triggerBoundary.triggerWasNotFutureDated`,
+      ),
+      triggerWasFresh: jsonBoolean(triggerBoundary.triggerWasFresh, `${path}: triggerBoundary.triggerWasFresh`),
+    },
+    buildAttestation: {
+      strictCodeSignatureVerified: jsonBoolean(
+        buildAttestation.strictCodeSignatureVerified,
+        `${path}: buildAttestation.strictCodeSignatureVerified`,
+      ),
+      suppliedAppName: jsonString(buildAttestation.suppliedAppName, `${path}: buildAttestation.suppliedAppName`),
+      runningAppName: jsonString(buildAttestation.runningAppName, `${path}: buildAttestation.runningAppName`),
+      suppliedExecutableSha256: jsonString(
+        buildAttestation.suppliedExecutableSha256,
+        `${path}: buildAttestation.suppliedExecutableSha256`,
+      ),
+      runningExecutableSha256: jsonString(
+        buildAttestation.runningExecutableSha256,
+        `${path}: buildAttestation.runningExecutableSha256`,
+      ),
+      suppliedMainJsBundleSha256: jsonString(
+        buildAttestation.suppliedMainJsBundleSha256,
+        `${path}: buildAttestation.suppliedMainJsBundleSha256`,
+      ),
+      runningMainJsBundleSha256: jsonString(
+        buildAttestation.runningMainJsBundleSha256,
+        `${path}: buildAttestation.runningMainJsBundleSha256`,
+      ),
+      exactExecutableMatch: jsonBoolean(
+        buildAttestation.exactExecutableMatch,
+        `${path}: buildAttestation.exactExecutableMatch`,
+      ),
+      exactMainJsBundleMatch: jsonBoolean(
+        buildAttestation.exactMainJsBundleMatch,
+        `${path}: buildAttestation.exactMainJsBundleMatch`,
+      ),
+    },
+    validation: {
+      exactSemanticPhotoParity: jsonBoolean(
+        validation.exactSemanticPhotoParity,
+        `${path}: validation.exactSemanticPhotoParity`,
+      ),
+      photoMismatchCount: jsonNumber(validation.photoMismatchCount, `${path}: validation.photoMismatchCount`),
+      exactStrategySemanticPhotoParity: jsonBoolean(
+        validation.exactStrategySemanticPhotoParity,
+        `${path}: validation.exactStrategySemanticPhotoParity`,
+      ),
+      strategyPhotoMismatchCount: jsonNumber(
+        validation.strategyPhotoMismatchCount,
+        `${path}: validation.strategyPhotoMismatchCount`,
+      ),
+      exactFullReferencePhotoParity: jsonBoolean(
+        validation.exactFullReferencePhotoParity,
+        `${path}: validation.exactFullReferencePhotoParity`,
+      ),
+      fullReferencePhotoMismatchCount: jsonNumber(
+        validation.fullReferencePhotoMismatchCount,
+        `${path}: validation.fullReferencePhotoMismatchCount`,
+      ),
+      successfulAttemptMismatchCount: jsonNumber(
+        validation.successfulAttemptMismatchCount,
+        `${path}: validation.successfulAttemptMismatchCount`,
+      ),
+      retryablePartialStateCount: jsonNumber(
+        validation.retryablePartialStateCount,
+        `${path}: validation.retryablePartialStateCount`,
+      ),
+      skippedWriteCount: jsonNumber(validation.skippedWriteCount, `${path}: validation.skippedWriteCount`),
+      photoIdMismatchCount: jsonNumber(validation.photoIdMismatchCount, `${path}: validation.photoIdMismatchCount`),
+      unplannedPendingCount: jsonNumber(validation.unplannedPendingCount, `${path}: validation.unplannedPendingCount`),
+      exactVisitFoodParity: jsonBoolean(validation.exactVisitFoodParity, `${path}: validation.exactVisitFoodParity`),
+      visitMismatchCount: jsonNumber(validation.visitMismatchCount, `${path}: validation.visitMismatchCount`),
+      exactPositiveVisitSet: jsonBoolean(validation.exactPositiveVisitSet, `${path}: validation.exactPositiveVisitSet`),
+      positiveVisitIdMismatchCount: jsonNumber(
+        validation.positiveVisitIdMismatchCount,
+        `${path}: validation.positiveVisitIdMismatchCount`,
+      ),
+      invalidVisitFoodCount: jsonNumber(validation.invalidVisitFoodCount, `${path}: validation.invalidVisitFoodCount`),
+      pendingCount: jsonNumber(validation.pendingCount, `${path}: validation.pendingCount`),
+      pendingRowsAreExpected: jsonBoolean(
+        validation.pendingRowsAreExpected,
+        `${path}: validation.pendingRowsAreExpected`,
+      ),
+      workloadAccountingExact: jsonBoolean(
+        validation.workloadAccountingExact,
+        `${path}: validation.workloadAccountingExact`,
+      ),
+      nativeWorkCountersRequired: jsonBoolean(
+        validation.nativeWorkCountersRequired,
+        `${path}: validation.nativeWorkCountersRequired`,
+      ),
+      nativeWorkCountersAvailable: jsonBoolean(
+        validation.nativeWorkCountersAvailable,
+        `${path}: validation.nativeWorkCountersAvailable`,
+      ),
+      nativeWorkLifecycleBalanced: jsonNullableBoolean(
+        validation.nativeWorkLifecycleBalanced,
+        `${path}: validation.nativeWorkLifecycleBalanced`,
+      ),
+      nativeRequestedAssetCountMatchesAttempts: jsonNullableBoolean(
+        validation.nativeRequestedAssetCountMatchesAttempts,
+        `${path}: validation.nativeRequestedAssetCountMatchesAttempts`,
+      ),
+      nativeBatchCountMatchesPlan: jsonNullableBoolean(
+        validation.nativeBatchCountMatchesPlan,
+        `${path}: validation.nativeBatchCountMatchesPlan`,
+      ),
+      integrity: jsonString(validation.integrity, `${path}: validation.integrity`),
+      foreignKeyViolationCount: jsonNumber(
+        validation.foreignKeyViolationCount,
+        `${path}: validation.foreignKeyViolationCount`,
+      ),
+    },
+    originalDatabaseSha256: jsonString(report.originalDatabaseSha256, `${path}: originalDatabaseSha256`),
+    originalDatabase: {
+      main: parseDatabaseComponent(originalDatabase.main, `${path}: originalDatabase.main`),
+      wal: parseDatabaseComponent(originalDatabase.wal, `${path}: originalDatabase.wal`),
+      shm: parseDatabaseComponent(originalDatabase.shm, `${path}: originalDatabase.shm`),
+      journal: parseDatabaseComponent(originalDatabase.journal, `${path}: originalDatabase.journal`),
+    },
+    standaloneSnapshotSha256: jsonString(report.standaloneSnapshotSha256, `${path}: standaloneSnapshotSha256`),
+    semanticReference: {
+      source: jsonString(semanticReference.source, `${path}: semanticReference.source`),
+      sha256: jsonString(semanticReference.sha256, `${path}: semanticReference.sha256`),
+      components: {
+        main: parseSemanticReferenceComponent(semanticComponents.main, `${path}: semanticReference.components.main`),
+        wal: parseSemanticReferenceComponent(semanticComponents.wal, `${path}: semanticReference.components.wal`),
+        shm: parseSemanticReferenceComponent(semanticComponents.shm, `${path}: semanticReference.components.shm`),
+        journal: parseSemanticReferenceComponent(
+          semanticComponents.journal,
+          `${path}: semanticReference.components.journal`,
+        ),
+      },
+    },
+    resultDatabase: {
+      sha256: jsonString(resultDatabase.sha256, `${path}: resultDatabase.sha256`),
+      retained: jsonBoolean(resultDatabase.retained, `${path}: resultDatabase.retained`),
+      path: jsonNullableString(resultDatabase.path, `${path}: resultDatabase.path`),
+    },
+    rawDatabases: {
+      retained: jsonBoolean(rawDatabases.retained, `${path}: rawDatabases.retained`),
+      snapshotPath: jsonNullableString(rawDatabases.snapshotPath, `${path}: rawDatabases.snapshotPath`),
+    },
+    restoration: {
+      exactMainAndSidecarSetRestored: jsonBoolean(
+        restoration.exactMainAndSidecarSetRestored,
+        `${path}: restoration.exactMainAndSidecarSetRestored`,
+      ),
+      launchEnvironmentRestored: jsonBoolean(
+        restoration.launchEnvironmentRestored,
+        `${path}: restoration.launchEnvironmentRestored`,
+      ),
+      rawDatabasePolicyApplied: jsonBoolean(
+        restoration.rawDatabasePolicyApplied,
+        `${path}: restoration.rawDatabasePolicyApplied`,
+      ),
+      reportPublishedAfterRestoration: jsonBoolean(
+        restoration.reportPublishedAfterRestoration,
+        `${path}: restoration.reportPublishedAfterRestoration`,
+      ),
+      restoredDatabaseSha256: jsonString(
+        restoration.restoredDatabaseSha256,
+        `${path}: restoration.restoredDatabaseSha256`,
+      ),
+    },
+    samplesPath: jsonString(report.samplesPath, `${path}: samplesPath`),
+  };
+}
 function validateDatabaseComponent(component: DatabaseComponent, label: string, required: boolean): void {
-  requireRecord(component, label);
-  assert.equal(typeof component.present, "boolean", `${label}.present must be boolean`);
   if (required) {
     assert.equal(component.present, true, `${label} must be present`);
   }
   if (component.present) {
+    assert.ok(component.sha256 !== null, `${label}.sha256 must be present`);
     sha256(component.sha256, `${label}.sha256`);
-    assert.ok(typeof component.mode === "string", `${label}.mode must be a string`);
+    assert.ok(component.mode !== null, `${label}.mode must be a string`);
     assert.match(component.mode, /^[0-7]{3,4}$/, `${label}.mode must be an octal file mode`);
   } else {
     assert.equal(component.sha256, null, `${label}.sha256 must be null when absent`);
@@ -412,11 +1026,10 @@ function validateTuning(
 
 function validateNativeWorkCounters(report: VisionReport, path: string): NativeWorkCounters {
   const native = report.runtimeAttestation.nativeResultTransport;
-  requireRecord(native, `${path}: native result-transport attestation`);
   assert.equal(native.schemaVersion, 2, `${path}: native result-transport schema must be exactly 2`);
   assert.equal(native.workCountersAvailable, true, `${path}: native work counters must be available`);
-  requireRecord(native.workCounters, `${path}: native work counters`);
-  const counters = native.workCounters as unknown as NativeWorkCounters;
+  const counters = native.workCounters;
+  assert.ok(counters, `${path}: native work counters`);
   for (const key of [
     "startedBatchCount",
     "startedRequestedAssetCount",
@@ -463,17 +1076,13 @@ function validateNativeWorkCounters(report: VisionReport, path: string): NativeW
 function validateReport(path: string, expectedStrategy: Strategy): LoadedRun {
   const pathStat = lstatSync(path);
   assert.ok(pathStat.isFile() && !pathStat.isSymbolicLink(), `${path}: report must be a regular non-symlinked file`);
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
-  requireRecord(parsed, `${path}: report`);
-  const report = parsed as unknown as VisionReport;
+  const report = parseVisionReport(parseJsonValue(readFileSync(path, "utf8")), path);
   assert.equal(report.schemaVersion, 6, `${path}: report schema must be exactly 6`);
-  requireRecord(report.schemaCompatibility, `${path}: schemaCompatibility`);
   assert.equal(report.schemaCompatibility.previousSchemaVersion, 5, `${path}: previous schema version`);
   assert.equal(report.schemaCompatibility.semanticFieldsPreserved, true, `${path}: schema compatibility`);
   assert.equal(report.status, "ok", `${path}: status`);
   assert.equal(report.visitFoodDetectionStrategy, expectedStrategy, `${path}: top-level visit-food strategy`);
 
-  requireRecord(report.configuration, `${path}: configuration`);
   positiveInteger(report.pageSize, `${path}: page size`);
   assert.ok(report.pageSize <= 2_000, `${path}: page size exceeds 2,000`);
   assert.equal(report.configuration.resultPageSize, report.pageSize, `${path}: configured page size`);
@@ -510,7 +1119,6 @@ function validateReport(path: string, expectedStrategy: Strategy): LoadedRun {
     `${path}: classification environment value`,
   );
 
-  requireRecord(report.runtimeAttestation, `${path}: runtimeAttestation`);
   const runtime = report.runtimeAttestation;
   safeToken(runtime.runId, `${path}: runtime run ID`);
   assert.equal(runtime.observedProcessPageSize, report.pageSize, `${path}: runtime page size`);
@@ -617,7 +1225,6 @@ function validateReport(path: string, expectedStrategy: Strategy): LoadedRun {
   finiteNonnegative(runtime.processEnvironmentObservedAtEpochSeconds, `${path}: process-environment observation`);
   const counters = validateNativeWorkCounters(report, path);
 
-  requireRecord(report.workload, `${path}: workload`);
   const workload = report.workload;
   assert.equal(workload.visitFoodDetectionStrategy, expectedStrategy, `${path}: workload visit-food strategy`);
   for (const key of [
@@ -653,7 +1260,6 @@ function validateReport(path: string, expectedStrategy: Strategy): LoadedRun {
   assert.equal(counters.startedRequestedAssetCount, workload.attemptedSamples, `${path}: direct requested-asset total`);
   assert.equal(counters.startedBatchCount, workload.expectedNativeBatchCount, `${path}: direct native-batch total`);
 
-  requireRecord(report.validation, `${path}: validation`);
   const validation = report.validation;
   assert.equal(validation.exactStrategySemanticPhotoParity, true, `${path}: exact strategy photo parity`);
   assert.equal(validation.strategyPhotoMismatchCount, 0, `${path}: strategy photo mismatch count`);
@@ -717,7 +1323,6 @@ function validateReport(path: string, expectedStrategy: Strategy): LoadedRun {
     );
   }
 
-  requireRecord(report.triggerBoundary, `${path}: triggerBoundary`);
   const trigger = report.triggerBoundary;
   sha256(trigger.preparedVisionStateSha256, `${path}: prepared Vision state`);
   sha256(trigger.preTriggerVisionStateSha256, `${path}: pre-trigger Vision state`);
@@ -758,7 +1363,6 @@ function validateReport(path: string, expectedStrategy: Strategy): LoadedRun {
     `${path}: trigger age exceeds its maximum`,
   );
 
-  requireRecord(report.timing, `${path}: timing`);
   finitePositive(report.wallSeconds, `${path}: wallSeconds`);
   finitePositive(report.timing.firstDurableProgressToCompletionSeconds, `${path}: durable-tail timing`);
   finitePositive(report.timing.triggerToDurableCompletionSeconds, `${path}: trigger-to-completion timing`);
@@ -787,7 +1391,6 @@ function validateReport(path: string, expectedStrategy: Strategy): LoadedRun {
     `${path}: trigger timestamps do not match timing`,
   );
 
-  requireRecord(report.buildAttestation, `${path}: buildAttestation`);
   const build = report.buildAttestation;
   assert.equal(build.strictCodeSignatureVerified, true, `${path}: strict code-signature verification`);
   nonemptyString(build.suppliedAppName, `${path}: supplied app name`);
@@ -805,21 +1408,18 @@ function validateReport(path: string, expectedStrategy: Strategy): LoadedRun {
   assert.equal(build.suppliedMainJsBundleSha256, build.runningMainJsBundleSha256, `${path}: bundle identity`);
 
   sha256(report.originalDatabaseSha256, `${path}: original database`);
-  requireRecord(report.originalDatabase, `${path}: originalDatabase`);
   validateDatabaseComponent(report.originalDatabase.main, `${path}: original main`, true);
   validateDatabaseComponent(report.originalDatabase.wal, `${path}: original WAL`, false);
   validateDatabaseComponent(report.originalDatabase.shm, `${path}: original SHM`, false);
   validateDatabaseComponent(report.originalDatabase.journal, `${path}: original journal`, false);
   assert.equal(report.originalDatabase.main.sha256, report.originalDatabaseSha256, `${path}: original main identity`);
   sha256(report.standaloneSnapshotSha256, `${path}: standalone snapshot`);
-  requireRecord(report.semanticReference, `${path}: semanticReference`);
   assert.ok(
     report.semanticReference.source === "live-original-snapshot" ||
       report.semanticReference.source === "external-current-control",
     `${path}: semantic reference source`,
   );
   sha256(report.semanticReference.sha256, `${path}: semantic reference`);
-  requireRecord(report.semanticReference.components, `${path}: semantic reference components`);
   validateSemanticReferenceComponent(report.semanticReference.components.main, `${path}: reference main`, true, false);
   validateSemanticReferenceComponent(report.semanticReference.components.wal, `${path}: reference WAL`, false, true);
   validateSemanticReferenceComponent(report.semanticReference.components.shm, `${path}: reference SHM`, false, false);
@@ -835,14 +1435,11 @@ function validateReport(path: string, expectedStrategy: Strategy): LoadedRun {
     `${path}: semantic reference main identity`,
   );
 
-  requireRecord(report.restoration, `${path}: restoration`);
   assert.equal(report.restoration.exactMainAndSidecarSetRestored, true, `${path}: exact database restoration`);
   assert.equal(report.restoration.launchEnvironmentRestored, true, `${path}: launch-environment restoration`);
   assert.equal(report.restoration.rawDatabasePolicyApplied, true, `${path}: raw database policy`);
   assert.equal(report.restoration.reportPublishedAfterRestoration, true, `${path}: report publication ordering`);
   assert.equal(report.restoration.restoredDatabaseSha256, report.originalDatabaseSha256, `${path}: restored database`);
-  requireRecord(report.rawDatabases, `${path}: rawDatabases`);
-  requireRecord(report.resultDatabase, `${path}: resultDatabase`);
   assert.equal(report.rawDatabases.retained, false, `${path}: raw snapshots must not be retained`);
   assert.equal(report.rawDatabases.snapshotPath, null, `${path}: raw snapshot path must be null`);
   assert.equal(report.resultDatabase.retained, false, `${path}: result database must not be retained`);
@@ -919,15 +1516,7 @@ function sum(values: readonly number[]): number {
   return total;
 }
 
-function delta(
-  candidate: number,
-  baseline: number,
-): {
-  baseline: number;
-  candidate: number;
-  candidateMinusBaseline: number;
-  candidateMinusBaselinePercent: number | null;
-} {
+function delta(candidate: number, baseline: number) {
   const candidateMinusBaseline = candidate - baseline;
   const candidateMinusBaselinePercent = baseline === 0 ? null : (candidateMinusBaseline / baseline) * 100;
   assert.ok(Number.isFinite(candidateMinusBaseline), "Descriptive delta must be finite");
@@ -943,15 +1532,7 @@ function delta(
   };
 }
 
-function avoided(
-  candidate: number,
-  baseline: number,
-): {
-  baseline: number;
-  candidate: number;
-  avoided: number;
-  avoidedPercent: number;
-} {
+function avoided(candidate: number, baseline: number) {
   assert.ok(baseline > 0, "Full-plan work must be positive to calculate avoided work");
   return {
     baseline,
@@ -1038,7 +1619,7 @@ function validateUniqueInputs(configuration: Configuration, runs: readonly Loade
   }
 }
 
-function publishReport(outputPath: string, report: unknown): void {
+function publishReport<Report extends object>(outputPath: string, report: Report): void {
   const temporaryPath = `${outputPath}.tmp`;
   let temporaryFileDescriptor: number | undefined;
   let temporaryFileCreated = false;

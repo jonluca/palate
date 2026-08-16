@@ -21,7 +21,7 @@ export const MICHELIN_STATIC_QUERY_CACHE_POLICY = {
 export async function ensureMichelinDataInitialized(
   queryClient: QueryClient,
   initialize: () => Promise<MichelinInitializationResult>,
-  invalidatePendingReview: () => Promise<unknown>,
+  invalidatePendingReview: () => Promise<void>,
 ): Promise<MichelinInitializationResult> {
   return queryClient.ensureQueryData({
     queryKey: MICHELIN_INITIALIZATION_QUERY_KEY,

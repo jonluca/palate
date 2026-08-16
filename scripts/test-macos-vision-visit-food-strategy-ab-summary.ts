@@ -18,6 +18,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  parseJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from "../utils/runtime-json.ts";
+
 type Strategy = "full-plan-v1" | "rank3-bulk-tail-v1";
 type ResultTransport = "legacy" | "packed-v1";
 type PageOrchestrationStrategy = "serial" | "lookahead";
@@ -41,7 +50,7 @@ interface SuccessSummary {
   schemaVersion: number;
   inputReportSchemaVersion: number;
   status: string;
-  validation: Record<string, boolean>;
+  validation: VisitFoodSummaryValidation;
   inputIdentity: {
     appName: string;
     pageSize: number;
@@ -99,6 +108,10 @@ interface SuccessSummary {
   limitations: string[];
 }
 
+interface VisitFoodSummaryValidation {
+  [attestation: string]: boolean;
+}
+
 interface Delta {
   baseline: number;
   candidate: number;
@@ -153,6 +166,20 @@ const fullPlanPreparedStateSha256 = "1".repeat(64);
 const rank3PreparedStateSha256 = "2".repeat(64);
 const resultDatabaseSha256 = "3".repeat(64);
 
+function parseResultTransport(value: string): ResultTransport {
+  if (value !== "legacy" && value !== "packed-v1") {
+    throw new TypeError(`Unsupported result transport: ${value}`);
+  }
+  return value;
+}
+
+function parsePageOrchestrationStrategy(value: string): PageOrchestrationStrategy {
+  if (value !== "serial" && value !== "lookahead") {
+    throw new TypeError(`Unsupported page orchestration strategy: ${value}`);
+  }
+  return value;
+}
+
 function makeCounters(requestedAssets: number, nativeBatches: number): NativeWorkCounters {
   return {
     startedBatchCount: nativeBatches,
@@ -187,6 +214,8 @@ function makeReport(
   const triggerToDurableCompletionSeconds = triggerToFirstProgressSeconds + durableTailSeconds;
   const durableCompletionObservedAtEpochSeconds = triggerEpochSeconds + triggerToDurableCompletionSeconds;
   const preparedVisionStateSha256 = fullPlan ? fullPlanPreparedStateSha256 : rank3PreparedStateSha256;
+  const packedResultTransport = parseResultTransport("packed-v1");
+  const lookaheadPageOrchestrationStrategy = parsePageOrchestrationStrategy("lookahead");
   return {
     schemaVersion: 6,
     schemaCompatibility: {
@@ -195,20 +224,20 @@ function makeReport(
     },
     status: "ok",
     pageSize: 25,
-    resultTransport: "packed-v1" as ResultTransport,
-    requestedResultTransport: "packed-v1" as ResultTransport,
+    resultTransport: packedResultTransport,
+    requestedResultTransport: packedResultTransport,
     visitFoodDetectionStrategy: strategy,
-    pageOrchestrationStrategy: "lookahead" as PageOrchestrationStrategy,
+    pageOrchestrationStrategy: lookaheadPageOrchestrationStrategy,
     configuration: {
       resultPageSize: 25,
-      resultTransport: "packed-v1" as ResultTransport,
-      requestedResultTransport: "packed-v1" as ResultTransport,
-      expectedResolvedResultTransport: "packed-v1" as ResultTransport,
+      resultTransport: packedResultTransport,
+      requestedResultTransport: packedResultTransport,
+      expectedResolvedResultTransport: packedResultTransport,
       classificationStrategy: "pipeline",
       classificationStrategyMode: "native-default",
       classificationStrategyEnvironmentValue: null,
       visitFoodDetectionStrategy: strategy,
-      pageOrchestrationStrategy: "lookahead" as PageOrchestrationStrategy,
+      pageOrchestrationStrategy: lookaheadPageOrchestrationStrategy,
       visionConcurrency: 3,
       visionConcurrencyMode: "override",
       visionConcurrencyOverridden: true,
@@ -247,10 +276,10 @@ function makeReport(
     runtimeAttestation: {
       runId,
       observedProcessPageSize: 25,
-      requestedResultTransport: "packed-v1" as ResultTransport,
-      observedProcessResultTransport: "packed-v1" as ResultTransport,
-      expectedResolvedResultTransport: "packed-v1" as ResultTransport,
-      observedProcessResultTransportEnvironmentValue: "packed-v1" as ResultTransport,
+      requestedResultTransport: packedResultTransport,
+      observedProcessResultTransport: packedResultTransport,
+      expectedResolvedResultTransport: packedResultTransport,
+      observedProcessResultTransportEnvironmentValue: packedResultTransport,
       resultTransportEnvironmentPresent: true,
       expectedResolvedClassificationStrategy: "pipeline",
       observedProcessClassificationStrategyEnvironmentValue: null,
@@ -260,8 +289,8 @@ function makeReport(
       observedProcessVisitFoodDetectionStrategyEnvironmentValue: strategy,
       visitFoodDetectionStrategyEnvironmentPresent: true,
       visitFoodDetectionStrategyAttestationSource: "process-environment-plus-strategy-aware-semantic-oracle",
-      expectedResolvedPageOrchestrationStrategy: "lookahead" as PageOrchestrationStrategy,
-      observedProcessPageOrchestrationStrategyEnvironmentValue: "lookahead" as PageOrchestrationStrategy,
+      expectedResolvedPageOrchestrationStrategy: lookaheadPageOrchestrationStrategy,
+      observedProcessPageOrchestrationStrategyEnvironmentValue: lookaheadPageOrchestrationStrategy,
       pageOrchestrationStrategyEnvironmentPresent: true,
       expectedResolvedVisionConcurrency: 3,
       observedProcessVisionConcurrencyEnvironmentValue: 3,
@@ -274,9 +303,9 @@ function makeReport(
       nativeResultTransport: {
         schemaVersion: 2,
         runId,
-        configuredResultTransport: "packed-v1" as ResultTransport,
-        resolvedResultTransport: "packed-v1" as ResultTransport,
-        selectedResultTransport: "packed-v1" as ResultTransport,
+        configuredResultTransport: packedResultTransport,
+        resolvedResultTransport: packedResultTransport,
+        selectedResultTransport: packedResultTransport,
         observedAtEpochSeconds: 1_001.35,
         lastObservedAtEpochSeconds: durableCompletionObservedAtEpochSeconds - 0.1,
         workCountersAvailable: true,
@@ -445,15 +474,326 @@ function execute(fixtureSet: FixtureSet): SpawnSyncReturns<string> {
   );
 }
 
+function isJsonBoolean(value: JsonValue | undefined): value is boolean {
+  return value === true || value === false;
+}
+
+function hasErrorCode(cause: Error): cause is Error & { code: string } {
+  return "code" in cause && typeof cause.code === "string";
+}
+
+function requiredJsonObject(value: JsonValue | undefined, label: string): JsonObject {
+  if (!isJsonObject(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function requiredJsonNumber(value: JsonValue | undefined, label: string): number {
+  if (!isJsonNumber(value)) {
+    throw new TypeError(`${label} must be a number.`);
+  }
+  return value;
+}
+
+function requiredNullableJsonNumber(value: JsonValue | undefined, label: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredJsonNumber(value, label);
+}
+
+function requiredJsonString(value: JsonValue | undefined, label: string): string {
+  if (!isJsonString(value)) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requiredNullableJsonString(value: JsonValue | undefined, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredJsonString(value, label);
+}
+
+function requiredJsonBoolean(value: JsonValue | undefined, label: string): boolean {
+  if (!isJsonBoolean(value)) {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+  return value;
+}
+
+function requiredJsonNumberArray(value: JsonValue | undefined, label: string): number[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => requiredJsonNumber(entry, `${label}[${index}]`));
+}
+
+function requiredJsonStringArray(value: JsonValue | undefined, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => requiredJsonString(entry, `${label}[${index}]`));
+}
+
+function parseVisitFoodStrategy(value: JsonValue | undefined, label: string): Strategy {
+  const strategy = requiredJsonString(value, label);
+  if (strategy !== "full-plan-v1" && strategy !== "rank3-bulk-tail-v1") {
+    throw new TypeError(`${label} is unsupported.`);
+  }
+  return strategy;
+}
+
+function parseVisitFoodStrategyOrTie(value: JsonValue | undefined, label: string): Strategy | "tie" {
+  if (value === "tie") {
+    return value;
+  }
+  return parseVisitFoodStrategy(value, label);
+}
+
+function parseSummaryValidation(value: JsonValue | undefined): VisitFoodSummaryValidation {
+  const object = requiredJsonObject(value, "summary.validation");
+  const validation: VisitFoodSummaryValidation = {};
+  for (const [key, entry] of Object.entries(object)) {
+    validation[key] = requiredJsonBoolean(entry, `summary.validation.${key}`);
+  }
+  return validation;
+}
+
+function parseDelta(value: JsonValue | undefined, label: string): Delta {
+  const object = requiredJsonObject(value, label);
+  return {
+    baseline: requiredJsonNumber(object.baseline, `${label}.baseline`),
+    candidate: requiredJsonNumber(object.candidate, `${label}.candidate`),
+    candidateMinusBaseline: requiredJsonNumber(object.candidateMinusBaseline, `${label}.candidateMinusBaseline`),
+    candidateMinusBaselinePercent: requiredNullableJsonNumber(
+      object.candidateMinusBaselinePercent,
+      `${label}.candidateMinusBaselinePercent`,
+    ),
+  };
+}
+
+function parseAvoided(value: JsonValue | undefined, label: string): Avoided {
+  const object = requiredJsonObject(value, label);
+  return {
+    baseline: requiredJsonNumber(object.baseline, `${label}.baseline`),
+    candidate: requiredJsonNumber(object.candidate, `${label}.candidate`),
+    avoided: requiredJsonNumber(object.avoided, `${label}.avoided`),
+    avoidedPercent: requiredJsonNumber(object.avoidedPercent, `${label}.avoidedPercent`),
+  };
+}
+
+function parseStrategySummary(value: JsonValue | undefined, label: string): StrategySummary {
+  const object = requiredJsonObject(value, label);
+  const timing = requiredJsonObject(object.timing, `${label}.timing`);
+  const rss = requiredJsonObject(object.rss, `${label}.rss`);
+  const directWork = requiredJsonObject(object.directWork, `${label}.directWork`);
+  return {
+    strategy: parseVisitFoodStrategy(object.strategy, `${label}.strategy`),
+    reports: requiredJsonStringArray(object.reports, `${label}.reports`),
+    runIds: requiredJsonStringArray(object.runIds, `${label}.runIds`),
+    sampleCount: requiredJsonNumber(object.sampleCount, `${label}.sampleCount`),
+    timing: {
+      firstDurableProgressToCompletionSeconds: requiredJsonNumberArray(
+        timing.firstDurableProgressToCompletionSeconds,
+        `${label}.timing.firstDurableProgressToCompletionSeconds`,
+      ),
+      medianFirstDurableProgressToCompletionSeconds: requiredJsonNumber(
+        timing.medianFirstDurableProgressToCompletionSeconds,
+        `${label}.timing.medianFirstDurableProgressToCompletionSeconds`,
+      ),
+      triggerToDurableCompletionSeconds: requiredJsonNumberArray(
+        timing.triggerToDurableCompletionSeconds,
+        `${label}.timing.triggerToDurableCompletionSeconds`,
+      ),
+      medianTriggerToDurableCompletionSeconds: requiredJsonNumber(
+        timing.medianTriggerToDurableCompletionSeconds,
+        `${label}.timing.medianTriggerToDurableCompletionSeconds`,
+      ),
+      triggerToFirstDurableProgressSeconds: requiredJsonNumberArray(
+        timing.triggerToFirstDurableProgressSeconds,
+        `${label}.timing.triggerToFirstDurableProgressSeconds`,
+      ),
+      medianTriggerToFirstDurableProgressSeconds: requiredJsonNumber(
+        timing.medianTriggerToFirstDurableProgressSeconds,
+        `${label}.timing.medianTriggerToFirstDurableProgressSeconds`,
+      ),
+    },
+    rss: {
+      maxRssKiB: requiredJsonNumberArray(rss.maxRssKiB, `${label}.rss.maxRssKiB`),
+      medianMaxRssKiB: requiredJsonNumber(rss.medianMaxRssKiB, `${label}.rss.medianMaxRssKiB`),
+    },
+    directWork: {
+      requestedAssets: requiredJsonNumberArray(directWork.requestedAssets, `${label}.directWork.requestedAssets`),
+      totalRequestedAssets: requiredJsonNumber(
+        directWork.totalRequestedAssets,
+        `${label}.directWork.totalRequestedAssets`,
+      ),
+      medianRequestedAssets: requiredJsonNumber(
+        directWork.medianRequestedAssets,
+        `${label}.directWork.medianRequestedAssets`,
+      ),
+      nativeBatches: requiredJsonNumberArray(directWork.nativeBatches, `${label}.directWork.nativeBatches`),
+      totalNativeBatches: requiredJsonNumber(directWork.totalNativeBatches, `${label}.directWork.totalNativeBatches`),
+      medianNativeBatches: requiredJsonNumber(
+        directWork.medianNativeBatches,
+        `${label}.directWork.medianNativeBatches`,
+      ),
+    },
+  };
+}
+
+function parseSummaryPair(value: JsonValue, index: number): SuccessSummary["comparison"]["pairs"][number] {
+  const label = `summary.comparison.pairs[${index}]`;
+  const object = requiredJsonObject(value, label);
+  const timing = requiredJsonObject(object.timing, `${label}.timing`);
+  const directWork = requiredJsonObject(object.directWork, `${label}.directWork`);
+  return {
+    pairIndex: requiredJsonNumber(object.pairIndex, `${label}.pairIndex`),
+    fullPlanRunId: requiredJsonString(object.fullPlanRunId, `${label}.fullPlanRunId`),
+    rank3BulkTailRunId: requiredJsonString(object.rank3BulkTailRunId, `${label}.rank3BulkTailRunId`),
+    timing: {
+      firstDurableProgressToCompletionSeconds: parseDelta(
+        timing.firstDurableProgressToCompletionSeconds,
+        `${label}.timing.firstDurableProgressToCompletionSeconds`,
+      ),
+    },
+    directWork: {
+      requestedAssets: parseAvoided(directWork.requestedAssets, `${label}.directWork.requestedAssets`),
+      nativeBatches: parseAvoided(directWork.nativeBatches, `${label}.directWork.nativeBatches`),
+    },
+    fasterDurableTail: parseVisitFoodStrategyOrTie(object.fasterDurableTail, `${label}.fasterDurableTail`),
+  };
+}
+
+function parseSuccessSummary(source: string): SuccessSummary {
+  const object = requiredJsonObject(parseJsonValue(source), "summary");
+  const inputIdentity = requiredJsonObject(object.inputIdentity, "summary.inputIdentity");
+  const preparedState = requiredJsonObject(
+    inputIdentity.preparedVisionStateSha256ByStrategy,
+    "summary.inputIdentity.preparedVisionStateSha256ByStrategy",
+  );
+  const comparison = requiredJsonObject(object.comparison, "summary.comparison");
+  const medianDeltas = requiredJsonObject(comparison.medianDeltas, "summary.comparison.medianDeltas");
+  const aggregateAvoidedWork = requiredJsonObject(
+    comparison.aggregateAvoidedWork,
+    "summary.comparison.aggregateAvoidedWork",
+  );
+  const medianAvoidedWork = requiredJsonObject(comparison.medianAvoidedWork, "summary.comparison.medianAvoidedWork");
+  const pairwiseWins = requiredJsonObject(comparison.pairwiseWins, "summary.comparison.pairwiseWins");
+  if (!Array.isArray(comparison.pairs)) {
+    throw new TypeError("summary.comparison.pairs must be an array.");
+  }
+  return {
+    schemaVersion: requiredJsonNumber(object.schemaVersion, "summary.schemaVersion"),
+    inputReportSchemaVersion: requiredJsonNumber(object.inputReportSchemaVersion, "summary.inputReportSchemaVersion"),
+    status: requiredJsonString(object.status, "summary.status"),
+    validation: parseSummaryValidation(object.validation),
+    inputIdentity: {
+      appName: requiredJsonString(inputIdentity.appName, "summary.inputIdentity.appName"),
+      pageSize: requiredJsonNumber(inputIdentity.pageSize, "summary.inputIdentity.pageSize"),
+      requestedResultTransport: parseResultTransport(
+        requiredJsonString(inputIdentity.requestedResultTransport, "summary.inputIdentity.requestedResultTransport"),
+      ),
+      resultTransport: parseResultTransport(
+        requiredJsonString(inputIdentity.resultTransport, "summary.inputIdentity.resultTransport"),
+      ),
+      pageOrchestrationStrategy: parsePageOrchestrationStrategy(
+        requiredJsonString(inputIdentity.pageOrchestrationStrategy, "summary.inputIdentity.pageOrchestrationStrategy"),
+      ),
+      classificationStrategy: requiredJsonString(
+        inputIdentity.classificationStrategy,
+        "summary.inputIdentity.classificationStrategy",
+      ),
+      classificationStrategyMode: requiredJsonString(
+        inputIdentity.classificationStrategyMode,
+        "summary.inputIdentity.classificationStrategyMode",
+      ),
+      classificationStrategyEnvironmentValue: requiredNullableJsonString(
+        inputIdentity.classificationStrategyEnvironmentValue,
+        "summary.inputIdentity.classificationStrategyEnvironmentValue",
+      ),
+      fixtureCount: requiredJsonNumber(inputIdentity.fixtureCount, "summary.inputIdentity.fixtureCount"),
+      originalDatabaseSha256: requiredJsonString(
+        inputIdentity.originalDatabaseSha256,
+        "summary.inputIdentity.originalDatabaseSha256",
+      ),
+      standaloneSnapshotSha256: requiredJsonString(
+        inputIdentity.standaloneSnapshotSha256,
+        "summary.inputIdentity.standaloneSnapshotSha256",
+      ),
+      preparedVisionStateSha256ByStrategy: {
+        fullPlanV1: requiredJsonString(
+          preparedState.fullPlanV1,
+          "summary.inputIdentity.preparedVisionStateSha256ByStrategy.fullPlanV1",
+        ),
+        rank3BulkTailV1: requiredJsonString(
+          preparedState.rank3BulkTailV1,
+          "summary.inputIdentity.preparedVisionStateSha256ByStrategy.rank3BulkTailV1",
+        ),
+      },
+    },
+    fullPlan: parseStrategySummary(object.fullPlan, "summary.fullPlan"),
+    rank3BulkTail: parseStrategySummary(object.rank3BulkTail, "summary.rank3BulkTail"),
+    comparison: {
+      interpretation: requiredJsonString(comparison.interpretation, "summary.comparison.interpretation"),
+      medianDeltas: {
+        firstDurableProgressToCompletionSeconds: parseDelta(
+          medianDeltas.firstDurableProgressToCompletionSeconds,
+          "summary.comparison.medianDeltas.firstDurableProgressToCompletionSeconds",
+        ),
+        triggerToDurableCompletionSeconds: parseDelta(
+          medianDeltas.triggerToDurableCompletionSeconds,
+          "summary.comparison.medianDeltas.triggerToDurableCompletionSeconds",
+        ),
+        triggerToFirstDurableProgressSeconds: parseDelta(
+          medianDeltas.triggerToFirstDurableProgressSeconds,
+          "summary.comparison.medianDeltas.triggerToFirstDurableProgressSeconds",
+        ),
+        maxRssKiB: parseDelta(medianDeltas.maxRssKiB, "summary.comparison.medianDeltas.maxRssKiB"),
+      },
+      aggregateAvoidedWork: {
+        requestedAssets: parseAvoided(
+          aggregateAvoidedWork.requestedAssets,
+          "summary.comparison.aggregateAvoidedWork.requestedAssets",
+        ),
+        nativeBatches: parseAvoided(
+          aggregateAvoidedWork.nativeBatches,
+          "summary.comparison.aggregateAvoidedWork.nativeBatches",
+        ),
+      },
+      medianAvoidedWork: {
+        requestedAssets: parseAvoided(
+          medianAvoidedWork.requestedAssets,
+          "summary.comparison.medianAvoidedWork.requestedAssets",
+        ),
+        nativeBatches: parseAvoided(
+          medianAvoidedWork.nativeBatches,
+          "summary.comparison.medianAvoidedWork.nativeBatches",
+        ),
+      },
+      pairwiseWins: {
+        rank3BulkTail: requiredJsonNumber(pairwiseWins.rank3BulkTail, "summary.comparison.pairwiseWins.rank3BulkTail"),
+        fullPlan: requiredJsonNumber(pairwiseWins.fullPlan, "summary.comparison.pairwiseWins.fullPlan"),
+        ties: requiredJsonNumber(pairwiseWins.ties, "summary.comparison.pairwiseWins.ties"),
+      },
+      pairs: comparison.pairs.map(parseSummaryPair),
+    },
+    limitations: requiredJsonStringArray(object.limitations, "summary.limitations"),
+  };
+}
+
 function pathExists(path: string): boolean {
   try {
     statSync(path);
     return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+  } catch (cause) {
+    if (cause instanceof Error && hasErrorCode(cause) && cause.code === "ENOENT") {
       return false;
     }
-    throw error;
+    throw cause;
   }
 }
 
@@ -551,7 +891,7 @@ try {
   assert.equal(successResult.status, 0, successResult.stderr);
   assert.match(successResult.stdout, /descriptive summary: 40\.00% direct requested assets avoided/);
   const summaryText = readFileSync(success.paths.output, "utf8");
-  const summary = JSON.parse(summaryText) as SuccessSummary;
+  const summary = parseSuccessSummary(summaryText);
   assert.equal(summary.schemaVersion, 1);
   assert.equal(summary.inputReportSchemaVersion, 6);
   assert.equal(summary.status, "ok");

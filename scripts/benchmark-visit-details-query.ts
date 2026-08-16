@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildVisitsWithDetailsQuery,
   parseVisitDetailsRows,
@@ -14,6 +14,9 @@ import {
   type VisitDetailsQueryRow,
 } from "../utils/db/visit-details-core.ts";
 import type { VisitWithDetails } from "../utils/db/types.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly visits: number;
@@ -36,10 +39,7 @@ interface QueryPlanRow {
   readonly detail: string;
 }
 
-interface LegacyVisitRow {
-  readonly id: string;
-  readonly [column: string]: unknown;
-}
+type LegacyVisitRow = Omit<VisitWithDetails, "previewPhotos">;
 
 interface LegacyPreviewRow {
   readonly visitId: string;
@@ -360,7 +360,7 @@ function createDatabase(configuration: Configuration, includePreviewIndex: boole
   return database;
 }
 
-function legacySelection(filter?: VisitDetailsFilter): { readonly where: string; readonly parameters: string[] } {
+function legacySelection(filter?: VisitDetailsFilter) {
   if (filter === "food") {
     return { where: "WHERE c.foodProbable = 1", parameters: [] };
   }
@@ -372,6 +372,7 @@ function legacySelection(filter?: VisitDetailsFilter): { readonly where: string;
 
 function executeLegacy(database: DatabaseSync, filter?: VisitDetailsFilter): Execution {
   const selection = legacySelection(filter);
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const visits = database
     .prepare(
       `SELECT c.*,
@@ -384,12 +385,13 @@ function executeLegacy(database: DatabaseSync, filter?: VisitDetailsFilter): Exe
        ${selection.where}
        ORDER BY c.startTime DESC`,
     )
-    .all(...selection.parameters) as unknown as LegacyVisitRow[];
+    .all(...selection.parameters) as BenchmarkSQLiteRow<LegacyVisitRow>[];
 
   if (visits.length === 0) {
     return { results: [], databaseCalls: 1, rowsCrossingDatabaseBoundary: 0, boundVisitIds: 0 };
   }
   const visitIds = visits.map((visit) => visit.id);
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const previews = database
     .prepare(
       `SELECT visitId, uri
@@ -403,7 +405,7 @@ function executeLegacy(database: DatabaseSync, filter?: VisitDetailsFilter): Exe
        WHERE rn <= 3
        ORDER BY rn ASC`,
     )
-    .all(...visitIds) as unknown as LegacyPreviewRow[];
+    .all(...visitIds) as BenchmarkSQLiteRow<LegacyPreviewRow>[];
 
   const previewsByVisit = new Map<string, string[]>();
   for (const preview of previews) {
@@ -414,10 +416,10 @@ function executeLegacy(database: DatabaseSync, filter?: VisitDetailsFilter): Exe
       previewsByVisit.set(preview.visitId, [preview.uri]);
     }
   }
-  const results = visits.map((visit) => ({
+  const results = visits.map((visit): VisitWithDetails => ({
     ...visit,
     previewPhotos: previewsByVisit.get(visit.id) ?? [],
-  })) as VisitWithDetails[];
+  }));
   return {
     results,
     databaseCalls: 2,
@@ -428,7 +430,8 @@ function executeLegacy(database: DatabaseSync, filter?: VisitDetailsFilter): Exe
 
 function executeProduction(database: DatabaseSync, filter?: VisitDetailsFilter): Execution {
   const query = buildVisitsWithDetailsQuery(filter);
-  const rows = database.prepare(query.sql).all(...query.parameters) as unknown as VisitDetailsQueryRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rows = database.prepare(query.sql).all(...query.parameters) as BenchmarkSQLiteRow<VisitDetailsQueryRow>[];
   return {
     results: parseVisitDetailsRows(rows),
     databaseCalls: 1,
@@ -491,16 +494,13 @@ function executeStrategy(strategy: Strategy, configuration: Configuration): Meas
 }
 
 function planDetails(database: DatabaseSync, sql: string, parameters: readonly (string | number)[] = []): string[] {
-  return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as unknown as QueryPlanRow[]).map(
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as BenchmarkSQLiteRow<QueryPlanRow>[]).map(
     (row) => row.detail,
   );
 }
 
-function collectPlanEvidence(configuration: Configuration): {
-  readonly productionByFilter: Record<string, string[]>;
-  readonly oneQueryWithoutPreviewIndex: string[];
-  readonly legacyPreview: string[];
-} {
+function collectPlanEvidence(configuration: Configuration) {
   const production = createDatabase(configuration, true);
   const fallback = createDatabase(configuration, false);
   try {
@@ -550,20 +550,24 @@ function collectPlanEvidence(configuration: Configuration): {
   }
 }
 
-function measurePreviewIndexBuild(configuration: Configuration): {
-  readonly milliseconds: number;
-  readonly additionalPages: number;
-  readonly pageSizeBytes: number;
-  readonly approximateAdditionalBytes: number;
-} {
+function measurePreviewIndexBuild(configuration: Configuration) {
   const database = createDatabase(configuration, false);
   try {
-    const pageSizeBytes = Number((database.prepare("PRAGMA page_size").get() as { page_size: number }).page_size);
-    const pagesBefore = Number((database.prepare("PRAGMA page_count").get() as { page_count: number }).page_count);
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+    const pageSizeBytes = Number(
+      (database.prepare("PRAGMA page_size").get() as BenchmarkSQLiteRow<{ page_size: number }>).page_size,
+    );
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+    const pagesBefore = Number(
+      (database.prepare("PRAGMA page_count").get() as BenchmarkSQLiteRow<{ page_count: number }>).page_count,
+    );
     const startedAt = performance.now();
     database.exec(PREVIEW_INDEX_SQL);
     const milliseconds = performance.now() - startedAt;
-    const pagesAfter = Number((database.prepare("PRAGMA page_count").get() as { page_count: number }).page_count);
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+    const pagesAfter = Number(
+      (database.prepare("PRAGMA page_count").get() as BenchmarkSQLiteRow<{ page_count: number }>).page_count,
+    );
     const additionalPages = pagesAfter - pagesBefore;
     return {
       milliseconds: rounded(milliseconds),
@@ -630,11 +634,11 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   }
 }
 
-const measurements: Record<Strategy, number[]> = {
-  legacyTwoCall: [],
-  oneQueryExistingIndex: [],
-  productionIndexed: [],
-};
+const measurements = {
+  legacyTwoCall: new Array<number>(),
+  oneQueryExistingIndex: new Array<number>(),
+  productionIndexed: new Array<number>(),
+} satisfies Record<Strategy, number[]>;
 const measurementOrder: string[] = [];
 for (let sample = 0; sample < configuration.samples; sample++) {
   const order = strategyOrder(sample);
@@ -649,12 +653,18 @@ for (let sample = 0; sample < configuration.samples; sample++) {
 const plans = collectPlanEvidence(configuration);
 const previewIndexBuild = measurePreviewIndexBuild(configuration);
 const countsDatabase = createDatabase(configuration, true);
+// SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
 const assignedPhotoRows = Number(
-  (countsDatabase.prepare("SELECT COUNT(*) AS count FROM photos WHERE visitId IS NOT NULL").get() as { count: number })
-    .count,
+  (
+    countsDatabase
+      .prepare("SELECT COUNT(*) AS count FROM photos WHERE visitId IS NOT NULL")
+      .get() as BenchmarkSQLiteRow<{ count: number }>
+  ).count,
 );
-const sqliteVersion = (countsDatabase.prepare("SELECT sqlite_version() AS version").get() as { version: string })
-  .version;
+// SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+const sqliteVersion = (
+  countsDatabase.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>
+).version;
 countsDatabase.close();
 
 const dataset: DatasetCounts = {

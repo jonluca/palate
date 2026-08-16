@@ -28,7 +28,7 @@ const PROVIDER_SPATIAL_TRIGGERS = [
   "michelin_provider_spatial_insert",
   "michelin_provider_spatial_update",
 ];
-const PROVIDER_SPATIAL_SCHEMA_SHAPE = [
+const PROVIDER_SPATIAL_SCHEMA_OBJECTS = [
   { type: "table", name: PROVIDER_SPATIAL_TABLE, tableName: PROVIDER_SPATIAL_TABLE },
   ...PROVIDER_SPATIAL_SHADOW_TABLES.map((name) => ({ type: "table", name, tableName: name })),
   ...PROVIDER_SPATIAL_TRIGGERS.map((name) => ({ type: "trigger", name, tableName: "michelin_restaurants" })),
@@ -85,11 +85,15 @@ function sha256File(path) {
   return hash.digest("hex");
 }
 
+function isMissingFileError(error) {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
 function fileSize(path) {
   try {
     return Number(statSync(path).size);
   } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+    if (isMissingFileError(error)) {
       return 0;
     }
     throw error;
@@ -134,9 +138,9 @@ function integrity(database) {
 }
 
 function providerSpatialSummary(database) {
-  const expectedNames = PROVIDER_SPATIAL_SCHEMA_SHAPE.map(({ name }) => name);
+  const expectedNames = PROVIDER_SPATIAL_SCHEMA_OBJECTS.map(({ name }) => name);
   const placeholders = expectedNames.map(() => "?").join(", ");
-  const schemaShape = database
+  const schemaObjects = database
     .prepare(`
       SELECT type, name, tbl_name AS tableName
       FROM sqlite_schema
@@ -145,8 +149,8 @@ function providerSpatialSummary(database) {
     `)
     .all(...expectedNames)
     .map((row) => ({ type: String(row.type), name: String(row.name), tableName: String(row.tableName) }));
-  if (JSON.stringify(schemaShape) !== JSON.stringify(PROVIDER_SPATIAL_SCHEMA_SHAPE)) {
-    throw new Error(`Provider spatial schema shape mismatch: ${JSON.stringify(schemaShape)}`);
+  if (JSON.stringify(schemaObjects) !== JSON.stringify(PROVIDER_SPATIAL_SCHEMA_OBJECTS)) {
+    throw new Error(`Provider spatial schema shape mismatch: ${JSON.stringify(schemaObjects)}`);
   }
 
   const spatialColumns = database
@@ -203,10 +207,10 @@ function providerSpatialSummary(database) {
 
   return {
     tableName: PROVIDER_SPATIAL_TABLE,
-    schemaObjectCount: schemaShape.length,
-    virtualTableCount: schemaShape.filter(({ name }) => name === PROVIDER_SPATIAL_TABLE).length,
-    shadowTableCount: schemaShape.filter(({ name }) => PROVIDER_SPATIAL_SHADOW_TABLES.includes(name)).length,
-    triggerCount: schemaShape.filter(({ type }) => type === "trigger").length,
+    schemaObjectCount: schemaObjects.length,
+    virtualTableCount: schemaObjects.filter(({ name }) => name === PROVIDER_SPATIAL_TABLE).length,
+    shadowTableCount: schemaObjects.filter(({ name }) => PROVIDER_SPATIAL_SHADOW_TABLES.includes(name)).length,
+    triggerCount: schemaObjects.filter(({ type }) => type === "trigger").length,
     rtreeCompileOptionEnabled,
     validGuideRestaurantCount,
     indexedRestaurantCount,

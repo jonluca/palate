@@ -38,6 +38,21 @@ export interface NativeCalendarMutationResult {
   readonly errorMessage: string | null;
 }
 
+export interface NativeCalendarMutationRecord {
+  readonly [field: string]: NativeCalendarMutationValue;
+}
+
+export type NativeCalendarMutationValue =
+  | string
+  | number
+  | boolean
+  | null
+  | NativeCalendarMutationRecord
+  | NativeCalendarMutationResult
+  | readonly NativeCalendarMutationValue[];
+
+export type NativeCalendarMutationPayload = NativeCalendarMutationValue | undefined;
+
 export interface CreatedCalendarMutation {
   readonly inputIndex: number;
   readonly visitId: string;
@@ -62,7 +77,7 @@ export interface CalendarCreateMutationDependencies {
     calendarId: string,
     timeZone: string,
     requests: readonly NativeCalendarExportEventMutationRequest[],
-  ) => Promise<unknown>;
+  ) => Promise<NativeCalendarMutationPayload>;
   readonly hasCalendarPermission: () => Promise<boolean>;
   readonly getTimeZone: () => string;
   readonly createWithExpo: (
@@ -70,14 +85,16 @@ export interface CalendarCreateMutationDependencies {
     timeZone: string,
     request: NativeCalendarExportEventMutationRequest,
   ) => Promise<string>;
-  readonly onExpoError?: (error: unknown, inputIndex: number) => void;
+  readonly onExpoError?: (cause: unknown, inputIndex: number) => void;
 }
 
 export interface CalendarDeleteMutationDependencies {
-  readonly invokeNative?: (requests: readonly NativeCalendarDeleteEventMutationRequest[]) => Promise<unknown>;
+  readonly invokeNative?: (
+    requests: readonly NativeCalendarDeleteEventMutationRequest[],
+  ) => Promise<NativeCalendarMutationPayload>;
   readonly hasCalendarPermission: () => Promise<boolean>;
   readonly deleteWithExpo: (request: NativeCalendarDeleteEventMutationRequest) => Promise<void>;
-  readonly onExpoError?: (error: unknown, inputIndex: number) => void;
+  readonly onExpoError?: (cause: unknown, inputIndex: number) => void;
 }
 
 export interface CalendarExportClearStatement {
@@ -189,7 +206,7 @@ export async function executeCalendarCreateMutations(
     const request = requests[inputIndex]!;
     try {
       const eventId = await dependencies.createWithExpo(calendarId, timeZone, request);
-      if (typeof eventId !== "string" || eventId.length === 0) {
+      if (!isNonEmptyCalendarEventId(eventId)) {
         throw new TypeError("Expo Calendar returned an empty event ID.");
       }
       createdItems.push({ inputIndex, visitId: request.requestId, eventId });
@@ -260,7 +277,7 @@ export async function executeCalendarDeleteMutations(
 
 export function validateNativeCalendarMutationResults(
   requests: readonly { readonly requestId: string }[],
-  rawResults: unknown,
+  rawResults: NativeCalendarMutationPayload,
   operation: "create" | "delete",
 ): NativeCalendarMutationResult[] {
   assertUniqueRequestIds(requests);
@@ -279,10 +296,10 @@ export function validateNativeCalendarMutationResults(
       throw new TypeError(`Native calendar ${operation} returned a non-object item.`);
     }
     const inputIndex = rawResult.inputIndex;
-    if (!Number.isInteger(inputIndex) || (inputIndex as number) < 0 || (inputIndex as number) >= requests.length) {
+    if (!isValidCalendarMutationInputIndex(inputIndex, requests.length)) {
       throw new RangeError(`Native calendar ${operation} returned invalid inputIndex ${String(inputIndex)}.`);
     }
-    const index = inputIndex as number;
+    const index = inputIndex;
     if (orderedResults[index]) {
       throw new RangeError(`Native calendar ${operation} returned duplicate inputIndex ${index}.`);
     }
@@ -360,24 +377,40 @@ function assertUniqueRequestIds(requests: readonly { readonly requestId: string 
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: NativeCalendarMutationValue): value is NativeCalendarMutationRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isNativeCalendarMutationStatus(value: unknown): value is NativeCalendarMutationStatus {
+function isNativeCalendarMutationStatus(value: NativeCalendarMutationValue): value is NativeCalendarMutationStatus {
   return value === "created" || value === "deleted" || value === "alreadyAbsent" || value === "failed";
 }
 
-function requireString(value: unknown, field: string, operation: "create" | "delete"): string {
-  if (typeof value !== "string") {
+function requireString(value: NativeCalendarMutationValue, field: string, operation: "create" | "delete"): string {
+  if (!isNativeCalendarString(value)) {
     throw new TypeError(`Native calendar ${operation} result field ${field} must be a string.`);
   }
   return value;
 }
 
-function requireNullableString(value: unknown, field: string, operation: "create" | "delete"): string | null {
-  if (value !== null && typeof value !== "string") {
+function requireNullableString(
+  value: NativeCalendarMutationValue,
+  field: string,
+  operation: "create" | "delete",
+): string | null {
+  if (value !== null && !isNativeCalendarString(value)) {
     throw new TypeError(`Native calendar ${operation} result field ${field} must be a string or null.`);
   }
-  return value as string | null;
+  return value;
+}
+
+function isNativeCalendarString(value: NativeCalendarMutationValue): value is string {
+  return typeof value === "string";
+}
+
+function isValidCalendarMutationInputIndex(value: NativeCalendarMutationValue, requestCount: number): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value < requestCount;
+}
+
+function isNonEmptyCalendarEventId(value: string): value is string {
+  return typeof value === "string" && value.length > 0;
 }

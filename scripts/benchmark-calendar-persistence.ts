@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildCalendarEventPersistenceStatement,
   buildCalendarExportPersistenceStatement,
@@ -16,6 +16,9 @@ import {
   type CalendarExportUpdate,
 } from "../utils/db/calendar-persistence-core.ts";
 import type { CalendarEventUpdate } from "../utils/db/types.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly visits: number;
@@ -176,10 +179,7 @@ function createInitialRows(count: number): VisitRow[] {
   }));
 }
 
-function createEnrichmentUpdates(rows: readonly VisitRow[]): {
-  readonly updates: CalendarEventUpdate[];
-  readonly missingUpdates: number;
-} {
+function createEnrichmentUpdates(rows: readonly VisitRow[]) {
   const updates: CalendarEventUpdate[] = [];
   for (let index = 0; index < rows.length; index++) {
     const row = rows[index];
@@ -213,19 +213,24 @@ function createEnrichmentUpdates(rows: readonly VisitRow[]): {
   return { updates, missingUpdates };
 }
 
-function createExportUpdates(rows: readonly VisitRow[]): {
-  readonly updates: CalendarExportUpdate[];
-  readonly missingUpdates: number;
-} {
+function createExportUpdates(rows: readonly VisitRow[]) {
   const updates: CalendarExportUpdate[] = [];
   for (let index = 0; index < rows.length; index++) {
     const row = rows[index];
-    updates.push({
-      visitId: row.id,
-      calendarEventId: `calendar-event-${index}`,
-      calendarEventTitle: index === 1 ? "寿司 at 東京" : `Calendar title ${index}`,
-      ...(index % 3 === 0 ? { exportedToCalendarId: `target-calendar-${index % 13}` } : {}),
-    });
+    const update: CalendarExportUpdate =
+      index % 3 === 0
+        ? {
+            visitId: row.id,
+            calendarEventId: `calendar-event-${index}`,
+            calendarEventTitle: index === 1 ? "寿司 at 東京" : `Calendar title ${index}`,
+            exportedToCalendarId: `target-calendar-${index % 13}`,
+          }
+        : {
+            visitId: row.id,
+            calendarEventId: `calendar-event-${index}`,
+            calendarEventTitle: index === 1 ? "寿司 at 東京" : `Calendar title ${index}`,
+          };
+    updates.push(update);
 
     // A later imported update changes event fields while retaining the calendar
     // written by the prior exported branch.
@@ -266,12 +271,20 @@ function createExportUpdates(rows: readonly VisitRow[]): {
   }
   const missingUpdates = Math.max(3, Math.ceil(rows.length / 1_250));
   for (let index = 0; index < missingUpdates; index++) {
-    updates.splice(Math.min(updates.length, index * 193 + 7), 0, {
-      visitId: index === 0 ? "missing-export-雪's" : `missing-export-${index}`,
-      calendarEventId: `missing-export-event-${index}`,
-      calendarEventTitle: `Missing export ${index}`,
-      ...(index % 2 === 0 ? { exportedToCalendarId: `missing-calendar-${index}` } : {}),
-    });
+    const update: CalendarExportUpdate =
+      index % 2 === 0
+        ? {
+            visitId: index === 0 ? "missing-export-雪's" : `missing-export-${index}`,
+            calendarEventId: `missing-export-event-${index}`,
+            calendarEventTitle: `Missing export ${index}`,
+            exportedToCalendarId: `missing-calendar-${index}`,
+          }
+        : {
+            visitId: index === 0 ? "missing-export-雪's" : `missing-export-${index}`,
+            calendarEventId: `missing-export-event-${index}`,
+            calendarEventTitle: `Missing export ${index}`,
+          };
+    updates.splice(Math.min(updates.length, index * 193 + 7), 0, update);
   }
   return { updates, missingUpdates };
 }
@@ -441,7 +454,7 @@ function executeCandidateBatches<T>(
     readonly sql: string;
     readonly parameters: readonly (string | number | null)[];
   },
-): { readonly executions: number; readonly statementsPrepared: number } {
+) {
   let executions = 0;
   let statementsPrepared = 0;
   let reusableFullBatchStatement: ReturnType<DatabaseSync["prepare"]> | null = null;
@@ -496,12 +509,13 @@ function executeCandidate(database: DatabaseSync, dataset: Dataset): Measurement
 }
 
 function readRows(database: DatabaseSync): VisitRow[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   return database
     .prepare(`SELECT id, calendarEventId, calendarEventTitle, calendarEventLocation,
       calendarEventIsAllDay, exportedToCalendarId, updatedAt, payload
       FROM visits ORDER BY id COLLATE BINARY`)
     .all()
-    .map((row) => ({ ...row }) as unknown as VisitRow);
+    .map((row) => ({ ...row }) as BenchmarkSQLiteRow<VisitRow>);
 }
 
 function runAndValidate(strategy: Strategy, dataset: Dataset): Measurement {
@@ -580,10 +594,10 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   }
 }
 
-const measurements: Record<Strategy, Measurement[]> = {
-  legacyPerRow: [],
-  productionSetBased: [],
-};
+const measurements = {
+  legacyPerRow: new Array<Measurement>(),
+  productionSetBased: new Array<Measurement>(),
+} satisfies Record<Strategy, Measurement[]>;
 const measurementOrder: string[] = [];
 for (let sample = 0; sample < configuration.samples; sample++) {
   const order = strategyOrder(sample);
@@ -596,8 +610,10 @@ for (let sample = 0; sample < configuration.samples; sample++) {
 const legacy = summarizeStrategy(measurements.legacyPerRow);
 const candidate = summarizeStrategy(measurements.productionSetBased);
 const runtimeDatabase = new DatabaseSync(":memory:");
-const sqliteVersion = (runtimeDatabase.prepare("SELECT sqlite_version() AS version").get() as { version: string })
-  .version;
+// SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+const sqliteVersion = (
+  runtimeDatabase.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>
+).version;
 runtimeDatabase.close();
 
 const report = {

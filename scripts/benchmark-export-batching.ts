@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   buildExportPhotoCountsQuery,
@@ -26,6 +26,85 @@ import {
   type ExportData,
   withExactExportPhotoCounts,
 } from "../utils/export-core.ts";
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isBooleanValue<Value>(value: Value): value is Value & boolean {
+  return typeof value === "boolean";
+}
+
+function isObjectValue<Value>(value: Value): value is Value & object {
+  return typeof value === "object";
+}
+
+function isFoodLabel<Value>(value: Value): value is Value & FoodLabel {
+  return (
+    value !== null &&
+    isObjectValue(value) &&
+    "label" in value &&
+    isStringValue(value.label) &&
+    "confidence" in value &&
+    isNumberValue(value.confidence)
+  );
+}
+
+function parseFoodLabels(serialized: string): FoodLabel[] {
+  const parsed: unknown = JSON.parse(serialized);
+  if (!Array.isArray(parsed) || !parsed.every(isFoodLabel)) {
+    throw new TypeError("Photo labels must contain label/confidence objects");
+  }
+  return parsed;
+}
+
+type ChildOutputProperty = string | number | boolean | null | undefined;
+type ChildOutputRecord = Readonly<Record<string, ChildOutputProperty>>;
+
+function isChildOutputProperty<Value>(value: Value): value is Extract<Value, ChildOutputProperty> {
+  return value === null || ["string", "number", "boolean", "undefined"].includes(typeof value);
+}
+
+function isChildOutputRecord<Value>(value: Value): value is Value & ChildOutputRecord {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value).every(isChildOutputProperty)
+  );
+}
+
+function requiredNumberProperty(value: ChildOutputRecord, key: string, context: string): number {
+  if (!(key in value) || !isNumberValue(value[key])) {
+    throw new TypeError(`${context}.${String(key)} must be a number`);
+  }
+  return value[key];
+}
+
+function requiredStringProperty(value: ChildOutputRecord, key: string, context: string): string {
+  if (!(key in value) || !isStringValue(value[key])) {
+    throw new TypeError(`${context}.${String(key)} must be a string`);
+  }
+  return value[key];
+}
+
+function assertLiteralProperty<Expected>(
+  value: ChildOutputRecord,
+  key: string,
+  expected: Expected,
+  context: string,
+): void {
+  if (!(key in value) || value[key] !== expected) {
+    throw new TypeError(`${context}.${String(key)} must equal ${JSON.stringify(expected)}`);
+  }
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   visits: number;
@@ -112,6 +191,44 @@ interface BooleanSchemaAudit {
   readonly rawSQLiteCalendarEventIntegerRows: number;
   readonly foodProbable: { readonly true: number; readonly false: number };
   readonly calendarEventIsAllDay: { readonly true: number; readonly false: number; readonly null: number };
+}
+
+interface ExportedBooleanVisit {
+  readonly visitId: string;
+  readonly foodProbable: boolean;
+  readonly calendarEvent: { readonly isAllDay: boolean | null };
+}
+
+function isExportedBooleanVisit<Value>(value: Value): value is Value & ExportedBooleanVisit {
+  if (
+    value === null ||
+    !isObjectValue(value) ||
+    !("visitId" in value) ||
+    !isStringValue(value.visitId) ||
+    !("foodProbable" in value) ||
+    !isBooleanValue(value.foodProbable) ||
+    !("calendarEvent" in value) ||
+    value.calendarEvent === null ||
+    !isObjectValue(value.calendarEvent) ||
+    !("isAllDay" in value.calendarEvent)
+  ) {
+    return false;
+  }
+  return value.calendarEvent.isAllDay === null || isBooleanValue(value.calendarEvent.isAllDay);
+}
+
+function parseExportedBooleanVisits(serialized: string): ExportedBooleanVisit[] {
+  const parsed: unknown = JSON.parse(serialized);
+  if (
+    parsed === null ||
+    !isObjectValue(parsed) ||
+    !("visits" in parsed) ||
+    !Array.isArray(parsed.visits) ||
+    !parsed.visits.every(isExportedBooleanVisit)
+  ) {
+    throw new TypeError("Export JSON must contain visits with corrected boolean fields");
+  }
+  return parsed.visits;
 }
 
 interface RunAudit extends Measurement {
@@ -517,7 +634,7 @@ function parseLegacyPhotoRecord(raw: RawPhotoRecord): PhotoRecord {
   let foodLabels: FoodLabel[] | null = null;
   if (raw.foodLabels) {
     try {
-      foodLabels = JSON.parse(raw.foodLabels) as FoodLabel[];
+      foodLabels = parseFoodLabels(raw.foodLabels);
     } catch {
       // Preserve the legacy behavior: malformed label payloads are ignored.
     }
@@ -526,7 +643,7 @@ function parseLegacyPhotoRecord(raw: RawPhotoRecord): PhotoRecord {
   let allLabels: FoodLabel[] | null = null;
   if (raw.allLabels) {
     try {
-      allLabels = JSON.parse(raw.allLabels) as FoodLabel[];
+      allLabels = parseFoodLabels(raw.allLabels);
     } catch {
       // Preserve the legacy behavior: malformed label payloads are ignored.
     }
@@ -547,7 +664,7 @@ function parseBatchedPhotoRecord(raw: RawPhotoRecord): PhotoRecord {
       return null;
     }
     try {
-      return JSON.parse(serialized) as FoodLabel[];
+      return parseFoodLabels(serialized);
     } catch {
       return null;
     }
@@ -561,19 +678,22 @@ function parseBatchedPhotoRecord(raw: RawPhotoRecord): PhotoRecord {
   });
 }
 
-function asVisitRecords(rows: readonly Record<string, unknown>[]): VisitRecord[] {
+function asVisitRecords(rows: readonly Record<string, SQLiteValue>[]): VisitRecord[] {
   // Preserve Expo SQLite's raw INTEGER-backed 0/1 values here so the
   // independent reference and production assembly each normalize them at
   // their public-schema boundary.
-  return rows.map((row) => ({ ...row })) as unknown as VisitRecord[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return rows.map((row) => ({ ...row })) as BenchmarkSQLiteRow<VisitRecord>[];
 }
 
-function asRestaurantRecords(rows: readonly Record<string, unknown>[]): RestaurantRecord[] {
-  return rows.map((row) => ({ ...row })) as unknown as RestaurantRecord[];
+function asRestaurantRecords(rows: readonly Record<string, SQLiteValue>[]): RestaurantRecord[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return rows.map((row) => ({ ...row })) as BenchmarkSQLiteRow<RestaurantRecord>[];
 }
 
-function asRawPhotoRecords(rows: readonly Record<string, unknown>[]): RawPhotoRecord[] {
-  return rows.map((row) => ({ ...row })) as unknown as RawPhotoRecord[];
+function asRawPhotoRecords(rows: readonly Record<string, SQLiteValue>[]): RawPhotoRecord[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return rows.map((row) => ({ ...row })) as BenchmarkSQLiteRow<RawPhotoRecord>[];
 }
 
 function legacyFormatDate(timestamp: number): string {
@@ -743,25 +863,29 @@ function runLegacy(database: DatabaseSync, format: Format): Execution {
   let sqliteCalls = 0;
   let photoQueryCalls = 0;
   let maximumPhotoQueryRows = 0;
-  const visitRows = database.prepare(VISITS_SQL).all("confirmed") as Record<string, unknown>[];
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const visitRows = database.prepare(VISITS_SQL).all("confirmed") as Record<string, SQLiteValue>[];
   sqliteCalls += 1;
   const visits = asVisitRecords(visitRows);
-  const restaurantRows = database.prepare(RESTAURANTS_SQL).all() as Record<string, unknown>[];
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const restaurantRows = database.prepare(RESTAURANTS_SQL).all() as Record<string, SQLiteValue>[];
   sqliteCalls += 1;
   const allRestaurants = asRestaurantRecords(restaurantRows);
   const restaurantsByVisitId = new Map<string, RestaurantRecord | null>();
   const photosByVisitId = new Map<string, PhotoRecord[]>();
 
   for (const visit of visits) {
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const restaurantRow = database.prepare(RESTAURANT_BY_ID_SQL).get(visit.restaurantId!) as
-      | Record<string, unknown>
+      | Record<string, SQLiteValue>
       | undefined;
     sqliteCalls += 1;
     restaurantsByVisitId.set(visit.id, restaurantRow ? asRestaurantRecords([restaurantRow])[0]! : null);
 
     if (format === "jsonIncludePhotos") {
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
       const rawPhotos = asRawPhotoRecords(
-        database.prepare(LEGACY_PHOTOS_SQL).all(visit.id) as Record<string, unknown>[],
+        database.prepare(LEGACY_PHOTOS_SQL).all(visit.id) as Record<string, SQLiteValue>[],
       );
       sqliteCalls += 1;
       photoQueryCalls += 1;
@@ -785,10 +909,12 @@ function runCandidate(database: DatabaseSync, format: Format): Execution {
   let photoQueryCalls = 0;
   let maximumPhotoQueryRows = 0;
   let maximumPhotoPageRows = 0;
-  const visitRows = database.prepare(VISITS_SQL).all("confirmed") as Record<string, unknown>[];
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const visitRows = database.prepare(VISITS_SQL).all("confirmed") as Record<string, SQLiteValue>[];
   sqliteCalls += 1;
   const visits = asVisitRecords(visitRows);
-  const restaurantRows = database.prepare(RESTAURANTS_SQL).all() as Record<string, unknown>[];
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const restaurantRows = database.prepare(RESTAURANTS_SQL).all() as Record<string, SQLiteValue>[];
   sqliteCalls += 1;
   const restaurants = asRestaurantRecords(restaurantRows);
   let exportVisits = buildExportVisits({ visits, restaurants, photosByVisitId: new Map() });
@@ -801,8 +927,9 @@ function runCandidate(database: DatabaseSync, format: Format): Execution {
     do {
       const photoQuery = buildExportPhotosQuery(visitIds, cursor);
       assert.ok(photoQuery);
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
       const rawPhotos = asRawPhotoRecords(
-        database.prepare(photoQuery.sql).all(...photoQuery.parameters) as Record<string, unknown>[],
+        database.prepare(photoQuery.sql).all(...photoQuery.parameters) as Record<string, SQLiteValue>[],
       );
       sqliteCalls += 1;
       photoQueryCalls += 1;
@@ -842,10 +969,11 @@ function runCandidate(database: DatabaseSync, format: Format): Execution {
   } else {
     const countQuery = buildExportPhotoCountsQuery(visitIds);
     if (countQuery) {
-      const countRows = database.prepare(countQuery.sql).all(...countQuery.parameters) as unknown as {
+      // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+      const countRows = database.prepare(countQuery.sql).all(...countQuery.parameters) as BenchmarkSQLiteRow<{
         readonly visitId: string;
         readonly photoCount: number;
-      }[];
+      }>[];
       sqliteCalls += 1;
       for (const row of countRows) {
         exactPhotoCounts.set(row.visitId, row.photoCount);
@@ -928,8 +1056,9 @@ function execute(
 function validatePhotoParserParity(dataset: Dataset): ParserParity {
   const database = createDatabase(dataset);
   try {
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const rows = asRawPhotoRecords(
-      database.prepare("SELECT * FROM photos ORDER BY id ASC").all() as Record<string, unknown>[],
+      database.prepare("SELECT * FROM photos ORDER BY id ASC").all() as Record<string, SQLiteValue>[],
     );
     const digest = createHash("sha256");
     for (const row of rows) {
@@ -949,14 +1078,8 @@ function validatePhotoParserParity(dataset: Dataset): ParserParity {
 }
 
 function validateCorrectedBooleanSchema(dataset: Dataset, jsonOutput: string): BooleanSchemaAudit {
-  const parsed = JSON.parse(jsonOutput) as {
-    readonly visits: readonly {
-      readonly visitId: string;
-      readonly foodProbable: unknown;
-      readonly calendarEvent: { readonly isAllDay: unknown };
-    }[];
-  };
-  assert.equal(parsed.visits.length, dataset.visits.length);
+  const visits = parseExportedBooleanVisits(jsonOutput);
+  assert.equal(visits.length, dataset.visits.length);
   const rawVisitsById = new Map(dataset.visits.map((visit) => [visit.id, visit]));
   let foodProbableTrue = 0;
   let foodProbableFalse = 0;
@@ -964,10 +1087,10 @@ function validateCorrectedBooleanSchema(dataset: Dataset, jsonOutput: string): B
   let calendarEventFalse = 0;
   let calendarEventNull = 0;
 
-  for (const exportedVisit of parsed.visits) {
+  for (const exportedVisit of visits) {
     const rawVisit = rawVisitsById.get(exportedVisit.visitId);
     assert.ok(rawVisit);
-    assert.equal(typeof exportedVisit.foodProbable, "boolean");
+    assert.ok(isBooleanValue(exportedVisit.foodProbable));
     assert.equal(exportedVisit.foodProbable, Boolean(rawVisit.foodProbable));
     if (exportedVisit.foodProbable) {
       foodProbableTrue += 1;
@@ -981,7 +1104,7 @@ function validateCorrectedBooleanSchema(dataset: Dataset, jsonOutput: string): B
     if (isAllDay === null) {
       calendarEventNull += 1;
     } else {
-      assert.equal(typeof isAllDay, "boolean");
+      assert.ok(isBooleanValue(isAllDay));
       if (isAllDay) {
         calendarEventTrue += 1;
       } else {
@@ -991,7 +1114,7 @@ function validateCorrectedBooleanSchema(dataset: Dataset, jsonOutput: string): B
   }
 
   return {
-    visitsChecked: parsed.visits.length,
+    visitsChecked: visits.length,
     rawSQLiteFoodProbableIntegerRows: dataset.visits.filter(
       (visit) => visit.foodProbable === 0 || visit.foodProbable === 1,
     ).length,
@@ -1094,18 +1217,34 @@ function runMemoryChildIfRequested(): void {
 }
 
 function parseMemoryChildResult(stdout: string, strategy: Strategy): MemoryChildResult {
-  let parsed: unknown;
+  let parsedValue: unknown;
   try {
-    parsed = JSON.parse(stdout.trim());
+    parsedValue = JSON.parse(stdout.trim());
   } catch (error) {
     throw new Error(`Could not parse ${strategy} memory child output: ${String(error)}`, { cause: error });
   }
-  assert.ok(parsed && typeof parsed === "object");
-  const result = parsed as MemoryChildResult;
-  assert.equal(result.strategy, strategy);
-  assert.equal(typeof result.sha256, "string");
-  assert.equal(typeof result.resourceUsageMaxRSSKiB, "number");
-  return result;
+  if (!isChildOutputRecord(parsedValue)) {
+    throw new TypeError(`${strategy} memory child output must be an object`);
+  }
+  const context = `${strategy} memory child output`;
+  assertLiteralProperty(parsedValue, "strategy", strategy, context);
+  assertLiteralProperty(parsedValue, "platform", process.platform, context);
+  return {
+    strategy,
+    sha256: requiredStringProperty(parsedValue, "sha256", context),
+    bytes: requiredNumberProperty(parsedValue, "bytes", context),
+    sqliteCalls: requiredNumberProperty(parsedValue, "sqliteCalls", context),
+    photoQueryCalls: requiredNumberProperty(parsedValue, "photoQueryCalls", context),
+    maximumPhotoQueryRows: requiredNumberProperty(parsedValue, "maximumPhotoQueryRows", context),
+    maximumPhotoPageRows: requiredNumberProperty(parsedValue, "maximumPhotoPageRows", context),
+    elapsedMilliseconds: requiredNumberProperty(parsedValue, "elapsedMilliseconds", context),
+    resourceUsageMaxRSSKiB: requiredNumberProperty(parsedValue, "resourceUsageMaxRSSKiB", context),
+    rssBytesAtCompletion: requiredNumberProperty(parsedValue, "rssBytesAtCompletion", context),
+    heapUsedBytesAtCompletion: requiredNumberProperty(parsedValue, "heapUsedBytesAtCompletion", context),
+    platform: process.platform,
+    architecture: requiredStringProperty(parsedValue, "architecture", context),
+    node: requiredStringProperty(parsedValue, "node", context),
+  };
 }
 
 function runMemoryChild(databasePath: string, strategy: Strategy): MemoryChildResult {
@@ -1129,19 +1268,7 @@ function runMemoryChild(databasePath: string, strategy: Strategy): MemoryChildRe
   return parseMemoryChildResult(child.stdout, strategy);
 }
 
-function profilePeakMemory(): {
-  readonly fixture: {
-    readonly visits: number;
-    readonly photos: number;
-    readonly foodLabelsPerPayload: number;
-    readonly allLabelsPerPayload: number;
-  };
-  readonly legacyNPlusOne: MemoryChildResult;
-  readonly batchedCandidate: MemoryChildResult;
-  readonly candidateToLegacyMaxRSSRatio: number;
-  readonly exactOutputParity: true;
-  readonly scope: string;
-} {
+function profilePeakMemory() {
   const directory = mkdtempSync(join(tmpdir(), "palate-export-memory-"));
   const databasePath = join(directory, "memory-profile.sqlite");
   try {
@@ -1202,10 +1329,10 @@ assert.equal(parserParity.rowsCompared, configuration.photos);
 const formats: readonly Format[] = ["jsonIncludePhotos", "csvWithoutPhotos"];
 const strategies: readonly Strategy[] = ["legacyNPlusOne", "batchedCandidate"];
 const expectedOutputs = new Map<Format, string>();
-const audits: Record<Format, Record<Strategy, RunAudit[]>> = {
-  jsonIncludePhotos: { legacyNPlusOne: [], batchedCandidate: [] },
-  csvWithoutPhotos: { legacyNPlusOne: [], batchedCandidate: [] },
-};
+const audits = {
+  jsonIncludePhotos: { legacyNPlusOne: new Array<RunAudit>(), batchedCandidate: new Array<RunAudit>() },
+  csvWithoutPhotos: { legacyNPlusOne: new Array<RunAudit>(), batchedCandidate: new Array<RunAudit>() },
+} satisfies Record<Format, Record<Strategy, RunAudit[]>>;
 
 for (const format of formats) {
   const oracle = execute(dataset, format, "legacyNPlusOne", null);
@@ -1221,7 +1348,7 @@ const booleanSchemaAudit = validateCorrectedBooleanSchema(dataset, expectedOutpu
 
 for (let iteration = 0; iteration < configuration.warmupIterations; iteration++) {
   for (const [formatIndex, format] of formats.entries()) {
-    const order = (iteration + formatIndex) % 2 === 0 ? strategies : ([...strategies].reverse() as Strategy[]);
+    const order = (iteration + formatIndex) % 2 === 0 ? strategies : [...strategies].reverse();
     for (const strategy of order) {
       const measurement = execute(dataset, format, strategy, expectedOutputs.get(format)!);
       recordAudit(audits, format, strategy, measurement, "warmup", iteration);
@@ -1229,13 +1356,13 @@ for (let iteration = 0; iteration < configuration.warmupIterations; iteration++)
   }
 }
 
-const samples: Record<Format, Record<Strategy, number[]>> = {
-  jsonIncludePhotos: { legacyNPlusOne: [], batchedCandidate: [] },
-  csvWithoutPhotos: { legacyNPlusOne: [], batchedCandidate: [] },
-};
+const samples = {
+  jsonIncludePhotos: { legacyNPlusOne: new Array<number>(), batchedCandidate: new Array<number>() },
+  csvWithoutPhotos: { legacyNPlusOne: new Array<number>(), batchedCandidate: new Array<number>() },
+} satisfies Record<Format, Record<Strategy, number[]>>;
 for (let iteration = 0; iteration < configuration.samples; iteration++) {
   for (const [formatIndex, format] of formats.entries()) {
-    const order = (iteration + formatIndex) % 2 === 0 ? strategies : ([...strategies].reverse() as Strategy[]);
+    const order = (iteration + formatIndex) % 2 === 0 ? strategies : [...strategies].reverse();
     for (const strategy of order) {
       const measurement = execute(dataset, format, strategy, expectedOutputs.get(format)!);
       samples[format][strategy].push(measurement.elapsedMilliseconds);

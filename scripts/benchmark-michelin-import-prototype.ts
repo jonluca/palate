@@ -21,7 +21,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   CURRENT_MICHELIN_SOURCE_ROWS_SQL,
@@ -42,6 +42,9 @@ import {
   type SqliteSourceSnapshot,
 } from "./michelin-import-prototype-core.ts";
 import { MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL } from "../utils/db/michelin-provider-spatial-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly outputPath: string;
@@ -77,6 +80,11 @@ interface MeasurementResult {
   readonly walBytesAfter: number;
   readonly walBytesBefore: number;
   readonly walGrowthBytes: number;
+}
+
+interface ExpectedMeasurements {
+  currentJsOracle: ImportMeasurement | null;
+  attachInsertSelect: ImportMeasurement | null;
 }
 
 interface NumericSummary {
@@ -205,8 +213,7 @@ function canonicalizePotentialPath(path: string, seenSymlinks = new Set<string>(
       }
       return resolve(realpathSync(ancestor), ...missingSegments.reverse());
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT") {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw error;
       }
       const parent = dirname(ancestor);
@@ -250,7 +257,7 @@ function publicFileSnapshot(snapshot: FileSnapshot): Omit<FileSnapshot, "device"
   };
 }
 
-function publicSourceSnapshot(snapshot: SqliteSourceSnapshot): Record<string, unknown> {
+function publicSourceSnapshot(snapshot: SqliteSourceSnapshot) {
   return {
     main: publicFileSnapshot(snapshot.main),
     wal: publicFileSnapshot(snapshot.wal),
@@ -271,21 +278,30 @@ function validateQuiescentSource(snapshot: SqliteSourceSnapshot): void {
 function inspectSource(sourcePath: string): SourceFacts {
   const database = new DatabaseSync(immutableSqliteUri(sourcePath), { readOnly: true });
   try {
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const integrity = database
       .prepare("SELECT integrity_check AS value FROM pragma_integrity_check")
-      .get() as unknown as TextRow;
+      .get() as BenchmarkSQLiteRow<TextRow>;
     assert.equal(integrity.value, "ok", "Source database must pass integrity_check");
     assert.equal(database.prepare("PRAGMA foreign_key_check").all().length, 0, "Source database has FK violations");
-    const sqliteVersion = (database.prepare("SELECT sqlite_version() AS value").get() as unknown as TextRow).value;
-    const restaurantRows = (database.prepare("SELECT COUNT(*) AS count FROM restaurants").get() as unknown as CountRow)
-      .count;
-    const awardRows = (database.prepare("SELECT COUNT(*) AS count FROM restaurant_awards").get() as unknown as CountRow)
-      .count;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const sqliteVersion = (database.prepare("SELECT sqlite_version() AS value").get() as BenchmarkSQLiteRow<TextRow>)
+      .value;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const restaurantRows = (
+      database.prepare("SELECT COUNT(*) AS count FROM restaurants").get() as BenchmarkSQLiteRow<CountRow>
+    ).count;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const awardRows = (
+      database.prepare("SELECT COUNT(*) AS count FROM restaurant_awards").get() as BenchmarkSQLiteRow<CountRow>
+    ).count;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const selectedRows = (
       database
         .prepare(`SELECT COUNT(*) AS count FROM (${CURRENT_MICHELIN_SOURCE_ROWS_SQL})`)
-        .get() as unknown as CountRow
+        .get() as BenchmarkSQLiteRow<CountRow>
     ).count;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const conflict = (
       database
         .prepare(`SELECT id, latitude, longitude
@@ -293,7 +309,7 @@ function inspectSource(sourcePath: string): SourceFacts {
         WHERE latitude IS NOT NULL AND longitude IS NOT NULL
           AND latitude != '' AND longitude != ''
         ORDER BY id`)
-        .all() as unknown as SeedIdentityRow[]
+        .all() as BenchmarkSQLiteRow<SeedIdentityRow>[]
     ).find(({ latitude, longitude }) => {
       const parsedLatitude = Number.parseFloat(String(latitude));
       const parsedLongitude = Number.parseFloat(String(longitude));
@@ -308,9 +324,10 @@ function inspectSource(sourcePath: string): SourceFacts {
       );
     });
     assert.ok(conflict, "Source database must contain at least one restaurant");
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const reservedCollision = (
       database.prepare("SELECT COUNT(*) AS count FROM restaurants WHERE 'michelin-' || id = ?").get(HISTORICAL_ID) as
-        | CountRow
+        | BenchmarkSQLiteRow<CountRow>
         | undefined
     )?.count;
     assert.equal(reservedCollision, 0, "Reserved historical prototype ID collides with source data");
@@ -377,35 +394,44 @@ function runMeasurement(
     const walBytesAfter = destinationWalBytes(databasePath);
     assert.ok(walBytesAfter >= walBytesBefore, "Destination WAL unexpectedly shrank during import");
     const digest = destinationDigest(database);
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const integrityCheck = (
-      database.prepare("SELECT integrity_check AS value FROM pragma_integrity_check").get() as unknown as TextRow
+      database
+        .prepare("SELECT integrity_check AS value FROM pragma_integrity_check")
+        .get() as BenchmarkSQLiteRow<TextRow>
     ).value;
     const foreignKeyViolations = database.prepare("PRAGMA foreign_key_check").all().length;
-    const spatialIssueCount = (database.prepare(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL).get() as unknown as HealthRow)
-      .issueCount;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const spatialIssueCount = (
+      database.prepare(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL).get() as BenchmarkSQLiteRow<HealthRow>
+    ).issueCount;
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const historical = database
       .prepare(`SELECT datasetVersion, award FROM michelin_restaurants WHERE id = ?`)
-      .get(HISTORICAL_ID) as Record<string, unknown> | undefined;
+      .get(HISTORICAL_ID) as Record<string, SQLiteValue> | undefined;
     assert.ok(historical);
     assert.equal(historical.datasetVersion, "prototype-historical-version");
     assert.equal(historical.award, "prototype historical award");
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const conflict = database
       .prepare("SELECT datasetVersion FROM michelin_restaurants WHERE id = ?")
-      .get(`michelin-${String(sourceFacts.conflictSourceId)}`) as Record<string, unknown> | undefined;
+      .get(`michelin-${String(sourceFacts.conflictSourceId)}`) as Record<string, SQLiteValue> | undefined;
     assert.equal(conflict?.datasetVersion, DATASET_VERSION);
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     assert.equal(
       (
         database
           .prepare("SELECT value FROM app_metadata WHERE key = ?")
-          .get(MICHELIN_DATASET_VERSION_KEY) as unknown as TextRow
+          .get(MICHELIN_DATASET_VERSION_KEY) as BenchmarkSQLiteRow<TextRow>
       ).value,
       DATASET_VERSION,
     );
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     assert.equal(
       (
         database
           .prepare("SELECT value FROM app_metadata WHERE key = 'prototype-unrelated-key'")
-          .get() as unknown as TextRow
+          .get() as BenchmarkSQLiteRow<TextRow>
       ).value,
       "prototype-unrelated-value",
     );
@@ -439,7 +465,7 @@ function summarize(values: readonly number[]): NumericSummary {
   assert.ok(values.length > 0);
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : (sorted[middle] as number);
+  const median = sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
   return {
     maximum: sorted.at(-1)!,
     median,
@@ -462,7 +488,7 @@ function summarizePhases(results: readonly MeasurementResult[]): PhaseSummary {
   };
 }
 
-function atomicWriteReport(outputPath: string, report: unknown, sourcePath: string): void {
+function atomicWriteReport<Report>(outputPath: string, report: Report, sourcePath: string): void {
   mkdirSync(dirname(outputPath), { recursive: true });
   const temporaryPath = `${outputPath}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
   assertOutputIsSafe(temporaryPath, sourcePath);
@@ -504,14 +530,14 @@ function main(): void {
   assert.deepEqual(snapshotSqliteSource(sourcePath), sourceBefore, "Source inspection mutated protected files");
 
   const scratchRoot = mkdtempSync(join(tmpdir(), "palate-michelin-import-profile-"));
-  const measured: Record<MichelinImportStrategy, MeasurementResult[]> = {
-    currentJsOracle: [],
-    attachInsertSelect: [],
-  };
+  const measured = {
+    currentJsOracle: new Array<MeasurementResult>(),
+    attachInsertSelect: new Array<MeasurementResult>(),
+  } satisfies Record<MichelinImportStrategy, MeasurementResult[]>;
   const pairedTotals: Array<{ readonly currentJsOracle: number; readonly attachInsertSelect: number }> = [];
   let ordinal = 0;
   let expectedDigest: DestinationDigest | null = null;
-  const expectedMeasurementShape: Record<MichelinImportStrategy, ImportMeasurement | null> = {
+  const expectedMeasurements: ExpectedMeasurements = {
     currentJsOracle: null,
     attachInsertSelect: null,
   };
@@ -526,23 +552,26 @@ function main(): void {
     }
 
     for (let pair = 0; pair < configuration.samples; pair++) {
-      const pairResults = {} as Record<MichelinImportStrategy, MeasurementResult>;
+      const pairResults = new Map<MichelinImportStrategy, MeasurementResult>();
       for (const strategy of counterbalancedOrder(pair + configuration.warmupPairs)) {
         const result = runMeasurement(strategy, sourcePath, sourceFacts, scratchRoot, ordinal++);
         expectedDigest ??= result.digest;
         assert.deepEqual(result.digest, expectedDigest, "Measured strategies produced different destination tables");
-        expectedMeasurementShape[strategy] ??= result.measurement;
+        expectedMeasurements[strategy] ??= result.measurement;
         measured[strategy].push(result);
-        pairResults[strategy] = result;
+        pairResults.set(strategy, result);
       }
+      const currentJsOracle = pairResults.get("currentJsOracle");
+      const attachInsertSelect = pairResults.get("attachInsertSelect");
+      assert.ok(currentJsOracle && attachInsertSelect, "each measured pair must execute both import strategies");
       pairedTotals.push({
-        currentJsOracle: pairResults.currentJsOracle.measurement.phasesMilliseconds.total,
-        attachInsertSelect: pairResults.attachInsertSelect.measurement.phasesMilliseconds.total,
+        currentJsOracle: currentJsOracle.measurement.phasesMilliseconds.total,
+        attachInsertSelect: attachInsertSelect.measurement.phasesMilliseconds.total,
       });
     }
 
-    const oracle = expectedMeasurementShape.currentJsOracle;
-    const candidate = expectedMeasurementShape.attachInsertSelect;
+    const oracle = expectedMeasurements.currentJsOracle;
+    const candidate = expectedMeasurements.attachInsertSelect;
     assert.ok(oracle && candidate && expectedDigest);
     assert.equal(oracle.sourceRestaurantRows, sourceFacts.restaurantRows);
     assert.equal(candidate.sourceRestaurantRows, sourceFacts.restaurantRows);

@@ -57,13 +57,13 @@ export interface AdaptiveVisitFoodTransition {
   readonly nextState: AdaptiveVisitFoodState;
 }
 
-function assertIdentifier(value: unknown, description: string): asserts value is string {
+function assertIdentifier(value: string, description: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${description} must be a non-empty string.`);
   }
 }
 
-function assertSampleRank(value: unknown, description: string): asserts value is number {
+function assertSampleRank(value: number, description: string): asserts value is number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
     throw new TypeError(`${description} must be a positive safe integer.`);
   }
@@ -83,7 +83,7 @@ export function createAdaptiveVisitFoodPlan(samples: readonly AdaptiveVisitFoodS
   const photoIds = new Set<string>();
 
   for (const [index, sample] of samples.entries()) {
-    if (sample === null || typeof sample !== "object") {
+    if (!isAdaptiveVisitFoodSample(sample)) {
       throw new TypeError(`Adaptive visit food sample ${index} must be an object.`);
     }
     assertIdentifier(sample.visitId, `Adaptive visit food sample ${index} visitId`);
@@ -135,6 +135,10 @@ export function createAdaptiveVisitFoodPlan(samples: readonly AdaptiveVisitFoodS
   return { visits, totalSamples: samples.length, maximumRank };
 }
 
+function isAdaptiveVisitFoodSample(sample: AdaptiveVisitFoodSample): sample is AdaptiveVisitFoodSample {
+  return sample !== null && typeof sample === "object";
+}
+
 function buildWave(
   plan: AdaptiveVisitFoodPlan,
   rank: number,
@@ -156,9 +160,9 @@ function buildWave(
 export function createAdaptiveVisitFoodState(
   samplesOrPlan: readonly AdaptiveVisitFoodSample[] | AdaptiveVisitFoodPlan,
 ): AdaptiveVisitFoodState {
-  const plan = Array.isArray(samplesOrPlan)
+  const plan = isAdaptiveVisitFoodSampleArray(samplesOrPlan)
     ? createAdaptiveVisitFoodPlan(samplesOrPlan)
-    : (samplesOrPlan as AdaptiveVisitFoodPlan);
+    : samplesOrPlan;
   return {
     plan,
     nextRank: 1,
@@ -169,6 +173,12 @@ export function createAdaptiveVisitFoodState(
     skippedAfterPositive: [],
     isComplete: plan.totalSamples === 0,
   };
+}
+
+function isAdaptiveVisitFoodSampleArray(
+  value: readonly AdaptiveVisitFoodSample[] | AdaptiveVisitFoodPlan,
+): value is readonly AdaptiveVisitFoodSample[] {
+  return Array.isArray(value);
 }
 
 /** Return the next one-sample-per-active-visit wave without changing state. */
@@ -190,7 +200,7 @@ function indexOutcomes(
   const outcomesByPhotoId = new Map<string, AdaptiveVisitFoodOutcome>();
 
   for (const [index, outcome] of outcomes.entries()) {
-    if (outcome === null || typeof outcome !== "object") {
+    if (!isAdaptiveVisitFoodOutcome(outcome)) {
       throw new TypeError(`Adaptive visit food outcome ${index} must be an object.`);
     }
     assertIdentifier(outcome.photoId, `Adaptive visit food outcome ${index} photoId`);
@@ -203,7 +213,7 @@ function indexOutcomes(
       throw new TypeError(`Adaptive visit food outcomes contain duplicate photoId ${JSON.stringify(outcome.photoId)}.`);
     }
     if (outcome.status === "success") {
-      if (typeof outcome.containsFood !== "boolean") {
+      if (!hasAdaptiveVisitFoodBoolean(outcome.containsFood)) {
         throw new TypeError(`Successful adaptive visit food outcome ${index} must include containsFood.`);
       }
     } else if (outcome.status === "failure") {
@@ -216,6 +226,14 @@ function indexOutcomes(
     outcomesByPhotoId.set(outcome.photoId, outcome);
   }
   return outcomesByPhotoId;
+}
+
+function isAdaptiveVisitFoodOutcome(outcome: AdaptiveVisitFoodOutcome): outcome is AdaptiveVisitFoodOutcome {
+  return outcome !== null && typeof outcome === "object";
+}
+
+function hasAdaptiveVisitFoodBoolean(value: boolean | undefined): value is boolean {
+  return typeof value === "boolean";
 }
 
 /** Interpret native outcomes for an ordered set of validated planned samples. */

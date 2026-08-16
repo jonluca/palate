@@ -62,7 +62,7 @@ export const DEFAULT_FOOD_KEYWORDS = [
 type FoodKeywordSyncBindValue = string | number;
 
 export interface FoodKeywordSyncConnection {
-  getAllAsync<T>(source: string, parameters: FoodKeywordSyncBindValue[]): Promise<T[]>;
+  getAllAsync(source: string, parameters: FoodKeywordSyncBindValue[]): Promise<FoodKeywordStateRow[]>;
   runAsync(source: string, parameters: FoodKeywordSyncBindValue[]): Promise<{ readonly changes: number }>;
 }
 
@@ -154,7 +154,7 @@ export async function syncDefaultFoodKeywords(
 }
 
 async function inspectFoodKeywordSyncPlan(connection: FoodKeywordSyncConnection): Promise<FoodKeywordSyncPlan> {
-  const rows = await connection.getAllAsync<FoodKeywordStateRow>(INSPECTION_SQL, DEFAULT_KEYWORDS);
+  const rows = await connection.getAllAsync(INSPECTION_SQL, DEFAULT_KEYWORDS);
   const existingByKeyword = new Map(rows.map((row) => [row.keyword, row]));
   const missing: string[] = [];
   const reclassified: string[] = [];

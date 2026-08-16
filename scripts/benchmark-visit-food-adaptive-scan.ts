@@ -7,7 +7,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from
 import { performance } from "node:perf_hooks";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   commitAdaptiveVisitFoodTransition,
   createAdaptiveVisitFoodState,
@@ -17,6 +17,13 @@ import {
   type AdaptiveVisitFoodSample,
   type AdaptiveVisitFoodState,
 } from "../utils/visit-food-adaptive-scan-core.ts";
+
+function isStringValue<Value>(value: Value): value is Extract<Value, string> {
+  return typeof value === "string";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly databasePath: string | null;
@@ -33,6 +40,11 @@ interface Dataset {
   readonly samples: readonly AdaptiveVisitFoodSample[];
   readonly outcomes: ReadonlyMap<string, AdaptiveVisitFoodOutcome>;
   readonly sqliteVersion: string | null;
+}
+
+interface RetainedDataset {
+  readonly dataset: Dataset;
+  readonly before: DatabaseIdentity;
 }
 
 interface FullOracleResult {
@@ -281,22 +293,24 @@ function immutableDatabaseUri(path: string): string {
   return url.href;
 }
 
-function loadRetainedDataset(path: string): { dataset: Dataset; before: DatabaseIdentity } {
+function loadRetainedDataset(path: string): RetainedDataset {
   const before = databaseIdentity(path);
   assertImmutableSourceReady(before);
   const database = new DatabaseSync(immutableDatabaseUri(path), { readOnly: true });
   try {
     database.exec("PRAGMA query_only = ON; BEGIN;");
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const tableCount = Number(
       (
         database
           .prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name IN ('photos', 'visits')")
-          .get() as { count: number | bigint }
+          .get() as BenchmarkSQLiteRow<{ count: number | bigint }>
       ).count,
     );
     if (tableCount !== 2) {
       throw new Error("Retained Vision control database is missing photos or visits.");
     }
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const rows = database
       .prepare(
         `WITH ranked AS (
@@ -318,12 +332,14 @@ function loadRetainedDataset(path: string): { dataset: Dataset; before: Database
          INNER JOIN visits AS visit ON visit.id = ranked.visitId
          ORDER BY visit.startTime DESC, ranked.visitId ASC, ranked.sampleRank ASC`,
       )
-      .all() as Array<{
-      visitId: unknown;
-      photoId: unknown;
-      sampleRank: unknown;
-      foodDetected: unknown;
-    }>;
+      .all() as Array<
+      BenchmarkSQLiteRow<{
+        visitId: SQLiteValue;
+        photoId: SQLiteValue;
+        sampleRank: SQLiteValue;
+        foodDetected: SQLiteValue;
+      }>
+    >;
     if (rows.length === 0) {
       throw new Error("Retained Vision control database contains no analyzed visit photos.");
     }
@@ -331,10 +347,10 @@ function loadRetainedDataset(path: string): { dataset: Dataset; before: Database
     const samples: AdaptiveVisitFoodSample[] = [];
     const outcomes = new Map<string, AdaptiveVisitFoodOutcome>();
     for (const [index, row] of rows.entries()) {
-      if (typeof row.visitId !== "string" || row.visitId.length === 0) {
+      if (!isStringValue(row.visitId) || row.visitId.length === 0) {
         throw new Error(`Retained row ${index} has an invalid visitId.`);
       }
-      if (typeof row.photoId !== "string" || row.photoId.length === 0) {
+      if (!isStringValue(row.photoId) || row.photoId.length === 0) {
         throw new Error(`Retained row ${index} has an invalid photoId.`);
       }
       const sampleRank = Number(row.sampleRank);
@@ -348,8 +364,9 @@ function loadRetainedDataset(path: string): { dataset: Dataset; before: Database
       samples.push({ visitId: row.visitId, photoId: row.photoId, sampleRank });
       outcomes.set(row.photoId, { photoId: row.photoId, status: "success", containsFood: foodDetected === 1 });
     }
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const sqliteVersion = String(
-      (database.prepare("SELECT sqlite_version() AS version").get() as { version: string }).version,
+      (database.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>).version,
     );
     database.exec("COMMIT;");
     return {

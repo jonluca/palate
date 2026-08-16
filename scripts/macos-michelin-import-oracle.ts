@@ -15,7 +15,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 
 type Mode = "compare" | "apply-fixture";
@@ -27,19 +27,6 @@ interface Configuration {
   readonly datasetVersion: string;
   readonly outputPath?: string;
   readonly injectSemanticCorruption: boolean;
-}
-
-interface GuideSourceRow {
-  readonly id: unknown;
-  readonly name: unknown;
-  readonly latitude: unknown;
-  readonly longitude: unknown;
-  readonly address: unknown;
-  readonly location: unknown;
-  readonly cuisine: unknown;
-  readonly latest_distinction: unknown;
-  readonly latest_year: unknown;
-  readonly has_green_star: unknown;
 }
 
 interface CanonicalImportRow {
@@ -93,6 +80,16 @@ interface ComparisonSummary {
 }
 
 const HASH_DOMAIN = Buffer.from("palate.michelin.import.oracle.length-prefixed.v1\0", "utf8");
+
+type SqlNode = SQLOutputValue | undefined;
+
+function isSqlNumber(value: SqlNode): value is number {
+  return typeof value === "number";
+}
+
+function isSqlString(value: SqlNode): value is string {
+  return typeof value === "string";
+}
 
 function usage(): string {
   return `Usage:
@@ -196,7 +193,7 @@ function openImmutable(path: string, label: string): DatabaseSync {
   assertConsolidatedRegularFile(path, label);
   const database = new DatabaseSync(immutableUri(path), { readOnly: true });
   database.exec("PRAGMA query_only = ON");
-  const integrity = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
+  const integrity = database.prepare("PRAGMA integrity_check").get();
   if (integrity?.integrity_check !== "ok") {
     database.close();
     throw new Error(`${label} failed integrity_check`);
@@ -204,24 +201,24 @@ function openImmutable(path: string, label: string): DatabaseSync {
   return database;
 }
 
-function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
+function requireString(value: SqlNode, label: string): string {
+  if (!isSqlString(value)) {
     throw new TypeError(`${label} must be text`);
   }
   return value;
 }
 
-function requireNullableInteger(value: unknown, label: string): number | null {
+function requireNullableInteger(value: SqlNode, label: string): number | null {
   if (value === null) {
     return null;
   }
-  if (!Number.isSafeInteger(value)) {
+  if (!isSqlNumber(value) || !Number.isSafeInteger(value)) {
     throw new TypeError(`${label} must be a safe integer or null`);
   }
-  return value as number;
+  return value;
 }
 
-function legacyString(value: unknown): string {
+function legacyString(value: SqlNode): string {
   // Expo SQLite exposes BLOBs as ArrayBuffer objects. JavaScript parseFloat
   // stringifies those as "[object ArrayBuffer]", which is not numeric.
   if (value instanceof Uint8Array) {
@@ -230,19 +227,17 @@ function legacyString(value: unknown): string {
   return String(value);
 }
 
-function legacyTruthy(value: unknown): boolean {
-  if (value === null || value === undefined || value === false || value === 0 || value === "") {
+function legacyTruthy(value: SqlNode): boolean {
+  if (value === null || value === undefined || value === 0 || value === "") {
     return false;
   }
-  return !(typeof value === "number" && Number.isNaN(value));
+  return !(isSqlNumber(value) && Number.isNaN(value));
 }
 
 function loadExpectedImport(guide: DatabaseSync, datasetVersion: string): ExpectedImport {
-  const sourceCount = guide.prepare("SELECT COUNT(*) AS count FROM restaurants").get() as
-    | { count?: unknown }
-    | undefined;
+  const sourceCount = guide.prepare("SELECT COUNT(*) AS count FROM restaurants").get();
   const sourceRows = sourceCount?.count;
-  if (!Number.isSafeInteger(sourceRows) || (sourceRows as number) <= 0) {
+  if (!isSqlNumber(sourceRows) || !Number.isSafeInteger(sourceRows) || sourceRows <= 0) {
     throw new Error("Signed guide source row count is invalid");
   }
   const rows = guide
@@ -275,7 +270,7 @@ function loadExpectedImport(guide: DatabaseSync, datasetVersion: string): Expect
          AND r.latitude != ''
          AND r.longitude != ''`,
     )
-    .all() as unknown as GuideSourceRow[];
+    .all();
 
   const imported: CanonicalImportRow[] = [];
   for (const row of rows) {
@@ -292,7 +287,7 @@ function loadExpectedImport(guide: DatabaseSync, datasetVersion: string): Expect
     ) {
       continue;
     }
-    if (typeof row.id !== "number" && typeof row.id !== "string") {
+    if (!isSqlNumber(row.id) && !isSqlString(row.id)) {
       throw new TypeError("Signed guide restaurant id cannot follow legacy string interpolation");
     }
     let award = row.latest_distinction === null ? "" : requireString(row.latest_distinction, "Latest distinction");
@@ -312,7 +307,7 @@ function loadExpectedImport(guide: DatabaseSync, datasetVersion: string): Expect
       datasetVersion,
     });
   }
-  return { sourceRows: sourceRows as number, rows: canonicalRows(imported) };
+  return { sourceRows, rows: canonicalRows(imported) };
 }
 
 function loadActualRows(database: DatabaseSync, datasetVersion: string): CanonicalImportRow[] {
@@ -323,13 +318,13 @@ function loadActualRows(database: DatabaseSync, datasetVersion: string): Canonic
        FROM michelin_restaurants
        WHERE datasetVersion = ?`,
     )
-    .all(datasetVersion) as Array<Record<string, unknown>>;
+    .all(datasetVersion);
   return canonicalRows(
     rows.map((row) => {
-      if (typeof row.latitude !== "number" || !Number.isFinite(row.latitude)) {
+      if (!isSqlNumber(row.latitude) || !Number.isFinite(row.latitude)) {
         throw new TypeError("Persisted latitude must be finite binary64");
       }
-      if (typeof row.longitude !== "number" || !Number.isFinite(row.longitude)) {
+      if (!isSqlNumber(row.longitude) || !Number.isFinite(row.longitude)) {
         throw new TypeError("Persisted longitude must be finite binary64");
       }
       return {
@@ -418,7 +413,7 @@ function canonicalDigest(rows: readonly CanonicalImportRow[]): string {
 function mismatchCounts(
   expected: readonly CanonicalImportRow[],
   actual: readonly CanonicalImportRow[],
-): { missingRows: number; unexpectedRows: number; contentRows: number } {
+): ComparisonSummary["mismatches"] {
   const expectedById = new Map(expected.map((row) => [row.id, canonicalRowBytes(row)]));
   const actualById = new Map(actual.map((row) => [row.id, canonicalRowBytes(row)]));
   let missingRows = 0;
@@ -440,7 +435,7 @@ function mismatchCounts(
   return { missingRows, unexpectedRows, contentRows };
 }
 
-function writeJsonAtomically(path: string, value: unknown): void {
+function writeJsonAtomically<Value extends object>(path: string, value: Value): void {
   if (existsSync(path)) {
     throw new Error("Refusing to overwrite oracle output");
   }

@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildPhotoVisitAssociationStatement,
   flattenPhotoVisitAssociations,
@@ -11,6 +11,9 @@ import {
   type PhotoVisitAssociation,
   type PhotoVisitAssociationUpdate,
 } from "../utils/db/photo-association-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly photos: number;
@@ -453,9 +456,10 @@ function runParameterizedSetBased(
 }
 
 function readRows(database: DatabaseSync): PhotoRow[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   return database
     .prepare(`SELECT ordinal, id, visitId, payload FROM photos ORDER BY ordinal`)
-    .all() as unknown as PhotoRow[];
+    .all() as BenchmarkSQLiteRow<PhotoRow>[];
 }
 
 function updateChecksum(checksum: number, value: string): number {
@@ -610,13 +614,7 @@ function strategyOrder(iteration: number): readonly Strategy[] {
     : ["parameterizedSetBased", "legacyLiteralCase"];
 }
 
-function benchmark(
-  dataset: BenchmarkDataset,
-  configuration: Configuration,
-): {
-  readonly legacyLiteralCase: MeasurementSummary;
-  readonly parameterizedSetBased: MeasurementSummary;
-} {
+function benchmark(dataset: BenchmarkDataset, configuration: Configuration) {
   // Full-dataset correctness is established on independently built databases
   // before warmups or measured samples are accepted.
   runStrategy("legacyLiteralCase", dataset, configuration, false);
@@ -628,10 +626,10 @@ function benchmark(
     }
   }
 
-  const measurements: Record<Strategy, Measurement[]> = {
-    legacyLiteralCase: [],
-    parameterizedSetBased: [],
-  };
+  const measurements = {
+    legacyLiteralCase: new Array<Measurement>(),
+    parameterizedSetBased: new Array<Measurement>(),
+  } satisfies Record<Strategy, Measurement[]>;
   for (let sample = 0; sample < configuration.samples; sample++) {
     for (const strategy of strategyOrder(sample)) {
       measurements[strategy].push(runStrategy(strategy, dataset, configuration, true));
@@ -660,12 +658,15 @@ const speedup =
 const runtimeDatabase = new DatabaseSync(":memory:");
 
 try {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const report = {
     schemaVersion: 1,
     status: "ok",
     runtime: {
       node: process.version,
-      sqlite: (runtimeDatabase.prepare("SELECT sqlite_version() AS version").get() as { version: string }).version,
+      sqlite: (
+        runtimeDatabase.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>
+      ).version,
     },
     configuration,
     dataset: {

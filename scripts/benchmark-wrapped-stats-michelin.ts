@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import type { WrappedStats } from "../utils/db/types.ts";
 import {
@@ -24,6 +24,17 @@ import {
   type WrappedStatsMichelinQueryRow,
 } from "../utils/db/wrapped-stats-michelin-core.ts";
 import { countWrappedStatsProductionSqlCalls } from "./wrapped-stats-query-call-counter.ts";
+
+function isStringValue<Value>(value: Value): value is Extract<Value, string> {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Extract<Value, number> {
+  return typeof value === "number";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 type MichelinStats = WrappedStats["michelinStats"];
 type Strategy = "legacyFiveQueries" | "consolidatedQuery";
@@ -50,17 +61,17 @@ interface VisitSeed {
 }
 
 interface SourceRestaurantRow {
-  readonly id: unknown;
-  readonly award: unknown;
+  readonly id: SQLiteValue;
+  readonly award: SQLiteValue;
 }
 
 interface SourceVisitRow {
-  readonly restaurantId: unknown;
-  readonly suggestedRestaurantId: unknown;
-  readonly nearbyRestaurantId: unknown;
-  readonly status: unknown;
-  readonly startTime: unknown;
-  readonly awardAtVisit: unknown;
+  readonly restaurantId: SQLiteValue;
+  readonly suggestedRestaurantId: SQLiteValue;
+  readonly nearbyRestaurantId: SQLiteValue;
+  readonly status: SQLiteValue;
+  readonly startTime: SQLiteValue;
+  readonly awardAtVisit: SQLiteValue;
 }
 
 interface DerivationCounts {
@@ -202,7 +213,7 @@ function canonicalizePotentialPath(path: string, seenSymlinks = new Set<string>(
     try {
       metadata = lstatSync(existingAncestor);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw error;
       }
       const parent = dirname(existingAncestor);
@@ -348,19 +359,19 @@ function parseConfiguration(arguments_: readonly string[]): Configuration | null
   return configuration;
 }
 
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
+function requiredString(value: SQLiteValue | undefined, label: string): string {
+  if (!isStringValue(value)) {
     throw new TypeError(`${label} must be a string.`);
   }
   return value;
 }
 
-function nullableString(value: unknown, label: string): string | null {
+function nullableString(value: SQLiteValue | undefined, label: string): string | null {
   return value === null ? null : requiredString(value, label);
 }
 
-function finiteTimestamp(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > 8_640_000_000_000_000) {
+function finiteTimestamp(value: SQLiteValue | undefined, label: string): number {
+  if (!isNumberValue(value) || !Number.isFinite(value) || Math.abs(value) > 8_640_000_000_000_000) {
     throw new TypeError(`${label} must be a finite supported timestamp.`);
   }
   return value;
@@ -408,8 +419,9 @@ function createSyntheticFixture(): Fixture {
 }
 
 function assertSourceTable(database: DatabaseSync, table: string): void {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const row = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as
-    | { name?: unknown }
+    | BenchmarkSQLiteRow<{ name?: SQLiteValue }>
     | undefined;
   if (row?.name !== table) {
     throw new Error(`Source database does not contain ${table}.`);
@@ -417,7 +429,8 @@ function assertSourceTable(database: DatabaseSync, table: string): void {
 }
 
 function assertSourceColumn(database: DatabaseSync, table: string, column: string): void {
-  const rows = database.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{ name?: unknown }>;
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rows = database.prepare(`PRAGMA table_info(${table})`).all() as Array<BenchmarkSQLiteRow<{ name?: unknown }>>;
   if (!rows.some((row) => row.name === column)) {
     throw new Error(`Source table ${table} does not contain ${column}.`);
   }
@@ -437,22 +450,27 @@ function createMacDerivedFixture(path: string): Fixture {
     assertSourceTable(source, "michelin_restaurants");
     assertSourceColumn(source, "visits", "awardAtVisit");
 
-    const integrityRow = source.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+    const integrityRow = source.prepare("PRAGMA integrity_check").get() as
+      | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
+      | undefined;
     const sourceIntegrityCheck = requiredString(integrityRow?.integrity_check, "Source integrity_check");
     const sourceForeignKeyViolationCount = source.prepare("PRAGMA foreign_key_check").all().length;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const rawRestaurants = source
       .prepare("SELECT id, award FROM michelin_restaurants ORDER BY id ASC")
-      .all() as unknown as SourceRestaurantRow[];
+      .all() as BenchmarkSQLiteRow<SourceRestaurantRow>[];
     if (rawRestaurants.length === 0) {
       throw new Error("Mac-derived Wrapped Stats profiling requires Michelin guide rows.");
     }
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const hasVisitSuggestions =
       (
         source
           .prepare(
             "SELECT 1 AS present FROM sqlite_schema WHERE type = 'table' AND name = 'visit_suggested_restaurants'",
           )
-          .get() as { present?: unknown } | undefined
+          .get() as BenchmarkSQLiteRow<{ present?: SQLiteValue }> | undefined
       )?.present === 1;
     const nearbyRestaurantExpression = hasVisitSuggestions
       ? `(SELECT vsr.restaurantId
@@ -461,6 +479,7 @@ function createMacDerivedFixture(path: string): Fixture {
           ORDER BY vsr.distance ASC, vsr.restaurantId ASC
           LIMIT 1)`
       : "NULL";
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const rawVisits = source
       .prepare(`SELECT
           v.restaurantId AS restaurantId,
@@ -471,7 +490,7 @@ function createMacDerivedFixture(path: string): Fixture {
           v.awardAtVisit AS awardAtVisit
         FROM visits v
         ORDER BY v.startTime ASC, v.id ASC`)
-      .all() as unknown as SourceVisitRow[];
+      .all() as BenchmarkSQLiteRow<SourceVisitRow>[];
     if (rawVisits.length === 0) {
       throw new Error("Mac-derived Wrapped Stats profiling requires at least one source visit.");
     }
@@ -668,10 +687,12 @@ function emptyMichelinStats(
 function executeLegacy(database: DatabaseSync, year: number | null): Measurement {
   const startedAt = performance.now();
   const parameters = year ? [String(year)] : [];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const all = <T>(sql: string): T[] =>
-    database.prepare(withLegacyYearFilter(sql, year)).all(...parameters) as unknown as T[];
+    database.prepare(withLegacyYearFilter(sql, year)).all(...parameters) as BenchmarkSQLiteRow<T>[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const get = <T>(sql: string): T | undefined =>
-    database.prepare(withLegacyYearFilter(sql, year)).get(...parameters) as unknown as T | undefined;
+    database.prepare(withLegacyYearFilter(sql, year)).get(...parameters) as BenchmarkSQLiteRow<T> | undefined;
   const visitCounts = all<AwardCountRow>(LEGACY_VISIT_COUNTS_SQL);
   const restaurantCounts = all<AwardCountRow>(LEGACY_RESTAURANT_COUNTS_SQL);
   const distinctStarredRestaurants = get<CountRow>(LEGACY_DISTINCT_STARRED_SQL)?.count ?? 0;
@@ -725,12 +746,15 @@ function executeLegacy(database: DatabaseSync, year: number | null): Measurement
 function executeCandidate(database: DatabaseSync, year: number | null): Measurement {
   const startedAt = performance.now();
   const query = buildWrappedStatsMichelinQuery(year);
-  const rows = database.prepare(query.sql).all(...query.parameters) as unknown as WrappedStatsMichelinQueryRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rows = database
+    .prepare(query.sql)
+    .all(...query.parameters) as BenchmarkSQLiteRow<WrappedStatsMichelinQueryRow>[];
   const result = parseWrappedStatsMichelinRows(rows);
   return { elapsedMilliseconds: performance.now() - startedAt, sqliteCalls: 1, result };
 }
 
-function digest(value: unknown): string {
+function digest<Value>(value: Value): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
@@ -752,12 +776,14 @@ function strategyOrder(iteration: number): readonly Strategy[] {
 }
 
 function explain(database: DatabaseSync, sql: string, parameters: readonly string[]): string[] {
-  return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as unknown as QueryPlanRow[]).map(
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as BenchmarkSQLiteRow<QueryPlanRow>[]).map(
     ({ detail }) => detail,
   );
 }
 
 function selectRepresentativeYear(database: DatabaseSync): number {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const row = database
     .prepare(`SELECT strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) AS year
       FROM visits v
@@ -766,18 +792,13 @@ function selectRepresentativeYear(database: DatabaseSync): number {
       GROUP BY year
       ORDER BY COUNT(*) DESC, year DESC
       LIMIT 1`)
-    .get() as SelectedYearRow | undefined;
+    .get() as BenchmarkSQLiteRow<SelectedYearRow> | undefined;
   const year = Number(row?.year);
   return Number.isSafeInteger(year) ? year : new Date().getUTCFullYear();
 }
 
-function workloadCoverage(database: DatabaseSync): {
-  readonly confirmedVisits: number;
-  readonly joinedVisits: number;
-  readonly distinctAssignedRestaurants: number;
-  readonly nonEmptyAwardVisits: number;
-  readonly exactAwardGroups: number;
-} {
+function workloadCoverage(database: DatabaseSync) {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const row = database
     .prepare(`SELECT
       (SELECT COUNT(*) FROM visits WHERE status = 'confirmed') AS confirmedVisits,
@@ -791,13 +812,13 @@ function workloadCoverage(database: DatabaseSync): {
     JOIN michelin_restaurants m ON v.restaurantId = m.id
     WHERE v.status = 'confirmed'`)
     .get() as
-    | {
-        confirmedVisits?: unknown;
-        joinedVisits?: unknown;
-        distinctAssignedRestaurants?: unknown;
-        nonEmptyAwardVisits?: unknown;
-        exactAwardGroups?: unknown;
-      }
+    | BenchmarkSQLiteRow<{
+        confirmedVisits?: SQLiteValue;
+        joinedVisits?: SQLiteValue;
+        distinctAssignedRestaurants?: SQLiteValue;
+        nonEmptyAwardVisits?: SQLiteValue;
+        exactAwardGroups?: SQLiteValue;
+      }>
     | undefined;
   return {
     confirmedVisits: Number(row?.confirmedVisits ?? 0),
@@ -808,17 +829,7 @@ function workloadCoverage(database: DatabaseSync): {
   };
 }
 
-function measureScope(
-  database: DatabaseSync,
-  scope: Scope,
-  year: number | null,
-  configuration: Configuration,
-): {
-  readonly oracle: Measurement;
-  readonly candidate: Measurement;
-  readonly legacy: MeasurementSummary;
-  readonly consolidated: MeasurementSummary;
-} {
+function measureScope(database: DatabaseSync, scope: Scope, year: number | null, configuration: Configuration) {
   const oracle = executeLegacy(database, year);
   const candidate = executeCandidate(database, year);
   assert.deepEqual(candidate.result, oracle.result, `${scope} candidate differs from the independent legacy oracle`);
@@ -833,7 +844,10 @@ function measureScope(
     }
   }
 
-  const samples: Record<Strategy, number[]> = { legacyFiveQueries: [], consolidatedQuery: [] };
+  const samples = { legacyFiveQueries: new Array<number>(), consolidatedQuery: new Array<number>() } satisfies Record<
+    Strategy,
+    number[]
+  >;
   for (let iteration = 0; iteration < configuration.samples; iteration++) {
     for (const strategy of strategyOrder(iteration)) {
       const measurement =
@@ -850,12 +864,7 @@ function measureScope(
   };
 }
 
-function timingReport(measurement: ReturnType<typeof measureScope>): {
-  readonly legacyFiveQueries: MeasurementSummary;
-  readonly consolidatedQuery: MeasurementSummary;
-  readonly medianSpeedup: number;
-  readonly medianMillisecondsSaved: number;
-} {
+function timingReport(measurement: ReturnType<typeof measureScope>) {
   return {
     legacyFiveQueries: measurement.legacy,
     consolidatedQuery: measurement.consolidated,

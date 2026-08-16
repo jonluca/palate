@@ -365,7 +365,10 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   runStrategy("safeCandidate", pairs, configuration.iterations, configuration.thresholdMeters);
 }
 
-const samples: Record<Strategy, Measurement[]> = { literalLegacy: [], safeCandidate: [] };
+const samples = { literalLegacy: new Array<Measurement>(), safeCandidate: new Array<Measurement>() } satisfies Record<
+  Strategy,
+  Measurement[]
+>;
 for (let sample = 0; sample < configuration.samples; sample++) {
   const order: Strategy[] = sample % 2 === 0 ? ["literalLegacy", "safeCandidate"] : ["safeCandidate", "literalLegacy"];
   for (const strategy of order) {
@@ -402,10 +405,10 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   runCentroidStrategy("literalArithmetic", centroidGroups, configuration.iterations);
   runCentroidStrategy("wrapAwareCandidate", centroidGroups, configuration.iterations);
 }
-const centroidSamples: Record<CentroidStrategy, CentroidMeasurement[]> = {
-  literalArithmetic: [],
-  wrapAwareCandidate: [],
-};
+const centroidSamples = {
+  literalArithmetic: new Array<CentroidMeasurement>(),
+  wrapAwareCandidate: new Array<CentroidMeasurement>(),
+} satisfies Record<CentroidStrategy, CentroidMeasurement[]>;
 for (let sample = 0; sample < configuration.samples; sample++) {
   const order: CentroidStrategy[] =
     sample % 2 === 0 ? ["literalArithmetic", "wrapAwareCandidate"] : ["wrapAwareCandidate", "literalArithmetic"];

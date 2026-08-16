@@ -22,6 +22,13 @@ interface PersistedDetection {
   readonly foodDetected: boolean;
 }
 
+interface DetectionExecutionFixture {
+  readonly execution: VisitFoodDetectionBatchExecution;
+  readonly persisted: PersistedDetection[];
+  readonly foodFoundSamples: number;
+  readonly retryableFailures: number;
+}
+
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 function makeVisitSamples(visitId: string, count: number): AdaptiveVisitFoodSample[] {
@@ -35,12 +42,7 @@ function makeVisitSamples(visitId: string, count: number): AdaptiveVisitFoodSamp
 function executionFor(
   samples: readonly AdaptiveVisitFoodSample[],
   configuredOutcomes: ReadonlyMap<string, AdaptiveVisitFoodOutcome>,
-): {
-  readonly execution: VisitFoodDetectionBatchExecution;
-  readonly persisted: PersistedDetection[];
-  readonly foodFoundSamples: number;
-  readonly retryableFailures: number;
-} {
+): DetectionExecutionFixture {
   const outcomes = samples.flatMap((sample) => {
     const outcome = configuredOutcomes.get(sample.photoId);
     return outcome ? [outcome] : [];

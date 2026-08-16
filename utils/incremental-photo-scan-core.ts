@@ -25,7 +25,7 @@ export interface PreferredAssetScanDependencies {
   readonly loadExistingAssetIds: () => Promise<string[]>;
   readonly beginFullScan: () => Promise<RetainedAssetScanSession>;
   readonly beginIncrementalScan: (existingAssetIds: string[]) => Promise<IncrementalAssetScanSession>;
-  readonly onIncrementalBeginFailure?: (error: unknown) => void;
+  readonly onIncrementalBeginFailure?: (cause: unknown) => void;
 }
 
 /**
@@ -130,7 +130,7 @@ export function getIncrementalPhotoScanInitialProgress(
 export async function getIncrementalPhotoScanInitialProgressWithCleanup(
   session: IncrementalAssetScanSession,
   endSession: (sessionId: string) => Promise<void>,
-  onCleanupFailure?: (error: unknown) => void,
+  onCleanupFailure?: (cause: unknown) => void,
 ): Promise<IncrementalPhotoScanInitialProgress> {
   try {
     return getIncrementalPhotoScanInitialProgress(session);

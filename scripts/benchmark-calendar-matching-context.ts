@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   buildCalendarEnrichmentVisitSnapshot,
@@ -23,7 +23,36 @@ import {
   type CalendarEnrichmentSnapshotRow,
 } from "../utils/db/calendar-enrichment-snapshot-core.ts";
 
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isSkinnySuggestion<Value>(value: Value): value is Value & SkinnySuggestion {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "id" in value &&
+    isStringValue(value.id) &&
+    "name" in value &&
+    isStringValue(value.name)
+  );
+}
+
+function parseSkinnySuggestions(serialized: string): SkinnySuggestion[] {
+  const parsed: unknown = JSON.parse(serialized);
+  if (!Array.isArray(parsed) || !parsed.every(isSkinnySuggestion)) {
+    throw new TypeError("Grouped Calendar suggestions must decode to an array of ID/name objects");
+  }
+  return parsed;
+}
+
 type Strategy = "legacyBatchedFullRows" | "singleQuerySkinnySnapshot" | "singleQueryGroupedJson";
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly batchSize: number;
@@ -44,7 +73,6 @@ interface FullSuggestionRow {
   readonly id: string;
   readonly name: string;
   readonly distance: number;
-  readonly [column: string]: unknown;
 }
 
 interface SkinnySuggestion {
@@ -236,7 +264,7 @@ function canonicalizePotentialPath(path: string, seenSymlinks = new Set<string>(
       }
       return resolve(realpathSync(ancestor), ...missing);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw error;
       }
       const parent = dirname(ancestor);
@@ -299,29 +327,34 @@ function immutableDatabaseUri(databasePath: string): string {
 }
 
 function totalChanges(database: DatabaseSync): number {
-  const row = database.prepare("SELECT total_changes() AS count").get() as { count?: unknown } | undefined;
-  if (typeof row?.count !== "number") {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const row = database.prepare("SELECT total_changes() AS count").get() as
+    | BenchmarkSQLiteRow<{ count?: SQLiteValue }>
+    | undefined;
+  if (!isNumberValue(row?.count)) {
     throw new TypeError("SQLite total_changes() did not return a number");
   }
   return row.count;
 }
 
 function snapshotSqliteSequence(database: DatabaseSync): SequenceSnapshot {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const present = database
     .prepare("SELECT 1 AS present FROM sqlite_schema WHERE type = 'table' AND name = 'sqlite_sequence'")
-    .get() as { present?: unknown } | undefined;
+    .get() as BenchmarkSQLiteRow<{ present?: SQLiteValue }> | undefined;
   const rows =
     present?.present === 1 ? database.prepare("SELECT name, seq FROM sqlite_sequence ORDER BY name").all() : [];
   return { rowCount: rows.length, sha256: sha256Bytes(JSON.stringify(rows)) };
 }
 
-function serializedBytes(value: unknown): number {
+function serializedBytes<Value>(value: Value): number {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
 function executeLegacy(database: DatabaseSync, batchSize: number): Measurement {
   const startedAt = performance.now();
-  const visitRows = database.prepare(VISITS_WITHOUT_CALENDAR_SQL).all() as unknown as VisitRow[];
+  // SAFETY: The fixed SELECT aliases and benchmark database schema match VisitRow.
+  const visitRows = database.prepare(VISITS_WITHOUT_CALENDAR_SQL).all() as BenchmarkSQLiteRow<VisitRow>[];
   const rawPayloads: unknown[] = [visitRows];
   let rawRowCount = visitRows.length;
   let sqliteCalls = 1;
@@ -330,6 +363,7 @@ function executeLegacy(database: DatabaseSync, batchSize: number): Measurement {
   for (let offset = 0; offset < visitRows.length; offset += batchSize) {
     const visitIds = visitRows.slice(offset, offset + batchSize).map((visit) => visit.id);
     const placeholders = visitIds.map(() => "?").join(", ");
+    // SAFETY: The fixed join projection supplies every FullSuggestionRow field used by the benchmark.
     const suggestionRows = database
       .prepare(
         `SELECT m.*, vsr.distance, vsr.visitId
@@ -338,7 +372,7 @@ function executeLegacy(database: DatabaseSync, batchSize: number): Measurement {
          WHERE vsr.visitId IN (${placeholders})
          ORDER BY vsr.visitId, vsr.distance ASC`,
       )
-      .all(...visitIds) as unknown as FullSuggestionRow[];
+      .all(...visitIds) as BenchmarkSQLiteRow<FullSuggestionRow>[];
     sqliteCalls++;
     rawPayloads.push(suggestionRows);
     rawRowCount += suggestionRows.length;
@@ -366,7 +400,10 @@ function executeLegacy(database: DatabaseSync, batchSize: number): Measurement {
 
 function executeJoinedCandidate(database: DatabaseSync): Measurement {
   const startedAt = performance.now();
-  const rows = database.prepare(CALENDAR_ENRICHMENT_SNAPSHOT_SQL).all() as unknown as CalendarEnrichmentSnapshotRow[];
+  // SAFETY: The production SQL constant owns the CalendarEnrichmentSnapshotRow projection contract.
+  const rows = database
+    .prepare(CALENDAR_ENRICHMENT_SNAPSHOT_SQL)
+    .all() as BenchmarkSQLiteRow<CalendarEnrichmentSnapshotRow>[];
   const result = buildCalendarEnrichmentVisitSnapshot(rows);
   const elapsedMilliseconds = performance.now() - startedAt;
   return {
@@ -380,17 +417,17 @@ function executeJoinedCandidate(database: DatabaseSync): Measurement {
 
 function executeGroupedJsonCandidate(database: DatabaseSync): Measurement {
   const startedAt = performance.now();
-  const rows = database.prepare(GROUPED_JSON_CALENDAR_MATCHING_CONTEXT_SQL).all() as unknown as GroupedJsonRow[];
+  // SAFETY: The local grouped query explicitly aliases every GroupedJsonRow field.
+  const rows = database
+    .prepare(GROUPED_JSON_CALENDAR_MATCHING_CONTEXT_SQL)
+    .all() as BenchmarkSQLiteRow<GroupedJsonRow>[];
   const result = rows.map((row) => {
-    const suggestedRestaurants = JSON.parse(row.suggestedRestaurantsJson) as unknown;
-    if (!Array.isArray(suggestedRestaurants)) {
-      throw new TypeError("Grouped Calendar suggestions must decode to an array");
-    }
+    const suggestedRestaurants = parseSkinnySuggestions(row.suggestedRestaurantsJson);
     return {
       id: row.id,
       startTime: row.startTime,
       endTime: row.endTime,
-      suggestedRestaurants: suggestedRestaurants as SkinnySuggestion[],
+      suggestedRestaurants,
     };
   });
   const elapsedMilliseconds = performance.now() - startedAt;
@@ -432,222 +469,230 @@ function run(configuration: Configuration): void {
   assertOutputDoesNotAliasSource(configuration.databasePath, configuration.outputPath);
   const sourceBefore = snapshotSource(configuration.databasePath);
   const database = new DatabaseSync(immutableDatabaseUri(configuration.databasePath), { readOnly: true });
-  let report: Record<string, unknown>;
   let totalChangesBefore = 0;
   let totalChangesAfter = 0;
   let sequenceBefore: SequenceSnapshot = { rowCount: 0, sha256: "" };
   let sequenceAfter: SequenceSnapshot = { rowCount: 0, sha256: "" };
 
-  try {
-    database.exec("PRAGMA query_only = ON");
-    totalChangesBefore = totalChanges(database);
-    sequenceBefore = snapshotSqliteSequence(database);
-    const integrity = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
-    assert.equal(integrity?.integrity_check, "ok", "source integrity_check must pass");
+  const report = (() => {
+    try {
+      database.exec("PRAGMA query_only = ON");
+      totalChangesBefore = totalChanges(database);
+      sequenceBefore = snapshotSqliteSequence(database);
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const integrity = database.prepare("PRAGMA integrity_check").get() as
+        | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
+        | undefined;
+      assert.equal(integrity?.integrity_check, "ok", "source integrity_check must pass");
 
-    const oracle = executeLegacy(database, configuration.batchSize);
-    const joinedCandidate = executeJoinedCandidate(database);
-    const groupedJsonCandidate = executeGroupedJsonCandidate(database);
-    assert.deepEqual(
-      joinedCandidate.result,
-      oracle.result,
-      "joined skinny context must exactly match the legacy native input",
-    );
-    assert.deepEqual(
-      groupedJsonCandidate.result,
-      oracle.result,
-      "grouped JSON context must exactly match the legacy native input",
-    );
-    assert.equal(joinedCandidate.sqliteCalls, 1);
-    assert.equal(groupedJsonCandidate.sqliteCalls, 1);
-    assert.equal(oracle.sqliteCalls, 1 + Math.ceil(oracle.result.length / configuration.batchSize));
-    assert.ok(
-      joinedCandidate.nativeToJsPayloadBytes < oracle.nativeToJsPayloadBytes,
-      "joined skinny context must reduce the serialized native-to-JS payload proxy",
-    );
-    assert.ok(
-      groupedJsonCandidate.nativeToJsPayloadBytes < joinedCandidate.nativeToJsPayloadBytes,
-      "grouped JSON must reduce payload relative to repeated joined visit fields",
-    );
-    assert.ok(
-      groupedJsonCandidate.rawRowCount < joinedCandidate.rawRowCount,
-      "grouped JSON must return fewer native rows than the repeated joined shape",
-    );
+      const oracle = executeLegacy(database, configuration.batchSize);
+      const joinedCandidate = executeJoinedCandidate(database);
+      const groupedJsonCandidate = executeGroupedJsonCandidate(database);
+      assert.deepEqual(
+        joinedCandidate.result,
+        oracle.result,
+        "joined skinny context must exactly match the legacy native input",
+      );
+      assert.deepEqual(
+        groupedJsonCandidate.result,
+        oracle.result,
+        "grouped JSON context must exactly match the legacy native input",
+      );
+      assert.equal(joinedCandidate.sqliteCalls, 1);
+      assert.equal(groupedJsonCandidate.sqliteCalls, 1);
+      assert.equal(oracle.sqliteCalls, 1 + Math.ceil(oracle.result.length / configuration.batchSize));
+      assert.ok(
+        joinedCandidate.nativeToJsPayloadBytes < oracle.nativeToJsPayloadBytes,
+        "joined skinny context must reduce the serialized native-to-JS payload proxy",
+      );
+      assert.ok(
+        groupedJsonCandidate.nativeToJsPayloadBytes < joinedCandidate.nativeToJsPayloadBytes,
+        "grouped JSON must reduce payload relative to repeated joined visit fields",
+      );
+      assert.ok(
+        groupedJsonCandidate.rawRowCount < joinedCandidate.rawRowCount,
+        "grouped JSON must return fewer native rows than the repeated joined shape",
+      );
 
-    const payloadBytes: Record<Strategy, number> = {
-      legacyBatchedFullRows: oracle.nativeToJsPayloadBytes,
-      singleQuerySkinnySnapshot: joinedCandidate.nativeToJsPayloadBytes,
-      singleQueryGroupedJson: groupedJsonCandidate.nativeToJsPayloadBytes,
-    };
-    const timings: Record<Strategy, number[]> = {
-      legacyBatchedFullRows: [],
-      singleQuerySkinnySnapshot: [],
-      singleQueryGroupedJson: [],
-    };
-    const counterbalancedOrders: readonly (readonly Strategy[])[] = [
-      ["legacyBatchedFullRows", "singleQuerySkinnySnapshot", "singleQueryGroupedJson"],
-      ["singleQuerySkinnySnapshot", "singleQueryGroupedJson", "legacyBatchedFullRows"],
-      ["singleQueryGroupedJson", "legacyBatchedFullRows", "singleQuerySkinnySnapshot"],
-      ["singleQueryGroupedJson", "singleQuerySkinnySnapshot", "legacyBatchedFullRows"],
-      ["singleQuerySkinnySnapshot", "legacyBatchedFullRows", "singleQueryGroupedJson"],
-      ["legacyBatchedFullRows", "singleQueryGroupedJson", "singleQuerySkinnySnapshot"],
-    ];
-    const measuredIterations = configuration.warmupIterations + configuration.samples;
-    for (let iteration = 0; iteration < measuredIterations; iteration++) {
-      const order = counterbalancedOrders[iteration % counterbalancedOrders.length]!;
-      for (const strategy of order) {
-        const measurement = executeStrategy(database, strategy, configuration.batchSize);
-        assert.deepEqual(measurement.result, oracle.result, `${strategy} result drifted during profiling`);
-        assert.equal(measurement.nativeToJsPayloadBytes, payloadBytes[strategy]);
-        if (iteration >= configuration.warmupIterations) {
-          timings[strategy].push(measurement.elapsedMilliseconds);
+      const payloadBytes = {
+        legacyBatchedFullRows: oracle.nativeToJsPayloadBytes,
+        singleQuerySkinnySnapshot: joinedCandidate.nativeToJsPayloadBytes,
+        singleQueryGroupedJson: groupedJsonCandidate.nativeToJsPayloadBytes,
+      } satisfies Record<Strategy, number>;
+      const timings = {
+        legacyBatchedFullRows: new Array<number>(),
+        singleQuerySkinnySnapshot: new Array<number>(),
+        singleQueryGroupedJson: new Array<number>(),
+      } satisfies Record<Strategy, number[]>;
+      const counterbalancedOrders: readonly (readonly Strategy[])[] = [
+        ["legacyBatchedFullRows", "singleQuerySkinnySnapshot", "singleQueryGroupedJson"],
+        ["singleQuerySkinnySnapshot", "singleQueryGroupedJson", "legacyBatchedFullRows"],
+        ["singleQueryGroupedJson", "legacyBatchedFullRows", "singleQuerySkinnySnapshot"],
+        ["singleQueryGroupedJson", "singleQuerySkinnySnapshot", "legacyBatchedFullRows"],
+        ["singleQuerySkinnySnapshot", "legacyBatchedFullRows", "singleQueryGroupedJson"],
+        ["legacyBatchedFullRows", "singleQueryGroupedJson", "singleQuerySkinnySnapshot"],
+      ];
+      const measuredIterations = configuration.warmupIterations + configuration.samples;
+      for (let iteration = 0; iteration < measuredIterations; iteration++) {
+        const order = counterbalancedOrders[iteration % counterbalancedOrders.length]!;
+        for (const strategy of order) {
+          const measurement = executeStrategy(database, strategy, configuration.batchSize);
+          assert.deepEqual(measurement.result, oracle.result, `${strategy} result drifted during profiling`);
+          assert.equal(measurement.nativeToJsPayloadBytes, payloadBytes[strategy]);
+          if (iteration >= configuration.warmupIterations) {
+            timings[strategy].push(measurement.elapsedMilliseconds);
+          }
         }
       }
+
+      const legacySummary = summarize(timings.legacyBatchedFullRows);
+      const joinedSummary = summarize(timings.singleQuerySkinnySnapshot);
+      const groupedJsonSummary = summarize(timings.singleQueryGroupedJson);
+      const suggestionCount = oracle.result.reduce((count, visit) => count + visit.suggestedRestaurants.length, 0);
+      const visitsWithSuggestions = oracle.result.filter((visit) => visit.suggestedRestaurants.length > 0).length;
+      const semanticSha256 = sha256Bytes(JSON.stringify(oracle.result));
+
+      const reportBody = {
+        schemaVersion: 2,
+        status: "ok",
+        generatedAt: new Date().toISOString(),
+        configuration: {
+          batchSize: configuration.batchSize,
+          samples: configuration.samples,
+          warmupIterations: configuration.warmupIterations,
+        },
+        measurementModel: {
+          runtime: "Node.js node:sqlite plus JavaScript result shaping",
+          scope: "isolated Calendar native-matching database context preload model",
+          includes: [
+            "SQLite statement preparation, execution, and row decoding",
+            "legacy batch construction and Map grouping",
+            "production candidate joined-row grouping and validation",
+            "grouped candidate ordered SQLite JSON aggregation and per-visit JSON.parse",
+          ],
+          excludes: [
+            "Expo connection acquisition and JSI/native bridge serialization",
+            "EventKit reads and Calendar matching",
+            "Calendar persistence and UI work",
+            "serialized-payload proxy calculation",
+          ],
+          serializedPayloadDefinition:
+            "UTF-8 bytes of JSON.stringify(raw rows) per SQLite call; a stable proxy, not measured Expo bridge bytes",
+        },
+        source: {
+          databaseBytes: statSync(configuration.databasePath).size,
+          databaseSha256: sha256File(configuration.databasePath),
+          integrityCheck: "ok",
+        },
+        workload: {
+          visitCount: oracle.result.length,
+          visitsWithSuggestions,
+          suggestionCount,
+          semanticSha256,
+        },
+        correctness: {
+          exactNativeInputParity: true,
+          comparedFields: ["visit id", "visit start/end time", "ordered suggestion id/name arrays"],
+          comparisonMethod: "assert.deepEqual over every shaped visit and ordered suggestion",
+        },
+        strategies: {
+          legacyBatchedFullRows: {
+            sqliteCalls: oracle.sqliteCalls,
+            rawRowsReturned: oracle.rawRowCount,
+            serializedPayloadBytes: payloadBytes.legacyBatchedFullRows,
+            ["queryShape"]: "one skinny visits query plus batched SELECT m.* suggestion hydration",
+            nodeModelTiming: legacySummary,
+          },
+          singleQuerySkinnySnapshot: {
+            sqliteCalls: joinedCandidate.sqliteCalls,
+            rawRowsReturned: joinedCandidate.rawRowCount,
+            serializedPayloadBytes: payloadBytes.singleQuerySkinnySnapshot,
+            ["queryShape"]: "one ordered joined query with nullable suggestion id/name fields",
+            nodeModelTiming: joinedSummary,
+          },
+          singleQueryGroupedJson: {
+            sqliteCalls: groupedJsonCandidate.sqliteCalls,
+            rawRowsReturned: groupedJsonCandidate.rawRowCount,
+            serializedPayloadBytes: payloadBytes.singleQueryGroupedJson,
+            ["queryShape"]: "one row per visit with an ordered suggestion id/name JSON array",
+            nodeModelTiming: groupedJsonSummary,
+          },
+        },
+        comparison: {
+          joinedVsLegacy: {
+            sqliteCallsSaved: oracle.sqliteCalls - joinedCandidate.sqliteCalls,
+            sqliteCallReductionPercent: ((oracle.sqliteCalls - joinedCandidate.sqliteCalls) / oracle.sqliteCalls) * 100,
+            serializedPayloadBytesSaved: payloadBytes.legacyBatchedFullRows - payloadBytes.singleQuerySkinnySnapshot,
+            serializedPayloadReductionPercent:
+              ((payloadBytes.legacyBatchedFullRows - payloadBytes.singleQuerySkinnySnapshot) /
+                payloadBytes.legacyBatchedFullRows) *
+              100,
+            nodeModelMedianMillisecondsSaved: legacySummary.medianMilliseconds - joinedSummary.medianMilliseconds,
+            nodeModelMedianSpeedup: legacySummary.medianMilliseconds / joinedSummary.medianMilliseconds,
+          },
+          groupedJsonVsLegacy: {
+            sqliteCallsSaved: oracle.sqliteCalls - groupedJsonCandidate.sqliteCalls,
+            sqliteCallReductionPercent:
+              ((oracle.sqliteCalls - groupedJsonCandidate.sqliteCalls) / oracle.sqliteCalls) * 100,
+            serializedPayloadBytesSaved: payloadBytes.legacyBatchedFullRows - payloadBytes.singleQueryGroupedJson,
+            serializedPayloadReductionPercent:
+              ((payloadBytes.legacyBatchedFullRows - payloadBytes.singleQueryGroupedJson) /
+                payloadBytes.legacyBatchedFullRows) *
+              100,
+            nodeModelMedianMillisecondsSaved: legacySummary.medianMilliseconds - groupedJsonSummary.medianMilliseconds,
+            nodeModelMedianSpeedup: legacySummary.medianMilliseconds / groupedJsonSummary.medianMilliseconds,
+          },
+          groupedJsonVsJoined: {
+            sqliteCallDifference: groupedJsonCandidate.sqliteCalls - joinedCandidate.sqliteCalls,
+            rawRowsSaved: joinedCandidate.rawRowCount - groupedJsonCandidate.rawRowCount,
+            rawRowReductionPercent:
+              ((joinedCandidate.rawRowCount - groupedJsonCandidate.rawRowCount) / joinedCandidate.rawRowCount) * 100,
+            serializedPayloadBytesSaved: payloadBytes.singleQuerySkinnySnapshot - payloadBytes.singleQueryGroupedJson,
+            serializedPayloadReductionPercent:
+              ((payloadBytes.singleQuerySkinnySnapshot - payloadBytes.singleQueryGroupedJson) /
+                payloadBytes.singleQuerySkinnySnapshot) *
+              100,
+            nodeModelMedianMillisecondsDifference:
+              groupedJsonSummary.medianMilliseconds - joinedSummary.medianMilliseconds,
+            nodeModelMedianRatio: groupedJsonSummary.medianMilliseconds / joinedSummary.medianMilliseconds,
+          },
+        },
+        privacy: {
+          aggregateOnly: true,
+          rawVisitFieldsRetainedInReport: false,
+          rawRestaurantFieldsRetainedInReport: false,
+          calendarLibraryAccessed: false,
+        },
+      };
+
+      totalChangesAfter = totalChanges(database);
+      sequenceAfter = snapshotSqliteSequence(database);
+      assert.equal(totalChangesAfter, totalChangesBefore, "read-only benchmark must not increment total_changes()");
+      assert.deepEqual(sequenceAfter, sequenceBefore, "read-only benchmark must not change sqlite_sequence");
+      return reportBody;
+    } finally {
+      database.close();
     }
-
-    const legacySummary = summarize(timings.legacyBatchedFullRows);
-    const joinedSummary = summarize(timings.singleQuerySkinnySnapshot);
-    const groupedJsonSummary = summarize(timings.singleQueryGroupedJson);
-    const suggestionCount = oracle.result.reduce((count, visit) => count + visit.suggestedRestaurants.length, 0);
-    const visitsWithSuggestions = oracle.result.filter((visit) => visit.suggestedRestaurants.length > 0).length;
-    const semanticSha256 = sha256Bytes(JSON.stringify(oracle.result));
-
-    report = {
-      schemaVersion: 2,
-      status: "ok",
-      generatedAt: new Date().toISOString(),
-      configuration: {
-        batchSize: configuration.batchSize,
-        samples: configuration.samples,
-        warmupIterations: configuration.warmupIterations,
-      },
-      measurementModel: {
-        runtime: "Node.js node:sqlite plus JavaScript result shaping",
-        scope: "isolated Calendar native-matching database context preload model",
-        includes: [
-          "SQLite statement preparation, execution, and row decoding",
-          "legacy batch construction and Map grouping",
-          "production candidate joined-row grouping and validation",
-          "grouped candidate ordered SQLite JSON aggregation and per-visit JSON.parse",
-        ],
-        excludes: [
-          "Expo connection acquisition and JSI/native bridge serialization",
-          "EventKit reads and Calendar matching",
-          "Calendar persistence and UI work",
-          "serialized-payload proxy calculation",
-        ],
-        serializedPayloadDefinition:
-          "UTF-8 bytes of JSON.stringify(raw rows) per SQLite call; a stable proxy, not measured Expo bridge bytes",
-      },
-      source: {
-        databaseBytes: statSync(configuration.databasePath).size,
-        databaseSha256: sha256File(configuration.databasePath),
-        integrityCheck: "ok",
-      },
-      workload: {
-        visitCount: oracle.result.length,
-        visitsWithSuggestions,
-        suggestionCount,
-        semanticSha256,
-      },
-      correctness: {
-        exactNativeInputParity: true,
-        comparedFields: ["visit id", "visit start/end time", "ordered suggestion id/name arrays"],
-        comparisonMethod: "assert.deepEqual over every shaped visit and ordered suggestion",
-      },
-      strategies: {
-        legacyBatchedFullRows: {
-          sqliteCalls: oracle.sqliteCalls,
-          rawRowsReturned: oracle.rawRowCount,
-          serializedPayloadBytes: payloadBytes.legacyBatchedFullRows,
-          queryShape: "one skinny visits query plus batched SELECT m.* suggestion hydration",
-          nodeModelTiming: legacySummary,
-        },
-        singleQuerySkinnySnapshot: {
-          sqliteCalls: joinedCandidate.sqliteCalls,
-          rawRowsReturned: joinedCandidate.rawRowCount,
-          serializedPayloadBytes: payloadBytes.singleQuerySkinnySnapshot,
-          queryShape: "one ordered joined query with nullable suggestion id/name fields",
-          nodeModelTiming: joinedSummary,
-        },
-        singleQueryGroupedJson: {
-          sqliteCalls: groupedJsonCandidate.sqliteCalls,
-          rawRowsReturned: groupedJsonCandidate.rawRowCount,
-          serializedPayloadBytes: payloadBytes.singleQueryGroupedJson,
-          queryShape: "one row per visit with an ordered suggestion id/name JSON array",
-          nodeModelTiming: groupedJsonSummary,
-        },
-      },
-      comparison: {
-        joinedVsLegacy: {
-          sqliteCallsSaved: oracle.sqliteCalls - joinedCandidate.sqliteCalls,
-          sqliteCallReductionPercent: ((oracle.sqliteCalls - joinedCandidate.sqliteCalls) / oracle.sqliteCalls) * 100,
-          serializedPayloadBytesSaved: payloadBytes.legacyBatchedFullRows - payloadBytes.singleQuerySkinnySnapshot,
-          serializedPayloadReductionPercent:
-            ((payloadBytes.legacyBatchedFullRows - payloadBytes.singleQuerySkinnySnapshot) /
-              payloadBytes.legacyBatchedFullRows) *
-            100,
-          nodeModelMedianMillisecondsSaved: legacySummary.medianMilliseconds - joinedSummary.medianMilliseconds,
-          nodeModelMedianSpeedup: legacySummary.medianMilliseconds / joinedSummary.medianMilliseconds,
-        },
-        groupedJsonVsLegacy: {
-          sqliteCallsSaved: oracle.sqliteCalls - groupedJsonCandidate.sqliteCalls,
-          sqliteCallReductionPercent:
-            ((oracle.sqliteCalls - groupedJsonCandidate.sqliteCalls) / oracle.sqliteCalls) * 100,
-          serializedPayloadBytesSaved: payloadBytes.legacyBatchedFullRows - payloadBytes.singleQueryGroupedJson,
-          serializedPayloadReductionPercent:
-            ((payloadBytes.legacyBatchedFullRows - payloadBytes.singleQueryGroupedJson) /
-              payloadBytes.legacyBatchedFullRows) *
-            100,
-          nodeModelMedianMillisecondsSaved: legacySummary.medianMilliseconds - groupedJsonSummary.medianMilliseconds,
-          nodeModelMedianSpeedup: legacySummary.medianMilliseconds / groupedJsonSummary.medianMilliseconds,
-        },
-        groupedJsonVsJoined: {
-          sqliteCallDifference: groupedJsonCandidate.sqliteCalls - joinedCandidate.sqliteCalls,
-          rawRowsSaved: joinedCandidate.rawRowCount - groupedJsonCandidate.rawRowCount,
-          rawRowReductionPercent:
-            ((joinedCandidate.rawRowCount - groupedJsonCandidate.rawRowCount) / joinedCandidate.rawRowCount) * 100,
-          serializedPayloadBytesSaved: payloadBytes.singleQuerySkinnySnapshot - payloadBytes.singleQueryGroupedJson,
-          serializedPayloadReductionPercent:
-            ((payloadBytes.singleQuerySkinnySnapshot - payloadBytes.singleQueryGroupedJson) /
-              payloadBytes.singleQuerySkinnySnapshot) *
-            100,
-          nodeModelMedianMillisecondsDifference:
-            groupedJsonSummary.medianMilliseconds - joinedSummary.medianMilliseconds,
-          nodeModelMedianRatio: groupedJsonSummary.medianMilliseconds / joinedSummary.medianMilliseconds,
-        },
-      },
-      privacy: {
-        aggregateOnly: true,
-        rawVisitFieldsRetainedInReport: false,
-        rawRestaurantFieldsRetainedInReport: false,
-        calendarLibraryAccessed: false,
-      },
-    };
-
-    totalChangesAfter = totalChanges(database);
-    sequenceAfter = snapshotSqliteSequence(database);
-    assert.equal(totalChangesAfter, totalChangesBefore, "read-only benchmark must not increment total_changes()");
-    assert.deepEqual(sequenceAfter, sequenceBefore, "read-only benchmark must not change sqlite_sequence");
-  } finally {
-    database.close();
-  }
+  })();
 
   const sourceAfter = snapshotSource(configuration.databasePath);
   assert.deepEqual(sourceAfter, sourceBefore, "immutable benchmark must not alter the source or any SQLite sidecar");
-  report.sourceAttestation = { before: sourceBefore, after: sourceAfter, byteIdentical: true };
-  report.writeInvariants = {
-    totalChangesBefore,
-    totalChangesAfter,
-    totalChangesUnchanged: totalChangesAfter === totalChangesBefore,
-    sqliteSequenceBefore: sequenceBefore,
-    sqliteSequenceAfter: sequenceAfter,
-    sqliteSequenceUnchanged: sequenceBefore.sha256 === sequenceAfter.sha256,
-    mainAndSidecarsByteIdentical: true,
-    databaseOpenMode: "mode=ro, immutable=1, PRAGMA query_only=ON",
+  const finalReport = {
+    ...report,
+    sourceAttestation: { before: sourceBefore, after: sourceAfter, byteIdentical: true },
+    writeInvariants: {
+      totalChangesBefore,
+      totalChangesAfter,
+      totalChangesUnchanged: totalChangesAfter === totalChangesBefore,
+      sqliteSequenceBefore: sequenceBefore,
+      sqliteSequenceAfter: sequenceAfter,
+      sqliteSequenceUnchanged: sequenceBefore.sha256 === sequenceAfter.sha256,
+      mainAndSidecarsByteIdentical: true,
+      databaseOpenMode: "mode=ro, immutable=1, PRAGMA query_only=ON",
+    },
   };
 
-  const serialized = `${JSON.stringify(report, null, 2)}\n`;
+  const serialized = `${JSON.stringify(finalReport, null, 2)}\n`;
   mkdirSync(dirname(configuration.outputPath), { recursive: true });
   writeFileSync(configuration.outputPath, serialized);
   console.log(serialized.trimEnd());

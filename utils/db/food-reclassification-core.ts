@@ -1,4 +1,4 @@
-import type { FoodLabel } from "./types";
+import { parseFoodLabelArrayJson } from "./food-label-json.ts";
 
 export interface FoodReclassificationSource {
   readonly photoId: string;
@@ -35,13 +35,8 @@ export function buildFoodReclassificationUpdate(
   source: FoodReclassificationSource,
   enabledKeywords: ReadonlySet<string>,
 ): FoodReclassificationUpdate | null {
-  let allLabels: FoodLabel[];
-  try {
-    allLabels = JSON.parse(source.allLabelsJson) as FoodLabel[];
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(allLabels)) {
+  const allLabels = parseFoodLabelArrayJson(source.allLabelsJson);
+  if (!allLabels) {
     return null;
   }
 

@@ -42,6 +42,13 @@ interface FileSnapshot {
   readonly sha256: string;
 }
 
+interface NumericSummary {
+  readonly minimum: number;
+  readonly median: number;
+  readonly p95: number;
+  readonly maximum: number;
+}
+
 interface StorageProbe {
   readonly totalChanges: number;
   readonly sequenceDelta: number;
@@ -139,9 +146,12 @@ function createSchema(database: DatabaseSync): void {
 
 function createAdapter(database: DatabaseSync, counters: AdapterCounters): FoodKeywordSyncDatabase {
   const connection: FoodKeywordSyncConnection = {
-    async getAllAsync<T>(source: string, parameters: Array<string | number>) {
+    async getAllAsync(source: string, parameters: Array<string | number>) {
       counters.reads += 1;
-      return database.prepare(source).all(...parameters) as T[];
+      return database
+        .prepare(source)
+        .all(...parameters)
+        .map((row) => ({ keyword: String(row.keyword), isBuiltIn: Number(row.isBuiltIn) }));
     },
     async runAsync(source, parameters) {
       counters.writeExecutions += 1;
@@ -289,12 +299,7 @@ async function probeStorage(strategy: Strategy): Promise<StorageProbe> {
   }
 }
 
-function summarize(values: readonly number[]): {
-  readonly minimum: number;
-  readonly median: number;
-  readonly p95: number;
-  readonly maximum: number;
-} {
+function summarize(values: readonly number[]): NumericSummary {
   const sorted = [...values].sort((left, right) => left - right);
   return {
     minimum: sorted[0],

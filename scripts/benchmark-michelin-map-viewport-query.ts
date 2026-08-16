@@ -19,7 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   buildMichelinMapViewportQuery,
@@ -35,6 +35,21 @@ import {
   type RestaurantViewportEntry,
 } from "../utils/restaurant-viewport-index.ts";
 import type { MichelinRestaurantRecord } from "../utils/db/types.ts";
+
+function isStringValue<Value>(value: Value): value is Extract<Value, string> {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Extract<Value, number> {
+  return typeof value === "number";
+}
+
+function isBooleanValue<Value>(value: Value): value is Extract<Value, boolean> {
+  return typeof value === "boolean";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly databasePath: string | null;
@@ -96,11 +111,13 @@ interface CandidateRowBounds {
   readonly maximumTotalInView: number;
 }
 
-interface CapturedExecution {
+interface CapturedExecution<
+  Retention extends BaselineRetention | CandidateRetention = BaselineRetention | CandidateRetention,
+> {
   readonly candidateRowBounds?: CandidateRowBounds;
   readonly counters: StrategyCounters;
   readonly guard: number;
-  readonly retention: BaselineRetention | CandidateRetention;
+  readonly retention: Retention;
   readonly selections: readonly MichelinMapViewportSelection[];
 }
 
@@ -138,6 +155,11 @@ interface ScratchBuildSummary {
   readonly rtreeRows: number;
   readonly sqliteVersion: string;
   readonly usesRTreeVirtualTable: boolean;
+}
+
+interface ScratchDatabase {
+  readonly database: DatabaseSync;
+  readonly summary: ScratchBuildSummary;
 }
 
 interface SyntheticRestaurantSeed extends MichelinRestaurantRecord {
@@ -373,7 +395,7 @@ function canonicalizePotentialPath(path: string, seenSymlinks = new Set<string>(
       }
       return resolve(realpathSync(ancestor), ...missing);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw error;
       }
       const parent = dirname(ancestor);
@@ -435,22 +457,29 @@ function immutableDatabaseUri(databasePath: string): string {
 }
 
 function totalChanges(database: DatabaseSync): number {
-  const row = database.prepare("SELECT total_changes() AS count").get() as { count?: unknown } | undefined;
-  if (typeof row?.count !== "number") {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const row = database.prepare("SELECT total_changes() AS count").get() as
+    | BenchmarkSQLiteRow<{ count?: SQLiteValue }>
+    | undefined;
+  if (!isNumberValue(row?.count)) {
     throw new TypeError("SQLite total_changes() did not return a number");
   }
   return row.count;
 }
 
 function validateSource(database: DatabaseSync): SourceValidation {
-  const integrity = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
-  const foreignKeys = database.prepare("SELECT COUNT(*) AS count FROM pragma_foreign_key_check").get() as
-    | { count?: unknown }
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const integrity = database.prepare("PRAGMA integrity_check").get() as
+    | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
     | undefined;
-  if (typeof integrity?.integrity_check !== "string") {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const foreignKeys = database.prepare("SELECT COUNT(*) AS count FROM pragma_foreign_key_check").get() as
+    | BenchmarkSQLiteRow<{ count?: SQLiteValue }>
+    | undefined;
+  if (!isStringValue(integrity?.integrity_check)) {
     throw new TypeError("PRAGMA integrity_check returned an invalid value");
   }
-  if (typeof foreignKeys?.count !== "number") {
+  if (!isNumberValue(foreignKeys?.count)) {
     throw new TypeError("PRAGMA foreign_key_check returned an invalid count");
   }
   return {
@@ -628,14 +657,19 @@ function expandTrace(trace: readonly TraceEvent[], repetitions: number): TraceEv
 }
 
 function loadAllSourceRows(database: DatabaseSync): SourceMichelinRow[] {
-  return database.prepare(ALL_GUIDE_ROWS_SQL).all() as unknown as SourceMichelinRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return database.prepare(ALL_GUIDE_ROWS_SQL).all() as BenchmarkSQLiteRow<SourceMichelinRow>[];
 }
 
 function loadBaselineContext(database: DatabaseSync): BaselineContext {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const activeRows = database
     .prepare(ACTIVE_GUIDE_ROWS_SQL)
-    .all(ACTIVE_DATASET_KEY, ACTIVE_DATASET_KEY) as unknown as RawActiveMichelinRow[];
-  const confirmedRows = database.prepare(CONFIRMED_RESTAURANT_IDS_SQL).all() as unknown as ConfirmedRestaurantRow[];
+    .all(ACTIVE_DATASET_KEY, ACTIVE_DATASET_KEY) as BenchmarkSQLiteRow<RawActiveMichelinRow>[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const confirmedRows = database
+    .prepare(CONFIRMED_RESTAURANT_IDS_SQL)
+    .all() as BenchmarkSQLiteRow<ConfirmedRestaurantRow>[];
   return {
     activeRows,
     confirmedRestaurantIds: new Set(confirmedRows.map(({ id }) => id)),
@@ -643,7 +677,7 @@ function loadBaselineContext(database: DatabaseSync): BaselineContext {
   };
 }
 
-function serializedBytes(value: unknown): number {
+function serializedBytes<Value>(value: Value): number {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
@@ -696,13 +730,7 @@ function baselineFilterKey(request: MichelinMapViewportRequest): string {
   return `${request.minimumAwardYear}\0${request.visitStatusFilter}\0${request.awardFilter}`;
 }
 
-function buildBaselineIndex(
-  context: BaselineContext,
-  request: MichelinMapViewportRequest,
-): {
-  readonly filteredEntryRows: number;
-  readonly index: RestaurantViewportIndex<MichelinRestaurantRecord>;
-} {
+function buildBaselineIndex(context: BaselineContext, request: MichelinMapViewportRequest) {
   const entries: RestaurantViewportEntry<MichelinRestaurantRecord>[] = [];
   for (const row of context.activeRows) {
     const visited = context.confirmedRestaurantIds.has(row.id);
@@ -712,7 +740,7 @@ function buildBaselineIndex(
     if (request.visitStatusFilter === "unvisited" && visited) {
       continue;
     }
-    if (typeof row.latestAwardYear !== "number" || row.latestAwardYear < request.minimumAwardYear) {
+    if (!isNumberValue(row.latestAwardYear) || row.latestAwardYear < request.minimumAwardYear) {
       continue;
     }
     if (!awardMatches(row.award, request.awardFilter)) {
@@ -755,6 +783,12 @@ function updateGuardString(guard: number, value: string): number {
   return updated;
 }
 
+function executeBaseline(source: DatabaseSync, trace: readonly TraceEvent[], capture: false): TimedExecution;
+function executeBaseline(
+  source: DatabaseSync,
+  trace: readonly TraceEvent[],
+  capture: true,
+): CapturedExecution<BaselineRetention>;
 function executeBaseline(
   source: DatabaseSync,
   trace: readonly TraceEvent[],
@@ -814,6 +848,12 @@ function executeBaseline(
   };
 }
 
+function executeCandidate(scratch: DatabaseSync, trace: readonly TraceEvent[], capture: false): Promise<TimedExecution>;
+function executeCandidate(
+  scratch: DatabaseSync,
+  trace: readonly TraceEvent[],
+  capture: true,
+): Promise<CapturedExecution<CandidateRetention>>;
 async function executeCandidate(
   scratch: DatabaseSync,
   trace: readonly TraceEvent[],
@@ -833,7 +873,8 @@ async function executeCandidate(
   for (const request of trace) {
     let requestTransferredRows = 0;
     const getAllAsync = async <T>(source: string, parameters: readonly (number | string)[]): Promise<T[]> => {
-      const rows = scratch.prepare(source).all(...parameters) as T[];
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const rows = scratch.prepare(source).all(...parameters) as BenchmarkSQLiteRow<T>[];
       sqliteResultQueries++;
       requestTransferredRows += rows.length;
       if (capture) {
@@ -920,7 +961,7 @@ function createScratchDatabase(
   allRows: readonly SourceMichelinRow[],
   activeDatasetVersion: string | null,
   confirmedRestaurantIds: readonly string[],
-): { readonly database: DatabaseSync; readonly summary: ScratchBuildSummary } {
+): ScratchDatabase {
   const startedAt = performance.now();
   const database = new DatabaseSync(scratchPath);
   try {
@@ -998,36 +1039,40 @@ function createScratchDatabase(
       ANALYZE;
       PRAGMA query_only = ON;
     `);
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const sqliteVersion = database.prepare("SELECT sqlite_version() AS version").get() as
-      | { version?: unknown }
+      | BenchmarkSQLiteRow<{ version?: SQLiteValue }>
       | undefined;
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const rtreeCheck = database.prepare("SELECT rtreecheck('michelin_restaurant_spatial_index') AS result").get() as
-      | { result?: unknown }
+      | BenchmarkSQLiteRow<{ result?: SQLiteValue }>
       | undefined;
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const rtreeRows = database.prepare("SELECT COUNT(*) AS count FROM michelin_restaurant_spatial_index").get() as
-      | { count?: unknown }
+      | BenchmarkSQLiteRow<{ count?: SQLiteValue }>
       | undefined;
     const sqliteVersionValue = sqliteVersion?.version;
     const rtreeCheckValue = rtreeCheck?.result;
     const rtreeRowCount = rtreeRows?.count;
-    if (typeof sqliteVersionValue !== "string") {
+    if (!isStringValue(sqliteVersionValue)) {
       throw new TypeError("Scratch SQLite version is not a string");
     }
-    if (typeof rtreeCheckValue !== "string") {
+    if (!isStringValue(rtreeCheckValue)) {
       throw new TypeError("Scratch rtreecheck result is not a string");
     }
-    if (typeof rtreeRowCount !== "number") {
+    if (!isNumberValue(rtreeRowCount)) {
       throw new TypeError("Scratch R-Tree row count is not a number");
     }
     assert.equal(rtreeCheckValue, "ok", "scratch R-Tree integrity failed");
 
     const representativePlan = buildMichelinMapViewportQuery(buildTrace(2025)[0]!);
     assert.ok(representativePlan);
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const queryPlan = database
       .prepare(`EXPLAIN QUERY PLAN ${representativePlan.sql}`)
-      .all(...representativePlan.parameters) as unknown as Array<{ detail?: unknown }>;
+      .all(...representativePlan.parameters) as Array<BenchmarkSQLiteRow<{ detail?: SQLiteValue }>>;
     const usesRTreeVirtualTable = queryPlan.some(
-      ({ detail }) => typeof detail === "string" && detail.includes("VIRTUAL TABLE INDEX"),
+      ({ detail }) => isStringValue(detail) && detail.includes("VIRTUAL TABLE INDEX"),
     );
     assert.equal(usesRTreeVirtualTable, true, "candidate query plan did not use the scratch R-Tree");
     return {
@@ -1054,13 +1099,14 @@ function createScratchDatabase(
 }
 
 function activeDatasetVersion(database: DatabaseSync): string | null {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const row = database.prepare("SELECT value FROM app_metadata WHERE key = ?").get(ACTIVE_DATASET_KEY) as
-    | { value?: unknown }
+    | BenchmarkSQLiteRow<{ value?: SQLiteValue }>
     | undefined;
   if (!row) {
     return null;
   }
-  if (typeof row.value !== "string") {
+  if (!isStringValue(row.value)) {
     throw new TypeError("Active Michelin dataset version is not a string");
   }
   return row.value;
@@ -1092,7 +1138,7 @@ function summarize(values: readonly number[]): TimingSummary {
   };
 }
 
-function summarizeCounts(values: readonly number[]): Record<string, number> {
+function summarizeCounts(values: readonly number[]) {
   assert.ok(values.length > 0);
   return {
     minimum: Math.min(...values),
@@ -1120,13 +1166,16 @@ async function benchmark(
     for (const strategy of strategies) {
       const execution =
         strategy === "fullGuideKDBush"
-          ? (executeBaseline(source, trace, false) as TimedExecution)
-          : ((await executeCandidate(scratch, trace, false)) as TimedExecution);
+          ? executeBaseline(source, trace, false)
+          : await executeCandidate(scratch, trace, false);
       assert.equal(execution.guard, expectedGuard, `warmup ${strategy} guard changed`);
     }
   }
 
-  const samples: Record<Strategy, number[]> = { fullGuideKDBush: [], nativeSqliteViewport: [] };
+  const samples = { fullGuideKDBush: new Array<number>(), nativeSqliteViewport: new Array<number>() } satisfies Record<
+    Strategy,
+    number[]
+  >;
   const measurementOrder: string[] = [];
   for (let sample = 0; sample < configuration.samples; sample++) {
     const strategies: Strategy[] =
@@ -1135,8 +1184,8 @@ async function benchmark(
     for (const strategy of strategies) {
       const execution =
         strategy === "fullGuideKDBush"
-          ? (executeBaseline(source, trace, false) as TimedExecution)
-          : ((await executeCandidate(scratch, trace, false)) as TimedExecution);
+          ? executeBaseline(source, trace, false)
+          : await executeCandidate(scratch, trace, false);
       assert.equal(execution.guard, expectedGuard, `measured ${strategy} guard changed`);
       samples[strategy].push(execution.elapsedMilliseconds);
     }
@@ -1151,16 +1200,16 @@ async function benchmark(
 function assertSelectionFields(selection: MichelinMapViewportSelection): void {
   for (const restaurant of selection.restaurants) {
     for (const field of ["id", "name", "address", "location", "cuisine", "award"] as const) {
-      assert.equal(typeof restaurant[field], "string", `selection field ${field} must be a string`);
+      assert.ok(isStringValue(restaurant[field]), `selection field ${field} must be a string`);
     }
-    assert.equal(typeof restaurant.latitude, "number");
-    assert.equal(typeof restaurant.longitude, "number");
-    assert.ok(restaurant.latestAwardYear === null || typeof restaurant.latestAwardYear === "number");
-    assert.equal(typeof restaurant.visited, "boolean");
+    assert.ok(isNumberValue(restaurant.latitude));
+    assert.ok(isNumberValue(restaurant.longitude));
+    assert.ok(restaurant.latestAwardYear === null || isNumberValue(restaurant.latestAwardYear));
+    assert.ok(isBooleanValue(restaurant.visited));
   }
 }
 
-function candidateBoundsReport(bounds: CandidateRowBounds): Record<string, unknown> {
+function candidateBoundsReport(bounds: CandidateRowBounds) {
   const softCandidateCutoff = DEFAULT_MAX_RESTAURANTS_IN_VIEW + CANDIDATE_RANKING_OVERSCAN_ROWS;
   return {
     softCandidateCutoff,
@@ -1211,8 +1260,8 @@ async function main(): Promise<void> {
     const trace = expandTrace(buildTrace(configuration.minimumAwardYear), configuration.traceRepetitions);
     const initialOpenTrace = buildInitialOpenTrace(configuration.minimumAwardYear);
 
-    const preBaseline = executeBaseline(source, trace, true) as CapturedExecution;
-    const preCandidate = (await executeCandidate(scratch, trace, true)) as CapturedExecution;
+    const preBaseline = executeBaseline(source, trace, true);
+    const preCandidate = await executeCandidate(scratch, trace, true);
     preBaseline.selections.forEach(assertSelectionFields);
     preCandidate.selections.forEach(assertSelectionFields);
     const preMeasurementDigest = assertExactParity(preBaseline, preCandidate, trace, "pre-measurement");
@@ -1226,8 +1275,8 @@ async function main(): Promise<void> {
       assert.ok(selection.restaurants.length <= DEFAULT_MAX_RESTAURANTS_IN_VIEW);
     }
 
-    const preInitialOpenBaseline = executeBaseline(source, initialOpenTrace, true) as CapturedExecution;
-    const preInitialOpenCandidate = (await executeCandidate(scratch, initialOpenTrace, true)) as CapturedExecution;
+    const preInitialOpenBaseline = executeBaseline(source, initialOpenTrace, true);
+    const preInitialOpenCandidate = await executeCandidate(scratch, initialOpenTrace, true);
     preInitialOpenBaseline.selections.forEach(assertSelectionFields);
     preInitialOpenCandidate.selections.forEach(assertSelectionFields);
     const preInitialOpenDigest = assertExactParity(
@@ -1253,16 +1302,16 @@ async function main(): Promise<void> {
       preInitialOpenBaseline.guard,
     );
 
-    const postBaseline = executeBaseline(source, trace, true) as CapturedExecution;
-    const postCandidate = (await executeCandidate(scratch, trace, true)) as CapturedExecution;
+    const postBaseline = executeBaseline(source, trace, true);
+    const postCandidate = await executeCandidate(scratch, trace, true);
     const postMeasurementDigest = assertExactParity(postBaseline, postCandidate, trace, "post-measurement");
     assert.equal(postMeasurementDigest, preMeasurementDigest, "semantic result changed during measurement");
     assert.deepEqual(postBaseline.counters, preBaseline.counters);
     assert.deepEqual(postCandidate.counters, preCandidate.counters);
     assert.deepEqual(postCandidate.candidateRowBounds, preCandidate.candidateRowBounds);
 
-    const postInitialOpenBaseline = executeBaseline(source, initialOpenTrace, true) as CapturedExecution;
-    const postInitialOpenCandidate = (await executeCandidate(scratch, initialOpenTrace, true)) as CapturedExecution;
+    const postInitialOpenBaseline = executeBaseline(source, initialOpenTrace, true);
+    const postInitialOpenCandidate = await executeCandidate(scratch, initialOpenTrace, true);
     const postInitialOpenDigest = assertExactParity(
       postInitialOpenBaseline,
       postInitialOpenCandidate,
@@ -1278,11 +1327,13 @@ async function main(): Promise<void> {
     assert.deepEqual(postInitialOpenCandidate.counters, preInitialOpenCandidate.counters);
     assert.deepEqual(postInitialOpenCandidate.candidateRowBounds, preInitialOpenCandidate.candidateRowBounds);
 
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const scratchIntegrity = scratch.prepare("PRAGMA integrity_check").get() as
-      | { integrity_check?: unknown }
+      | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
       | undefined;
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const scratchForeignKeys = scratch.prepare("SELECT COUNT(*) AS count FROM pragma_foreign_key_check").get() as
-      | { count?: unknown }
+      | BenchmarkSQLiteRow<{ count?: SQLiteValue }>
       | undefined;
     assert.equal(scratchIntegrity?.integrity_check, "ok");
     assert.equal(scratchForeignKeys?.count, 0);
@@ -1294,12 +1345,12 @@ async function main(): Promise<void> {
 
     const baselineMedian = timing.baseline.medianMilliseconds;
     const candidateMedian = timing.candidate.medianMilliseconds;
-    const baselineRetention = preBaseline.retention as BaselineRetention;
-    const candidateRetention = preCandidate.retention as CandidateRetention;
+    const baselineRetention = preBaseline.retention;
+    const candidateRetention = preCandidate.retention;
     const initialOpenBaselineMedian = initialOpenTiming.baseline.medianMilliseconds;
     const initialOpenCandidateMedian = initialOpenTiming.candidate.medianMilliseconds;
-    const initialOpenBaselineRetention = preInitialOpenBaseline.retention as BaselineRetention;
-    const initialOpenCandidateRetention = preInitialOpenCandidate.retention as CandidateRetention;
+    const initialOpenBaselineRetention = preInitialOpenBaseline.retention;
+    const initialOpenCandidateRetention = preInitialOpenCandidate.retention;
     const report = {
       schemaVersion: 1,
       status: "ok",
@@ -1381,7 +1432,7 @@ async function main(): Promise<void> {
         ],
         baselineTraceCaching:
           "The trace keeps one KDBush index per distinct filter for the whole sample. The prior screen retained only its current useMemo index, so this deliberately favors the baseline when filters are revisited.",
-        candidateScratchRelationalShape:
+        ["candidateScratchRelationalShape"]:
           "The scratch database copies every real guide row but models each distinct confirmed Michelin ID with one restaurant and one confirmed visit rather than copying the source visit distribution or indexes. Timing can understate confirmed-status CTE work; parity and transfer counts remain exact for the modeled confirmed-ID set.",
         transferBytesDefinition:
           "UTF-8 bytes of JSON.stringify over raw SQLite result rows; a stable payload proxy, not measured Expo bridge bytes",
@@ -1535,7 +1586,7 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((error: unknown) => {
-  console.error(error);
+void main().catch((cause: unknown) => {
+  console.error(cause);
   process.exitCode = 1;
 });

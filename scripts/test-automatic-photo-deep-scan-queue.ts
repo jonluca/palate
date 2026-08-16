@@ -2,7 +2,7 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   CLEAR_AUTOMATIC_PHOTO_FOOD_SYNC_REQUIRED_SQL,
   CLEAR_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL,
@@ -20,6 +20,32 @@ import {
 } from "../utils/db/automatic-photo-deep-scan-queue-core.ts";
 import { buildPhotoIngestionStatement } from "../utils/db/photo-ingestion-core.ts";
 import { AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE } from "../utils/automatic-photo-rescan-core.ts";
+
+type SQLiteRow = Record<string, SQLOutputValue>;
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function readIntegerColumn(row: SQLiteRow | undefined, column: string, context: string): number {
+  const value = row?.[column];
+  if (!isNumberValue(value) || !Number.isSafeInteger(value)) {
+    throw new TypeError(`${context} must return an integer ${column} column`);
+  }
+  return value;
+}
+
+function readStringColumn(row: SQLiteRow, column: string, context: string): string {
+  const value = row[column];
+  if (!isStringValue(value)) {
+    throw new TypeError(`${context} must return a text ${column} column`);
+  }
+  return value;
+}
 
 const database = new DatabaseSync(":memory:");
 try {
@@ -42,7 +68,7 @@ try {
       const ids = database
         .prepare(GET_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL)
         .all(limit)
-        .map((row) => String(row.id));
+        .map((row) => readStringColumn(row, "id", "deep-scan candidate query"));
       if (ids.length > 0) {
         database.prepare(MARK_AUTOMATIC_PHOTO_DEEP_SCAN_ATTEMPTS_SQL).run(JSON.stringify(ids));
       }
@@ -55,7 +81,7 @@ try {
   };
 
   const getStateFlag = (source: string): number =>
-    Number((database.prepare(source).get() as { isPending: number }).isPending);
+    readIntegerColumn(database.prepare(source).get(), "isPending", "automatic photo state query");
 
   const insertPhoto = database.prepare(
     `INSERT INTO photos (id, uri, creationTime, foodDetected, mediaType) VALUES (?, ?, ?, ?, 'photo')`,
@@ -68,15 +94,17 @@ try {
     .prepare(ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL)
     .run(JSON.stringify(["needs-'深度'-🍜", "known-food", "known-not-food", "missing", "needs-'深度'-🍜"]));
 
-  const initialCount = database.prepare(COUNT_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL).get() as {
-    pendingCount: number;
-  };
-  assert.equal(initialCount.pendingCount, 1, "only queued NULL rows are deep-scan candidates");
+  const initialCount = readIntegerColumn(
+    database.prepare(COUNT_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL).get(),
+    "pendingCount",
+    "deep-scan candidate count query",
+  );
+  assert.equal(initialCount, 1, "only queued NULL rows are deep-scan candidates");
   assert.deepEqual(
     database
       .prepare(GET_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL)
       .all(999)
-      .map((row) => String(row.id)),
+      .map((row) => readStringColumn(row, "id", "deep-scan candidate query")),
     ["needs-'深度'-🍜"],
   );
 
@@ -85,7 +113,7 @@ try {
     database
       .prepare("SELECT assetId FROM automatic_photo_deep_scan_queue ORDER BY assetId")
       .all()
-      .map((row) => String(row.assetId)),
+      .map((row) => readStringColumn(row, "assetId", "deep-scan queue query")),
     ["needs-'深度'-🍜"],
   );
 
@@ -110,24 +138,23 @@ try {
     },
   ]);
   assert.ok(ingestion);
-  const insertedRows = database.prepare(`${ingestion.sql} RETURNING id`).all(...ingestion.parameters) as Array<{
-    id: string;
-  }>;
-  assert.deepEqual(
-    insertedRows.map((row) => row.id),
-    ["arrived-during-scan"],
-    "RETURNING captures exact inserts, not a preflight snapshot",
-  );
-  database.prepare(ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL).run(JSON.stringify(insertedRows.map((row) => row.id)));
+  const insertedIds = database
+    .prepare(`${ingestion.sql} RETURNING id`)
+    .all(...ingestion.parameters)
+    .map((row) => readStringColumn(row, "id", "photo ingestion RETURNING query"));
+  assert.deepEqual(insertedIds, ["arrived-during-scan"], "RETURNING captures exact inserts, not a preflight snapshot");
+  database.prepare(ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL).run(JSON.stringify(insertedIds));
   database.prepare(MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL).run();
   assert.equal(getStateFlag(IS_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL), 1);
   database.prepare(CLEAR_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL).run();
   assert.equal(getStateFlag(IS_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL), 0);
 
-  const afterExactInsert = database.prepare(COUNT_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL).get() as {
-    pendingCount: number;
-  };
-  assert.equal(afterExactInsert.pendingCount, 2);
+  const afterExactInsert = readIntegerColumn(
+    database.prepare(COUNT_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL).get(),
+    "pendingCount",
+    "deep-scan candidate count query",
+  );
+  assert.equal(afterExactInsert, 2);
 
   database.prepare("UPDATE photos SET foodDetected = 0 WHERE id = ?").run("needs-'深度'-🍜");
   database.prepare(PRUNE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL).run();
@@ -135,7 +162,7 @@ try {
     database
       .prepare("SELECT assetId FROM automatic_photo_deep_scan_queue")
       .all()
-      .map((row) => String(row.assetId)),
+      .map((row) => readStringColumn(row, "assetId", "deep-scan queue query")),
     ["arrived-during-scan"],
   );
 
@@ -200,7 +227,7 @@ try {
     const rollbackRows = database
       .prepare(`${rollbackIngestion.sql} RETURNING id`)
       .all(...rollbackIngestion.parameters)
-      .map((row) => String(row.id));
+      .map((row) => readStringColumn(row, "id", "rollback ingestion RETURNING query"));
     database.prepare(ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL).run(JSON.stringify(rollbackRows));
     database.prepare(MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL).run();
     reachedForcedRollback = true;
@@ -210,11 +237,15 @@ try {
     database.exec("ROLLBACK");
   }
   assert.equal(reachedForcedRollback, true);
-  assert.equal(Number((database.prepare("SELECT COUNT(*) AS count FROM photos").get() as { count: number }).count), 0);
   assert.equal(
-    Number(
-      (database.prepare("SELECT COUNT(*) AS count FROM automatic_photo_deep_scan_queue").get() as { count: number })
-        .count,
+    readIntegerColumn(database.prepare("SELECT COUNT(*) AS count FROM photos").get(), "count", "photo count query"),
+    0,
+  );
+  assert.equal(
+    readIntegerColumn(
+      database.prepare("SELECT COUNT(*) AS count FROM automatic_photo_deep_scan_queue").get(),
+      "count",
+      "deep-scan queue count query",
     ),
     0,
   );

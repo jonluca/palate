@@ -91,6 +91,259 @@ interface LoadedRun {
   scanImplementation: string;
 }
 
+type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string;
+type JsonNode = JsonValue | undefined;
+
+interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
+
+function isJsonObject(value: JsonNode): value is JsonObject {
+  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value);
+}
+
+function isJsonBoolean(value: JsonNode): value is boolean {
+  return typeof value === "boolean";
+}
+
+function isJsonNumber(value: JsonNode): value is number {
+  return typeof value === "number";
+}
+
+function isJsonString(value: JsonNode): value is string {
+  return typeof value === "string";
+}
+
+function parseJsonValue(source: string): JsonValue {
+  // JSON.parse either throws or returns exactly the recursive JSON domain represented by JsonValue.
+  return JSON.parse(source);
+}
+
+function jsonObject(value: JsonNode, label: string): JsonObject {
+  assert.ok(isJsonObject(value), `${label} must be an object`);
+  return value;
+}
+
+function jsonBoolean(value: JsonNode, label: string): boolean {
+  assert.ok(isJsonBoolean(value), `${label} must be a boolean`);
+  return value;
+}
+
+function jsonNumber(value: JsonNode, label: string): number {
+  assert.ok(isJsonNumber(value), `${label} must be a number`);
+  return value;
+}
+
+function jsonString(value: JsonNode, label: string): string {
+  assert.ok(isJsonString(value), `${label} must be a string`);
+  return value;
+}
+
+function jsonNullableString(value: JsonNode, label: string): string | null {
+  return value === null ? null : jsonString(value, label);
+}
+
+function jsonStrategy(value: JsonNode, label: string): Strategy {
+  assert.ok(value === "legacy" || value === "incremental", `${label} must be a photo scan strategy`);
+  return value;
+}
+
+function jsonNullableStrategy(value: JsonNode, label: string): Strategy | null {
+  return value === null ? null : jsonStrategy(value, label);
+}
+
+function parseFixture(value: JsonNode, label: string): RunReport["fixture"] {
+  const record = jsonObject(value, label);
+  const fixture: Record<string, number> = {};
+  for (const [name, count] of Object.entries(record)) {
+    fixture[name] = jsonNumber(count, `${label}.${name}`);
+  }
+  return fixture;
+}
+
+function parseRestorationComponent(value: JsonNode, label: string): RestorationComponent {
+  const component = jsonObject(value, label);
+  const presentValue = component.present;
+  assert.ok(
+    presentValue === true || presentValue === false || presentValue === 1 || presentValue === 0,
+    `${label}.present must be boolean-like`,
+  );
+  return {
+    present: presentValue,
+    sha256: jsonString(component.sha256, `${label}.sha256`),
+    mode: jsonString(component.mode, `${label}.mode`),
+  };
+}
+
+function parseRestoration(value: JsonNode, label: string): RunReport["restoration"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  const restoration = jsonObject(value, label);
+  return {
+    exactMainAndSidecarSetRestored: jsonBoolean(
+      restoration.exactMainAndSidecarSetRestored,
+      `${label}.exactMainAndSidecarSetRestored`,
+    ),
+    sensitiveDatabaseCopiesRetained: jsonBoolean(
+      restoration.sensitiveDatabaseCopiesRetained,
+      `${label}.sensitiveDatabaseCopiesRetained`,
+    ),
+    originalMain: parseRestorationComponent(restoration.originalMain, `${label}.originalMain`),
+    originalWal: parseRestorationComponent(restoration.originalWal, `${label}.originalWal`),
+    originalShm: parseRestorationComponent(restoration.originalShm, `${label}.originalShm`),
+    originalJournal: parseRestorationComponent(restoration.originalJournal, `${label}.originalJournal`),
+    restoredMainSha256: jsonString(restoration.restoredMainSha256, `${label}.restoredMainSha256`),
+  };
+}
+
+function parseRunReport(value: JsonValue, path: string): RunReport {
+  const report = jsonObject(value, `${path}: report`);
+  const configuration = jsonObject(report.configuration, `${path}: configuration`);
+  const timing = jsonObject(report.timing, `${path}: timing`);
+  const runtimeAttestation = jsonObject(report.runtimeAttestation, `${path}: runtimeAttestation`);
+  const photoScan = jsonObject(runtimeAttestation.photoScan, `${path}: runtimeAttestation.photoScan`);
+  const buildAttestation = jsonObject(report.buildAttestation, `${path}: buildAttestation`);
+  const triggerBoundary = jsonObject(report.triggerBoundary, `${path}: triggerBoundary`);
+  const liveOriginalDatabase = jsonObject(report.liveOriginalDatabase, `${path}: liveOriginalDatabase`);
+  const parityReferenceDatabase = jsonObject(report.parityReferenceDatabase, `${path}: parityReferenceDatabase`);
+  const validation = jsonObject(report.validation, `${path}: validation`);
+  return {
+    schemaVersion: jsonNumber(report.schemaVersion, `${path}: schemaVersion`),
+    status: jsonString(report.status, `${path}: status`),
+    configuration: {
+      calendarQueryStrategy: jsonString(
+        configuration.calendarQueryStrategy,
+        `${path}: configuration.calendarQueryStrategy`,
+      ),
+      sparseCoalescingGapDays: jsonNumber(
+        configuration.sparseCoalescingGapDays,
+        `${path}: configuration.sparseCoalescingGapDays`,
+      ),
+      requestedPhotoScanStrategy: jsonNullableStrategy(
+        configuration.requestedPhotoScanStrategy,
+        `${path}: configuration.requestedPhotoScanStrategy`,
+      ),
+      expectedPhotoScanImplementation: jsonNullableString(
+        configuration.expectedPhotoScanImplementation,
+        `${path}: configuration.expectedPhotoScanImplementation`,
+      ),
+    },
+    fixture: parseFixture(report.fixture, `${path}: fixture`),
+    timing: {
+      wallSeconds: jsonNumber(timing.wallSeconds, `${path}: timing.wallSeconds`),
+      triggerEpochSeconds: jsonNumber(timing.triggerEpochSeconds, `${path}: timing.triggerEpochSeconds`),
+    },
+    maxRssKiB: jsonNumber(report.maxRssKiB, `${path}: maxRssKiB`),
+    runtimeAttestation: {
+      runId: jsonString(runtimeAttestation.runId, `${path}: runtimeAttestation.runId`),
+      expectedPhotoScanImplementation: jsonString(
+        runtimeAttestation.expectedPhotoScanImplementation,
+        `${path}: runtimeAttestation.expectedPhotoScanImplementation`,
+      ),
+      photoScan: {
+        schemaVersion: jsonNumber(photoScan.schemaVersion, `${path}: runtimeAttestation.photoScan.schemaVersion`),
+        runId: jsonString(photoScan.runId, `${path}: runtimeAttestation.photoScan.runId`),
+        selectedScanKind: jsonStrategy(
+          photoScan.selectedScanKind,
+          `${path}: runtimeAttestation.photoScan.selectedScanKind`,
+        ),
+        selectedScanImplementation: jsonString(
+          photoScan.selectedScanImplementation,
+          `${path}: runtimeAttestation.photoScan.selectedScanImplementation`,
+        ),
+        resolvedPhotoScanStrategy: jsonStrategy(
+          photoScan.resolvedPhotoScanStrategy,
+          `${path}: runtimeAttestation.photoScan.resolvedPhotoScanStrategy`,
+        ),
+        libraryTotalCount: jsonNumber(
+          photoScan.libraryTotalCount,
+          `${path}: runtimeAttestation.photoScan.libraryTotalCount`,
+        ),
+        unknownVisibleCount: jsonNumber(
+          photoScan.unknownVisibleCount,
+          `${path}: runtimeAttestation.photoScan.unknownVisibleCount`,
+        ),
+        excludedVisibleCount: jsonNumber(
+          photoScan.excludedVisibleCount,
+          `${path}: runtimeAttestation.photoScan.excludedVisibleCount`,
+        ),
+        observedAtEpochSeconds: jsonNumber(
+          photoScan.observedAtEpochSeconds,
+          `${path}: runtimeAttestation.photoScan.observedAtEpochSeconds`,
+        ),
+      },
+    },
+    buildAttestation: {
+      suppliedExecutableSha256: jsonString(
+        buildAttestation.suppliedExecutableSha256,
+        `${path}: buildAttestation.suppliedExecutableSha256`,
+      ),
+      suppliedMainBundleSha256: jsonString(
+        buildAttestation.suppliedMainBundleSha256,
+        `${path}: buildAttestation.suppliedMainBundleSha256`,
+      ),
+      exactExecutableMatch: jsonBoolean(
+        buildAttestation.exactExecutableMatch,
+        `${path}: buildAttestation.exactExecutableMatch`,
+      ),
+      exactMainBundleMatch: jsonBoolean(
+        buildAttestation.exactMainBundleMatch,
+        `${path}: buildAttestation.exactMainBundleMatch`,
+      ),
+      strictCodeSignatureVerified: jsonBoolean(
+        buildAttestation.strictCodeSignatureVerified,
+        `${path}: buildAttestation.strictCodeSignatureVerified`,
+      ),
+    },
+    triggerBoundary: {
+      preparedLogicalDigest: jsonString(
+        triggerBoundary.preparedLogicalDigest,
+        `${path}: triggerBoundary.preparedLogicalDigest`,
+      ),
+      pretriggerLogicalDigest: jsonString(
+        triggerBoundary.pretriggerLogicalDigest,
+        `${path}: triggerBoundary.pretriggerLogicalDigest`,
+      ),
+      unchangedBeforeTrigger: jsonBoolean(
+        triggerBoundary.unchangedBeforeTrigger,
+        `${path}: triggerBoundary.unchangedBeforeTrigger`,
+      ),
+    },
+    liveOriginalDatabase: {
+      sha256: jsonString(liveOriginalDatabase.sha256, `${path}: liveOriginalDatabase.sha256`),
+      preparedStandaloneSnapshotSha256: jsonString(
+        liveOriginalDatabase.preparedStandaloneSnapshotSha256,
+        `${path}: liveOriginalDatabase.preparedStandaloneSnapshotSha256`,
+      ),
+    },
+    parityReferenceDatabase: {
+      sha256: jsonString(parityReferenceDatabase.sha256, `${path}: parityReferenceDatabase.sha256`),
+    },
+    validation: {
+      exactVisitParityExcludingUpdatedAt: jsonBoolean(
+        validation.exactVisitParityExcludingUpdatedAt,
+        `${path}: validation.exactVisitParityExcludingUpdatedAt`,
+      ),
+      exactPhotoParity: jsonBoolean(validation.exactPhotoParity, `${path}: validation.exactPhotoParity`),
+      exactVisitSuggestedRestaurantParity: jsonBoolean(
+        validation.exactVisitSuggestedRestaurantParity,
+        `${path}: validation.exactVisitSuggestedRestaurantParity`,
+      ),
+      exactAppMetadataParity: jsonBoolean(
+        validation.exactAppMetadataParity,
+        `${path}: validation.exactAppMetadataParity`,
+      ),
+      integrity: jsonString(validation.integrity, `${path}: validation.integrity`),
+      foreignKeyViolationCount: jsonNumber(
+        validation.foreignKeyViolationCount,
+        `${path}: validation.foreignKeyViolationCount`,
+      ),
+    },
+    restoration: parseRestoration(report.restoration, `${path}: restoration`),
+  };
+}
+
 function usage(): string {
   return `Usage: summarize-macos-photo-scan-ab.ts --legacy=REPORT[,REPORT...] --incremental=REPORT[,REPORT...] --output=PATH`;
 }
@@ -155,16 +408,16 @@ function finitePositive(value: number, label: string): void {
   assert.ok(Number.isFinite(value) && value > 0, `${label} must be finite and positive`);
 }
 
-function nonemptyString(value: unknown, label: string): asserts value is string {
-  assert.ok(typeof value === "string" && value.trim().length > 0, `${label} must be a nonempty string`);
+function nonemptyString(value: string | null, label: string): asserts value is string {
+  assert.ok(value !== null && value.trim().length > 0, `${label} must be a nonempty string`);
 }
 
-function validateSha256(value: unknown, label: string): asserts value is string {
+function validateSha256(value: string, label: string): void {
   nonemptyString(value, label);
   assert.match(value, /^[0-9a-f]{64}$/i, `${label} must be a SHA-256 digest`);
 }
 
-function validateLogicalDigest(value: unknown, label: string): asserts value is string {
+function validateLogicalDigest(value: string, label: string): void {
   nonemptyString(value, label);
   assert.match(value, /^[0-9a-f]{64}(?::[0-9a-f]{64}){3}$/i, `${label} must contain the four logical SHA-256 digests`);
 }
@@ -173,7 +426,8 @@ function normalizedRestorationIdentity(report: RunReport): string | undefined {
   if (report.schemaVersion !== 6) {
     return undefined;
   }
-  const restoration = report.restoration!;
+  const restoration = report.restoration;
+  assert.ok(restoration, "Schema 6 reports must include restoration details");
   const normalize = (component: RestorationComponent) => ({
     present: component.present === true || component.present === 1,
     sha256: component.sha256,
@@ -189,7 +443,6 @@ function normalizedRestorationIdentity(report: RunReport): string | undefined {
 }
 
 function validateRestorationComponent(component: RestorationComponent, label: string): boolean {
-  assert.ok(component && typeof component === "object", `${label} must be an object`);
   assert.ok(
     component.present === true || component.present === false || component.present === 1 || component.present === 0,
     `${label}.present must be boolean-like`,
@@ -206,7 +459,6 @@ function validateRestorationComponent(component: RestorationComponent, label: st
 }
 
 function validateFixture(fixture: Record<string, number>, path: string): void {
-  assert.ok(fixture && typeof fixture === "object" && !Array.isArray(fixture), `${path}: fixture object`);
   assert.ok(Object.keys(fixture).length > 0, `${path}: fixture must not be empty`);
   for (const [name, value] of Object.entries(fixture)) {
     assert.ok(Number.isInteger(value) && value >= 0, `${path}: fixture.${name} must be a nonnegative integer`);
@@ -214,29 +466,22 @@ function validateFixture(fixture: Record<string, number>, path: string): void {
 }
 
 function loadAndValidate(path: string, strategy: Strategy): LoadedRun {
-  const report = JSON.parse(readFileSync(path, "utf8")) as RunReport;
+  const report = parseRunReport(parseJsonValue(readFileSync(path, "utf8")), path);
   assert.ok(report.schemaVersion === 5 || report.schemaVersion === 6, `${path}: report schema must be 5 or 6`);
   if (report.schemaVersion === 6) {
-    assert.equal(report.restoration?.exactMainAndSidecarSetRestored, true, `${path}: exact database restoration`);
+    const restoration = report.restoration;
+    assert.ok(restoration, `${path}: exact database restoration`);
+    assert.equal(restoration.exactMainAndSidecarSetRestored, true, `${path}: exact database restoration`);
     assert.equal(
-      typeof report.restoration?.sensitiveDatabaseCopiesRetained,
-      "boolean",
-      `${path}: sensitive database copy retention attestation`,
-    );
-    assert.equal(
-      validateRestorationComponent(report.restoration!.originalMain, `${path}: restoration.originalMain`),
+      validateRestorationComponent(restoration.originalMain, `${path}: restoration.originalMain`),
       true,
       `${path}: original main database must be present`,
     );
-    validateRestorationComponent(report.restoration!.originalWal, `${path}: restoration.originalWal`);
-    validateRestorationComponent(report.restoration!.originalShm, `${path}: restoration.originalShm`);
-    validateRestorationComponent(report.restoration!.originalJournal, `${path}: restoration.originalJournal`);
-    validateSha256(report.restoration!.restoredMainSha256, `${path}: restored main SHA-256`);
-    assert.equal(
-      report.restoration!.restoredMainSha256,
-      report.restoration!.originalMain.sha256,
-      `${path}: restored main identity`,
-    );
+    validateRestorationComponent(restoration.originalWal, `${path}: restoration.originalWal`);
+    validateRestorationComponent(restoration.originalShm, `${path}: restoration.originalShm`);
+    validateRestorationComponent(restoration.originalJournal, `${path}: restoration.originalJournal`);
+    validateSha256(restoration.restoredMainSha256, `${path}: restored main SHA-256`);
+    assert.equal(restoration.restoredMainSha256, restoration.originalMain.sha256, `${path}: restored main identity`);
   }
   assert.equal(report.status, "ok", `${path}: status`);
   nonemptyString(report.configuration.calendarQueryStrategy, `${path}: Calendar query strategy`);

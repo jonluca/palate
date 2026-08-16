@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   ATTACHED_MICHELIN_INSERT_SELECT_SQL,
@@ -20,6 +20,7 @@ export const IMPORT_FAILURE_MESSAGE = "Injected Michelin import failure after re
 export { ATTACHED_MICHELIN_INSERT_SELECT_SQL, MICHELIN_DATASET_VERSION_KEY, NO_VALID_MICHELIN_ROWS_MESSAGE };
 
 const SIDECAR_SUFFIXES = ["", "-wal", "-shm", "-journal"] as const;
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
 
 export type MichelinImportStrategy = "currentJsOracle" | "attachInsertSelect";
 export type ImportFailurePoint = "afterRowsBeforeMetadata";
@@ -78,9 +79,9 @@ export interface ImportMeasurement {
 }
 
 export interface DestinationRows {
-  readonly restaurants: readonly Record<string, unknown>[];
-  readonly metadata: readonly Record<string, unknown>[];
-  readonly spatial: readonly Record<string, unknown>[];
+  readonly restaurants: readonly SQLiteRow[];
+  readonly metadata: readonly SQLiteRow[];
+  readonly spatial: readonly SQLiteRow[];
 }
 
 export interface DestinationDigest {
@@ -103,7 +104,7 @@ interface SourceRestaurantRow {
   readonly cuisine: string | null;
   readonly latest_distinction: string | null;
   readonly latest_year: number | null;
-  readonly has_green_star: number | string | Uint8Array | null;
+  readonly has_green_star: SQLOutputValue;
 }
 
 interface ImportedRestaurant {
@@ -120,6 +121,69 @@ interface ImportedRestaurant {
 
 interface CountRow {
   readonly count: number;
+}
+
+function isSQLiteString(value: SQLOutputValue): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue): value is number {
+  return typeof value === "number";
+}
+
+function isSQLiteNumberOrString(value: SQLOutputValue): value is number | string {
+  return isSQLiteNumber(value) || isSQLiteString(value);
+}
+
+function requiredString(value: SQLOutputValue, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function requiredNumber(value: SQLOutputValue, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function nullableNumber(value: SQLOutputValue, column: string): number | null {
+  return value === null ? null : requiredNumber(value, column);
+}
+
+function requiredNumberOrString(value: SQLOutputValue, column: string): number | string {
+  assert.ok(isSQLiteNumberOrString(value), `${column} must be a SQLite numeric or TEXT value`);
+  return value;
+}
+
+function nullableNumberOrString(value: SQLOutputValue, column: string): number | string | null {
+  return value === null ? null : requiredNumberOrString(value, column);
+}
+
+function assertDefined<T>(value: T | undefined): T {
+  assert.ok(value !== undefined, "Expected the query to return a row.");
+  return value;
+}
+
+function parseCountRow(row: SQLiteRow): CountRow {
+  return { count: requiredNumber(row.count, "count") };
+}
+
+function parseSourceRestaurantRow(row: SQLiteRow): SourceRestaurantRow {
+  return {
+    id: requiredNumberOrString(row.id, "restaurants.id"),
+    name: nullableString(row.name, "restaurants.name"),
+    latitude: nullableNumberOrString(row.latitude, "restaurants.latitude"),
+    longitude: nullableNumberOrString(row.longitude, "restaurants.longitude"),
+    address: nullableString(row.address, "restaurants.address"),
+    location: nullableString(row.location, "restaurants.location"),
+    cuisine: nullableString(row.cuisine, "restaurants.cuisine"),
+    latest_distinction: nullableString(row.latest_distinction, "restaurant_awards.latest_distinction"),
+    latest_year: nullableNumber(row.latest_year, "restaurant_awards.latest_year"),
+    has_green_star: row.has_green_star,
+  };
 }
 
 export interface ImportOptions {
@@ -387,9 +451,9 @@ export function runCurrentJsOracleImport(
     phases.sourceConnect = performance.now() - phaseStarted;
 
     phaseStarted = performance.now();
-    const countRow = source.prepare("SELECT COUNT(*) AS count FROM restaurants").get() as unknown as CountRow;
+    const countRow = parseCountRow(assertDefined(source.prepare("SELECT COUNT(*) AS count FROM restaurants").get()));
     sourceRestaurantRows = countRow.count;
-    sourceRows = source.prepare(CURRENT_MICHELIN_SOURCE_ROWS_SQL).all() as unknown as SourceRestaurantRow[];
+    sourceRows = source.prepare(CURRENT_MICHELIN_SOURCE_ROWS_SQL).all().map(parseSourceRestaurantRow);
     phases.sourceRead = performance.now() - phaseStarted;
 
     phaseStarted = performance.now();
@@ -500,8 +564,8 @@ export function runAttachInsertSelectImport(
     phases.sourceConnect = performance.now() - phaseStarted;
 
     phaseStarted = performance.now();
-    sourceRestaurantRows = (
-      destination.prepare("SELECT COUNT(*) AS count FROM michelin_source.restaurants").get() as unknown as CountRow
+    sourceRestaurantRows = parseCountRow(
+      assertDefined(destination.prepare("SELECT COUNT(*) AS count FROM michelin_source.restaurants").get()),
     ).count;
     phases.sourceRead = performance.now() - phaseStarted;
 
@@ -559,11 +623,8 @@ export function readDestinationRows(database: DatabaseSync): DestinationRows {
       latestAwardYear, award, datasetVersion
     FROM michelin_restaurants
     ORDER BY id COLLATE BINARY`)
-    .all() as Record<string, unknown>[];
-  const metadata = database.prepare("SELECT key, value FROM app_metadata ORDER BY key COLLATE BINARY").all() as Record<
-    string,
-    unknown
-  >[];
+    .all();
+  const metadata = database.prepare("SELECT key, value FROM app_metadata ORDER BY key COLLATE BINARY").all();
   const spatial = database
     .prepare(`SELECT
       spatial.restaurantRowId,
@@ -575,7 +636,7 @@ export function readDestinationRows(database: DatabaseSync): DestinationRows {
     FROM michelin_restaurant_spatial_index spatial
     LEFT JOIN michelin_restaurants restaurant ON restaurant.rowid = spatial.restaurantRowId
     ORDER BY spatial.restaurantRowId`)
-    .all() as Record<string, unknown>[];
+    .all();
   return { restaurants, metadata, spatial };
 }
 

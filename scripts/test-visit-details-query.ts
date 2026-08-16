@@ -2,30 +2,113 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   buildVisitsWithDetailsQuery,
   parseVisitDetailsRows,
   type VisitDetailsFilter,
   type VisitDetailsQueryRow,
 } from "../utils/db/visit-details-core.ts";
-import type { VisitWithDetails } from "../utils/db/types.ts";
+import type { VisitRecord, VisitWithDetails } from "../utils/db/types.ts";
 
-interface QueryPlanRow {
-  readonly detail: string;
-}
-
-interface LegacyVisitRow {
-  readonly id: string;
+interface LegacyVisitRow extends VisitRecord {
   readonly restaurantName: string | null;
   readonly suggestedRestaurantName: string | null;
   readonly suggestedRestaurantAward: string | null;
-  readonly [column: string]: unknown;
 }
 
 interface LegacyPreviewRow {
   readonly visitId: string;
   readonly uri: string;
+}
+
+interface LegacyWhere {
+  readonly clause: string;
+  readonly parameters: string[];
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue | undefined, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function requiredNumber(value: SQLOutputValue | undefined, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function nullableNumber(value: SQLOutputValue | undefined, column: string): number | null {
+  return value === null ? null : requiredNumber(value, column);
+}
+
+function parseVisitRecord(row: SQLiteRow): VisitRecord {
+  const status = requiredString(row.status, "visits.status");
+  assert.ok(
+    status === "pending" || status === "confirmed" || status === "rejected",
+    "visits.status must be a supported visit status",
+  );
+  const calendarEventIsAllDay = nullableNumber(row.calendarEventIsAllDay, "visits.calendarEventIsAllDay");
+  return {
+    id: requiredString(row.id, "visits.id"),
+    restaurantId: nullableString(row.restaurantId, "visits.restaurantId"),
+    suggestedRestaurantId: nullableString(row.suggestedRestaurantId, "visits.suggestedRestaurantId"),
+    status,
+    startTime: requiredNumber(row.startTime, "visits.startTime"),
+    endTime: requiredNumber(row.endTime, "visits.endTime"),
+    centerLat: requiredNumber(row.centerLat, "visits.centerLat"),
+    centerLon: requiredNumber(row.centerLon, "visits.centerLon"),
+    photoCount: requiredNumber(row.photoCount, "visits.photoCount"),
+    foodProbable: requiredNumber(row.foodProbable, "visits.foodProbable") !== 0,
+    calendarEventId: nullableString(row.calendarEventId, "visits.calendarEventId"),
+    calendarEventTitle: nullableString(row.calendarEventTitle, "visits.calendarEventTitle"),
+    calendarEventLocation: nullableString(row.calendarEventLocation, "visits.calendarEventLocation"),
+    calendarEventIsAllDay: calendarEventIsAllDay === null ? null : calendarEventIsAllDay !== 0,
+    exportedToCalendarId: nullableString(row.exportedToCalendarId, "visits.exportedToCalendarId"),
+    notes: nullableString(row.notes, "visits.notes"),
+    updatedAt: nullableNumber(row.updatedAt, "visits.updatedAt"),
+    awardAtVisit: nullableString(row.awardAtVisit, "visits.awardAtVisit"),
+  };
+}
+
+function parseLegacyVisitRow(row: SQLiteRow): LegacyVisitRow {
+  return {
+    ...parseVisitRecord(row),
+    restaurantName: nullableString(row.restaurantName, "restaurantName"),
+    suggestedRestaurantName: nullableString(row.suggestedRestaurantName, "suggestedRestaurantName"),
+    suggestedRestaurantAward: nullableString(row.suggestedRestaurantAward, "suggestedRestaurantAward"),
+  };
+}
+
+function parseVisitDetailsQueryRow(row: SQLiteRow): VisitDetailsQueryRow {
+  return {
+    ...parseLegacyVisitRow(row),
+    previewPhotosJson: nullableString(row.previewPhotosJson, "previewPhotosJson"),
+  };
+}
+
+function parseLegacyPreviewRow(row: SQLiteRow): LegacyPreviewRow {
+  return {
+    visitId: requiredString(row.visitId, "photos.visitId"),
+    uri: requiredString(row.uri, "photos.uri"),
+  };
+}
+
+function parseQueryPlanDetail(row: SQLiteRow): string {
+  return requiredString(row.detail, "query plan.detail");
 }
 
 const database = new DatabaseSync(":memory:");
@@ -255,7 +338,7 @@ function seedEdgeCases(): void {
   }
 }
 
-function legacyWhere(filter?: VisitDetailsFilter): { readonly clause: string; readonly parameters: string[] } {
+function legacyWhere(filter?: VisitDetailsFilter): LegacyWhere {
   if (filter === "food") {
     return { clause: "WHERE c.foodProbable = 1", parameters: [] };
   }
@@ -279,7 +362,8 @@ function executeLegacy(filter?: VisitDetailsFilter): VisitWithDetails[] {
        ${selection.clause}
        ORDER BY c.startTime DESC`,
     )
-    .all(...selection.parameters) as unknown as LegacyVisitRow[];
+    .all(...selection.parameters)
+    .map(parseLegacyVisitRow);
 
   if (visits.length === 0) {
     return [];
@@ -305,7 +389,8 @@ function executeLegacy(filter?: VisitDetailsFilter): VisitWithDetails[] {
        WHERE rn <= 3
        ORDER BY rn ASC`,
     )
-    .all(...visitIds) as unknown as LegacyPreviewRow[];
+    .all(...visitIds)
+    .map(parseLegacyPreviewRow);
 
   const previewsByVisit = new Map<string, string[]>();
   for (const preview of previews) {
@@ -320,12 +405,15 @@ function executeLegacy(filter?: VisitDetailsFilter): VisitWithDetails[] {
   return visits.map((visit) => ({
     ...visit,
     previewPhotos: previewsByVisit.get(visit.id) ?? [],
-  })) as VisitWithDetails[];
+  }));
 }
 
 function executeCandidate(filter?: VisitDetailsFilter): VisitWithDetails[] {
   const query = buildVisitsWithDetailsQuery(filter);
-  const rows = database.prepare(query.sql).all(...query.parameters) as unknown as VisitDetailsQueryRow[];
+  const rows = database
+    .prepare(query.sql)
+    .all(...query.parameters)
+    .map(parseVisitDetailsQueryRow);
   return parseVisitDetailsRows(rows);
 }
 
@@ -405,10 +493,11 @@ try {
 
   const plan = database
     .prepare(`EXPLAIN QUERY PLAN ${buildVisitsWithDetailsQuery().sql}`)
-    .all() as unknown as QueryPlanRow[];
+    .all()
+    .map(parseQueryPlanDetail);
   assert.ok(
-    plan.some((row) => row.detail.includes("idx_photos_visit_preview")),
-    `expected preview lookup index in plan:\n${plan.map((row) => row.detail).join("\n")}`,
+    plan.some((detail) => detail.includes("idx_photos_visit_preview")),
+    `expected preview lookup index in plan:\n${plan.join("\n")}`,
   );
 
   console.log(

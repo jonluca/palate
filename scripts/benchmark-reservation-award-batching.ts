@@ -6,11 +6,14 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   resolveReservationAwardsInBatches,
   type ReservationAwardLookupInput,
 } from "../utils/reservation-award-batch-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 process.env.TZ = "America/Los_Angeles";
 
@@ -201,6 +204,7 @@ function queryAwards(
   const placeholders = databaseIds.map(() => "?").join(", ");
   metrics.sqliteQueries += 1;
   metrics.boundRestaurantIds += databaseIds.length;
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const rows = database
     .prepare(
       `SELECT restaurant_id, year, distinction, green_star
@@ -208,12 +212,14 @@ function queryAwards(
        WHERE restaurant_id IN (${placeholders})
        ORDER BY restaurant_id ASC, year ASC`,
     )
-    .all(...databaseIds) as Array<{
-    restaurant_id: number;
-    year: number;
-    distinction: string | null;
-    green_star: number | null;
-  }>;
+    .all(...databaseIds) as Array<
+    BenchmarkSQLiteRow<{
+      restaurant_id: number;
+      year: number;
+      distinction: string | null;
+      green_star: number | null;
+    }>
+  >;
   metrics.returnedRows += rows.length;
   const byRestaurant = new Map<number, typeof rows>();
   for (const row of rows) {
@@ -343,10 +349,10 @@ async function measureScale(path: string, inputCount: number, scaleIndex: number
     }
   }
 
-  const samples: Record<Strategy, Execution[]> = {
-    "legacy-per-match": [],
-    "batched-per-local-year": [],
-  };
+  const samples = {
+    "legacy-per-match": new Array<Execution>(),
+    "batched-per-local-year": new Array<Execution>(),
+  } satisfies Record<Strategy, Execution[]>;
   const pairOrders: Strategy[][] = [];
   for (let pair = 0; pair < configuration.samples; pair++) {
     const order: Strategy[] =

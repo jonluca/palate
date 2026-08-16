@@ -107,6 +107,19 @@ const measurement = (
       preheat: { ...preheatMetrics },
     };
   };
+  const basePhaseMarkers = {
+    leadRequestStartedMilliseconds,
+    leadTerminalMilliseconds,
+    leadValidationCompletedMilliseconds: leadTerminalMilliseconds + 0.1,
+    metricsAfterLeadCapturedMilliseconds: leadTerminalMilliseconds + 0.2,
+    targetRequestStartedMilliseconds,
+    targetTerminalMilliseconds: endToEnd,
+    targetValidationCompletedMilliseconds: endToEnd + 0.1,
+    metricsAfterTargetCapturedMilliseconds: endToEnd + 0.2,
+  };
+  const phaseMarkers =
+    arm === "windowedPreheat" ? { ...basePhaseMarkers, preheatSubmittedMilliseconds: 0.1 } : basePhaseMarkers;
+
   return {
     arm,
     imageCount: 9,
@@ -126,17 +139,7 @@ const measurement = (
     },
     continuousTiming: {
       elapsedThroughTargetTerminalMilliseconds: endToEnd,
-      phaseMarkers: {
-        ...(arm === "windowedPreheat" ? { preheatSubmittedMilliseconds: 0.1 } : {}),
-        leadRequestStartedMilliseconds,
-        leadTerminalMilliseconds,
-        leadValidationCompletedMilliseconds: leadTerminalMilliseconds + 0.1,
-        metricsAfterLeadCapturedMilliseconds: leadTerminalMilliseconds + 0.2,
-        targetRequestStartedMilliseconds,
-        targetTerminalMilliseconds: endToEnd,
-        targetValidationCompletedMilliseconds: endToEnd + 0.1,
-        metricsAfterTargetCapturedMilliseconds: endToEnd + 0.2,
-      },
+      phaseMarkers,
     },
     metricsAfterLead: storeMetrics("lead"),
     metricsAfterTarget: storeMetrics("target"),

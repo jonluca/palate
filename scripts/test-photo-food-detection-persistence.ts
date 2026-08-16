@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   buildLabeledPhotoFoodDetectionStatement,
   buildSimplePhotoFoodDetectionStatement,
@@ -20,6 +20,44 @@ interface PhotoRow {
   readonly foodConfidence: number | null;
   readonly allLabels: string | null;
   readonly payload: string;
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue | undefined, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function nullableNumber(value: SQLOutputValue | undefined, column: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function parsePhotoRow(row: SQLiteRow): PhotoRow {
+  return {
+    id: requiredString(row.id, "photos.id"),
+    foodDetected: nullableNumber(row.foodDetected, "photos.foodDetected"),
+    foodLabels: nullableString(row.foodLabels, "photos.foodLabels"),
+    foodConfidence: nullableNumber(row.foodConfidence, "photos.foodConfidence"),
+    allLabels: nullableString(row.allLabels, "photos.allLabels"),
+    payload: requiredString(row.payload, "photos.payload"),
+  };
 }
 
 function createDatabase(): DatabaseSync {
@@ -220,7 +258,7 @@ function readRows(database: DatabaseSync): PhotoRow[] {
        FROM photos ORDER BY id`,
     )
     .all()
-    .map((row) => ({ ...row })) as unknown as PhotoRow[];
+    .map(parsePhotoRow);
 }
 
 function rowsChecksum(rows: readonly PhotoRow[]): string {

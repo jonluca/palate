@@ -64,18 +64,19 @@ function cleanupStaleExportParts(exportDir: Directory): void {
 }
 
 function downloadWebExport(data: string, format: ExportFormat): ExportShareResult {
-  if (typeof document === "undefined") {
+  const domDocument = globalThis.document;
+  if (!domDocument) {
     throw new Error("Browser downloads require a DOM document.");
   }
   const timestamp = formatTimestampForFilename(new Date());
   const fileName = `palate-export-${timestamp}.${format}`;
   const mimeType = format === "json" ? "application/json" : "text/csv";
   const objectUrl = URL.createObjectURL(new Blob([data], { type: `${mimeType};charset=utf-8` }));
-  const link = document.createElement("a");
+  const link = domDocument.createElement("a");
   link.href = objectUrl;
   link.download = fileName;
   link.style.display = "none";
-  document.body.appendChild(link);
+  domDocument.body.appendChild(link);
   try {
     link.click();
   } finally {

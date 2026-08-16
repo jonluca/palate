@@ -22,8 +22,13 @@ export interface MapKitSearchResult {
   timeZone: string | null;
 }
 
+interface NativeMapKitSearchModule {
+  searchNearbyRestaurants(latitude: number, longitude: number, radiusMeters: number): Promise<MapKitSearchResult[]>;
+  searchByText(query: string, latitude: number, longitude: number, radiusMeters: number): Promise<MapKitSearchResult[]>;
+}
+
 // Only available on iOS
-const MapKitSearchModule = Platform.OS === "ios" ? requireNativeModule("MapKitSearch") : null;
+const MapKitSearchModule = Platform.OS === "ios" ? requireNativeModule<NativeMapKitSearchModule>("MapKitSearch") : null;
 
 // ============================================================================
 // CACHING LAYER
@@ -138,9 +143,7 @@ export async function searchNearbyRestaurants(
   }
 
   // Create and cache the promise
-  const promise = MapKitSearchModule.searchNearbyRestaurants(latitude, longitude, radiusMeters) as Promise<
-    MapKitSearchResult[]
-  >;
+  const promise = MapKitSearchModule.searchNearbyRestaurants(latitude, longitude, radiusMeters);
   cacheSearch(nearbyCache, key, promise);
 
   return promise;
@@ -172,9 +175,7 @@ export async function searchByText(
     return cached;
   }
 
-  const promise = MapKitSearchModule.searchByText(trimmedQuery, latitude, longitude, radiusMeters) as Promise<
-    MapKitSearchResult[]
-  >;
+  const promise = MapKitSearchModule.searchByText(trimmedQuery, latitude, longitude, radiusMeters);
   cacheSearch(textSearchCache, key, promise);
 
   return promise;

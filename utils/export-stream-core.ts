@@ -13,7 +13,7 @@ export class ExportStreamStateError extends Error {
   }
 }
 
-function stringifyJson(value: unknown): string {
+function stringifyJson<Value>(value: Value): string {
   const serialized = JSON.stringify(value, null, 2);
   if (serialized === undefined) {
     throw new TypeError("Export stream values must be JSON-serializable.");
@@ -31,10 +31,10 @@ function indentContinuationLines(value: string, spaces: number): string {
   return value.replaceAll("\n", `\n${indentation}`);
 }
 
-function serializeVisitPrefix(visit: ExportVisitHeader): string {
+function serializeVisitPrefix(visit: ExportVisitHeader & Partial<Pick<ExportVisit, "photos">>): string {
   // Remove a runtime photos property as well as the compile-time one, then append
   // it last so the streamed property order matches the canonical export shape.
-  const { photos: _ignoredPhotos, ...visitFields } = visit as ExportVisit;
+  const { photos: _ignoredPhotos, ...visitFields } = visit;
   const serialized = stringifyJson({ ...visitFields, photos: [] });
   const expectedSuffix = '  "photos": []\n}';
   if (!serialized.endsWith(expectedSuffix)) {
@@ -58,7 +58,7 @@ export class ExportJsonStreamWriter {
   private hasPhotosInCurrentVisit = false;
 
   constructor(sink: TextFragmentSink, document: ExportStreamDocument) {
-    if (typeof sink !== "function") {
+    if (!isTextFragmentSink(sink)) {
       throw new TypeError("Export stream sink must be a function.");
     }
     this.sink = sink;
@@ -144,6 +144,10 @@ export class ExportJsonStreamWriter {
   }
 }
 
+function isTextFragmentSink(sink: TextFragmentSink): sink is TextFragmentSink {
+  return typeof sink === "function";
+}
+
 /**
  * Buffers complete text fragments and writes UTF-8 chunks synchronously.
  * Normal fragments never push the buffer past `maxBufferedCodeUnits`. A single
@@ -162,7 +166,7 @@ export class BoundedUtf8BufferingSink {
   private closed = false;
 
   constructor(sink: Utf8ChunkSink, maxBufferedCodeUnits: number = 64 * 1024) {
-    if (typeof sink !== "function") {
+    if (!isUtf8ChunkSink(sink)) {
       throw new TypeError("UTF-8 chunk sink must be a function.");
     }
     if (!Number.isSafeInteger(maxBufferedCodeUnits) || maxBufferedCodeUnits <= 0) {
@@ -210,7 +214,7 @@ export class BoundedUtf8BufferingSink {
     if (this.closed) {
       throw new ExportStreamStateError("Cannot write to a closed UTF-8 buffer.");
     }
-    if (typeof fragment !== "string") {
+    if (!isTextFragment(fragment)) {
       throw new TypeError("UTF-8 buffer fragments must be strings.");
     }
     if (fragment.length === 0) {
@@ -235,4 +239,12 @@ export class BoundedUtf8BufferingSink {
     this.codeUnits += fragment.length;
     this.maximumCodeUnits = Math.max(this.maximumCodeUnits, this.codeUnits);
   }
+}
+
+function isUtf8ChunkSink(sink: Utf8ChunkSink): sink is Utf8ChunkSink {
+  return typeof sink === "function";
+}
+
+function isTextFragment(fragment: string): fragment is string {
+  return typeof fragment === "string";
 }

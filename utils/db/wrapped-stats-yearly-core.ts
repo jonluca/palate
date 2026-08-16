@@ -71,7 +71,7 @@ function parseYear(value: WrappedStatsYearlyQueryRow["year"]): number {
   if (value === null) {
     throw new TypeError("Wrapped Stats yearly query returned a null year.");
   }
-  if (typeof value === "string" && !/^-?\d+$/.test(value)) {
+  if (isWrappedStatsYearString(value) && !/^-?\d+$/.test(value)) {
     throw new TypeError(`Wrapped Stats yearly query returned an invalid year: ${value}`);
   }
   const year = Number(value);
@@ -79,6 +79,12 @@ function parseYear(value: WrappedStatsYearlyQueryRow["year"]): number {
     throw new TypeError(`Wrapped Stats yearly query returned an invalid year: ${String(value)}`);
   }
   return year;
+}
+
+function isWrappedStatsYearString(
+  value: WrappedStatsYearlyQueryRow["year"],
+): value is Extract<WrappedStatsYearlyQueryRow["year"], string> {
+  return typeof value === "string";
 }
 
 export function parseWrappedStatsYearlyRows(rows: readonly WrappedStatsYearlyQueryRow[]): WrappedStatsYearlyStat[] {

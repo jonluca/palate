@@ -8,6 +8,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  parseJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from "../utils/runtime-json.ts";
+
 type Strategy = "legacy" | "incremental";
 
 interface TestReport {
@@ -89,25 +98,25 @@ interface FixtureSet {
   };
 }
 
+interface ScanStrategySummary {
+  sampleCount: number;
+  runIds: string[];
+  scanImplementation: string;
+  scanPreparationCompleteSeconds: number[];
+  medianScanPreparationCompleteSeconds: number;
+  scanBeginSeconds?: number[];
+}
+
+interface PhotoScanSummaryValidation {
+  [attestation: string]: boolean;
+}
+
 interface SuccessSummary {
   schemaVersion: number;
   status: string;
-  validation: Record<string, boolean>;
-  legacy: {
-    sampleCount: number;
-    runIds: string[];
-    scanImplementation: string;
-    scanPreparationCompleteSeconds: number[];
-    medianScanPreparationCompleteSeconds: number;
-    scanBeginSeconds?: number[];
-  };
-  incremental: {
-    sampleCount: number;
-    runIds: string[];
-    scanImplementation: string;
-    scanPreparationCompleteSeconds: number[];
-    medianScanPreparationCompleteSeconds: number;
-  };
+  validation: PhotoScanSummaryValidation;
+  legacy: ScanStrategySummary;
+  incremental: ScanStrategySummary;
   comparison: {
     interpretation: string;
     medianScanPreparationCompleteSecondsDelta: number;
@@ -256,7 +265,7 @@ function expectFailure(caseName: string, mutate: (fixtureSet: FixtureSet) => voi
   assert.match(result.stderr, new RegExp(expectedMessage), `${caseName} failure message`);
 }
 
-function expectPathShapeFailure(
+function expectPathGroupFailure(
   caseName: string,
   mutate: (fixtureSet: FixtureSet) => void,
   expectedMessage: string,
@@ -269,12 +278,114 @@ function expectPathShapeFailure(
   assert.match(result.stderr, new RegExp(expectedMessage), `${caseName} failure message`);
 }
 
+function isJsonBoolean(value: JsonValue | undefined): value is boolean {
+  return value === true || value === false;
+}
+
+function requiredJsonObject(value: JsonValue | undefined, label: string): JsonObject {
+  if (!isJsonObject(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function requiredJsonNumber(value: JsonValue | undefined, label: string): number {
+  if (!isJsonNumber(value)) {
+    throw new TypeError(`${label} must be a number.`);
+  }
+  return value;
+}
+
+function requiredJsonString(value: JsonValue | undefined, label: string): string {
+  if (!isJsonString(value)) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requiredJsonBoolean(value: JsonValue | undefined, label: string): boolean {
+  if (!isJsonBoolean(value)) {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+  return value;
+}
+
+function requiredJsonNumberArray(value: JsonValue | undefined, label: string): number[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => requiredJsonNumber(entry, `${label}[${index}]`));
+}
+
+function requiredJsonStringArray(value: JsonValue | undefined, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => requiredJsonString(entry, `${label}[${index}]`));
+}
+
+function parseValidation(value: JsonValue | undefined): PhotoScanSummaryValidation {
+  const object = requiredJsonObject(value, "summary.validation");
+  const validation: PhotoScanSummaryValidation = {};
+  for (const [key, entry] of Object.entries(object)) {
+    validation[key] = requiredJsonBoolean(entry, `summary.validation.${key}`);
+  }
+  return validation;
+}
+
+function parseScanStrategySummary(value: JsonValue | undefined, label: string): ScanStrategySummary {
+  const object = requiredJsonObject(value, label);
+  const summary: ScanStrategySummary = {
+    sampleCount: requiredJsonNumber(object.sampleCount, `${label}.sampleCount`),
+    runIds: requiredJsonStringArray(object.runIds, `${label}.runIds`),
+    scanImplementation: requiredJsonString(object.scanImplementation, `${label}.scanImplementation`),
+    scanPreparationCompleteSeconds: requiredJsonNumberArray(
+      object.scanPreparationCompleteSeconds,
+      `${label}.scanPreparationCompleteSeconds`,
+    ),
+    medianScanPreparationCompleteSeconds: requiredJsonNumber(
+      object.medianScanPreparationCompleteSeconds,
+      `${label}.medianScanPreparationCompleteSeconds`,
+    ),
+  };
+  if (object.scanBeginSeconds !== undefined) {
+    summary.scanBeginSeconds = requiredJsonNumberArray(object.scanBeginSeconds, `${label}.scanBeginSeconds`);
+  }
+  return summary;
+}
+
+function parseSuccessSummary(source: string): SuccessSummary {
+  const object = requiredJsonObject(parseJsonValue(source), "summary");
+  const comparison = requiredJsonObject(object.comparison, "summary.comparison");
+  const summary: SuccessSummary = {
+    schemaVersion: requiredJsonNumber(object.schemaVersion, "summary.schemaVersion"),
+    status: requiredJsonString(object.status, "summary.status"),
+    validation: parseValidation(object.validation),
+    legacy: parseScanStrategySummary(object.legacy, "summary.legacy"),
+    incremental: parseScanStrategySummary(object.incremental, "summary.incremental"),
+    comparison: {
+      interpretation: requiredJsonString(comparison.interpretation, "summary.comparison.interpretation"),
+      medianScanPreparationCompleteSecondsDelta: requiredJsonNumber(
+        comparison.medianScanPreparationCompleteSecondsDelta,
+        "summary.comparison.medianScanPreparationCompleteSecondsDelta",
+      ),
+    },
+  };
+  if (comparison.medianScanBeginSecondsDelta !== undefined) {
+    summary.comparison.medianScanBeginSecondsDelta = requiredJsonNumber(
+      comparison.medianScanBeginSecondsDelta,
+      "summary.comparison.medianScanBeginSecondsDelta",
+    );
+  }
+  return summary;
+}
+
 try {
   const success = createFixtureSet("success");
   writeFixtureSet(success);
   const successResult = execute(success);
   assert.equal(successResult.status, 0, successResult.stderr);
-  const summary = JSON.parse(readFileSync(success.paths.output, "utf8")) as SuccessSummary;
+  const summary = parseSuccessSummary(readFileSync(success.paths.output, "utf8"));
   assert.equal(summary.schemaVersion, 3);
   assert.equal(summary.status, "ok");
   assert.equal(summary.legacy.sampleCount, 2);
@@ -307,7 +418,7 @@ try {
   writeFixtureSet(schema6Success);
   const schema6SuccessResult = execute(schema6Success);
   assert.equal(schema6SuccessResult.status, 0, schema6SuccessResult.stderr);
-  const schema6Summary = JSON.parse(readFileSync(schema6Success.paths.output, "utf8")) as SuccessSummary;
+  const schema6Summary = parseSuccessSummary(readFileSync(schema6Success.paths.output, "utf8"));
   assert.equal(schema6Summary.status, "ok");
   assert.equal(schema6Summary.validation.everySchema6RunExactRestorationAttested, true);
 
@@ -322,7 +433,9 @@ try {
     "schema6-false-restoration",
     ({ reports }) => {
       attestSchema6Restoration(reports.incrementalB);
-      reports.incrementalB.restoration!.exactMainAndSidecarSetRestored = false;
+      const restoration = reports.incrementalB.restoration;
+      assert.ok(restoration, "schema-6 fixture restoration");
+      restoration.exactMainAndSidecarSetRestored = false;
     },
     "exact database restoration",
   );
@@ -370,7 +483,7 @@ try {
     },
     "A/B PhotoKit count mismatch",
   );
-  expectPathShapeFailure(
+  expectPathGroupFailure(
     "single-sample-groups",
     ({ paths }) => {
       paths.legacy = paths.legacy.slice(0, 1);
@@ -378,7 +491,7 @@ try {
     },
     "at least two measured reports",
   );
-  expectPathShapeFailure(
+  expectPathGroupFailure(
     "unequal-sample-groups",
     ({ paths }) => {
       paths.incremental = paths.incremental.slice(0, 1);
@@ -446,7 +559,9 @@ try {
       for (const report of Object.values(reports)) {
         attestSchema6Restoration(report);
       }
-      reports.incrementalB.restoration!.originalShm.sha256 = "f".repeat(64);
+      const restoration = reports.incrementalB.restoration;
+      assert.ok(restoration, "schema-6 fixture restoration");
+      restoration.originalShm.sha256 = "f".repeat(64);
     },
     "A/B restored original file-set mismatch",
   );

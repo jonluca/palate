@@ -64,7 +64,7 @@ export function PhotoGalleryModal({ visible, photos, currentIndex, onIndexChange
   const insets = useSafeAreaInsets();
 
   const currentPhoto = photos[currentIndex];
-  const foodLabels = currentPhoto?.foodLabels as FoodLabel[] | undefined;
+  const foodLabels = currentPhoto?.foodLabels ?? undefined;
   const isVideo = currentPhoto?.mediaType === "video";
 
   const renderItem = useCallback((info: RenderItemInfo<MediaWithLabels>) => {

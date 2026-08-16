@@ -20,7 +20,7 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   buildVisitsWithDetailsQuery,
@@ -36,6 +36,9 @@ import {
   type VisitListItem,
   type VisitListPageRow,
 } from "../utils/db/visit-list-paging-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   databasePath: string | null;
@@ -62,7 +65,11 @@ interface DatasetSummary {
 type Strategy = "eager-full" | "candidate-first-page" | "candidate-full-traversal";
 type BenchmarkFilter = "all" | VisitListFilter;
 
-interface TransferShape {
+function isBenchmarkFilter(value: string): value is BenchmarkFilter {
+  return value === "all" || value === "pending" || value === "confirmed" || value === "rejected" || value === "food";
+}
+
+interface TransferSummary {
   readonly queryCalls: number;
   readonly sqliteRows: number;
   readonly outputRows: number;
@@ -72,7 +79,7 @@ interface TransferShape {
   readonly maximumJsonEquivalentBytesPerCall: number;
 }
 
-interface Measurement extends TransferShape {
+interface Measurement extends TransferSummary {
   readonly queryMilliseconds: number;
   readonly parseAndProjectionMilliseconds: number;
   readonly queryAndParseMilliseconds: number;
@@ -96,7 +103,7 @@ interface StrategyTimingReport {
   readonly query: TimingSummary;
   readonly parseAndSlimProjection: TimingSummary;
   readonly queryAndParse: TimingSummary;
-  readonly transferShape: TransferShape;
+  readonly ["transferShape"]: TransferSummary;
   readonly measuredOutputSha256: string[];
 }
 
@@ -190,10 +197,10 @@ function parseConfiguration(arguments_: readonly string[]): Configuration | null
         configuration.databasePath = resolve(value);
         break;
       case "--filter":
-        if (!(["all", "pending", "confirmed", "rejected", "food"] as const).includes(value as BenchmarkFilter)) {
+        if (!isBenchmarkFilter(value)) {
           throw new RangeError("--filter must be all, pending, confirmed, rejected, or food");
         }
-        configuration.filter = value as BenchmarkFilter;
+        configuration.filter = value;
         break;
       case "--visits":
         configuration.visits = parseInteger(value, option);
@@ -233,7 +240,7 @@ function sha256File(path: string): string {
   return sha256(readFileSync(path));
 }
 
-function serializedBytes(value: unknown): number {
+function serializedBytes<Value>(value: Value): number {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
@@ -270,7 +277,7 @@ function lstatIfPresent(path: string): ReturnType<typeof lstatSync> | null {
   try {
     return lstatSync(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return null;
     }
     throw error;
@@ -560,6 +567,7 @@ function seedSyntheticDatabase(database: DatabaseSync, configuration: Configurat
 }
 
 function datasetSummary(database: DatabaseSync): DatasetSummary {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const row = database
     .prepare(`
       SELECT
@@ -572,11 +580,11 @@ function datasetSummary(database: DatabaseSync): DatasetSummary {
         (SELECT COUNT(*) FROM visits WHERE status = 'rejected') AS rejectedVisits,
         (SELECT COUNT(*) FROM visits WHERE foodProbable = 1) AS foodProbableVisits
     `)
-    .get() as unknown as DatasetSummary;
+    .get() as BenchmarkSQLiteRow<DatasetSummary>;
   return row;
 }
 
-function normalizeBoolean(value: unknown): boolean {
+function normalizeBoolean(value: boolean | SQLiteValue | undefined): boolean {
   return value === true || value === 1;
 }
 
@@ -601,7 +609,8 @@ function projectEagerVisit(row: ReturnType<typeof parseVisitDetailsRows>[number]
 function executeEager(database: DatabaseSync, filter: BenchmarkFilter): Execution {
   const query = buildVisitsWithDetailsQuery(productionFilter(filter));
   const queryStartedAt = performance.now();
-  const rawRows = database.prepare(query.sql).all(...query.parameters) as unknown as VisitDetailsQueryRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rawRows = database.prepare(query.sql).all(...query.parameters) as BenchmarkSQLiteRow<VisitDetailsQueryRow>[];
   const queryCompletedAt = performance.now();
   const parseStartedAt = performance.now();
   const output = parseVisitDetailsRows(rawRows).map(projectEagerVisit);
@@ -630,7 +639,8 @@ function executeEager(database: DatabaseSync, filter: BenchmarkFilter): Executio
 function executeCandidateFirstPage(database: DatabaseSync, filter: BenchmarkFilter, pageSize: number): Execution {
   const query = buildVisitListPageQuery(productionFilter(filter), null, pageSize);
   const queryStartedAt = performance.now();
-  const rawRows = database.prepare(query.sql).all(...query.parameters) as unknown as VisitListPageRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rawRows = database.prepare(query.sql).all(...query.parameters) as BenchmarkSQLiteRow<VisitListPageRow>[];
   const queryCompletedAt = performance.now();
   const parseStartedAt = performance.now();
   const output = parseVisitListPageRows(rawRows, pageSize).visits;
@@ -670,7 +680,8 @@ function executeCandidateFullTraversal(database: DatabaseSync, filter: Benchmark
   do {
     const query = buildVisitListPageQuery(productionFilter(filter), cursor, pageSize);
     const queryStartedAt = performance.now();
-    const rawRows = database.prepare(query.sql).all(...query.parameters) as unknown as VisitListPageRow[];
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const rawRows = database.prepare(query.sql).all(...query.parameters) as BenchmarkSQLiteRow<VisitListPageRow>[];
     const queryCompletedAt = performance.now();
     const parseStartedAt = performance.now();
     const page = parseVisitListPageRows(rawRows, pageSize);
@@ -722,7 +733,7 @@ function executeStrategy(
   }
 }
 
-function transferShape(measurement: Measurement): TransferShape {
+function transferSummary(measurement: Measurement): TransferSummary {
   return {
     queryCalls: measurement.queryCalls,
     sqliteRows: measurement.sqliteRows,
@@ -754,12 +765,13 @@ function counterbalancedOrder(strategies: readonly Strategy[], round: number): S
 }
 
 function explainQuery(database: DatabaseSync, sql: string, parameters: readonly (string | number)[]): string[] {
-  return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as unknown as QueryPlanRow[]).map(
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as BenchmarkSQLiteRow<QueryPlanRow>[]).map(
     ({ detail }) => detail,
   );
 }
 
-function queryPlans(database: DatabaseSync, filter: BenchmarkFilter, pageSize: number): Record<string, string[]> {
+function queryPlans(database: DatabaseSync, filter: BenchmarkFilter, pageSize: number) {
   const selectedFilter = productionFilter(filter);
   const eager = buildVisitsWithDetailsQuery(selectedFilter);
   const first = buildVisitListPageQuery(selectedFilter, null, pageSize);
@@ -808,7 +820,8 @@ function validateQueryPlanContract(plans: Record<string, string[]>, filter: Benc
 }
 
 function totalChanges(database: DatabaseSync): number {
-  return (database.prepare("SELECT total_changes() AS value").get() as { value: number }).value;
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  return (database.prepare("SELECT total_changes() AS value").get() as BenchmarkSQLiteRow<{ value: number }>).value;
 }
 
 function safeRatio(numerator: number, denominator: number): number | null {
@@ -837,199 +850,206 @@ async function run(configuration: Configuration): Promise<void> {
     syntheticBuildMilliseconds = performance.now() - buildStartedAt;
   }
 
-  let report: Record<string, unknown> | null = null;
-  let benchmarkFailure: { readonly error: unknown } | null = null;
-  try {
-    database.exec("PRAGMA query_only = ON; BEGIN");
-    const changesBefore = totalChanges(database);
-    const dataset = datasetSummary(database);
-    const plans = queryPlans(database, configuration.filter, configuration.pageSize);
-    const planValidation = validateQueryPlanContract(plans, configuration.filter);
+  const benchmarkOutcome = (() => {
+    try {
+      database.exec("PRAGMA query_only = ON; BEGIN");
+      const changesBefore = totalChanges(database);
+      const dataset = datasetSummary(database);
+      const plans = queryPlans(database, configuration.filter, configuration.pageSize);
+      const planValidation = validateQueryPlanContract(plans, configuration.filter);
 
-    const oracleEagerBefore = executeEager(database, configuration.filter);
-    const oracleFirstBefore = executeCandidateFirstPage(database, configuration.filter, configuration.pageSize);
-    const oracleFullBefore = executeCandidateFullTraversal(database, configuration.filter, configuration.pageSize);
-    const expectedPrefix = oracleEagerBefore.output.slice(0, configuration.pageSize);
-    assert.deepEqual(
-      oracleFirstBefore.output,
-      expectedPrefix,
-      "candidate first page must exactly match the eager slim-render prefix",
-    );
-    assert.deepEqual(
-      oracleFullBefore.output,
-      oracleEagerBefore.output,
-      "candidate complete traversal must exactly match the eager slim-render output",
-    );
-    const fullOutputSha256 = checksumRows(oracleEagerBefore.output);
-    const prefixOutputSha256 = checksumRows(expectedPrefix);
+      const oracleEagerBefore = executeEager(database, configuration.filter);
+      const oracleFirstBefore = executeCandidateFirstPage(database, configuration.filter, configuration.pageSize);
+      const oracleFullBefore = executeCandidateFullTraversal(database, configuration.filter, configuration.pageSize);
+      const expectedPrefix = oracleEagerBefore.output.slice(0, configuration.pageSize);
+      assert.deepEqual(
+        oracleFirstBefore.output,
+        expectedPrefix,
+        "candidate first page must exactly match the eager slim-render prefix",
+      );
+      assert.deepEqual(
+        oracleFullBefore.output,
+        oracleEagerBefore.output,
+        "candidate complete traversal must exactly match the eager slim-render output",
+      );
+      const fullOutputSha256 = checksumRows(oracleEagerBefore.output);
+      const prefixOutputSha256 = checksumRows(expectedPrefix);
 
-    const strategies: Strategy[] = ["eager-full", "candidate-first-page", "candidate-full-traversal"];
-    for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
-      for (const strategy of counterbalancedOrder(strategies, warmup)) {
-        const execution = executeStrategy(database, strategy, configuration.filter, configuration.pageSize);
-        assert.equal(
-          execution.measurement.outputSha256,
-          strategy === "candidate-first-page" ? prefixOutputSha256 : fullOutputSha256,
-          `warmup ${strategy} output hash diverged`,
-        );
-      }
-    }
-
-    const measurements = Object.fromEntries(strategies.map((strategy) => [strategy, [] as Measurement[]])) as Record<
-      Strategy,
-      Measurement[]
-    >;
-    const measurementOrder: Strategy[][] = [];
-    for (let sample = 0; sample < configuration.samples; sample++) {
-      const order = counterbalancedOrder(strategies, sample + configuration.warmupIterations);
-      measurementOrder.push(order);
-      for (const strategy of order) {
-        const execution = executeStrategy(database, strategy, configuration.filter, configuration.pageSize);
-        assert.equal(
-          execution.measurement.outputSha256,
-          strategy === "candidate-first-page" ? prefixOutputSha256 : fullOutputSha256,
-          `sample ${sample + 1} ${strategy} output hash diverged`,
-        );
-        measurements[strategy].push(execution.measurement);
-      }
-    }
-
-    const oracleEagerAfter = executeEager(database, configuration.filter);
-    const oracleFirstAfter = executeCandidateFirstPage(database, configuration.filter, configuration.pageSize);
-    const oracleFullAfter = executeCandidateFullTraversal(database, configuration.filter, configuration.pageSize);
-    assert.deepEqual(oracleEagerAfter.output, oracleEagerBefore.output, "eager oracle changed during profiling");
-    assert.deepEqual(oracleFirstAfter.output, expectedPrefix, "first-page output changed during profiling");
-    assert.deepEqual(oracleFullAfter.output, oracleEagerBefore.output, "full traversal changed during profiling");
-    assert.equal(totalChanges(database), changesBefore, "read-only benchmark must not change SQLite total_changes()");
-
-    const timingByStrategy = Object.fromEntries(
-      strategies.map((strategy) => {
-        const strategyMeasurements = measurements[strategy];
-        const expectedShape = transferShape(strategyMeasurements[0]);
-        for (const measurement of strategyMeasurements) {
-          assert.deepEqual(
-            transferShape(measurement),
-            expectedShape,
-            `${strategy} transfer shape changed across samples`,
+      const strategies: Strategy[] = ["eager-full", "candidate-first-page", "candidate-full-traversal"];
+      for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
+        for (const strategy of counterbalancedOrder(strategies, warmup)) {
+          const execution = executeStrategy(database, strategy, configuration.filter, configuration.pageSize);
+          assert.equal(
+            execution.measurement.outputSha256,
+            strategy === "candidate-first-page" ? prefixOutputSha256 : fullOutputSha256,
+            `warmup ${strategy} output hash diverged`,
           );
         }
-        return [
-          strategy,
-          {
-            query: summarize(strategyMeasurements.map(({ queryMilliseconds }) => queryMilliseconds)),
-            parseAndSlimProjection: summarize(
-              strategyMeasurements.map(({ parseAndProjectionMilliseconds }) => parseAndProjectionMilliseconds),
-            ),
-            queryAndParse: summarize(
-              strategyMeasurements.map(({ queryAndParseMilliseconds }) => queryAndParseMilliseconds),
-            ),
-            transferShape: expectedShape,
-            measuredOutputSha256: [...new Set(strategyMeasurements.map(({ outputSha256 }) => outputSha256))],
+      }
+
+      // SAFETY: strategies is the exhaustive Strategy list, and the mapping creates exactly one array for every key.
+      const measurements = Object.fromEntries(
+        strategies.map((strategy) => [strategy, new Array<Measurement>()]),
+      ) as Record<Strategy, Measurement[]>;
+      const measurementOrder: Strategy[][] = [];
+      for (let sample = 0; sample < configuration.samples; sample++) {
+        const order = counterbalancedOrder(strategies, sample + configuration.warmupIterations);
+        measurementOrder.push(order);
+        for (const strategy of order) {
+          const execution = executeStrategy(database, strategy, configuration.filter, configuration.pageSize);
+          assert.equal(
+            execution.measurement.outputSha256,
+            strategy === "candidate-first-page" ? prefixOutputSha256 : fullOutputSha256,
+            `sample ${sample + 1} ${strategy} output hash diverged`,
+          );
+          measurements[strategy].push(execution.measurement);
+        }
+      }
+
+      const oracleEagerAfter = executeEager(database, configuration.filter);
+      const oracleFirstAfter = executeCandidateFirstPage(database, configuration.filter, configuration.pageSize);
+      const oracleFullAfter = executeCandidateFullTraversal(database, configuration.filter, configuration.pageSize);
+      assert.deepEqual(oracleEagerAfter.output, oracleEagerBefore.output, "eager oracle changed during profiling");
+      assert.deepEqual(oracleFirstAfter.output, expectedPrefix, "first-page output changed during profiling");
+      assert.deepEqual(oracleFullAfter.output, oracleEagerBefore.output, "full traversal changed during profiling");
+      assert.equal(totalChanges(database), changesBefore, "read-only benchmark must not change SQLite total_changes()");
+
+      // SAFETY: The exhaustive strategies list is mapped without filtering, so every Strategy report key is present.
+      const timingByStrategy = Object.fromEntries(
+        strategies.map((strategy) => {
+          const strategyMeasurements = measurements[strategy];
+          const expectedTransfer = transferSummary(strategyMeasurements[0]);
+          for (const measurement of strategyMeasurements) {
+            assert.deepEqual(
+              transferSummary(measurement),
+              expectedTransfer,
+              `${strategy} transfer shape changed across samples`,
+            );
+          }
+          return [
+            strategy,
+            {
+              query: summarize(strategyMeasurements.map(({ queryMilliseconds }) => queryMilliseconds)),
+              parseAndSlimProjection: summarize(
+                strategyMeasurements.map(({ parseAndProjectionMilliseconds }) => parseAndProjectionMilliseconds),
+              ),
+              queryAndParse: summarize(
+                strategyMeasurements.map(({ queryAndParseMilliseconds }) => queryAndParseMilliseconds),
+              ),
+              ["transferShape"]: expectedTransfer,
+              measuredOutputSha256: [...new Set(strategyMeasurements.map(({ outputSha256 }) => outputSha256))],
+            },
+          ];
+        }),
+      ) as Record<Strategy, StrategyTimingReport>;
+
+      const eagerTransfer = transferSummary(measurements["eager-full"][0]);
+      const firstTransfer = transferSummary(measurements["candidate-first-page"][0]);
+      const fullTransfer = transferSummary(measurements["candidate-full-traversal"][0]);
+      const eagerMedian = timingByStrategy["eager-full"].queryAndParse.medianMilliseconds;
+      const firstMedian = timingByStrategy["candidate-first-page"].queryAndParse.medianMilliseconds;
+      const fullMedian = timingByStrategy["candidate-full-traversal"].queryAndParse.medianMilliseconds;
+
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const report = {
+        schemaVersion: 2,
+        status: "ok",
+        benchmarkScope:
+          mode === "immutable-real"
+            ? "Node/V8 node:sqlite against one immutable, query-only real Palate database read transaction. Timings include statement preparation/execution and production parsing/slim projection; they exclude JSON byte-accounting, Expo SQLite scheduling, the React Native bridge, Hermes, FlashList rendering, Photos, and Calendar."
+            : "Node/V8 node:sqlite against a deterministic in-memory current-Mac-scale fixture. Timings include statement preparation/execution and production parsing/slim projection; they exclude JSON byte-accounting, Expo SQLite scheduling, the React Native bridge, Hermes, FlashList rendering, Photos, and Calendar.",
+        consistencyModel:
+          "The profiler holds one read transaction for deterministic full-traversal parity. Production page requests use independent snapshots and rely on mutation-triggered list resets, so this benchmark does not imply snapshot consistency across an actual scroll.",
+        strategyContracts: {
+          eagerFull:
+            "buildVisitsWithDetailsQuery() + parseVisitDetailsRows(), followed by only the fields rendered by All Visits",
+          candidateFirstPage:
+            "buildVisitListPageQuery() + parseVisitListPageRows() for the initial keyset page, including one lookahead SQL row when available",
+          candidateFullTraversal:
+            "Repeated production slim keyset pages to exhaustion; retained as a correctness and complete-traversal cost oracle",
+        },
+        runtime: {
+          node: process.version,
+          v8: process.versions.v8,
+          sqlite: (
+            database.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>
+          ).version,
+        },
+        configuration: {
+          mode,
+          filter: configuration.filter,
+          requestedSyntheticVisits: mode === "synthetic" ? configuration.visits : null,
+          requestedSyntheticPhotos: mode === "synthetic" ? configuration.photos : null,
+          pageSize: configuration.pageSize,
+          samples: configuration.samples,
+          warmupIterations: configuration.warmupIterations,
+        },
+        dataset: {
+          ...dataset,
+          syntheticBuildMilliseconds,
+        },
+        correctness: {
+          exactFirstPagePrefixParityBeforeTiming: true,
+          exactFullTraversalParityBeforeTiming: true,
+          exactFirstPagePrefixParityAfterTiming: true,
+          exactFullTraversalParityAfterTiming: true,
+          fullSlimRenderOutputSha256: fullOutputSha256,
+          firstPageSlimRenderPrefixSha256: prefixOutputSha256,
+          hashEncoding:
+            "SHA-256 of UTF-8 JSON.stringify over ordered slim-render objects with production field insertion order",
+          fullRowsCompared: oracleEagerBefore.output.length,
+          prefixRowsCompared: expectedPrefix.length,
+          totalChangesBefore: changesBefore,
+          totalChangesAfter: totalChanges(database),
+        },
+        transferAndTimingComparison: {
+          eagerFull: eagerTransfer,
+          candidateFirstPage: {
+            ...firstTransfer,
+            sqliteRowReductionFraction: 1 - (safeRatio(firstTransfer.sqliteRows, eagerTransfer.sqliteRows) ?? 1),
+            sqlitePayloadReductionFraction:
+              1 -
+              (safeRatio(firstTransfer.sqliteRowsJsonEquivalentBytes, eagerTransfer.sqliteRowsJsonEquivalentBytes) ??
+                1),
+            medianQueryAndParseSpeedup: safeRatio(eagerMedian, firstMedian),
           },
-        ];
-      }),
-    ) as Record<Strategy, StrategyTimingReport>;
-
-    const eagerShape = transferShape(measurements["eager-full"][0]);
-    const firstShape = transferShape(measurements["candidate-first-page"][0]);
-    const fullShape = transferShape(measurements["candidate-full-traversal"][0]);
-    const eagerMedian = timingByStrategy["eager-full"].queryAndParse.medianMilliseconds;
-    const firstMedian = timingByStrategy["candidate-first-page"].queryAndParse.medianMilliseconds;
-    const fullMedian = timingByStrategy["candidate-full-traversal"].queryAndParse.medianMilliseconds;
-
-    report = {
-      schemaVersion: 2,
-      status: "ok",
-      benchmarkScope:
-        mode === "immutable-real"
-          ? "Node/V8 node:sqlite against one immutable, query-only real Palate database read transaction. Timings include statement preparation/execution and production parsing/slim projection; they exclude JSON byte-accounting, Expo SQLite scheduling, the React Native bridge, Hermes, FlashList rendering, Photos, and Calendar."
-          : "Node/V8 node:sqlite against a deterministic in-memory current-Mac-scale fixture. Timings include statement preparation/execution and production parsing/slim projection; they exclude JSON byte-accounting, Expo SQLite scheduling, the React Native bridge, Hermes, FlashList rendering, Photos, and Calendar.",
-      consistencyModel:
-        "The profiler holds one read transaction for deterministic full-traversal parity. Production page requests use independent snapshots and rely on mutation-triggered list resets, so this benchmark does not imply snapshot consistency across an actual scroll.",
-      strategyContracts: {
-        eagerFull:
-          "buildVisitsWithDetailsQuery() + parseVisitDetailsRows(), followed by only the fields rendered by All Visits",
-        candidateFirstPage:
-          "buildVisitListPageQuery() + parseVisitListPageRows() for the initial keyset page, including one lookahead SQL row when available",
-        candidateFullTraversal:
-          "Repeated production slim keyset pages to exhaustion; retained as a correctness and complete-traversal cost oracle",
-      },
-      runtime: {
-        node: process.version,
-        v8: process.versions.v8,
-        sqlite: (database.prepare("SELECT sqlite_version() AS version").get() as { version: string }).version,
-      },
-      configuration: {
-        mode,
-        filter: configuration.filter,
-        requestedSyntheticVisits: mode === "synthetic" ? configuration.visits : null,
-        requestedSyntheticPhotos: mode === "synthetic" ? configuration.photos : null,
-        pageSize: configuration.pageSize,
-        samples: configuration.samples,
-        warmupIterations: configuration.warmupIterations,
-      },
-      dataset: {
-        ...dataset,
-        syntheticBuildMilliseconds,
-      },
-      correctness: {
-        exactFirstPagePrefixParityBeforeTiming: true,
-        exactFullTraversalParityBeforeTiming: true,
-        exactFirstPagePrefixParityAfterTiming: true,
-        exactFullTraversalParityAfterTiming: true,
-        fullSlimRenderOutputSha256: fullOutputSha256,
-        firstPageSlimRenderPrefixSha256: prefixOutputSha256,
-        hashEncoding:
-          "SHA-256 of UTF-8 JSON.stringify over ordered slim-render objects with production field insertion order",
-        fullRowsCompared: oracleEagerBefore.output.length,
-        prefixRowsCompared: expectedPrefix.length,
-        totalChangesBefore: changesBefore,
-        totalChangesAfter: totalChanges(database),
-      },
-      transferAndTimingComparison: {
-        eagerFull: eagerShape,
-        candidateFirstPage: {
-          ...firstShape,
-          sqliteRowReductionFraction: 1 - (safeRatio(firstShape.sqliteRows, eagerShape.sqliteRows) ?? 1),
-          sqlitePayloadReductionFraction:
-            1 - (safeRatio(firstShape.sqliteRowsJsonEquivalentBytes, eagerShape.sqliteRowsJsonEquivalentBytes) ?? 1),
-          medianQueryAndParseSpeedup: safeRatio(eagerMedian, firstMedian),
+          candidateFullTraversal: {
+            ...fullTransfer,
+            sqlitePayloadRatioVersusEager: safeRatio(
+              fullTransfer.sqliteRowsJsonEquivalentBytes,
+              eagerTransfer.sqliteRowsJsonEquivalentBytes,
+            ),
+            medianQueryAndParseSpeedup: safeRatio(eagerMedian, fullMedian),
+          },
         },
-        candidateFullTraversal: {
-          ...fullShape,
-          sqlitePayloadRatioVersusEager: safeRatio(
-            fullShape.sqliteRowsJsonEquivalentBytes,
-            eagerShape.sqliteRowsJsonEquivalentBytes,
-          ),
-          medianQueryAndParseSpeedup: safeRatio(eagerMedian, fullMedian),
+        timings: timingByStrategy,
+        measurementOrder,
+        queryPlans: plans,
+        queryPlanValidation: planValidation,
+        privacy: {
+          aggregateOnly: true,
+          rawRowsRetainedInReport: false,
+          visitIdentifiersRetainedInReport: false,
+          restaurantIdentifiersOrNamesRetainedInReport: false,
+          photoUrisRetainedInReport: false,
+          sourceOrOutputPathsRetainedInReport: false,
+          photosLibraryAccessed: false,
+          calendarLibraryAccessed: false,
         },
-      },
-      timings: timingByStrategy,
-      measurementOrder,
-      queryPlans: plans,
-      queryPlanValidation: planValidation,
-      privacy: {
-        aggregateOnly: true,
-        rawRowsRetainedInReport: false,
-        visitIdentifiersRetainedInReport: false,
-        restaurantIdentifiersOrNamesRetainedInReport: false,
-        photoUrisRetainedInReport: false,
-        sourceOrOutputPathsRetainedInReport: false,
-        photosLibraryAccessed: false,
-        calendarLibraryAccessed: false,
-      },
-    };
-    database.exec("COMMIT");
-  } catch (error) {
-    try {
-      database.exec("ROLLBACK");
-    } catch {
-      // Preserve the primary failure if the transaction already ended.
+      };
+      database.exec("COMMIT");
+      return { status: "success" as const, report };
+    } catch (error) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // Preserve the primary failure if the transaction already ended.
+      }
+      return { status: "failure" as const, error };
+    } finally {
+      database.close();
     }
-    benchmarkFailure = { error };
-  } finally {
-    database.close();
-  }
+  })();
 
   let sourceGuardFailure: { readonly error: unknown } | null = null;
   if (canonicalSource) {
@@ -1044,33 +1064,38 @@ async function run(configuration: Configuration): Promise<void> {
       sourceGuardFailure = { error };
     }
   }
-  if (benchmarkFailure && sourceGuardFailure) {
+  if (benchmarkOutcome.status === "failure" && sourceGuardFailure) {
     throw new AggregateError(
-      [benchmarkFailure.error, sourceGuardFailure.error],
+      [benchmarkOutcome.error, sourceGuardFailure.error],
       "The benchmark failed and the immutable source attestation also changed",
     );
   }
   if (sourceGuardFailure) {
     throw sourceGuardFailure.error;
   }
-  if (benchmarkFailure) {
-    throw benchmarkFailure.error;
+  if (benchmarkOutcome.status === "failure") {
+    throw benchmarkOutcome.error;
   }
-  assert.ok(report, "successful benchmark must produce an aggregate report");
+  const report = benchmarkOutcome.report;
 
+  const finalReport = canonicalSource
+    ? {
+        ...report,
+        sourceAttestation: {
+          guardedBeforeAndAfter: true,
+          comparisonFields: ["presence", "mode", "size", "device", "inode", "sha256"],
+          before: sourceBefore,
+          afterMatchesBefore: true,
+          nonemptyWalOrJournalRejected: true,
+          immutableFileUri: true,
+          queryOnly: true,
+          singleReadTransaction: true,
+          outputPublication:
+            "O_NOFOLLOW file descriptor, pre-truncation hard-link identity check, mode 0600, fsync, then source re-attestation before reporting success",
+        },
+      }
+    : report;
   if (canonicalSource) {
-    report.sourceAttestation = {
-      guardedBeforeAndAfter: true,
-      comparisonFields: ["presence", "mode", "size", "device", "inode", "sha256"],
-      before: sourceBefore,
-      afterMatchesBefore: true,
-      nonemptyWalOrJournalRejected: true,
-      immutableFileUri: true,
-      queryOnly: true,
-      singleReadTransaction: true,
-      outputPublication:
-        "O_NOFOLLOW file descriptor, pre-truncation hard-link identity check, mode 0600, fsync, then source re-attestation before reporting success",
-    };
     assertOutputDoesNotAliasSource(canonicalSource, configuration.outputPath);
   }
 
@@ -1078,7 +1103,7 @@ async function run(configuration: Configuration): Promise<void> {
   if (canonicalSource) {
     assertOutputDoesNotAliasSource(canonicalSource, configuration.outputPath);
   }
-  const reportContents = `${JSON.stringify(report, null, 2)}\n`;
+  const reportContents = `${JSON.stringify(finalReport, null, 2)}\n`;
   const reportSha256 = publishAggregateReport(configuration.outputPath, reportContents, canonicalSource);
   if (canonicalSource) {
     assertOutputDoesNotAliasSource(canonicalSource, configuration.outputPath);
@@ -1090,7 +1115,7 @@ async function run(configuration: Configuration): Promise<void> {
   }
   assert.equal(sha256File(configuration.outputPath), reportSha256, "published aggregate report hash changed");
   console.log(
-    `Visit-list paging benchmark: wrote aggregate ${mode} report (${report.dataset && (report.dataset as DatasetSummary).visits} visits; SHA-256 ${reportSha256}).`,
+    `Visit-list paging benchmark: wrote aggregate ${mode} report (${finalReport.dataset.visits} visits; SHA-256 ${reportSha256}).`,
   );
 }
 

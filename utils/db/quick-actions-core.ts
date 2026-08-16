@@ -4,6 +4,8 @@ import {
   PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL,
 } from "./visit-review-core.ts";
 import type { PendingVisitReviewExactConfirmation, PendingVisitReviewMatchTools } from "./visit-review-paging-core.ts";
+import { parseFoodLabelArraysJson } from "./food-label-json.ts";
+import { isJsonNumber, isJsonString, parseJsonValue, type JsonValue } from "../runtime-json.ts";
 
 /** Minimal restaurant identity needed to find and confirm an exact Calendar match. */
 export interface PendingQuickActionSuggestion {
@@ -145,35 +147,37 @@ export function parseLegacyPendingVisitFoodLabels(
     return [];
   }
   try {
-    const rawLabelsArrays = JSON.parse(foodLabelsJson) as FoodLabel[][];
-    return Array.isArray(rawLabelsArrays) ? aggregatePendingVisitFoodLabelArrays(rawLabelsArrays) : [];
+    const rawLabelsArrays = parseFoodLabelArraysJson(foodLabelsJson);
+    return rawLabelsArrays ? aggregatePendingVisitFoodLabelArrays(rawLabelsArrays) : [];
   } catch {
     return [];
   }
 }
 
-function requireNonEmptyString(value: unknown, context: string): string {
-  if (typeof value !== "string" || value.length === 0) {
+type PendingQuickActionBoundaryValue = JsonValue | undefined;
+
+function requireNonEmptyString(value: PendingQuickActionBoundaryValue, context: string): string {
+  if (!isPendingQuickActionString(value) || value.length === 0) {
     throw new TypeError(`${context} must be a non-empty string`);
   }
   return value;
 }
 
-function requireNullableString(value: unknown, context: string): string | null {
-  if (value !== null && typeof value !== "string") {
+function requireNullableString(value: PendingQuickActionBoundaryValue, context: string): string | null {
+  if (value === undefined || (value !== null && !isJsonString(value))) {
     throw new TypeError(`${context} must be a string or null`);
   }
   return value;
 }
 
-function requireFiniteNumber(value: unknown, context: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function requireFiniteNumber(value: PendingQuickActionBoundaryValue, context: string): number {
+  if (!isPendingQuickActionNumber(value) || !Number.isFinite(value)) {
     throw new TypeError(`${context} must be a finite number`);
   }
   return value;
 }
 
-function requireSuggestion(value: unknown, context: string): PendingQuickActionSuggestion {
+function requireSuggestion(value: JsonValue, context: string): PendingQuickActionSuggestion {
   if (!Array.isArray(value) || value.length !== 4) {
     throw new TypeError(`${context} must be a four-value array`);
   }
@@ -186,7 +190,7 @@ function requireSuggestion(value: unknown, context: string): PendingQuickActionS
   if (longitude < -180 || longitude > 180) {
     throw new RangeError(`${context}.longitude must be between -180 and 180`);
   }
-  if (typeof name !== "string") {
+  if (!isJsonString(name)) {
     throw new TypeError(`${context}.name must be a string`);
   }
   return {
@@ -197,13 +201,13 @@ function requireSuggestion(value: unknown, context: string): PendingQuickActionS
   };
 }
 
-function parseSuggestions(value: unknown, context: string): PendingQuickActionSuggestion[] {
-  if (typeof value !== "string") {
+function parseSuggestions(value: PendingQuickActionBoundaryValue, context: string): PendingQuickActionSuggestion[] {
+  if (!isPendingQuickActionString(value)) {
     throw new TypeError(`${context} must be a JSON string`);
   }
-  let decoded: unknown;
+  let decoded: JsonValue;
   try {
-    decoded = JSON.parse(value);
+    decoded = parseJsonValue(value);
   } catch (error) {
     throw new SyntaxError(`${context} is not valid JSON: ${String(error)}`);
   }
@@ -224,7 +228,7 @@ function parseSuggestions(value: unknown, context: string): PendingQuickActionSu
 function parseRow(row: PendingQuickActionQueryRow, index: number): PendingQuickActionVisit {
   const context = `quickActionRows[${index}]`;
   const photoCount = row?.photoCount;
-  if (typeof photoCount !== "number" || !Number.isSafeInteger(photoCount) || photoCount < 0) {
+  if (!isPendingQuickActionNumber(photoCount) || !Number.isSafeInteger(photoCount) || photoCount < 0) {
     throw new RangeError(`${context}.photoCount must be a non-negative safe integer`);
   }
   if (row?.foodProbable !== 0 && row?.foodProbable !== 1) {
@@ -249,6 +253,14 @@ function parseRow(row: PendingQuickActionQueryRow, index: number): PendingQuickA
     // Quick Action, while required visit/suggestion fields remain strict.
     foodLabels: parseLegacyPendingVisitFoodLabels(row?.foodLabelsJson, foodProbable),
   };
+}
+
+function isPendingQuickActionString(value: PendingQuickActionBoundaryValue): value is string {
+  return value !== undefined && isJsonString(value);
+}
+
+function isPendingQuickActionNumber(value: PendingQuickActionBoundaryValue): value is number {
+  return value !== undefined && isJsonNumber(value);
 }
 
 /** Strictly decode slim rows without changing their SQLite-supplied order. */

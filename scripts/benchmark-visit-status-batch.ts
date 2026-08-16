@@ -6,8 +6,11 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { buildVisitStatusBatchStatement } from "../utils/db/visit-status-batch-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   visits: number;
@@ -170,10 +173,11 @@ function createDatabase(rows: readonly VisitRow[]): DatabaseSync {
 }
 
 function snapshot(database: DatabaseSync): VisitRow[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   return database
     .prepare("SELECT id, status, updatedAt, payload FROM visits ORDER BY id")
     .all()
-    .map((row) => ({ ...row })) as unknown as VisitRow[];
+    .map((row) => ({ ...row })) as BenchmarkSQLiteRow<VisitRow>[];
 }
 
 function checksum(rows: readonly VisitRow[]): string {
@@ -247,10 +251,10 @@ for (let iteration = 0; iteration < configuration.warmupIterations; iteration++)
   }
 }
 
-const samples: Record<Strategy, number[]> = {
-  currentPerVisitAutocommit: [],
-  setBasedJsonUpdate: [],
-};
+const samples = {
+  currentPerVisitAutocommit: new Array<number>(),
+  setBasedJsonUpdate: new Array<number>(),
+} satisfies Record<Strategy, number[]>;
 for (let iteration = 0; iteration < configuration.samples; iteration++) {
   const order: Strategy[] =
     iteration % 2 === 0

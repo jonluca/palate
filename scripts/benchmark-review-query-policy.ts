@@ -22,6 +22,25 @@ interface ModeledReviewRow {
   readonly payload: string;
 }
 
+function isModeledReviewRow<Value>(value: Value): value is Value & ModeledReviewRow {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "id" in value &&
+    typeof value.id === "number" &&
+    "payload" in value &&
+    typeof value.payload === "string"
+  );
+}
+
+function parseModeledReviewRows(payload: string): ModeledReviewRow[] {
+  const parsed: unknown = JSON.parse(payload);
+  if (!Array.isArray(parsed) || !parsed.every(isModeledReviewRow)) {
+    throw new TypeError("Modeled review payload must contain ID/payload rows");
+  }
+  return parsed;
+}
+
 interface TraceMeasurement {
   readonly elapsedMilliseconds: number;
   readonly queryCalls: number;
@@ -132,7 +151,7 @@ async function measureMountTrace(
     queryKey: reviewQueryKeys.pendingReview,
     queryFn: async () => {
       queryCalls += 1;
-      return JSON.parse(payload) as ModeledReviewRow[];
+      return parseModeledReviewRows(payload);
     },
     ...(strategy === "legacyAlwaysRefetch"
       ? { staleTime: REVIEW_QUERY_MOUNT_POLICY.staleTime, refetchOnMount: "always" as const }
@@ -181,10 +200,10 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   await measureMountTrace("staleAware", configuration, payload);
 }
 
-const measurements: Record<Strategy, TraceMeasurement[]> = {
-  legacyAlwaysRefetch: [],
-  staleAware: [],
-};
+const measurements = {
+  legacyAlwaysRefetch: new Array<TraceMeasurement>(),
+  staleAware: new Array<TraceMeasurement>(),
+} satisfies Record<Strategy, TraceMeasurement[]>;
 const measurementOrder: Strategy[][] = [];
 for (let sample = 0; sample < configuration.samples; sample++) {
   const order: Strategy[] =
@@ -219,7 +238,7 @@ const report = {
     rowsPerQuery: configuration.rowsPerQuery,
     bytesPerQuery: configuration.bytesPerQuery,
     exactPayloadBytes: Buffer.byteLength(payload),
-    payloadShape: "JSON array with one independently allocated object and payload string per modeled row",
+    ["payloadShape"]: "JSON array with one independently allocated object and payload string per modeled row",
   },
   correctness: {
     observerBehaviorValidated: true,

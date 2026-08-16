@@ -20,7 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   ATTACHED_MICHELIN_INSERT_SELECT_SQL,
@@ -69,18 +69,6 @@ interface SyntheticAward {
   readonly year: number;
 }
 
-interface TextRow {
-  readonly value: string;
-}
-
-interface CountRow {
-  readonly count: number;
-}
-
-interface HealthRow {
-  readonly issueCount: number;
-}
-
 interface GreenStarStorageRow {
   readonly blobBytes: number | null;
   readonly numericValue: number | null;
@@ -88,6 +76,242 @@ interface GreenStarStorageRow {
   readonly storageClass: string;
   readonly textValue: string | null;
   readonly year: number;
+}
+
+type SqlRow = Record<string, SQLOutputValue>;
+
+type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string;
+
+interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
+
+interface SampleSeriesContract {
+  readonly samples: readonly JsonValue[];
+}
+
+interface BenchmarkStrategyContract {
+  readonly bridgeModel: {
+    readonly sourceResultRows: number;
+  };
+  readonly destinationWalGrowthBytes: SampleSeriesContract;
+  readonly phasesMilliseconds: {
+    readonly total: SampleSeriesContract;
+  };
+  readonly sqliteModel: {
+    readonly transactions: number;
+  };
+}
+
+interface BenchmarkReportContract {
+  readonly comparison: {
+    readonly boundValuesEliminated: number;
+    readonly sourceResultRowsEliminated: number;
+  };
+  readonly correctness: {
+    readonly destinationDigest: {
+      readonly fullTableSha256: string;
+    };
+    readonly equalMichelinRestaurantsMetadataAndSpatialTables: boolean;
+  };
+  readonly implementation: {
+    readonly productionImportCoreSha256: string;
+  };
+  readonly privacy: {
+    readonly aggregateOnly: boolean;
+    readonly rawDisposableDatabasesRetained: boolean;
+  };
+  readonly schemaVersion: number;
+  readonly source: {
+    readonly importedRows: number;
+    readonly restaurantRows: number;
+  };
+  readonly strategies: {
+    readonly attachInsertSelect: BenchmarkStrategyContract;
+    readonly currentJsOracle: BenchmarkStrategyContract;
+  };
+}
+
+function isSqlNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function isSqlString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function requireSqlRow(row: SqlRow | undefined, description: string): SqlRow {
+  assert.ok(row, `Missing SQLite row for ${description}`);
+  return row;
+}
+
+function sqlNumber(row: SqlRow, column: string): number {
+  const value = row[column];
+  assert.ok(isSqlNumber(value), `Expected numeric SQLite column ${column}`);
+  return value;
+}
+
+function sqlNullableNumber(row: SqlRow, column: string): number | null {
+  const value = row[column];
+  if (value === null) {
+    return null;
+  }
+  assert.ok(isSqlNumber(value), `Expected nullable numeric SQLite column ${column}`);
+  return value;
+}
+
+function sqlString(row: SqlRow, column: string): string {
+  const value = row[column];
+  assert.ok(isSqlString(value), `Expected text SQLite column ${column}`);
+  return value;
+}
+
+function sqlNullableString(row: SqlRow, column: string): string | null {
+  const value = row[column];
+  if (value === null) {
+    return null;
+  }
+  assert.ok(isSqlString(value), `Expected nullable text SQLite column ${column}`);
+  return value;
+}
+
+function parseGreenStarStorageRow(row: SqlRow): GreenStarStorageRow {
+  return {
+    blobBytes: sqlNullableNumber(row, "blobBytes"),
+    numericValue: sqlNullableNumber(row, "numericValue"),
+    restaurantId: sqlNumber(row, "restaurantId"),
+    storageClass: sqlString(row, "storageClass"),
+    textValue: sqlNullableString(row, "textValue"),
+    year: sqlNumber(row, "year"),
+  };
+}
+
+function isJsonObject(value: JsonValue | undefined): value is JsonObject {
+  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value);
+}
+
+function isJsonBoolean(value: JsonValue | undefined): value is boolean {
+  return typeof value === "boolean";
+}
+
+function isJsonNumber(value: JsonValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function isJsonString(value: JsonValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function requireJsonObject(value: JsonValue | undefined, description: string): JsonObject {
+  assert.ok(isJsonObject(value), `Expected JSON object at ${description}`);
+  return value;
+}
+
+function requireJsonArray(value: JsonValue | undefined, description: string): JsonValue[] {
+  assert.ok(Array.isArray(value), `Expected JSON array at ${description}`);
+  return value;
+}
+
+function requireJsonBoolean(value: JsonValue | undefined, description: string): boolean {
+  assert.ok(isJsonBoolean(value), `Expected JSON boolean at ${description}`);
+  return value;
+}
+
+function requireJsonNumber(value: JsonValue | undefined, description: string): number {
+  assert.ok(isJsonNumber(value), `Expected JSON number at ${description}`);
+  return value;
+}
+
+function requireJsonString(value: JsonValue | undefined, description: string): string {
+  assert.ok(isJsonString(value), `Expected JSON string at ${description}`);
+  return value;
+}
+
+function parseSampleSeries(value: JsonValue | undefined, description: string): SampleSeriesContract {
+  const series = requireJsonObject(value, description);
+  return {
+    samples: requireJsonArray(series.samples, `${description}.samples`),
+  };
+}
+
+function parseBenchmarkStrategy(value: JsonValue | undefined, description: string): BenchmarkStrategyContract {
+  const strategy = requireJsonObject(value, description);
+  const bridgeModel = requireJsonObject(strategy.bridgeModel, `${description}.bridgeModel`);
+  const sqliteModel = requireJsonObject(strategy.sqliteModel, `${description}.sqliteModel`);
+  const phasesMilliseconds = requireJsonObject(strategy.phasesMilliseconds, `${description}.phasesMilliseconds`);
+  return {
+    bridgeModel: {
+      sourceResultRows: requireJsonNumber(bridgeModel.sourceResultRows, `${description}.bridgeModel.sourceResultRows`),
+    },
+    destinationWalGrowthBytes: parseSampleSeries(
+      strategy.destinationWalGrowthBytes,
+      `${description}.destinationWalGrowthBytes`,
+    ),
+    phasesMilliseconds: {
+      total: parseSampleSeries(phasesMilliseconds.total, `${description}.phasesMilliseconds.total`),
+    },
+    sqliteModel: {
+      transactions: requireJsonNumber(sqliteModel.transactions, `${description}.sqliteModel.transactions`),
+    },
+  };
+}
+
+function parseBenchmarkReport(value: JsonValue): BenchmarkReportContract {
+  const report = requireJsonObject(value, "report");
+  const comparison = requireJsonObject(report.comparison, "report.comparison");
+  const correctness = requireJsonObject(report.correctness, "report.correctness");
+  const destinationDigest = requireJsonObject(correctness.destinationDigest, "report.correctness.destinationDigest");
+  const implementation = requireJsonObject(report.implementation, "report.implementation");
+  const privacy = requireJsonObject(report.privacy, "report.privacy");
+  const source = requireJsonObject(report.source, "report.source");
+  const strategies = requireJsonObject(report.strategies, "report.strategies");
+
+  return {
+    comparison: {
+      boundValuesEliminated: requireJsonNumber(
+        comparison.boundValuesEliminated,
+        "report.comparison.boundValuesEliminated",
+      ),
+      sourceResultRowsEliminated: requireJsonNumber(
+        comparison.sourceResultRowsEliminated,
+        "report.comparison.sourceResultRowsEliminated",
+      ),
+    },
+    correctness: {
+      destinationDigest: {
+        fullTableSha256: requireJsonString(
+          destinationDigest.fullTableSha256,
+          "report.correctness.destinationDigest.fullTableSha256",
+        ),
+      },
+      equalMichelinRestaurantsMetadataAndSpatialTables: requireJsonBoolean(
+        correctness.equalMichelinRestaurantsMetadataAndSpatialTables,
+        "report.correctness.equalMichelinRestaurantsMetadataAndSpatialTables",
+      ),
+    },
+    implementation: {
+      productionImportCoreSha256: requireJsonString(
+        implementation.productionImportCoreSha256,
+        "report.implementation.productionImportCoreSha256",
+      ),
+    },
+    privacy: {
+      aggregateOnly: requireJsonBoolean(privacy.aggregateOnly, "report.privacy.aggregateOnly"),
+      rawDisposableDatabasesRetained: requireJsonBoolean(
+        privacy.rawDisposableDatabasesRetained,
+        "report.privacy.rawDisposableDatabasesRetained",
+      ),
+    },
+    schemaVersion: requireJsonNumber(report.schemaVersion, "report.schemaVersion"),
+    source: {
+      importedRows: requireJsonNumber(source.importedRows, "report.source.importedRows"),
+      restaurantRows: requireJsonNumber(source.restaurantRows, "report.source.restaurantRows"),
+    },
+    strategies: {
+      attachInsertSelect: parseBenchmarkStrategy(strategies.attachInsertSelect, "report.strategies.attachInsertSelect"),
+      currentJsOracle: parseBenchmarkStrategy(strategies.currentJsOracle, "report.strategies.currentJsOracle"),
+    },
+  };
 }
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -211,7 +435,8 @@ function createSyntheticSource(path: string, includeSentinelSidecars = false): v
       FROM restaurant_awards
       WHERE restaurant_id IN (1, 12, 16, 17, 21, 22)
       ORDER BY restaurant_id, year`)
-      .all() as unknown as GreenStarStorageRow[];
+      .all()
+      .map(parseGreenStarStorageRow);
     assert.deepEqual(
       storageRows.map((row) => ({ ...row })),
       [
@@ -274,7 +499,7 @@ function openSeededDestination(path: string): DatabaseSync {
   return database;
 }
 
-function restaurantById(rows: DestinationRows, id: string): Record<string, unknown> {
+function restaurantById(rows: DestinationRows, id: string) {
   const restaurant = rows.restaurants.find((row) => row.id === id);
   assert.ok(restaurant, `Missing destination restaurant ${id}`);
   return restaurant;
@@ -341,28 +566,28 @@ function assertSyntheticExpected(rows: DestinationRows): void {
 }
 
 function assertHealthy(database: DatabaseSync): void {
-  const integrity = database
-    .prepare("SELECT integrity_check AS value FROM pragma_integrity_check")
-    .get() as unknown as TextRow;
-  assert.equal(integrity.value, "ok");
+  const integrity = requireSqlRow(
+    database.prepare("SELECT integrity_check AS value FROM pragma_integrity_check").get(),
+    "integrity check",
+  );
+  assert.equal(sqlString(integrity, "value"), "ok");
   assert.equal(database.prepare("PRAGMA foreign_key_check").all().length, 0);
-  const health = database.prepare(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL).get() as unknown as HealthRow;
-  assert.equal(health.issueCount, 0);
+  const health = requireSqlRow(database.prepare(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL).get(), "spatial health check");
+  assert.equal(sqlNumber(health, "issueCount"), 0);
 }
 
 function mutateThroughSpatialTriggers(database: DatabaseSync): DestinationRows {
   database.prepare("UPDATE michelin_restaurants SET latitude = 91 WHERE id = ?").run("michelin-1");
-  assert.equal(
-    (
-      database
-        .prepare(`SELECT COUNT(*) AS count
-          FROM michelin_restaurant_spatial_index spatial
-          JOIN michelin_restaurants restaurant ON restaurant.rowid = spatial.restaurantRowId
-          WHERE restaurant.id = ?`)
-        .get("michelin-1") as unknown as CountRow
-    ).count,
-    0,
+  const spatialCount = requireSqlRow(
+    database
+      .prepare(`SELECT COUNT(*) AS count
+        FROM michelin_restaurant_spatial_index spatial
+        JOIN michelin_restaurants restaurant ON restaurant.rowid = spatial.restaurantRowId
+        WHERE restaurant.id = ?`)
+      .get("michelin-1"),
+    "spatial index count",
   );
+  assert.equal(sqlNumber(spatialCount, "count"), 0);
   database.prepare("UPDATE michelin_restaurants SET latitude = 40, longitude = -70 WHERE id = ?").run("michelin-1");
   database.prepare("DELETE FROM michelin_restaurants WHERE id = ?").run("michelin-3");
   database
@@ -432,10 +657,11 @@ function testRollbackAtomicity(root: string): void {
         new RegExp(IMPORT_FAILURE_MESSAGE),
       );
       assert.deepEqual(destinationDigest(database), before, `${strategy} must roll back rows, triggers, and metadata`);
-      const metadata = database
-        .prepare("SELECT value FROM app_metadata WHERE key = ?")
-        .get(MICHELIN_DATASET_VERSION_KEY) as unknown as TextRow;
-      assert.equal(metadata.value, "old-version");
+      const metadata = requireSqlRow(
+        database.prepare("SELECT value FROM app_metadata WHERE key = ?").get(MICHELIN_DATASET_VERSION_KEY),
+        "dataset version metadata",
+      );
+      assert.equal(sqlString(metadata, "value"), "old-version");
       const attachedNames = database
         .prepare("PRAGMA database_list")
         .all()
@@ -481,14 +707,11 @@ function testNoImportableRowsPreserveMetadata(root: string): void {
     );
     assert.deepEqual(destinationDigest(oracle), before);
     assert.deepEqual(destinationDigest(candidate), before);
-    assert.equal(
-      (
-        candidate
-          .prepare("SELECT value FROM app_metadata WHERE key = ?")
-          .get(MICHELIN_DATASET_VERSION_KEY) as unknown as TextRow
-      ).value,
-      "old-version",
+    const metadata = requireSqlRow(
+      candidate.prepare("SELECT value FROM app_metadata WHERE key = ?").get(MICHELIN_DATASET_VERSION_KEY),
+      "preserved dataset version metadata",
     );
+    assert.equal(sqlString(metadata, "value"), "old-version");
   } finally {
     oracle.close();
     candidate.close();
@@ -499,11 +722,13 @@ function testNoImportableRowsPreserveMetadata(root: string): void {
 function firstRealSourceId(): number | string {
   const database = new DatabaseSync(immutableSqliteUri(realSourcePath), { readOnly: true });
   try {
-    const row = database.prepare("SELECT id FROM restaurants ORDER BY id LIMIT 1").get() as
-      | Record<string, number | string>
-      | undefined;
-    assert.ok(row);
-    return row.id!;
+    const row = requireSqlRow(
+      database.prepare("SELECT id FROM restaurants ORDER BY id LIMIT 1").get(),
+      "first Michelin source id",
+    );
+    const id = row.id;
+    assert.ok(isSqlNumber(id) || isSqlString(id), "Expected a numeric or text Michelin source id");
+    return id;
   } finally {
     database.close();
   }
@@ -588,12 +813,17 @@ function assertBenchmarkRejected(
   assert.match(`${result.stdout}\n${result.stderr}`, expected);
 }
 
-function collectKeys(value: unknown, keys = new Set<string>()): Set<string> {
+function parseJsonValue(source: string): JsonValue {
+  // JSON.parse either throws or returns exactly the recursive JSON domain represented by JsonValue.
+  return JSON.parse(source);
+}
+
+function collectKeys(value: JsonValue, keys = new Set<string>()): Set<string> {
   if (Array.isArray(value)) {
     for (const item of value) {
       collectKeys(item, keys);
     }
-  } else if (value !== null && typeof value === "object") {
+  } else if (isJsonObject(value)) {
     for (const [key, child] of Object.entries(value)) {
       keys.add(key);
       collectKeys(child, keys);
@@ -615,7 +845,8 @@ function testBenchmarkContractAndPrivacy(root: string): void {
   assert.deepEqual(snapshotSqliteSource(sourcePath), sourceBefore);
 
   const reportText = readFileSync(outputPath, "utf8");
-  const report = JSON.parse(reportText) as Record<string, unknown>;
+  const reportValue = parseJsonValue(reportText);
+  const report = parseBenchmarkReport(reportValue);
   assert.equal(report.schemaVersion, 1);
   assert.doesNotMatch(reportText, new RegExp(SECRET_SENTINEL));
   assert.ok(!reportText.includes(sourcePath), "Report must not retain the source path");
@@ -631,38 +862,30 @@ function testBenchmarkContractAndPrivacy(root: string): void {
     "cuisine",
     "path",
   ]);
-  for (const key of collectKeys(report)) {
+  for (const key of collectKeys(reportValue)) {
     assert.ok(!forbiddenKeys.has(key), `Aggregate report contains forbidden raw-field key: ${key}`);
   }
 
-  const source = report.source as Record<string, unknown>;
+  const source = report.source;
   assert.equal(source.restaurantRows, SYNTHETIC_RESTAURANTS.length);
   assert.equal(source.importedRows, 9);
-  const correctness = report.correctness as Record<string, unknown>;
+  const correctness = report.correctness;
   assert.equal(correctness.equalMichelinRestaurantsMetadataAndSpatialTables, true);
-  const destinationReportDigest = correctness.destinationDigest as Record<string, unknown>;
-  assert.match(String(destinationReportDigest.fullTableSha256), /^[0-9a-f]{64}$/);
-  const strategies = report.strategies as Record<string, Record<string, unknown>>;
-  const oracleStrategy = strategies.currentJsOracle!;
-  const candidateStrategy = strategies.attachInsertSelect!;
-  assert.equal((oracleStrategy.bridgeModel as Record<string, unknown>).sourceResultRows, 21);
-  assert.equal((candidateStrategy.bridgeModel as Record<string, unknown>).sourceResultRows, 1);
-  assert.equal((oracleStrategy.sqliteModel as Record<string, unknown>).transactions, 1);
-  assert.equal((candidateStrategy.sqliteModel as Record<string, unknown>).transactions, 1);
-  assert.equal(((oracleStrategy.destinationWalGrowthBytes as Record<string, unknown>).samples as unknown[]).length, 2);
-  assert.equal(
-    (
-      ((candidateStrategy.phasesMilliseconds as Record<string, unknown>).total as Record<string, unknown>)
-        .samples as unknown[]
-    ).length,
-    2,
-  );
-  const comparison = report.comparison as Record<string, unknown>;
+  assert.match(correctness.destinationDigest.fullTableSha256, /^[0-9a-f]{64}$/);
+  const oracleStrategy = report.strategies.currentJsOracle;
+  const candidateStrategy = report.strategies.attachInsertSelect;
+  assert.equal(oracleStrategy.bridgeModel.sourceResultRows, 21);
+  assert.equal(candidateStrategy.bridgeModel.sourceResultRows, 1);
+  assert.equal(oracleStrategy.sqliteModel.transactions, 1);
+  assert.equal(candidateStrategy.sqliteModel.transactions, 1);
+  assert.equal(oracleStrategy.destinationWalGrowthBytes.samples.length, 2);
+  assert.equal(candidateStrategy.phasesMilliseconds.total.samples.length, 2);
+  const comparison = report.comparison;
   assert.equal(comparison.sourceResultRowsEliminated, 20);
   assert.equal(comparison.boundValuesEliminated, 88);
-  const implementation = report.implementation as Record<string, unknown>;
-  assert.match(String(implementation.productionImportCoreSha256), /^[0-9a-f]{64}$/);
-  const privacy = report.privacy as Record<string, unknown>;
+  const implementation = report.implementation;
+  assert.match(implementation.productionImportCoreSha256, /^[0-9a-f]{64}$/);
+  const privacy = report.privacy;
   assert.equal(privacy.aggregateOnly, true);
   assert.equal(privacy.rawDisposableDatabasesRetained, false);
 

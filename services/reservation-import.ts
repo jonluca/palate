@@ -38,7 +38,13 @@ const RESERVATION_DEDUPE_BUFFER_MS = 2 * 60 * 60 * 1000;
 const RESERVATION_IMPORT_LOG_PREFIX = "[ReservationImport]";
 const RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE = 5;
 
-export type JsonRecord = Record<string, unknown>;
+export type JsonValue = string | number | boolean | null | JsonRecord | JsonValue[];
+
+export interface JsonRecord {
+  [key: string]: JsonValue | undefined;
+}
+
+export type JsonNode = JsonValue | undefined;
 
 export interface ImportableReservation {
   id: string;
@@ -112,7 +118,7 @@ export class ReservationApiError extends Error {
   }
 }
 
-function logReservationImport(sourceDisplayName: string, message: string, details?: unknown): void {
+function logReservationImport<Details>(sourceDisplayName: string, message: string, details?: Details): void {
   if (!__DEV__) {
     return;
   }
@@ -124,7 +130,7 @@ function logReservationImport(sourceDisplayName: string, message: string, detail
   }
 }
 
-function summarizeImportableReservationForLog(reservation: ImportableReservation): Record<string, unknown> {
+function summarizeImportableReservationForLog(reservation: ImportableReservation) {
   return {
     sourceName: reservation.sourceName,
     restaurantName: reservation.restaurantName,
@@ -136,7 +142,7 @@ function summarizeImportableReservationForLog(reservation: ImportableReservation
   };
 }
 
-function summarizeLocatedReservationForLog(reservation: LocatedImportableReservation): Record<string, unknown> {
+function summarizeLocatedReservationForLog(reservation: LocatedImportableReservation) {
   return {
     ...summarizeImportableReservationForLog(reservation),
     latitude: Number(reservation.latitude.toFixed(5)),
@@ -159,10 +165,14 @@ async function mergeDuplicateVisitsAfterProviderImport(sourceDisplayName: string
   return mergeCount;
 }
 
-function dedupeImportableReservationsBySourceEventId(reservations: ImportableReservation[]): {
+interface ImportableReservationDedupeResult {
   reservations: ImportableReservation[];
   duplicateCount: number;
-} {
+}
+
+function dedupeImportableReservationsBySourceEventId(
+  reservations: ImportableReservation[],
+): ImportableReservationDedupeResult {
   const reservationsBySourceEventId = new Map<string, ImportableReservation>();
   const sourceEventIdsByReviewKey = new Map<string, string>();
   let duplicateCount = 0;
@@ -228,12 +238,24 @@ function getImportableReservationCompletenessScore(reservation: ImportableReserv
   );
 }
 
-export function asRecord(value: unknown): JsonRecord | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : null;
+function isJsonRecord(value: JsonNode): value is JsonRecord {
+  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value);
 }
 
-export function getPath(value: unknown, path: string[]): unknown {
-  let current: unknown = value;
+function isNonEmptyString(value: JsonNode): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isFiniteJsonNumber(value: JsonNode): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function asRecord(value: JsonNode): JsonRecord | null {
+  return isJsonRecord(value) ? value : null;
+}
+
+export function getPath(value: JsonNode, path: string[]): JsonNode {
+  let current: JsonNode = value;
   for (const key of path) {
     const record = asRecord(current);
     if (!record) {
@@ -244,24 +266,24 @@ export function getPath(value: unknown, path: string[]): unknown {
   return current;
 }
 
-export function getString(...values: unknown[]): string | null {
+export function getString(...values: JsonNode[]): string | null {
   for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
+    if (isNonEmptyString(value)) {
       return value.trim();
     }
-    if (typeof value === "number" && Number.isFinite(value)) {
+    if (isFiniteJsonNumber(value)) {
       return String(value);
     }
   }
   return null;
 }
 
-export function getNumber(...values: unknown[]): number | null {
+export function getNumber(...values: JsonNode[]): number | null {
   for (const value of values) {
-    if (typeof value === "number" && Number.isFinite(value)) {
+    if (isFiniteJsonNumber(value)) {
       return value;
     }
-    if (typeof value === "string" && value.trim()) {
+    if (isNonEmptyString(value)) {
       const parsed = Number(value);
       if (Number.isFinite(parsed)) {
         return parsed;
@@ -293,7 +315,7 @@ export function compactAddress(parts: Array<string | null>): string | null {
   return compacted.length > 0 ? compacted.join(", ") : null;
 }
 
-export function parseTimestamp(...values: unknown[]): number | null {
+export function parseTimestamp(...values: JsonNode[]): number | null {
   for (const value of values) {
     const text = getString(value);
     if (!text) {
@@ -348,10 +370,12 @@ function areReservationVisitsDuplicate(
   return a.startTime <= b.endTime + timeBufferMs && a.endTime >= b.startTime - timeBufferMs;
 }
 
-function dedupeReservationOnlyVisits(visits: ReservationOnlyVisitInput[]): {
+interface ReservationOnlyVisitDedupeResult {
   visits: ReservationOnlyVisitInput[];
   duplicateCount: number;
-} {
+}
+
+function dedupeReservationOnlyVisits(visits: ReservationOnlyVisitInput[]): ReservationOnlyVisitDedupeResult {
   const sorted = [...visits].sort((a, b) => a.startTime - b.startTime);
   const deduped: ReservationOnlyVisitInput[] = [];
   let duplicateCount = 0;
@@ -549,7 +573,7 @@ export async function importReservationVisitHistory(
   const restaurantsByName = await loadProviderMichelinFallbackRestaurantsByName(reservations);
   const locatedReservations: LocatedImportableReservation[] = [];
   let missingLocationCount = 0;
-  const missingLocationSamples: Array<Record<string, unknown>> = [];
+  const missingLocationSamples: Array<ReturnType<typeof summarizeImportableReservationForLog>> = [];
   const resolvedLocations = await resolveReservationLocations(reservations, restaurantsByName);
 
   for (let index = 0; index < reservations.length; index++) {

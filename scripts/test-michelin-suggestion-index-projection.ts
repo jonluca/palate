@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, w
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   calculateGeodesicDistanceMeters,
@@ -19,7 +19,9 @@ import {
   ACTIVE_MICHELIN_SUGGESTION_LOCATIONS_SQL,
   loadActiveMichelinSuggestionLocations,
   type MichelinSuggestionLocation,
+  type MichelinSuggestionLocationReader,
 } from "../utils/db/michelin-suggestion-index-core.ts";
+import { isJsonObject, isJsonString, parseJsonValue, type JsonObject, type JsonValue } from "../utils/runtime-json.ts";
 
 interface FullRestaurant extends MichelinLocation {
   readonly name: string;
@@ -36,6 +38,23 @@ interface FileSnapshot {
   readonly bytes: number | null;
   readonly mode: number | null;
   readonly sha256: string | null;
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function parseSuggestionLocation(row: SQLiteRow): MichelinSuggestionLocation {
+  assert.ok(isSQLiteString(row.id), "michelin_restaurants.id must be a SQLite TEXT value");
+  assert.ok(isSQLiteNumber(row.latitude), "michelin_restaurants.latitude must be numeric");
+  assert.ok(isSQLiteNumber(row.longitude), "michelin_restaurants.longitude must be numeric");
+  return { id: row.id, latitude: row.latitude, longitude: row.longitude };
 }
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -130,9 +149,9 @@ function assertBenchmarkRejected(
   return result;
 }
 
-function requiredRecord(value: unknown, name: string): Record<string, unknown> {
-  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), `${name} must be an object`);
-  return value as Record<string, unknown>;
+function requiredRecord(value: JsonValue | undefined, name: string): JsonObject {
+  assert.ok(isJsonObject(value), `${name} must be an object`);
+  return value;
 }
 
 const boundaryLatitude = (200 / 6_371_000) * (180 / Math.PI);
@@ -268,15 +287,14 @@ const productionRows: MichelinSuggestionLocation[] = [
 ];
 let productionQuery = "";
 let productionQueryCount = 0;
-let productionQueryParameters: readonly unknown[] = [];
-const productionDatabase = {
-  async getAllAsync<T>(source: string, ...parameters: unknown[]): Promise<T[]> {
+const productionQueryParameters: readonly [] = [];
+const productionDatabase: MichelinSuggestionLocationReader = {
+  async getAllAsync(source: string): Promise<MichelinSuggestionLocation[]> {
     productionQuery = source;
     productionQueryCount += 1;
-    productionQueryParameters = parameters;
-    return productionRows as T[];
+    return productionRows;
   },
-} as Parameters<typeof loadActiveMichelinSuggestionLocations>[0];
+};
 const loadedProductionRows = await loadActiveMichelinSuggestionLocations(productionDatabase);
 assert.equal(productionQueryCount, 1, "the production index must execute one active-guide query per generation");
 assert.deepEqual(productionQueryParameters, [], "the production active-guide projection must not need row parameters");
@@ -310,13 +328,15 @@ assert.deepEqual(
   "the shipped projection must preserve deterministic IDs and exact distances",
 );
 
-for (const invalidLocation of [
-  { id: "null-latitude", latitude: null as unknown as number, longitude: 0 },
+const invalidLocations: MichelinLocation[] = [
+  // @ts-expect-error: The boundary test deliberately supplies a null latitude to the runtime validator.
+  { id: "null-latitude", latitude: null, longitude: 0 },
   { id: "nan-latitude", latitude: Number.NaN, longitude: 0 },
   { id: "infinite-latitude", latitude: Number.POSITIVE_INFINITY, longitude: 0 },
   { id: "latitude-out-of-range", latitude: 90.000_001, longitude: 0 },
   { id: "longitude-out-of-range", latitude: 0, longitude: -180.000_001 },
-]) {
+];
+for (const invalidLocation of invalidLocations) {
   assert.throws(
     () => new MichelinLocationIndex([invalidLocation]),
     /(latitude|longitude) must be a finite number/,
@@ -402,8 +422,8 @@ try {
       insertVisit.run(`private-visit-${index}`, index % 2 === 0 ? "pending" : "confirmed", ...coordinate);
     }
 
-    const selectActiveProjection = () =>
-      database.prepare(ACTIVE_MICHELIN_SUGGESTION_LOCATIONS_SQL).all() as unknown as MichelinSuggestionLocation[];
+    const selectActiveProjection = (): MichelinSuggestionLocation[] =>
+      database.prepare(ACTIVE_MICHELIN_SUGGESTION_LOCATIONS_SQL).all().map(parseSuggestionLocation);
     const activeProjection = selectActiveProjection();
     assert.equal(activeProjection.length, fullRestaurants.length);
     assert.ok(!activeProjection.some(({ id }) => id === "stale-private-restaurant"));
@@ -459,7 +479,7 @@ try {
   );
 
   const serializedReport = readFileSync(outputPath, "utf8");
-  const report = requiredRecord(JSON.parse(serializedReport), "report");
+  const report = requiredRecord(parseJsonValue(serializedReport), "report");
   const configuration = requiredRecord(report.configuration, "configuration");
   const source = requiredRecord(report.source, "source");
   const correctness = requiredRecord(report.correctness, "correctness");
@@ -483,14 +503,16 @@ try {
   assert.equal(source.minimalRowColumnCount, 3);
   assert.equal(correctness.exactProjectedRowParity, true);
   assert.equal(correctness.exactSuggestionIdAndDistanceParity, true);
-  assert.equal(typeof correctness.suggestionDigestSha256, "string");
+  assert.ok(isJsonString(correctness.suggestionDigestSha256));
   assert.ok(Number(current.payloadBytes) > Number(minimal.payloadBytes));
   assert.ok(Number(comparison.payloadBytesSaved) > 0);
   for (const phase of ["load", "build", "search", "total"]) {
     const currentPhase = requiredRecord(currentTiming[phase], `current ${phase}`);
     const minimalPhase = requiredRecord(minimalTiming[phase], `minimal ${phase}`);
-    assert.equal((currentPhase.samplesMilliseconds as unknown[]).length, 2);
-    assert.equal((minimalPhase.samplesMilliseconds as unknown[]).length, 2);
+    assert.ok(Array.isArray(currentPhase.samplesMilliseconds));
+    assert.ok(Array.isArray(minimalPhase.samplesMilliseconds));
+    assert.equal(currentPhase.samplesMilliseconds.length, 2);
+    assert.equal(minimalPhase.samplesMilliseconds.length, 2);
   }
   assert.deepEqual(counterbalancing.measuredOrders, [
     ["minimalProjection", "currentFullRows"],

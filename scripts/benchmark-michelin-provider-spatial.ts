@@ -20,7 +20,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { deburr } from "lodash-es";
 import {
@@ -30,6 +30,17 @@ import {
   type MichelinProviderSpatialCandidateRow,
 } from "../utils/db/michelin-provider-spatial-core.ts";
 import { findProviderMichelinMatch, type ProviderMichelinNameTools } from "../utils/provider-michelin-matching-core.ts";
+
+function isStringValue<Value>(value: Value): value is Extract<Value, string> {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Extract<Value, number> {
+  return typeof value === "number";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 type MatchKind = "exact" | "fuzzy";
 type WorkloadKind = MatchKind | "miss";
@@ -449,7 +460,7 @@ function canonicalizePotentialPath(path: string, seenSymlinks = new Set<string>(
       }
       return resolve(realpathSync(ancestor), ...missingSegments);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw error;
       }
       const parent = dirname(ancestor);
@@ -723,25 +734,23 @@ function normalizeLongitude(longitude: number): number {
   return normalized === -180 && longitude > 0 ? 180 : normalized;
 }
 
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
+function requiredString(value: SQLiteValue | undefined, label: string): string {
+  if (!isStringValue(value)) {
     throw new TypeError(`${label} must be a string.`);
   }
   return value;
 }
 
-function finiteNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function finiteNumber(value: SQLiteValue | undefined, label: string): number {
+  if (!isNumberValue(value) || !Number.isFinite(value)) {
     throw new TypeError(`${label} must be a finite number.`);
   }
   return value;
 }
 
-function restaurantFromRow(row: Record<string, unknown>, label: string): RestaurantRow {
-  const latestAwardYear = row.latestAwardYear;
-  if (latestAwardYear !== null && (typeof latestAwardYear !== "number" || !Number.isFinite(latestAwardYear))) {
-    throw new TypeError(`${label}.latestAwardYear must be null or finite.`);
-  }
+function restaurantFromRow(row: Record<string, SQLiteValue>, label: string): RestaurantRow {
+  const latestAwardYear =
+    row.latestAwardYear === null ? null : finiteNumber(row.latestAwardYear, `${label}.latestAwardYear`);
   return {
     id: requiredString(row.id, `${label}.id`),
     name: requiredString(row.name, `${label}.name`),
@@ -750,7 +759,7 @@ function restaurantFromRow(row: Record<string, unknown>, label: string): Restaur
     address: requiredString(row.address, `${label}.address`),
     location: requiredString(row.location, `${label}.location`),
     cuisine: requiredString(row.cuisine, `${label}.cuisine`),
-    latestAwardYear: latestAwardYear as number | null,
+    latestAwardYear,
     award: requiredString(row.award, `${label}.award`),
     datasetVersion:
       row.datasetVersion === undefined || row.datasetVersion === null
@@ -776,13 +785,11 @@ const SOURCE_ORDER_SQL = `SELECT m.rowid AS sourceOrder, m.*
   )
   ORDER BY m.rowid ASC`;
 
-function queryFullGuide(database: DatabaseSync): {
-  readonly rawRows: Record<string, unknown>[];
-  readonly rows: RestaurantRow[];
-} {
-  const rawRows = database.prepare(FULL_GUIDE_SQL).all(ACTIVE_DATASET_KEY, ACTIVE_DATASET_KEY) as unknown as Record<
+function queryFullGuide(database: DatabaseSync) {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rawRows = database.prepare(FULL_GUIDE_SQL).all(ACTIVE_DATASET_KEY, ACTIVE_DATASET_KEY) as Record<
     string,
-    unknown
+    SQLiteValue
   >[];
   const rows = rawRows.map((row, index) => restaurantFromRow(row, `Full guide row ${index}`));
   return { rawRows, rows };
@@ -826,11 +833,12 @@ function executeCandidate(
     batchSize,
   );
   for (const plan of plans) {
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const rawRows = database
       .prepare(
         plan.sql.replaceAll("michelin_restaurant_spatial_index", "provider_spatial_scratch.michelin_spatial_index"),
       )
-      .all(...plan.parameters) as unknown as MichelinProviderSpatialCandidateRow[];
+      .all(...plan.parameters) as BenchmarkSQLiteRow<MichelinProviderSpatialCandidateRow>[];
     sqliteCalls += 1;
     transferredRows += rawRows.length;
     if (measurePayload) {
@@ -857,9 +865,10 @@ function executeCandidate(
   const matchedIds = [...new Set(spatialMatches.flatMap((match) => (match ? [match.restaurant.id] : [])))];
   const hydratedById = new Map<string, RestaurantRow>();
   if (matchedIds.length > 0) {
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const rawRows = database
       .prepare(MICHELIN_PROVIDER_SPATIAL_HYDRATION_SQL)
-      .all(JSON.stringify(matchedIds), ACTIVE_DATASET_KEY, ACTIVE_DATASET_KEY) as unknown as Record<string, unknown>[];
+      .all(JSON.stringify(matchedIds), ACTIVE_DATASET_KEY, ACTIVE_DATASET_KEY) as Record<string, SQLiteValue>[];
     sqliteCalls += 1;
     transferredRows += rawRows.length;
     if (measurePayload) {
@@ -883,13 +892,11 @@ function executeCandidate(
   return { matches, sqliteCalls, transferredRows, payloadBytes, candidateCounts };
 }
 
-function sourceOrderMap(database: DatabaseSync): {
-  readonly rows: RestaurantRow[];
-  readonly byId: ReadonlyMap<string, number>;
-} {
-  const rawRows = database.prepare(SOURCE_ORDER_SQL).all(ACTIVE_DATASET_KEY, ACTIVE_DATASET_KEY) as unknown as Record<
+function sourceOrderMap(database: DatabaseSync) {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rawRows = database.prepare(SOURCE_ORDER_SQL).all(ACTIVE_DATASET_KEY, ACTIVE_DATASET_KEY) as Record<
     string,
-    unknown
+    SQLiteValue
   >[];
   const rows: RestaurantRow[] = [];
   const byId = new Map<string, number>();
@@ -948,12 +955,7 @@ function createRandom(seed: number): () => number {
   };
 }
 
-function offsetCoordinate(
-  latitude: number,
-  longitude: number,
-  northMeters: number,
-  eastMeters: number,
-): { readonly latitude: number; readonly longitude: number } {
+function offsetCoordinate(latitude: number, longitude: number, northMeters: number, eastMeters: number) {
   const latitudeOffset = (northMeters / EARTH_RADIUS_METERS) * (180 / Math.PI);
   const targetLatitude = Math.max(-90, Math.min(90, latitude + latitudeOffset));
   const cosine = Math.cos(targetLatitude * (Math.PI / 180));
@@ -1026,14 +1028,7 @@ function summarizeMeasurements(values: readonly number[]): MeasurementSummary {
   };
 }
 
-function summarizeCounts(values: readonly number[]): {
-  readonly minimum: number;
-  readonly median: number;
-  readonly p95: number;
-  readonly maximum: number;
-  readonly mean: number;
-  readonly total: number;
-} {
+function summarizeCounts(values: readonly number[]) {
   const total = values.reduce((sum, value) => sum + value, 0);
   return {
     minimum: Math.min(...values),
@@ -1047,16 +1042,18 @@ function summarizeCounts(values: readonly number[]): {
 
 function assertSourceSchema(database: DatabaseSync): void {
   for (const table of ["michelin_restaurants", "app_metadata"]) {
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
     const row = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) as
-      | { name?: unknown }
+      | BenchmarkSQLiteRow<{ name?: SQLiteValue }>
       | undefined;
     if (row?.name !== table) {
       throw new Error(`Source database is missing ${table}.`);
     }
   }
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const index = database
     .prepare("SELECT name FROM sqlite_schema WHERE type = 'index' AND name = 'idx_michelin_location'")
-    .get() as { name?: unknown } | undefined;
+    .get() as BenchmarkSQLiteRow<{ name?: SQLiteValue }> | undefined;
   if (index?.name !== "idx_michelin_location") {
     throw new Error("Source database is missing idx_michelin_location(latitude, longitude).");
   }
@@ -1064,6 +1061,7 @@ function assertSourceSchema(database: DatabaseSync): void {
 
 function assertCandidateQueryUsesLocationIndex(database: DatabaseSync, reservation: LocatedReservation): void {
   const query = buildMichelinProviderSpatialQueryPlans([reservation], 1)[0]!;
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const plan = database
     .prepare(
       `EXPLAIN QUERY PLAN ${query.sql.replaceAll(
@@ -1071,20 +1069,17 @@ function assertCandidateQueryUsesLocationIndex(database: DatabaseSync, reservati
         "provider_spatial_scratch.michelin_spatial_index",
       )}`,
     )
-    .all(...query.parameters) as unknown as Array<{ detail?: unknown }>;
+    .all(...query.parameters) as Array<BenchmarkSQLiteRow<{ detail?: SQLiteValue }>>;
   assert.ok(
     plan.some(
       (row) =>
-        typeof row.detail === "string" && row.detail.includes("spatial") && row.detail.includes("VIRTUAL TABLE INDEX"),
+        isStringValue(row.detail) && row.detail.includes("spatial") && row.detail.includes("VIRTUAL TABLE INDEX"),
     ),
     "Candidate query plan did not use the scratch R-Tree virtual-table index.",
   );
 }
 
-function buildScratchSpatialIndex(database: DatabaseSync): {
-  readonly elapsedMilliseconds: number;
-  readonly indexedRows: number;
-} {
+function buildScratchSpatialIndex(database: DatabaseSync) {
   const startedAt = performance.now();
   database.exec(`
     ATTACH DATABASE ':memory:' AS provider_spatial_scratch;
@@ -1105,9 +1100,10 @@ function buildScratchSpatialIndex(database: DatabaseSync): {
         AND m.longitude BETWEEN -180.0 AND 180.0
         AND NOT (m.latitude = 0.0 AND m.longitude = 0.0)`)
     .run();
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const countRow = database
     .prepare("SELECT COUNT(*) AS count FROM provider_spatial_scratch.michelin_spatial_index")
-    .get() as { count?: unknown } | undefined;
+    .get() as BenchmarkSQLiteRow<{ count?: SQLiteValue }> | undefined;
   return {
     elapsedMilliseconds: performance.now() - startedAt,
     indexedRows: finiteNumber(countRow?.count, "Scratch R-Tree row count"),
@@ -1145,7 +1141,10 @@ function measureHealthySpatialCheck(database: DatabaseSync): MeasurementSummary 
   const samples: number[] = [];
   for (let sample = 0; sample < 9; sample++) {
     const startedAt = performance.now();
-    const row = database.prepare(SCRATCH_SPATIAL_HEALTH_SQL).get() as { issueCount?: unknown } | undefined;
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+    const row = database.prepare(SCRATCH_SPATIAL_HEALTH_SQL).get() as
+      | BenchmarkSQLiteRow<{ issueCount?: SQLiteValue }>
+      | undefined;
     samples.push(performance.now() - startedAt);
     assert.equal(row?.issueCount, 0);
   }
@@ -1184,7 +1183,7 @@ function insertSyntheticRestaurant(
   statement.run(id, name, latitude, longitude, "", "", "", null, "", "synthetic-v1");
 }
 
-function runSyntheticCorrectnessTests(): { readonly parityQueries: number; readonly edgeCases: number } {
+function runSyntheticCorrectnessTests() {
   const database = createSyntheticDatabase();
   try {
     const insert = database.prepare(`INSERT INTO michelin_restaurants
@@ -1296,25 +1295,17 @@ function assertAliasGuards(): void {
   }
 }
 
-function assertAggregateOnlyReport(report: unknown, sourceRows: readonly RestaurantRow[], databasePath: string): void {
-  const serialized = JSON.stringify(report);
+function assertAggregateOnlyReport(
+  serialized: string,
+  sourceRows: readonly RestaurantRow[],
+  databasePath: string,
+): void {
   assert.ok(!serialized.includes(resolve(databasePath)), "Report leaked the source database path.");
-  const reportStrings = new Set<string>();
-  const collect = (value: unknown): void => {
-    if (typeof value === "string") {
-      reportStrings.add(value);
-    } else if (Array.isArray(value)) {
-      value.forEach(collect);
-    } else if (value && typeof value === "object") {
-      Object.values(value as Record<string, unknown>).forEach(collect);
-    }
-  };
-  collect(report);
   for (const row of sourceRows) {
-    assert.ok(!reportStrings.has(row.id), "Report leaked a guide restaurant id.");
-    assert.ok(!reportStrings.has(row.name), "Report leaked a guide restaurant name.");
+    assert.ok(!serialized.includes(JSON.stringify(row.id)), "Report leaked a guide restaurant id.");
+    assert.ok(!serialized.includes(JSON.stringify(row.name)), "Report leaked a guide restaurant name.");
     if (row.address) {
-      assert.ok(!reportStrings.has(row.address), "Report leaked a guide restaurant address.");
+      assert.ok(!serialized.includes(JSON.stringify(row.address)), "Report leaked a guide restaurant address.");
     }
   }
 }
@@ -1341,188 +1332,192 @@ function main(): void {
   // DatabaseSync's connection-wide readOnly option: it would also make the
   // attached in-memory scratch schema read-only and prevent R-Tree setup.
   const database = new DatabaseSync(immutableDatabaseUri(configuration.databasePath));
-  let report: Record<string, unknown>;
   let sourceRowsForPrivacyCheck: RestaurantRow[] = [];
-  try {
-    const scratchSpatialIndex = buildScratchSpatialIndex(database);
-    const healthySpatialCheck = measureHealthySpatialCheck(database);
-    database.exec("PRAGMA query_only = ON; BEGIN");
-    assertSourceSchema(database);
-    const integrity = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
-    if (integrity?.integrity_check !== "ok") {
-      throw new Error(`Source integrity_check failed: ${String(integrity?.integrity_check)}`);
-    }
-    const foreignKeyViolations = database.prepare("PRAGMA foreign_key_check").all().length;
-    const ordered = sourceOrderMap(database);
-    sourceRowsForPrivacyCheck = ordered.rows;
-    if (ordered.rows.length === 0) {
-      throw new Error("The active Michelin guide is empty.");
-    }
-    const invalidGuideCoordinateCount = ordered.rows.filter(
-      ({ latitude, longitude }) => !isValidGuideCoordinate(latitude, longitude),
-    ).length;
-    if (invalidGuideCoordinateCount !== 0) {
-      throw new Error(
-        `Active guide contains ${invalidGuideCoordinateCount} invalid coordinates; refusing to benchmark a workload that violates import invariants.`,
-      );
-    }
-    const currentUnordered = queryFullGuide(database).rows;
-    assert.deepEqual(
-      currentUnordered.map(({ id }) => id),
-      ordered.rows.map(({ id }) => id),
-      "Current unordered full-guide materialization did not match rowid order; source-order tie parity is unprovable.",
-    );
-    const reservations = buildWorkload(ordered.rows, configuration.reservationCount);
-    assertCandidateQueryUsesLocationIndex(database, reservations[0]!);
-
-    const referenceLegacy = executeLegacy(database, reservations);
-    const referenceCandidate = executeCandidate(database, reservations, configuration.batchSize);
-    const parityHash = assertMatchParity(referenceLegacy, referenceCandidate, ordered.byId);
-    const candidateCountSummary = summarizeCounts(referenceCandidate.candidateCounts);
-
-    for (let pair = 0; pair < configuration.warmupPairs; pair++) {
-      if (pair % 2 === 0) {
-        executeLegacy(database, reservations, false);
-        executeCandidate(database, reservations, configuration.batchSize, false);
-      } else {
-        executeCandidate(database, reservations, configuration.batchSize, false);
-        executeLegacy(database, reservations, false);
-      }
-    }
-
-    const legacyTimes: number[] = [];
-    const candidateTimes: number[] = [];
-    for (let pair = 0; pair < configuration.samples; pair++) {
-      const first = pair % 2 === 0 ? "legacy" : "candidate";
-      const firstResult = timed(() =>
-        first === "legacy"
-          ? executeLegacy(database, reservations, false)
-          : executeCandidate(database, reservations, configuration.batchSize, false),
-      );
-      const secondResult = timed(() =>
-        first === "legacy"
-          ? executeCandidate(database, reservations, configuration.batchSize, false)
-          : executeLegacy(database, reservations, false),
-      );
-      const legacyResult = first === "legacy" ? firstResult : secondResult;
-      const candidateResult = first === "candidate" ? firstResult : secondResult;
-      assertMatchParity(legacyResult, candidateResult, ordered.byId);
-      legacyTimes.push(legacyResult.elapsedMilliseconds);
-      candidateTimes.push(candidateResult.elapsedMilliseconds);
-    }
-    const legacyTiming = summarizeMeasurements(legacyTimes);
-    const candidateTiming = summarizeMeasurements(candidateTimes);
-    const resultCounts = referenceLegacy.matches.reduce(
-      (counts, match) => {
-        counts[match?.kind ?? "unmatched"] += 1;
-        return counts;
-      },
-      { exact: 0, fuzzy: 0, unmatched: 0 },
-    );
-    const workloadCounts = reservations.reduce(
-      (counts, reservation) => {
-        counts[reservation.workloadKind] += 1;
-        return counts;
-      },
-      { exact: 0, fuzzy: 0, miss: 0 },
-    );
-
-    report = {
-      schemaVersion: 2,
-      generatedAt: new Date().toISOString(),
-      source: {
-        databaseSha256: sourceDatabaseSha256,
-        databaseBytes: sourceDatabaseBytes,
-        integrityCheck: "ok",
-        foreignKeyViolationCount: foreignKeyViolations,
-        activeGuideRows: ordered.rows.length,
-        activeGuideInvalidCoordinateRows: invalidGuideCoordinateCount,
-        existingLatitudeLongitudeIndexPresent: true,
-        scratchRTreeIndexedRows: scratchSpatialIndex.indexedRows,
-        scratchRTreeBuildMilliseconds: Number(scratchSpatialIndex.elapsedMilliseconds.toFixed(3)),
-        healthyDeepSpatialCheck: healthySpatialCheck,
-        sourceOrderObservation: "current full-guide query matched ascending rowid for every active row",
-        pendingWalBytes: 0,
-      },
-      selfTests: {
-        ...syntheticTests,
-        coversAntimeridian: true,
-        coversPoles: true,
-        coversRadiusBoundaries: true,
-        coversInvalidCoordinates: true,
-        coversSourceOrderDistanceTies: true,
-        coversOutputDirectSymlinkAndHardlinkAliases: true,
-        rejectsHardLinkedSourceDatabases: true,
-        productionCoreAndMatcherImported: true,
-      },
-      workload: {
-        locatedReservations: reservations.length,
-        deterministicSeed: "0x51a71a1",
-        syntheticInputKinds: workloadCounts,
-        observedResultKinds: resultCounts,
-        rawNamesOrCoordinatesRetained: false,
-        exactRadiusMeters: EXACT_RADIUS_METERS,
-        fuzzyRadiusMeters: FUZZY_RADIUS_METERS,
-        sqlBoundingRadiusMeters: BOUNDING_RADIUS_METERS,
-      },
-      parity: {
-        allMatchesEqual: true,
-        anonymizedResultSha256: parityHash,
-        legacyResultSha256: parityHash,
-        candidateResultSha256: matchSignature(referenceCandidate.matches, ordered.byId),
-      },
-      transfer: {
-        legacyFullGuideRows: referenceLegacy.transferredRows,
-        legacyPayloadBytes: referenceLegacy.payloadBytes,
-        candidateRows: referenceCandidate.transferredRows,
-        candidatePayloadBytes: referenceCandidate.payloadBytes,
-        candidateCountsPerReservation: candidateCountSummary,
-        rowReductionPercent: Number(
-          ((1 - referenceCandidate.transferredRows / referenceLegacy.transferredRows) * 100).toFixed(3),
-        ),
-        payloadReductionPercent: Number(
-          ((1 - referenceCandidate.payloadBytes / referenceLegacy.payloadBytes) * 100).toFixed(3),
-        ),
-      },
-      performance: {
-        samples: configuration.samples,
-        warmupPairs: configuration.warmupPairs,
-        batchSize: configuration.batchSize,
-        legacySqliteCallsPerRun: referenceLegacy.sqliteCalls,
-        candidateSqliteCallsPerRun: referenceCandidate.sqliteCalls,
-        legacyFullMaterializationAndScan: legacyTiming,
-        batchedBoundingCandidateQueryAndScan: candidateTiming,
-        medianSpeedup: Number((legacyTiming.medianMilliseconds / candidateTiming.medianMilliseconds).toFixed(2)),
-        medianMillisecondsSaved: Number(
-          (legacyTiming.medianMilliseconds - candidateTiming.medianMilliseconds).toFixed(3),
-        ),
-        timedRegion:
-          "SQLite prepare/execute/decode, JS row hydration, normalized-name indexing, Haversine filtering, and exact/fuzzy selection",
-        excludes:
-          "source integrity checks, attached R-Tree build, Expo dedicated-connection lifecycle, workload derivation, payload-byte instrumentation, parity hashing, report serialization, and app rendering",
-      },
-      implementationRisks: [
-        "Keep calendar-title and Unicode-aware fuzzy normalization in JavaScript; SQLite only narrows by a conservative 1000 m box.",
-        "The isolated legacy materialization only observed rowid order from its unordered SELECT; production candidate grouping explicitly restores rowid order before applying tie behavior.",
-        "Split longitude intervals at the antimeridian and search every longitude when a bound reaches a pole; final Haversine checks remain authoritative.",
-        "Reject invalid located-reservation coordinates and preserve the guide import invariant that active coordinates are valid and not 0,0.",
-        "Chunk VALUES input below SQLite bind limits; the production model uses eight binds per reservation plus two active-dataset binds.",
-        "Maintain the R-Tree transactionally when a guide dataset changes; this read-only benchmark builds an attached in-memory equivalent once and reports that excluded build cost separately.",
-        "The no-coordinate provider fallback still needs a separate exact-name lookup; the spatial path only replaces matching for located reservations.",
-        "Re-benchmark small and very large provider batches on Expo SQLite because Node's row-decoding cost is a proxy, not the React Native bridge itself.",
-      ],
-    };
-    database.exec("COMMIT");
-  } catch (error) {
+  const report = (() => {
     try {
-      database.exec("ROLLBACK");
-    } catch {
-      // The transaction may not have started; preserve the original error.
+      const scratchSpatialIndex = buildScratchSpatialIndex(database);
+      const healthySpatialCheck = measureHealthySpatialCheck(database);
+      database.exec("PRAGMA query_only = ON; BEGIN");
+      assertSourceSchema(database);
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const integrity = database.prepare("PRAGMA integrity_check").get() as
+        | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
+        | undefined;
+      if (integrity?.integrity_check !== "ok") {
+        throw new Error(`Source integrity_check failed: ${String(integrity?.integrity_check)}`);
+      }
+      const foreignKeyViolations = database.prepare("PRAGMA foreign_key_check").all().length;
+      const ordered = sourceOrderMap(database);
+      sourceRowsForPrivacyCheck = ordered.rows;
+      if (ordered.rows.length === 0) {
+        throw new Error("The active Michelin guide is empty.");
+      }
+      const invalidGuideCoordinateCount = ordered.rows.filter(
+        ({ latitude, longitude }) => !isValidGuideCoordinate(latitude, longitude),
+      ).length;
+      if (invalidGuideCoordinateCount !== 0) {
+        throw new Error(
+          `Active guide contains ${invalidGuideCoordinateCount} invalid coordinates; refusing to benchmark a workload that violates import invariants.`,
+        );
+      }
+      const currentUnordered = queryFullGuide(database).rows;
+      assert.deepEqual(
+        currentUnordered.map(({ id }) => id),
+        ordered.rows.map(({ id }) => id),
+        "Current unordered full-guide materialization did not match rowid order; source-order tie parity is unprovable.",
+      );
+      const reservations = buildWorkload(ordered.rows, configuration.reservationCount);
+      assertCandidateQueryUsesLocationIndex(database, reservations[0]!);
+
+      const referenceLegacy = executeLegacy(database, reservations);
+      const referenceCandidate = executeCandidate(database, reservations, configuration.batchSize);
+      const parityHash = assertMatchParity(referenceLegacy, referenceCandidate, ordered.byId);
+      const candidateCountSummary = summarizeCounts(referenceCandidate.candidateCounts);
+
+      for (let pair = 0; pair < configuration.warmupPairs; pair++) {
+        if (pair % 2 === 0) {
+          executeLegacy(database, reservations, false);
+          executeCandidate(database, reservations, configuration.batchSize, false);
+        } else {
+          executeCandidate(database, reservations, configuration.batchSize, false);
+          executeLegacy(database, reservations, false);
+        }
+      }
+
+      const legacyTimes: number[] = [];
+      const candidateTimes: number[] = [];
+      for (let pair = 0; pair < configuration.samples; pair++) {
+        const first = pair % 2 === 0 ? "legacy" : "candidate";
+        const firstResult = timed(() =>
+          first === "legacy"
+            ? executeLegacy(database, reservations, false)
+            : executeCandidate(database, reservations, configuration.batchSize, false),
+        );
+        const secondResult = timed(() =>
+          first === "legacy"
+            ? executeCandidate(database, reservations, configuration.batchSize, false)
+            : executeLegacy(database, reservations, false),
+        );
+        const legacyResult = first === "legacy" ? firstResult : secondResult;
+        const candidateResult = first === "candidate" ? firstResult : secondResult;
+        assertMatchParity(legacyResult, candidateResult, ordered.byId);
+        legacyTimes.push(legacyResult.elapsedMilliseconds);
+        candidateTimes.push(candidateResult.elapsedMilliseconds);
+      }
+      const legacyTiming = summarizeMeasurements(legacyTimes);
+      const candidateTiming = summarizeMeasurements(candidateTimes);
+      const resultCounts = referenceLegacy.matches.reduce(
+        (counts, match) => {
+          counts[match?.kind ?? "unmatched"] += 1;
+          return counts;
+        },
+        { exact: 0, fuzzy: 0, unmatched: 0 },
+      );
+      const workloadCounts = reservations.reduce(
+        (counts, reservation) => {
+          counts[reservation.workloadKind] += 1;
+          return counts;
+        },
+        { exact: 0, fuzzy: 0, miss: 0 },
+      );
+
+      return {
+        schemaVersion: 2,
+        generatedAt: new Date().toISOString(),
+        source: {
+          databaseSha256: sourceDatabaseSha256,
+          databaseBytes: sourceDatabaseBytes,
+          integrityCheck: "ok",
+          foreignKeyViolationCount: foreignKeyViolations,
+          activeGuideRows: ordered.rows.length,
+          activeGuideInvalidCoordinateRows: invalidGuideCoordinateCount,
+          existingLatitudeLongitudeIndexPresent: true,
+          scratchRTreeIndexedRows: scratchSpatialIndex.indexedRows,
+          scratchRTreeBuildMilliseconds: Number(scratchSpatialIndex.elapsedMilliseconds.toFixed(3)),
+          healthyDeepSpatialCheck: healthySpatialCheck,
+          sourceOrderObservation: "current full-guide query matched ascending rowid for every active row",
+          pendingWalBytes: 0,
+        },
+        selfTests: {
+          ...syntheticTests,
+          coversAntimeridian: true,
+          coversPoles: true,
+          coversRadiusBoundaries: true,
+          coversInvalidCoordinates: true,
+          coversSourceOrderDistanceTies: true,
+          coversOutputDirectSymlinkAndHardlinkAliases: true,
+          rejectsHardLinkedSourceDatabases: true,
+          productionCoreAndMatcherImported: true,
+        },
+        workload: {
+          locatedReservations: reservations.length,
+          deterministicSeed: "0x51a71a1",
+          syntheticInputKinds: workloadCounts,
+          observedResultKinds: resultCounts,
+          rawNamesOrCoordinatesRetained: false,
+          exactRadiusMeters: EXACT_RADIUS_METERS,
+          fuzzyRadiusMeters: FUZZY_RADIUS_METERS,
+          sqlBoundingRadiusMeters: BOUNDING_RADIUS_METERS,
+        },
+        parity: {
+          allMatchesEqual: true,
+          anonymizedResultSha256: parityHash,
+          legacyResultSha256: parityHash,
+          candidateResultSha256: matchSignature(referenceCandidate.matches, ordered.byId),
+        },
+        transfer: {
+          legacyFullGuideRows: referenceLegacy.transferredRows,
+          legacyPayloadBytes: referenceLegacy.payloadBytes,
+          candidateRows: referenceCandidate.transferredRows,
+          candidatePayloadBytes: referenceCandidate.payloadBytes,
+          candidateCountsPerReservation: candidateCountSummary,
+          rowReductionPercent: Number(
+            ((1 - referenceCandidate.transferredRows / referenceLegacy.transferredRows) * 100).toFixed(3),
+          ),
+          payloadReductionPercent: Number(
+            ((1 - referenceCandidate.payloadBytes / referenceLegacy.payloadBytes) * 100).toFixed(3),
+          ),
+        },
+        performance: {
+          samples: configuration.samples,
+          warmupPairs: configuration.warmupPairs,
+          batchSize: configuration.batchSize,
+          legacySqliteCallsPerRun: referenceLegacy.sqliteCalls,
+          candidateSqliteCallsPerRun: referenceCandidate.sqliteCalls,
+          legacyFullMaterializationAndScan: legacyTiming,
+          batchedBoundingCandidateQueryAndScan: candidateTiming,
+          medianSpeedup: Number((legacyTiming.medianMilliseconds / candidateTiming.medianMilliseconds).toFixed(2)),
+          medianMillisecondsSaved: Number(
+            (legacyTiming.medianMilliseconds - candidateTiming.medianMilliseconds).toFixed(3),
+          ),
+          timedRegion:
+            "SQLite prepare/execute/decode, JS row hydration, normalized-name indexing, Haversine filtering, and exact/fuzzy selection",
+          excludes:
+            "source integrity checks, attached R-Tree build, Expo dedicated-connection lifecycle, workload derivation, payload-byte instrumentation, parity hashing, report serialization, and app rendering",
+        },
+        implementationRisks: [
+          "Keep calendar-title and Unicode-aware fuzzy normalization in JavaScript; SQLite only narrows by a conservative 1000 m box.",
+          "The isolated legacy materialization only observed rowid order from its unordered SELECT; production candidate grouping explicitly restores rowid order before applying tie behavior.",
+          "Split longitude intervals at the antimeridian and search every longitude when a bound reaches a pole; final Haversine checks remain authoritative.",
+          "Reject invalid located-reservation coordinates and preserve the guide import invariant that active coordinates are valid and not 0,0.",
+          "Chunk VALUES input below SQLite bind limits; the production model uses eight binds per reservation plus two active-dataset binds.",
+          "Maintain the R-Tree transactionally when a guide dataset changes; this read-only benchmark builds an attached in-memory equivalent once and reports that excluded build cost separately.",
+          "The no-coordinate provider fallback still needs a separate exact-name lookup; the spatial path only replaces matching for located reservations.",
+          "Re-benchmark small and very large provider batches on Expo SQLite because Node's row-decoding cost is a proxy, not the React Native bridge itself.",
+        ],
+      };
+      database.exec("COMMIT");
+    } catch (error) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // The transaction may not have started; preserve the original error.
+      }
+      throw error;
+    } finally {
+      database.close();
     }
-    throw error;
-  } finally {
-    database.close();
-  }
+  })();
 
   assert.equal(sha256File(configuration.databasePath), sourceDatabaseSha256, "Source database bytes changed.");
   assert.deepEqual(
@@ -1530,7 +1525,7 @@ function main(): void {
     protectedBefore,
     "Source or sidecar state changed.",
   );
-  assertAggregateOnlyReport(report, sourceRowsForPrivacyCheck, configuration.databasePath);
+  assertAggregateOnlyReport(JSON.stringify(report), sourceRowsForPrivacyCheck, configuration.databasePath);
   mkdirSync(dirname(configuration.outputPath), { recursive: true });
   writeFileSync(configuration.outputPath, `${JSON.stringify(report, null, 2)}\n`, { flag: "w" });
   assert.equal(sha256File(configuration.databasePath), sourceDatabaseSha256, "Source changed while writing report.");

@@ -2,21 +2,27 @@ import type { MichelinBadge } from "./types";
 
 export function formatDate(timestamp: number, timeZone?: string | null): string {
   const date = new Date(timestamp);
-  return date.toLocaleDateString(undefined, {
+  const options: Intl.DateTimeFormatOptions = {
     month: "short",
     day: "numeric",
     year: "numeric",
-    ...(timeZone ? { timeZone } : {}),
-  });
+  };
+  if (timeZone) {
+    options.timeZone = timeZone;
+  }
+  return date.toLocaleDateString(undefined, options);
 }
 
 export function formatTime(timestamp: number, timeZone?: string | null): string {
   const date = new Date(timestamp);
-  return date.toLocaleTimeString(undefined, {
+  const options: Intl.DateTimeFormatOptions = {
     hour: "numeric",
     minute: "2-digit",
-    ...(timeZone ? { timeZone } : {}),
-  });
+  };
+  if (timeZone) {
+    options.timeZone = timeZone;
+  }
+  return date.toLocaleTimeString(undefined, options);
 }
 
 export function getMichelinBadge(award: string): MichelinBadge | null {

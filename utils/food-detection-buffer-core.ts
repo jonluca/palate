@@ -15,16 +15,19 @@ export const DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE = 1_000;
  * Binaries that omit the constant and invalid values retain the legacy 50-row
  * boundary so an over-the-air JavaScript update cannot enlarge untested native work.
  */
-export function resolveVisionNativePageSize(value: unknown): number {
-  if (
-    typeof value !== "number" ||
-    !Number.isSafeInteger(value) ||
-    value <= 0 ||
-    value > MAXIMUM_VISION_NATIVE_PAGE_SIZE
-  ) {
+export type VisionNativePageSizeSetting = number | string | undefined;
+
+export function resolveVisionNativePageSize(value: VisionNativePageSizeSetting): number {
+  if (!isValidVisionNativePageSize(value)) {
     return LEGACY_VISION_NATIVE_PAGE_SIZE;
   }
   return value;
+}
+
+function isValidVisionNativePageSize(value: VisionNativePageSizeSetting): value is number {
+  return (
+    typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= MAXIMUM_VISION_NATIVE_PAGE_SIZE
+  );
 }
 
 /** Configures an {@link AsyncResultBuffer}. */
@@ -86,10 +89,10 @@ export class AsyncResultBuffer<T> {
 
   /** Creates an empty result buffer. */
   constructor(options: AsyncResultBufferOptions<T>) {
-    if (options === null || typeof options !== "object") {
+    if (!isAsyncResultBufferOptions(options)) {
       throw new TypeError("Async result buffer options must be an object.");
     }
-    if (typeof options.persist !== "function") {
+    if (!hasAsyncResultBufferPersistence(options)) {
       throw new TypeError("Async result buffer persistence must be a function.");
     }
 
@@ -187,4 +190,14 @@ export class AsyncResultBuffer<T> {
       this.operationInProgress = false;
     }
   }
+}
+
+function isAsyncResultBufferOptions<T>(options: AsyncResultBufferOptions<T>): options is AsyncResultBufferOptions<T> {
+  return options !== null && typeof options === "object";
+}
+
+function hasAsyncResultBufferPersistence<T>(
+  options: AsyncResultBufferOptions<T>,
+): options is AsyncResultBufferOptions<T> {
+  return typeof options.persist === "function";
 }

@@ -51,21 +51,23 @@ export interface MichelinProviderSpatialCandidate {
 }
 
 export interface MichelinProviderSpatialCandidateRow {
-  readonly reservationOrdinal: unknown;
-  readonly sourceOrder: unknown;
-  readonly id: unknown;
-  readonly name: unknown;
-  readonly latitude: unknown;
-  readonly longitude: unknown;
+  readonly reservationOrdinal: MichelinProviderSpatialRowValue;
+  readonly sourceOrder: MichelinProviderSpatialRowValue;
+  readonly id: MichelinProviderSpatialRowValue;
+  readonly name: MichelinProviderSpatialRowValue;
+  readonly latitude: MichelinProviderSpatialRowValue;
+  readonly longitude: MichelinProviderSpatialRowValue;
 }
 
-interface MichelinProviderSpatialHealthRow {
+export type MichelinProviderSpatialRowValue = string | number | null | undefined;
+
+export interface MichelinProviderSpatialHealthRow {
   readonly issueCount: number;
 }
 
 export interface MichelinProviderSpatialSqlExecutor {
   readonly execAsync: (source: string) => Promise<void>;
-  readonly getFirstAsync: <T>(source: string) => Promise<T | null>;
+  readonly getFirstAsync: (source: string) => Promise<MichelinProviderSpatialHealthRow | null>;
 }
 
 export interface MichelinProviderSpatialDatabase extends MichelinProviderSpatialSqlExecutor {
@@ -173,19 +175,21 @@ ORDER BY m.rowid`;
 
 function parseHealthIssueCount(row: MichelinProviderSpatialHealthRow | null): number {
   const issueCount = row?.issueCount;
-  if (typeof issueCount !== "number" || !Number.isSafeInteger(issueCount) || issueCount < 0) {
+  if (!isValidMichelinProviderSpatialHealthIssueCount(issueCount)) {
     throw new Error("Michelin provider spatial health query returned an invalid issueCount.");
   }
   return issueCount;
+}
+
+function isValidMichelinProviderSpatialHealthIssueCount(value: number | undefined): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 async function repairInsideTransaction(database: MichelinProviderSpatialDatabase): Promise<boolean> {
   spatialIndexRequiresValidation = true;
   let repaired = false;
   await database.withExclusiveTransactionAsync(async (transaction) => {
-    const issueCount = parseHealthIssueCount(
-      await transaction.getFirstAsync<MichelinProviderSpatialHealthRow>(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL),
-    );
+    const issueCount = parseHealthIssueCount(await transaction.getFirstAsync(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL));
     if (issueCount > 0) {
       await transaction.execAsync(MICHELIN_PROVIDER_SPATIAL_REPAIR_SQL);
       repaired = true;
@@ -222,9 +226,7 @@ export async function ensureInvalidatedMichelinProviderSpatialIndex(
 /** Healthy launches execute schema guards plus one read-only health query and no transaction. */
 export async function ensureMichelinProviderSpatialIndex(database: MichelinProviderSpatialDatabase): Promise<boolean> {
   await database.execAsync(MICHELIN_PROVIDER_SPATIAL_SCHEMA_SQL);
-  const issueCount = parseHealthIssueCount(
-    await database.getFirstAsync<MichelinProviderSpatialHealthRow>(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL),
-  );
+  const issueCount = parseHealthIssueCount(await database.getFirstAsync(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL));
   if (issueCount === 0) {
     spatialIndexRequiresValidation = false;
     return false;
@@ -236,9 +238,7 @@ export async function ensureMichelinProviderSpatialIndex(database: MichelinProvi
 export async function repairMichelinProviderSpatialIndexIfNeeded(
   database: MichelinProviderSpatialDatabase,
 ): Promise<boolean> {
-  const issueCount = parseHealthIssueCount(
-    await database.getFirstAsync<MichelinProviderSpatialHealthRow>(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL),
-  );
+  const issueCount = parseHealthIssueCount(await database.getFirstAsync(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL));
   if (issueCount === 0) {
     spatialIndexRequiresValidation = false;
     return false;
@@ -415,18 +415,26 @@ export function buildMichelinProviderSpatialQueryPlans(
   return plans;
 }
 
-function requiredFiniteNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function requiredFiniteNumber(value: MichelinProviderSpatialRowValue, label: string): number {
+  if (!isFiniteMichelinProviderSpatialNumber(value)) {
     throw new TypeError(`${label} must be a finite number.`);
   }
   return value;
 }
 
-function requiredString(value: unknown, label: string): string {
-  if (typeof value !== "string") {
+function requiredString(value: MichelinProviderSpatialRowValue, label: string): string {
+  if (!isMichelinProviderSpatialString(value)) {
     throw new TypeError(`${label} must be a string.`);
   }
   return value;
+}
+
+function isFiniteMichelinProviderSpatialNumber(value: MichelinProviderSpatialRowValue): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isMichelinProviderSpatialString(value: MichelinProviderSpatialRowValue): value is string {
+  return typeof value === "string";
 }
 
 /** Parse bridge rows, deduplicate R-Tree OR results, and restore guide rowid order per input. */

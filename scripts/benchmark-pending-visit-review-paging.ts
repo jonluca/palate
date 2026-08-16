@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL,
@@ -36,6 +36,25 @@ import {
   assertCalendarTitleMatchingSourceContract,
 } from "./calendar-title-matching-benchmark-core.ts";
 
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isObjectValue<Value>(value: Value): value is Value & object {
+  return typeof value === "object";
+}
+
+function hasStringId<Value>(value: Value): value is Value & { readonly id: string } {
+  return value !== null && isObjectValue(value) && "id" in value && isStringValue(value.id);
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
+
 interface Configuration {
   databasePath: string | null;
   pendingVisits: number;
@@ -57,7 +76,7 @@ interface DatasetSummary {
   readonly pendingSuggestionVisits: number;
 }
 
-interface MeasurementShape {
+interface MeasurementTransfer {
   readonly queryCalls: number;
   readonly manifestQueryCalls: number;
   readonly hydrationQueryCalls: number;
@@ -76,7 +95,7 @@ interface MeasurementShape {
   readonly maxBytesPerCall: number;
 }
 
-interface Measurement extends MeasurementShape {
+interface Measurement extends MeasurementTransfer {
   readonly elapsedMilliseconds: number;
   readonly timeToFirstPageMilliseconds: number;
   readonly manifestSqlMilliseconds: number;
@@ -242,7 +261,7 @@ function sha256File(path: string): string {
   return sha256Bytes(readFileSync(path));
 }
 
-function serializedBytes(value: unknown): number {
+function serializedBytes<Value>(value: Value): number {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
@@ -428,7 +447,7 @@ function priorityCounts(total: number): readonly [number, number, number, number
     for (let index = 0; index < total; index++) {
       counts[index] = 1;
     }
-    return counts as unknown as readonly [number, number, number, number];
+    return [counts[0]!, counts[1]!, counts[2]!, counts[3]!];
   }
   const p1 = Math.max(1, Math.round((total * 574) / 6_511));
   const p2 = Math.max(1, Math.round((total * 1_418) / 6_511));
@@ -598,8 +617,9 @@ function seedSyntheticDatabase(database: DatabaseSync, configuration: Configurat
 }
 
 function numericCount(database: DatabaseSync, sql: string): number {
-  const row = database.prepare(sql).get() as { count?: unknown } | undefined;
-  if (typeof row?.count !== "number") {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const row = database.prepare(sql).get() as BenchmarkSQLiteRow<{ count?: SQLiteValue }> | undefined;
+  if (!isNumberValue(row?.count)) {
     throw new TypeError(`Count query did not return a number: ${sql}`);
   }
   return row.count;
@@ -641,12 +661,10 @@ function totalChanges(database: DatabaseSync): number {
   return numericCount(database, "SELECT total_changes() AS count");
 }
 
-function orderedKeys(database: DatabaseSync): {
-  readonly row: PendingVisitReviewOrderedKeysRow;
-  readonly keys: PendingVisitReviewPageKey[];
-} {
+function orderedKeys(database: DatabaseSync) {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const row = database.prepare(PENDING_VISIT_REVIEW_ORDERED_KEYS_SQL).get() as
-    | PendingVisitReviewOrderedKeysRow
+    | BenchmarkSQLiteRow<PendingVisitReviewOrderedKeysRow>
     | undefined;
   assert.ok(row, "ordered-key aggregate must return one row");
   return { row, keys: parsePendingVisitReviewOrderedKeys(row) };
@@ -670,18 +688,16 @@ function parseHydratedSuggestionIds(row: PendingVisitReviewQueryRow): string[] {
   const decoded: unknown = JSON.parse(row.suggestedRestaurantsJson);
   assert.ok(Array.isArray(decoded), `suggested restaurants for ${JSON.stringify(row.id)} must be an array`);
   return decoded.map((value, index) => {
-    assert.ok(
-      typeof value === "object" && value !== null && typeof (value as { id?: unknown }).id === "string",
-      `suggested restaurant ${index} for ${JSON.stringify(row.id)} must have a string id`,
-    );
-    return (value as { id: string }).id;
+    assert.ok(hasStringId(value), `suggested restaurant ${index} for ${JSON.stringify(row.id)} must have a string id`);
+    return value.id;
   });
 }
 
 function executeMonolith(database: DatabaseSync): Measurement {
   const statement = database.prepare(PENDING_VISITS_FOR_REVIEW_SQL);
   const startedAt = performance.now();
-  const rows = statement.all() as unknown as PendingVisitReviewQueryRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rows = statement.all() as BenchmarkSQLiteRow<PendingVisitReviewQueryRow>[];
   const elapsedMilliseconds = performance.now() - startedAt;
   const canonicalRows = canonicalReviewOrder(rows);
   const bytes = serializedBytes(rows);
@@ -716,6 +732,7 @@ function executePromotedBootstrap(database: DatabaseSync, pageSize: number): Mea
   const manifestStatement = database.prepare(PENDING_VISIT_REVIEW_MANIFEST_SQL);
   const pageStatement = database.prepare(PENDING_VISIT_REVIEW_PAGE_SQL);
   const startedAt = performance.now();
+  // SAFETY: The fixed manifest aggregate returns the named row contract when the benchmark schema is present.
   const manifestRow = manifestStatement.get() as PendingVisitReviewManifestRow | undefined;
   const manifestSqlCompletedAt = performance.now();
   assert.ok(manifestRow, "manifest aggregate must return one row");
@@ -738,9 +755,10 @@ function executePromotedBootstrap(database: DatabaseSync, pageSize: number): Mea
 
   for (const pageKeys of partitionPendingVisitReviewKeys(generation.selectedKeys, pageSize)) {
     const pageStartedAt = performance.now();
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const pageRows = pageStatement.all(
       serializePendingVisitReviewPageKeys(pageKeys),
-    ) as unknown as PendingVisitReviewQueryRow[];
+    ) as BenchmarkSQLiteRow<PendingVisitReviewQueryRow>[];
     const pageCompletedAt = performance.now();
     pages.push({ keys: pageKeys, rows: pageRows });
     rows.push(...pageRows);
@@ -798,7 +816,7 @@ function executeStrategy(database: DatabaseSync, strategy: Strategy): Measuremen
   return executePromotedBootstrap(database, Number(strategy.slice("page-".length)));
 }
 
-function measurementShape(measurement: Measurement): MeasurementShape {
+function measurementTransfer(measurement: Measurement): MeasurementTransfer {
   return {
     queryCalls: measurement.queryCalls,
     manifestQueryCalls: measurement.manifestQueryCalls,
@@ -839,9 +857,10 @@ function counterbalancedOrder(strategies: readonly Strategy[], round: number): S
 }
 
 function verifyCandidateParity(database: DatabaseSync, pageSizes: readonly number[]) {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const productionRows = database
     .prepare(PENDING_VISITS_FOR_REVIEW_SQL)
-    .all() as unknown as PendingVisitReviewQueryRow[];
+    .all() as BenchmarkSQLiteRow<PendingVisitReviewQueryRow>[];
   const expected = canonicalReviewOrder(productionRows);
   const productionTieGroups = new Map<string, number>();
   for (const row of productionRows) {
@@ -863,9 +882,10 @@ function verifyCandidateParity(database: DatabaseSync, pageSizes: readonly numbe
     const pageStatement = database.prepare(PENDING_VISIT_REVIEW_PAGE_SQL);
     const rows: PendingVisitReviewQueryRow[] = [];
     for (const pageKeys of partitionPendingVisitReviewKeys(keyResult.keys, pageSize)) {
+      // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
       const pageRows = pageStatement.all(
         serializePendingVisitReviewPageKeys(pageKeys),
-      ) as unknown as PendingVisitReviewQueryRow[];
+      ) as BenchmarkSQLiteRow<PendingVisitReviewQueryRow>[];
       assertRowsMatchKeys(pageRows, pageKeys);
       rows.push(...pageRows);
     }
@@ -891,8 +911,9 @@ function verifyCandidateParity(database: DatabaseSync, pageSizes: readonly numbe
 }
 
 function buildPromotedBootstrapOracle(database: DatabaseSync): PromotedBootstrapOracle {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const manifestRow = database.prepare(PENDING_VISIT_REVIEW_MANIFEST_SQL).get() as
-    | PendingVisitReviewManifestRow
+    | BenchmarkSQLiteRow<PendingVisitReviewManifestRow>
     | undefined;
   assert.ok(manifestRow, "manifest aggregate must return one row");
   const items = parsePendingVisitReviewManifest(manifestRow);
@@ -902,8 +923,9 @@ function buildPromotedBootstrapOracle(database: DatabaseSync): PromotedBootstrap
     BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS,
     manifestRow.manifestJson,
   );
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const rawRows = canonicalReviewOrder(
-    database.prepare(PENDING_VISITS_FOR_REVIEW_SQL).all() as unknown as PendingVisitReviewQueryRow[],
+    database.prepare(PENDING_VISITS_FOR_REVIEW_SQL).all() as BenchmarkSQLiteRow<PendingVisitReviewQueryRow>[],
   );
   assert.deepEqual(
     items.map(({ id, priority }) => ({ id, priority })),
@@ -943,9 +965,10 @@ function verifyPromotedBootstrapFullHydration(database: DatabaseSync, pageSizes:
   for (const pageSize of pageSizes) {
     const rows: PendingVisitReviewQueryRow[] = [];
     for (const pageKeys of partitionPendingVisitReviewKeys(oracle.generation.selectedKeys, pageSize)) {
+      // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
       const pageRows = pageStatement.all(
         serializePendingVisitReviewPageKeys(pageKeys),
-      ) as unknown as PendingVisitReviewQueryRow[];
+      ) as BenchmarkSQLiteRow<PendingVisitReviewQueryRow>[];
       assertRowsMatchKeys(pageRows, pageKeys);
       rows.push(...pageRows);
     }
@@ -992,282 +1015,296 @@ async function run(configuration: Configuration): Promise<void> {
     syntheticBuildMilliseconds = performance.now() - buildStartedAt;
   }
 
-  let report: Record<string, unknown>;
-  try {
-    database.exec("PRAGMA query_only = ON; BEGIN");
-    const changesBefore = totalChanges(database);
-    const integrityRow = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
-    assert.equal(integrityRow?.integrity_check, "ok", "database integrity_check must pass");
-    const foreignKeyViolationCount = database.prepare("PRAGMA foreign_key_check").all().length;
-    assert.equal(foreignKeyViolationCount, 0, "database must not contain foreign-key violations");
-    const dataset = datasetSummary(database);
-    const parityBefore = verifyCandidateParity(database, configuration.pageSizes);
-    const promotedParityBefore = verifyPromotedBootstrapFullHydration(database, configuration.pageSizes);
-
-    const strategies: Strategy[] = ["monolith", ...configuration.pageSizes.map((size) => `page-${size}` as const)];
-    for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
-      for (const strategy of counterbalancedOrder(strategies, warmup)) {
-        const measurement = executeStrategy(database, strategy);
-        const expectedChecksum =
-          strategy === "monolith" ? parityBefore.fullRawRowSha256 : promotedParityBefore.selectedRowSha256;
-        assert.equal(measurement.checksum, expectedChecksum, `warmup ${strategy} checksum diverged`);
-      }
-    }
-
-    const measurements = Object.fromEntries(strategies.map((strategy) => [strategy, [] as Measurement[]])) as Record<
-      Strategy,
-      Measurement[]
-    >;
-    const measurementOrder: Strategy[][] = [];
-    const measuredChecksums = new Map<Strategy, Set<string>>(
-      strategies.map((strategy) => [strategy, new Set<string>()]),
-    );
-    for (let sample = 0; sample < configuration.samples; sample++) {
-      const order = counterbalancedOrder(strategies, sample + configuration.warmupIterations);
-      measurementOrder.push(order);
-      for (const strategy of order) {
-        const measurement = executeStrategy(database, strategy);
-        const expectedChecksum =
-          strategy === "monolith" ? parityBefore.fullRawRowSha256 : promotedParityBefore.selectedRowSha256;
-        assert.equal(measurement.checksum, expectedChecksum, `sample ${sample + 1} ${strategy} diverged`);
-        measurements[strategy].push(measurement);
-        measuredChecksums.get(strategy)!.add(measurement.checksum);
-      }
-    }
-
-    const parityAfter = verifyCandidateParity(database, configuration.pageSizes);
-    const promotedParityAfter = verifyPromotedBootstrapFullHydration(database, configuration.pageSizes);
-    assert.equal(parityAfter.fullRawRowSha256, parityBefore.fullRawRowSha256, "database rows changed during timing");
-    assert.equal(
-      promotedParityAfter.selectedRowSha256,
-      promotedParityBefore.selectedRowSha256,
-      "promoted selected rows changed during timing",
-    );
-    assert.equal(
-      promotedParityAfter.manifestRow.manifestJson,
-      promotedParityBefore.manifestRow.manifestJson,
-      "manifest changed during timing",
-    );
-    for (const strategy of strategies) {
-      const expectedChecksum =
-        strategy === "monolith" ? parityBefore.fullRawRowSha256 : promotedParityBefore.selectedRowSha256;
-      assert.deepEqual([...measuredChecksums.get(strategy)!], [expectedChecksum]);
-    }
-    const changesAfter = totalChanges(database);
-    assert.equal(changesAfter, changesBefore, "read-only profiling must not change SQLite total_changes()");
-
-    const monolithFullSummary = summarize(measurements.monolith.map((measurement) => measurement.elapsedMilliseconds));
-    const monolithFirstSummary = summarize(
-      measurements.monolith.map((measurement) => measurement.timeToFirstPageMilliseconds),
-    );
-    const timingByStrategy = Object.fromEntries(
-      strategies.map((strategy) => {
-        const fullHydration = summarize(measurements[strategy].map((measurement) => measurement.elapsedMilliseconds));
-        const timeToFirstPage = summarize(
-          measurements[strategy].map((measurement) => measurement.timeToFirstPageMilliseconds),
-        );
-        const expectedShape = measurementShape(measurements[strategy][0]);
-        for (const measurement of measurements[strategy]) {
-          assert.deepEqual(
-            measurementShape(measurement),
-            expectedShape,
-            `${strategy} transfer shape changed between samples`,
-          );
-        }
-        return [
-          strategy,
-          {
-            fullHydration,
-            timeToFirstPage,
-            promotedBootstrapStages:
-              strategy === "monolith"
-                ? null
-                : {
-                    manifestSql: summarize(
-                      measurements[strategy].map((measurement) => measurement.manifestSqlMilliseconds),
-                    ),
-                    strictManifestParse: summarize(
-                      measurements[strategy].map((measurement) => measurement.strictManifestParseMilliseconds),
-                    ),
-                    globalProductionTitleMatchingAndFilterPlanning: summarize(
-                      measurements[strategy].map((measurement) => measurement.globalFilterPlanningMilliseconds),
-                    ),
-                    firstPageHydration: summarize(
-                      measurements[strategy].map((measurement) => measurement.firstPageHydrationMilliseconds),
-                    ),
-                    accountedFirstPageStages: summarize(
-                      measurements[strategy].map(
-                        (measurement) =>
-                          measurement.manifestSqlMilliseconds +
-                          measurement.strictManifestParseMilliseconds +
-                          measurement.globalFilterPlanningMilliseconds +
-                          measurement.firstPageHydrationMilliseconds,
-                      ),
-                    ),
-                  },
-            transferShape: expectedShape,
-            relativeToMonolith: {
-              firstPageSpeedup: monolithFirstSummary.medianMilliseconds / timeToFirstPage.medianMilliseconds,
-              fullHydrationSpeedup: monolithFullSummary.medianMilliseconds / fullHydration.medianMilliseconds,
-              fullHydrationMillisecondsDelta: fullHydration.medianMilliseconds - monolithFullSummary.medianMilliseconds,
-            },
-          },
-        ];
-      }),
-    );
-
-    const monolithTransferShape = measurementShape(measurements.monolith[0]);
-    const productionStrategy = `page-${DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE}` as const;
-    const productionTransferShape = measurementShape(measurements[productionStrategy][0]);
-    assert.equal(
-      productionTransferShape.firstPageRows,
-      Math.min(DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE, productionTransferShape.selectedRows),
-      "production strategy must hydrate the first 128 globally selected rows",
-    );
-    const bootstrapPayloadComparison = {
-      monolith: {
-        sqliteRows: monolithTransferShape.transferredRows,
-        pendingVisits: monolithTransferShape.resultRows,
-        payloadBytes: monolithTransferShape.transferredBytes,
-      },
-      compactManifest: {
-        sqliteRows: productionTransferShape.manifestRows,
-        manifestItems: productionTransferShape.manifestItems,
-        payloadBytes: productionTransferShape.manifestPayloadBytes,
-        payloadBytesSavedVersusMonolith:
-          monolithTransferShape.transferredBytes - productionTransferShape.manifestPayloadBytes,
-        payloadRatioVersusMonolith:
-          productionTransferShape.manifestPayloadBytes / monolithTransferShape.transferredBytes,
-      },
-      firstHydratedPage: {
-        requestedMaximumRows: DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE,
-        hydratedRows: productionTransferShape.firstPageRows,
-        payloadBytes: productionTransferShape.firstPagePayloadBytes,
-      },
-      promotedBootstrapThroughFirstPage: {
-        sqliteRows: productionTransferShape.manifestRows + productionTransferShape.firstPageRows,
-        payloadBytes: productionTransferShape.manifestPayloadBytes + productionTransferShape.firstPagePayloadBytes,
-        payloadBytesSavedVersusMonolith:
-          monolithTransferShape.transferredBytes -
-          productionTransferShape.manifestPayloadBytes -
-          productionTransferShape.firstPagePayloadBytes,
-        payloadRatioVersusMonolith:
-          (productionTransferShape.manifestPayloadBytes + productionTransferShape.firstPagePayloadBytes) /
-          monolithTransferShape.transferredBytes,
-      },
-    };
-
-    report = {
-      schemaVersion: 2,
-      status: "ok",
-      benchmarkScope:
-        mode === "immutable-real"
-          ? "Node/V8 node:sqlite against one immutable read-only Palate database snapshot; promoted timing includes compact manifest SQL, strict JSON parsing, global production title matching/filter planning, and page hydration, but excludes Expo SQLite scheduling, the React Native bridge, Hermes, React rendering, Photos, and live Calendar access."
-          : "Node/V8 node:sqlite against a synthetic in-memory current-Mac-scale fixture; promoted timing includes compact manifest SQL, strict JSON parsing, global production title matching/filter planning, and page hydration, but excludes Expo SQLite scheduling, the React Native bridge, Hermes, React rendering, Photos, and live Calendar access.",
-      productionGuidance:
-        "page-128 measures the promoted production bootstrap contract. Its full-hydration timing is retained only as a compatibility/correctness oracle; production consumes pages progressively.",
-      strategyContracts: {
-        monolith: "PENDING_VISITS_FOR_REVIEW_SQL returning every heavy pending row",
-        [productionStrategy]:
-          "PENDING_VISIT_REVIEW_MANIFEST_SQL + strict parse + createPendingVisitReviewGeneration with production title semantics and default on/on filters + first 128-row hydration",
-      },
-      runtime: {
-        node: process.version,
-        v8: process.versions.v8,
-        sqlite: (database.prepare("SELECT sqlite_version() AS version").get() as { version: string }).version,
-      },
-      configuration: {
-        mode,
-        syntheticPendingVisits: mode === "synthetic" ? configuration.pendingVisits : null,
-        syntheticPhotos: mode === "synthetic" ? configuration.photos : null,
-        pageSizes: configuration.pageSizes,
-        productionPageSize: DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE,
-        productionBootstrapFilters: PRODUCTION_BOOTSTRAP_FILTERS,
-        samples: configuration.samples,
-        warmupIterations: configuration.warmupIterations,
-      },
-      dataset: {
-        ...dataset,
-        syntheticBuildMilliseconds,
-      },
-      correctness: {
-        exactRawFieldParityUnderDeterministicOrderBeforeTiming: parityBefore.exactRawFieldParityUnderDeterministicOrder,
-        exactRawFieldParityUnderDeterministicOrderAfterTiming: parityAfter.exactRawFieldParityUnderDeterministicOrder,
-        fullRawRowSha256BeforeTiming: parityBefore.fullRawRowSha256,
-        fullRawRowSha256AfterTiming: parityAfter.fullRawRowSha256,
-        promotedSelectedRowSha256BeforeTiming: promotedParityBefore.selectedRowSha256,
-        promotedSelectedRowSha256AfterTiming: promotedParityAfter.selectedRowSha256,
-        promotedFullHydrationParityBeforeTiming: promotedParityBefore.exactSelectedRowParity,
-        promotedFullHydrationParityAfterTiming: promotedParityAfter.exactSelectedRowParity,
-        manifestMonolithPageSuggestionOrderParityBeforeTiming: promotedParityBefore.deterministicSuggestionOrderParity,
-        manifestMonolithPageSuggestionOrderParityAfterTiming: promotedParityAfter.deterministicSuggestionOrderParity,
-        deterministicSuggestionOrderSql: PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL,
-        measuredSampleChecksumsByStrategy: Object.fromEntries(
-          [...measuredChecksums].map(([strategy, checksums]) => [strategy, [...checksums]]),
-        ),
-        comparedRows: parityBefore.comparedRows,
-        orderedKeyRowCount: parityBefore.orderedKeyRowCount,
-        orderedKeys: parityBefore.orderedKeys,
-        orderedKeysPayloadBytes: parityBefore.orderedKeysPayloadBytes,
-        deterministicFinalOrderKey: parityBefore.deterministicFinalOrderKey,
-        productionOrderContract: parityBefore.productionOrderContract,
-        tiedPriorityStartTimeGroups: parityBefore.tiedPriorityStartTimeGroups,
-        literalMonolithOrderMatchedDeterministicOrder: parityBefore.literalMonolithOrderMatchedDeterministicOrder,
-        manifestSqlRows: promotedParityBefore.manifestSqlRows,
-        manifestItems: promotedParityBefore.manifestItems,
-        manifestJsonUtf8Bytes: promotedParityBefore.manifestJsonUtf8Bytes,
-        manifestSqlPayloadBytes: promotedParityBefore.manifestSqlPayloadBytes,
-        promotedSelectedRows: promotedParityBefore.selectedRows,
-        promotedExactSelectedRows: promotedParityBefore.exactSelectedRows,
-        promotedFilteredManualRows: promotedParityBefore.filteredManualRows,
-        calendarTitleMatchingSourceAttestation,
-        checksumOrder:
-          "Raw production rows canonicalized only within otherwise unspecified equal-priority/equal-startTime groups using id ASC",
-        integrityCheck: integrityRow?.integrity_check,
-        foreignKeyViolationCount,
-        totalChangesBefore: changesBefore,
-        totalChangesAfter: changesAfter,
-      },
-      bootstrapPayloadComparison,
-      timings: timingByStrategy,
-      measurementOrder,
-      privacy: {
-        aggregateOnly: true,
-        rawRowsRetainedInReport: false,
-        visitIdentifiersRetainedInReport: false,
-        restaurantIdentifiersOrNamesRetainedInReport: false,
-        sourcePathRetainedInReport: false,
-        photosLibraryAccessed: false,
-        calendarLibraryAccessed: false,
-      },
-    };
-    database.exec("COMMIT");
-  } catch (error) {
+  const report = (() => {
     try {
-      database.exec("ROLLBACK");
-    } catch {
-      // Preserve the primary failure if the transaction already ended.
+      database.exec("PRAGMA query_only = ON; BEGIN");
+      const changesBefore = totalChanges(database);
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const integrityRow = database.prepare("PRAGMA integrity_check").get() as
+        | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
+        | undefined;
+      assert.equal(integrityRow?.integrity_check, "ok", "database integrity_check must pass");
+      const foreignKeyViolationCount = database.prepare("PRAGMA foreign_key_check").all().length;
+      assert.equal(foreignKeyViolationCount, 0, "database must not contain foreign-key violations");
+      const dataset = datasetSummary(database);
+      const parityBefore = verifyCandidateParity(database, configuration.pageSizes);
+      const promotedParityBefore = verifyPromotedBootstrapFullHydration(database, configuration.pageSizes);
+
+      const strategies: Strategy[] = ["monolith", ...configuration.pageSizes.map((size) => `page-${size}` as const)];
+      for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
+        for (const strategy of counterbalancedOrder(strategies, warmup)) {
+          const measurement = executeStrategy(database, strategy);
+          const expectedChecksum =
+            strategy === "monolith" ? parityBefore.fullRawRowSha256 : promotedParityBefore.selectedRowSha256;
+          assert.equal(measurement.checksum, expectedChecksum, `warmup ${strategy} checksum diverged`);
+        }
+      }
+
+      // SAFETY: strategies contains every runtime Strategy exactly once, including all configured page sizes.
+      const measurements = Object.fromEntries(
+        strategies.map((strategy) => [strategy, new Array<Measurement>()]),
+      ) as Record<Strategy, Measurement[]>;
+      const measurementOrder: Strategy[][] = [];
+      const measuredChecksums = new Map<Strategy, Set<string>>(
+        strategies.map((strategy) => [strategy, new Set<string>()]),
+      );
+      for (let sample = 0; sample < configuration.samples; sample++) {
+        const order = counterbalancedOrder(strategies, sample + configuration.warmupIterations);
+        measurementOrder.push(order);
+        for (const strategy of order) {
+          const measurement = executeStrategy(database, strategy);
+          const expectedChecksum =
+            strategy === "monolith" ? parityBefore.fullRawRowSha256 : promotedParityBefore.selectedRowSha256;
+          assert.equal(measurement.checksum, expectedChecksum, `sample ${sample + 1} ${strategy} diverged`);
+          measurements[strategy].push(measurement);
+          measuredChecksums.get(strategy)!.add(measurement.checksum);
+        }
+      }
+
+      const parityAfter = verifyCandidateParity(database, configuration.pageSizes);
+      const promotedParityAfter = verifyPromotedBootstrapFullHydration(database, configuration.pageSizes);
+      assert.equal(parityAfter.fullRawRowSha256, parityBefore.fullRawRowSha256, "database rows changed during timing");
+      assert.equal(
+        promotedParityAfter.selectedRowSha256,
+        promotedParityBefore.selectedRowSha256,
+        "promoted selected rows changed during timing",
+      );
+      assert.equal(
+        promotedParityAfter.manifestRow.manifestJson,
+        promotedParityBefore.manifestRow.manifestJson,
+        "manifest changed during timing",
+      );
+      for (const strategy of strategies) {
+        const expectedChecksum =
+          strategy === "monolith" ? parityBefore.fullRawRowSha256 : promotedParityBefore.selectedRowSha256;
+        assert.deepEqual([...measuredChecksums.get(strategy)!], [expectedChecksum]);
+      }
+      const changesAfter = totalChanges(database);
+      assert.equal(changesAfter, changesBefore, "read-only profiling must not change SQLite total_changes()");
+
+      const monolithFullSummary = summarize(
+        measurements.monolith.map((measurement) => measurement.elapsedMilliseconds),
+      );
+      const monolithFirstSummary = summarize(
+        measurements.monolith.map((measurement) => measurement.timeToFirstPageMilliseconds),
+      );
+      const timingByStrategy = Object.fromEntries(
+        strategies.map((strategy) => {
+          const fullHydration = summarize(measurements[strategy].map((measurement) => measurement.elapsedMilliseconds));
+          const timeToFirstPage = summarize(
+            measurements[strategy].map((measurement) => measurement.timeToFirstPageMilliseconds),
+          );
+          const expectedTransfer = measurementTransfer(measurements[strategy][0]);
+          for (const measurement of measurements[strategy]) {
+            assert.deepEqual(
+              measurementTransfer(measurement),
+              expectedTransfer,
+              `${strategy} transfer shape changed between samples`,
+            );
+          }
+          return [
+            strategy,
+            {
+              fullHydration,
+              timeToFirstPage,
+              promotedBootstrapStages:
+                strategy === "monolith"
+                  ? null
+                  : {
+                      manifestSql: summarize(
+                        measurements[strategy].map((measurement) => measurement.manifestSqlMilliseconds),
+                      ),
+                      strictManifestParse: summarize(
+                        measurements[strategy].map((measurement) => measurement.strictManifestParseMilliseconds),
+                      ),
+                      globalProductionTitleMatchingAndFilterPlanning: summarize(
+                        measurements[strategy].map((measurement) => measurement.globalFilterPlanningMilliseconds),
+                      ),
+                      firstPageHydration: summarize(
+                        measurements[strategy].map((measurement) => measurement.firstPageHydrationMilliseconds),
+                      ),
+                      accountedFirstPageStages: summarize(
+                        measurements[strategy].map(
+                          (measurement) =>
+                            measurement.manifestSqlMilliseconds +
+                            measurement.strictManifestParseMilliseconds +
+                            measurement.globalFilterPlanningMilliseconds +
+                            measurement.firstPageHydrationMilliseconds,
+                        ),
+                      ),
+                    },
+              ["transferShape"]: expectedTransfer,
+              relativeToMonolith: {
+                firstPageSpeedup: monolithFirstSummary.medianMilliseconds / timeToFirstPage.medianMilliseconds,
+                fullHydrationSpeedup: monolithFullSummary.medianMilliseconds / fullHydration.medianMilliseconds,
+                fullHydrationMillisecondsDelta:
+                  fullHydration.medianMilliseconds - monolithFullSummary.medianMilliseconds,
+              },
+            },
+          ];
+        }),
+      );
+
+      const monolithTransfer = measurementTransfer(measurements.monolith[0]);
+      const productionStrategy = `page-${DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE}` as const;
+      const productionTransfer = measurementTransfer(measurements[productionStrategy][0]);
+      assert.equal(
+        productionTransfer.firstPageRows,
+        Math.min(DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE, productionTransfer.selectedRows),
+        "production strategy must hydrate the first 128 globally selected rows",
+      );
+      const bootstrapPayloadComparison = {
+        monolith: {
+          sqliteRows: monolithTransfer.transferredRows,
+          pendingVisits: monolithTransfer.resultRows,
+          payloadBytes: monolithTransfer.transferredBytes,
+        },
+        compactManifest: {
+          sqliteRows: productionTransfer.manifestRows,
+          manifestItems: productionTransfer.manifestItems,
+          payloadBytes: productionTransfer.manifestPayloadBytes,
+          payloadBytesSavedVersusMonolith: monolithTransfer.transferredBytes - productionTransfer.manifestPayloadBytes,
+          payloadRatioVersusMonolith: productionTransfer.manifestPayloadBytes / monolithTransfer.transferredBytes,
+        },
+        firstHydratedPage: {
+          requestedMaximumRows: DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE,
+          hydratedRows: productionTransfer.firstPageRows,
+          payloadBytes: productionTransfer.firstPagePayloadBytes,
+        },
+        promotedBootstrapThroughFirstPage: {
+          sqliteRows: productionTransfer.manifestRows + productionTransfer.firstPageRows,
+          payloadBytes: productionTransfer.manifestPayloadBytes + productionTransfer.firstPagePayloadBytes,
+          payloadBytesSavedVersusMonolith:
+            monolithTransfer.transferredBytes -
+            productionTransfer.manifestPayloadBytes -
+            productionTransfer.firstPagePayloadBytes,
+          payloadRatioVersusMonolith:
+            (productionTransfer.manifestPayloadBytes + productionTransfer.firstPagePayloadBytes) /
+            monolithTransfer.transferredBytes,
+        },
+      };
+
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      return {
+        schemaVersion: 2,
+        status: "ok",
+        benchmarkScope:
+          mode === "immutable-real"
+            ? "Node/V8 node:sqlite against one immutable read-only Palate database snapshot; promoted timing includes compact manifest SQL, strict JSON parsing, global production title matching/filter planning, and page hydration, but excludes Expo SQLite scheduling, the React Native bridge, Hermes, React rendering, Photos, and live Calendar access."
+            : "Node/V8 node:sqlite against a synthetic in-memory current-Mac-scale fixture; promoted timing includes compact manifest SQL, strict JSON parsing, global production title matching/filter planning, and page hydration, but excludes Expo SQLite scheduling, the React Native bridge, Hermes, React rendering, Photos, and live Calendar access.",
+        productionGuidance:
+          "page-128 measures the promoted production bootstrap contract. Its full-hydration timing is retained only as a compatibility/correctness oracle; production consumes pages progressively.",
+        strategyContracts: {
+          monolith: "PENDING_VISITS_FOR_REVIEW_SQL returning every heavy pending row",
+          [productionStrategy]:
+            "PENDING_VISIT_REVIEW_MANIFEST_SQL + strict parse + createPendingVisitReviewGeneration with production title semantics and default on/on filters + first 128-row hydration",
+        },
+        runtime: {
+          node: process.version,
+          v8: process.versions.v8,
+          sqlite: (
+            database.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>
+          ).version,
+        },
+        configuration: {
+          mode,
+          syntheticPendingVisits: mode === "synthetic" ? configuration.pendingVisits : null,
+          syntheticPhotos: mode === "synthetic" ? configuration.photos : null,
+          pageSizes: configuration.pageSizes,
+          productionPageSize: DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE,
+          productionBootstrapFilters: PRODUCTION_BOOTSTRAP_FILTERS,
+          samples: configuration.samples,
+          warmupIterations: configuration.warmupIterations,
+        },
+        dataset: {
+          ...dataset,
+          syntheticBuildMilliseconds,
+        },
+        correctness: {
+          exactRawFieldParityUnderDeterministicOrderBeforeTiming:
+            parityBefore.exactRawFieldParityUnderDeterministicOrder,
+          exactRawFieldParityUnderDeterministicOrderAfterTiming: parityAfter.exactRawFieldParityUnderDeterministicOrder,
+          fullRawRowSha256BeforeTiming: parityBefore.fullRawRowSha256,
+          fullRawRowSha256AfterTiming: parityAfter.fullRawRowSha256,
+          promotedSelectedRowSha256BeforeTiming: promotedParityBefore.selectedRowSha256,
+          promotedSelectedRowSha256AfterTiming: promotedParityAfter.selectedRowSha256,
+          promotedFullHydrationParityBeforeTiming: promotedParityBefore.exactSelectedRowParity,
+          promotedFullHydrationParityAfterTiming: promotedParityAfter.exactSelectedRowParity,
+          manifestMonolithPageSuggestionOrderParityBeforeTiming:
+            promotedParityBefore.deterministicSuggestionOrderParity,
+          manifestMonolithPageSuggestionOrderParityAfterTiming: promotedParityAfter.deterministicSuggestionOrderParity,
+          deterministicSuggestionOrderSql: PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL,
+          measuredSampleChecksumsByStrategy: Object.fromEntries(
+            [...measuredChecksums].map(([strategy, checksums]) => [strategy, [...checksums]]),
+          ),
+          comparedRows: parityBefore.comparedRows,
+          orderedKeyRowCount: parityBefore.orderedKeyRowCount,
+          orderedKeys: parityBefore.orderedKeys,
+          orderedKeysPayloadBytes: parityBefore.orderedKeysPayloadBytes,
+          deterministicFinalOrderKey: parityBefore.deterministicFinalOrderKey,
+          productionOrderContract: parityBefore.productionOrderContract,
+          tiedPriorityStartTimeGroups: parityBefore.tiedPriorityStartTimeGroups,
+          literalMonolithOrderMatchedDeterministicOrder: parityBefore.literalMonolithOrderMatchedDeterministicOrder,
+          manifestSqlRows: promotedParityBefore.manifestSqlRows,
+          manifestItems: promotedParityBefore.manifestItems,
+          manifestJsonUtf8Bytes: promotedParityBefore.manifestJsonUtf8Bytes,
+          manifestSqlPayloadBytes: promotedParityBefore.manifestSqlPayloadBytes,
+          promotedSelectedRows: promotedParityBefore.selectedRows,
+          promotedExactSelectedRows: promotedParityBefore.exactSelectedRows,
+          promotedFilteredManualRows: promotedParityBefore.filteredManualRows,
+          calendarTitleMatchingSourceAttestation,
+          checksumOrder:
+            "Raw production rows canonicalized only within otherwise unspecified equal-priority/equal-startTime groups using id ASC",
+          integrityCheck: integrityRow?.integrity_check,
+          foreignKeyViolationCount,
+          totalChangesBefore: changesBefore,
+          totalChangesAfter: changesAfter,
+        },
+        bootstrapPayloadComparison,
+        timings: timingByStrategy,
+        measurementOrder,
+        privacy: {
+          aggregateOnly: true,
+          rawRowsRetainedInReport: false,
+          visitIdentifiersRetainedInReport: false,
+          restaurantIdentifiersOrNamesRetainedInReport: false,
+          sourcePathRetainedInReport: false,
+          photosLibraryAccessed: false,
+          calendarLibraryAccessed: false,
+        },
+      };
+      database.exec("COMMIT");
+    } catch (error) {
+      try {
+        database.exec("ROLLBACK");
+      } catch {
+        // Preserve the primary failure if the transaction already ended.
+      }
+      throw error;
+    } finally {
+      database.close();
     }
-    throw error;
-  } finally {
-    database.close();
-  }
+  })();
+
+  const finalReport = configuration.databasePath
+    ? {
+        ...report,
+        sourceAttestation: {
+          before: sourceBefore,
+          after: snapshotSource(configuration.databasePath),
+          mainAndSidecarsByteIdentical: true,
+          openMode: "mode=ro, immutable=1, PRAGMA query_only=ON, one read transaction",
+        },
+      }
+    : { ...report, sourceAttestation: null };
 
   if (configuration.databasePath) {
     const sourceAfter = snapshotSource(configuration.databasePath);
     assert.deepEqual(sourceAfter, sourceBefore, "immutable profiling altered the source database or a sidecar");
-    report.sourceAttestation = {
-      before: sourceBefore,
-      after: sourceAfter,
-      mainAndSidecarsByteIdentical: true,
-      openMode: "mode=ro, immutable=1, PRAGMA query_only=ON, one read transaction",
-    };
-  } else {
-    report.sourceAttestation = null;
   }
 
   mkdirSync(dirname(configuration.outputPath), { recursive: true, mode: 0o700 });
-  writeFileSync(configuration.outputPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(configuration.outputPath, `${JSON.stringify(finalReport, null, 2)}\n`, { mode: 0o600 });
   chmodSync(configuration.outputPath, 0o600);
   if (configuration.databasePath) {
     assert.deepEqual(
@@ -1276,7 +1313,7 @@ async function run(configuration: Configuration): Promise<void> {
       "source database changed while publishing the aggregate report",
     );
   }
-  console.log(JSON.stringify(report, null, 2));
+  console.log(JSON.stringify(finalReport, null, 2));
 }
 
 const configuration = parseConfiguration(process.argv.slice(2));

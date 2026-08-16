@@ -3,17 +3,19 @@
  * Uses a simple Map with stringified keys for caching.
  * Assumes all arguments are strings, numbers, or booleans.
  */
-// oxlint-disable-next-line @typescript-eslint/no-explicit-any
-export function memoize<T extends (...args: any[]) => any>(fn: T): T {
-  const cache = new Map<string, ReturnType<T>>();
+export function memoize<Arguments extends unknown[], Result>(
+  fn: (...args: Arguments) => Result,
+): (...args: Arguments) => Result {
+  const cache = new Map<string, { readonly value: Result }>();
 
-  return ((...args: Parameters<T>): ReturnType<T> => {
+  return (...args: Arguments): Result => {
     const key = args.join("\0");
-    if (cache.has(key)) {
-      return cache.get(key)!;
+    const cached = cache.get(key);
+    if (cached) {
+      return cached.value;
     }
-    const result = fn(...args) as ReturnType<T>;
-    cache.set(key, result);
+    const result = fn(...args);
+    cache.set(key, { value: result });
     return result;
-  }) as T;
+  };
 }

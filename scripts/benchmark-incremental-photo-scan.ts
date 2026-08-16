@@ -16,7 +16,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL,
@@ -25,6 +25,17 @@ import {
   type PhotoScanInsertRecord,
 } from "../utils/incremental-photo-scan-core.ts";
 import { buildPhotoIngestionStatement, PHOTO_INGESTION_FLUSH_SIZE } from "../utils/db/photo-ingestion-core.ts";
+
+function isStringValue<Value>(value: Value): value is Extract<Value, string> {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Extract<Value, number> {
+  return typeof value === "number";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 type Strategy = "fullRetainedScan" | "nativeIncrementalScan";
 
@@ -224,7 +235,7 @@ function canonicalizePotentialPath(path: string, seenSymlinks = new Set<string>(
       }
       return resolve(realpathSync(ancestor), ...missing);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
         throw error;
       }
       const parent = dirname(ancestor);
@@ -286,17 +297,21 @@ function immutableDatabaseUri(databasePath: string): string {
 }
 
 function totalChanges(database: DatabaseSync): number {
-  const row = database.prepare("SELECT total_changes() AS count").get() as { count?: unknown } | undefined;
-  if (typeof row?.count !== "number") {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const row = database.prepare("SELECT total_changes() AS count").get() as
+    | BenchmarkSQLiteRow<{ count?: SQLiteValue }>
+    | undefined;
+  if (!isNumberValue(row?.count)) {
     throw new TypeError("SQLite total_changes() did not return a number");
   }
   return row.count;
 }
 
 function snapshotSqliteSequence(database: DatabaseSync): SequenceSnapshot {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const present = database
     .prepare("SELECT 1 AS present FROM sqlite_schema WHERE type = 'table' AND name = 'sqlite_sequence'")
-    .get() as { present?: unknown } | undefined;
+    .get() as BenchmarkSQLiteRow<{ present?: SQLiteValue }> | undefined;
   const rows =
     present?.present === 1 ? database.prepare("SELECT name, seq FROM sqlite_sequence ORDER BY name").all() : [];
   return { rowCount: rows.length, sha256: sha256Bytes(JSON.stringify(rows)) };
@@ -326,12 +341,13 @@ function summarize(samples: readonly number[]): TimingSummary {
   };
 }
 
-function serializedBytes(value: unknown): number {
+function serializedBytes<Value>(value: Value): number {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
 function loadSourceRows(database: DatabaseSync): SourcePhotoRow[] {
-  return database.prepare(SOURCE_ROWS_SQL).all() as unknown as SourcePhotoRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return database.prepare(SOURCE_ROWS_SQL).all() as BenchmarkSQLiteRow<SourcePhotoRow>[];
 }
 
 function createUnknownAssets(count: number): PhotoScanAssetRecord[] {
@@ -448,9 +464,10 @@ function executeStrategy(
   expectedChanges: number,
   expectedFinalDigest: DigestSnapshot | null,
 ): StrategyMeasurement {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const collision = database
     .prepare("SELECT COUNT(*) AS count FROM photos WHERE id LIKE ?")
-    .get(`${SYNTHETIC_PREFIX}%`) as { count: number };
+    .get(`${SYNTHETIC_PREFIX}%`) as BenchmarkSQLiteRow<{ count: number }>;
   assert.equal(collision.count, 0, "synthetic profile IDs must be absent before each strategy");
 
   let changes = 0;
@@ -490,15 +507,12 @@ function executeStrategy(
   };
 }
 
-function readIdentifierBridgeIndex(
-  database: DatabaseSync,
-  expectedCount: number,
-): { readonly elapsedMilliseconds: number; readonly identifiers: string[] } {
+function readIdentifierBridgeIndex(database: DatabaseSync, expectedCount: number) {
   const startedAt = performance.now();
   const rows = database.prepare(INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL).all();
   const identifiers = rows.map((row, index) => {
-    const identifier = (row as { id: unknown }).id;
-    if (typeof identifier !== "string" || identifier.length === 0) {
+    const identifier = row.id;
+    if (!isStringValue(identifier) || identifier.length === 0) {
       throw new TypeError(`identifier bridge row ${index + 1} must have a nonempty string ID`);
     }
     return identifier;
@@ -508,9 +522,9 @@ function readIdentifierBridgeIndex(
   return { elapsedMilliseconds, identifiers };
 }
 
-function storedMetricsFromDatabaseRow(row: Record<string, unknown>, rowNumber: number): StoredPhotoScanMetrics {
+function storedMetricsFromDatabaseRow(row: Record<string, SQLiteValue>, rowNumber: number): StoredPhotoScanMetrics {
   const { id, creationTime, latitude, longitude } = row;
-  if (typeof id !== "string") {
+  if (!isStringValue(id)) {
     throw new TypeError(`database index row ${rowNumber} must have a string ID`);
   }
   assert.ok(id.length > 0, `database index row ${rowNumber} must have a nonempty ID`);
@@ -520,33 +534,27 @@ function storedMetricsFromDatabaseRow(row: Record<string, unknown>, rowNumber: n
     ["longitude", longitude],
   ] as const) {
     assert.ok(
-      value === null || typeof value === "number",
+      value === null || isNumberValue(value),
       `database index row ${rowNumber} ${column} must be numeric or null`,
     );
   }
 
   const hasValidLocation =
-    typeof latitude === "number" &&
+    isNumberValue(latitude) &&
     Number.isFinite(latitude) &&
     latitude >= -90 &&
     latitude <= 90 &&
-    typeof longitude === "number" &&
+    isNumberValue(longitude) &&
     Number.isFinite(longitude) &&
     longitude >= -180 &&
     longitude <= 180;
   return {
-    hasUsableCreationTime: typeof creationTime === "number" && Number.isFinite(creationTime),
+    hasUsableCreationTime: isNumberValue(creationTime) && Number.isFinite(creationTime),
     hasValidLocation,
   };
 }
 
-function readDatabaseBackedIndex(
-  databasePath: string,
-  expectedCount: number,
-): {
-  readonly elapsedMilliseconds: number;
-  readonly metricsByIdentifier: ReadonlyMap<string, StoredPhotoScanMetrics>;
-} {
+function readDatabaseBackedIndex(databasePath: string, expectedCount: number) {
   const startedAt = performance.now();
   const database = new DatabaseSync(immutableDatabaseUri(databasePath), { readOnly: true });
   const metricsByIdentifier = new Map<string, StoredPhotoScanMetrics>();
@@ -555,9 +563,9 @@ function readDatabaseBackedIndex(
     let rowNumber = 0;
     for (const rawRow of database.prepare(DATABASE_BACKED_INDEX_SQL).iterate()) {
       rowNumber++;
-      const row = rawRow as Record<string, unknown>;
+      const row: Record<string, SQLiteValue> = rawRow;
       const identifier = row.id;
-      if (typeof identifier !== "string") {
+      if (!isStringValue(identifier)) {
         throw new TypeError(`database index row ${rowNumber} must have a string ID`);
       }
       assert.ok(!metricsByIdentifier.has(identifier), `database index row ${rowNumber} duplicated an ID`);
@@ -755,450 +763,471 @@ function run(configuration: Configuration): void {
   assertOutputDoesNotAliasSource(configuration.databasePath, configuration.outputPath);
   const sourceBefore = snapshotSource(configuration.databasePath);
   const source = new DatabaseSync(immutableDatabaseUri(configuration.databasePath), { readOnly: true });
-  let report: Record<string, unknown>;
   let changesBefore = 0;
   let changesAfter = 0;
   let sequenceBefore: SequenceSnapshot = { rowCount: 0, sha256: "" };
   let sequenceAfter: SequenceSnapshot = { rowCount: 0, sha256: "" };
 
-  try {
-    source.exec("PRAGMA query_only = ON");
-    changesBefore = totalChanges(source);
-    sequenceBefore = snapshotSqliteSequence(source);
-    const integrity = source.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
-    assert.equal(integrity?.integrity_check, "ok", "source integrity_check must pass");
-    const sourceDigest = digestQuery(source, SOURCE_ROWS_SQL);
-    const sourceRows = loadSourceRows(source);
-    assert.equal(sourceRows.length, sourceDigest.rowCount);
-    for (const [index, row] of sourceRows.entries()) {
-      assert.equal(typeof row.id, "string", `source photo ${index} must have a string ID`);
-      assert.ok(row.id.length > 0, `source photo ${index} must have a nonempty ID`);
-    }
-
-    const setupProxies = measureSetupProxies(
-      source,
-      configuration.databasePath,
-      sourceRows.length,
-      configuration.samples,
-      configuration.warmupIterations,
-    );
-    const queryMeasurement = {
-      identifiers: setupProxies.identifierBridge.identifiers,
-      timing: setupProxies.identifierBridge.queryMaterializeAndValidateTiming,
-    };
-    const databaseBackedIndex = {
-      metricsByIdentifier: setupProxies.databaseBacked.metricsByIdentifier,
-      openReadIndexAndCloseTiming: setupProxies.databaseBacked.openReadValidateIndexAndCloseTiming,
-    };
-    assert.equal(new Set(queryMeasurement.identifiers).size, queryMeasurement.identifiers.length);
-    assert.equal(databaseBackedIndex.metricsByIdentifier.size, queryMeasurement.identifiers.length);
-    for (const identifier of queryMeasurement.identifiers) {
-      assert.ok(databaseBackedIndex.metricsByIdentifier.has(identifier));
-    }
-    const unknownAssets = createUnknownAssets(configuration.unknownAssets);
-    const unknownCollisionCount = source
-      .prepare("SELECT COUNT(*) AS count FROM photos WHERE id LIKE ?")
-      .get(`${SYNTHETIC_PREFIX}%`) as { count: number };
-    assert.equal(unknownCollisionCount.count, 0, "source database collides with synthetic benchmark IDs");
-    const libraryAssets = [...sourceRowsAsAssets(sourceRows), ...unknownAssets];
-    const planProxies = measurePlanProxies(
-      queryMeasurement.identifiers,
-      databaseBackedIndex.metricsByIdentifier,
-      libraryAssets,
-      unknownAssets.length,
-      configuration.samples,
-      configuration.warmupIterations,
-    );
-    const setFiltering = planProxies.identifierBridge;
-    const databaseBackedLookup = planProxies.databaseBacked;
-    for (const [index, row] of sourceRows.entries()) {
-      assert.deepEqual(
-        databaseBackedIndex.metricsByIdentifier.get(row.id),
-        storedMetricsFromDatabaseRow(
-          {
-            id: row.id,
-            creationTime: row.creationTime,
-            latitude: row.latitude,
-            longitude: row.longitude,
-          },
-          index + 1,
-        ),
-        `database-backed index metrics differ for source row ${index + 1}`,
-      );
-    }
-    const expectedUnknownIdentifiers = unknownAssets.map((asset) => asset.id);
-    assert.deepEqual(setFiltering.unknownIdentifiers, expectedUnknownIdentifiers);
-    assert.deepEqual(databaseBackedLookup.unknownIdentifiers, expectedUnknownIdentifiers);
-    assert.equal(databaseBackedLookup.excludedVisibleCount, setFiltering.excludedVisibleCount);
-    assert.equal(databaseBackedLookup.excludedPhotosWithLocation, setFiltering.excludedPhotosWithLocation);
-    assert.equal(databaseBackedLookup.excludedSkippedAssets, setFiltering.excludedSkippedAssets);
-
-    const fullProcessing = processPages(libraryAssets, configuration.pageSize);
-    const incrementalProcessing = processPages(unknownAssets, configuration.pageSize);
-    const expectedChanges = incrementalProcessing.photos.length;
-    const fixture = createFixture(sourceRows);
+  const reportBody = (() => {
     try {
-      const initialFixtureDigest = digestQuery(fixture, SOURCE_ROWS_SQL);
-      assert.deepEqual(
-        initialFixtureDigest,
-        sourceDigest,
-        "in-memory clone must exactly match the immutable source rows",
-      );
-
-      const fullOracle = executeStrategy(fixture, fullProcessing.photos, expectedChanges, null);
-      const sourceAfterFull = digestQuery(fixture, SOURCE_ROWS_SQL);
-      assert.deepEqual(sourceAfterFull, sourceDigest, "cleanup after full scan must restore every source sentinel row");
-      const incrementalOracle = executeStrategy(
-        fixture,
-        incrementalProcessing.photos,
-        expectedChanges,
-        fullOracle.finalDatabase,
-      );
-      assert.deepEqual(
-        digestQuery(fixture, SOURCE_ROWS_SQL),
-        sourceDigest,
-        "cleanup after incremental scan must restore every source sentinel row",
-      );
-      assert.equal(incrementalOracle.statementCalls, Math.ceil(expectedChanges / PHOTO_INGESTION_FLUSH_SIZE));
-      if (configuration.unknownAssets === 0) {
-        assert.equal(incrementalOracle.statementCalls, 0);
+      source.exec("PRAGMA query_only = ON");
+      changesBefore = totalChanges(source);
+      sequenceBefore = snapshotSqliteSequence(source);
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const integrity = source.prepare("PRAGMA integrity_check").get() as
+        | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
+        | undefined;
+      assert.equal(integrity?.integrity_check, "ok", "source integrity_check must pass");
+      const sourceDigest = digestQuery(source, SOURCE_ROWS_SQL);
+      const sourceRows = loadSourceRows(source);
+      assert.equal(sourceRows.length, sourceDigest.rowCount);
+      for (const [index, row] of sourceRows.entries()) {
+        assert.ok(isStringValue(row.id), `source photo ${index} must have a string ID`);
+        assert.ok(row.id.length > 0, `source photo ${index} must have a nonempty ID`);
       }
 
-      const timingSamples: Record<Strategy, { build: number[]; execute: number[]; total: number[] }> = {
-        fullRetainedScan: { build: [], execute: [], total: [] },
-        nativeIncrementalScan: { build: [], execute: [], total: [] },
+      const setupProxies = measureSetupProxies(
+        source,
+        configuration.databasePath,
+        sourceRows.length,
+        configuration.samples,
+        configuration.warmupIterations,
+      );
+      const queryMeasurement = {
+        identifiers: setupProxies.identifierBridge.identifiers,
+        timing: setupProxies.identifierBridge.queryMaterializeAndValidateTiming,
       };
-      const measuredIterations = configuration.warmupIterations + configuration.samples;
-      for (let iteration = 0; iteration < measuredIterations; iteration++) {
-        const order: readonly Strategy[] =
-          iteration % 2 === 0
-            ? ["fullRetainedScan", "nativeIncrementalScan"]
-            : ["nativeIncrementalScan", "fullRetainedScan"];
-        for (const strategy of order) {
-          const measurement = executeStrategy(
+      const databaseBackedIndex = {
+        metricsByIdentifier: setupProxies.databaseBacked.metricsByIdentifier,
+        openReadIndexAndCloseTiming: setupProxies.databaseBacked.openReadValidateIndexAndCloseTiming,
+      };
+      assert.equal(new Set(queryMeasurement.identifiers).size, queryMeasurement.identifiers.length);
+      assert.equal(databaseBackedIndex.metricsByIdentifier.size, queryMeasurement.identifiers.length);
+      for (const identifier of queryMeasurement.identifiers) {
+        assert.ok(databaseBackedIndex.metricsByIdentifier.has(identifier));
+      }
+      const unknownAssets = createUnknownAssets(configuration.unknownAssets);
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const unknownCollisionCount = source
+        .prepare("SELECT COUNT(*) AS count FROM photos WHERE id LIKE ?")
+        .get(`${SYNTHETIC_PREFIX}%`) as BenchmarkSQLiteRow<{ count: number }>;
+      assert.equal(unknownCollisionCount.count, 0, "source database collides with synthetic benchmark IDs");
+      const libraryAssets = [...sourceRowsAsAssets(sourceRows), ...unknownAssets];
+      const planProxies = measurePlanProxies(
+        queryMeasurement.identifiers,
+        databaseBackedIndex.metricsByIdentifier,
+        libraryAssets,
+        unknownAssets.length,
+        configuration.samples,
+        configuration.warmupIterations,
+      );
+      const setFiltering = planProxies.identifierBridge;
+      const databaseBackedLookup = planProxies.databaseBacked;
+      for (const [index, row] of sourceRows.entries()) {
+        assert.deepEqual(
+          databaseBackedIndex.metricsByIdentifier.get(row.id),
+          storedMetricsFromDatabaseRow(
+            {
+              id: row.id,
+              creationTime: row.creationTime,
+              latitude: row.latitude,
+              longitude: row.longitude,
+            },
+            index + 1,
+          ),
+          `database-backed index metrics differ for source row ${index + 1}`,
+        );
+      }
+      const expectedUnknownIdentifiers = unknownAssets.map((asset) => asset.id);
+      assert.deepEqual(setFiltering.unknownIdentifiers, expectedUnknownIdentifiers);
+      assert.deepEqual(databaseBackedLookup.unknownIdentifiers, expectedUnknownIdentifiers);
+      assert.equal(databaseBackedLookup.excludedVisibleCount, setFiltering.excludedVisibleCount);
+      assert.equal(databaseBackedLookup.excludedPhotosWithLocation, setFiltering.excludedPhotosWithLocation);
+      assert.equal(databaseBackedLookup.excludedSkippedAssets, setFiltering.excludedSkippedAssets);
+
+      const fullProcessing = processPages(libraryAssets, configuration.pageSize);
+      const incrementalProcessing = processPages(unknownAssets, configuration.pageSize);
+      const expectedChanges = incrementalProcessing.photos.length;
+      const fixtureReport = (() => {
+        const fixture = createFixture(sourceRows);
+        try {
+          const initialFixtureDigest = digestQuery(fixture, SOURCE_ROWS_SQL);
+          assert.deepEqual(
+            initialFixtureDigest,
+            sourceDigest,
+            "in-memory clone must exactly match the immutable source rows",
+          );
+
+          const fullOracle = executeStrategy(fixture, fullProcessing.photos, expectedChanges, null);
+          const sourceAfterFull = digestQuery(fixture, SOURCE_ROWS_SQL);
+          assert.deepEqual(
+            sourceAfterFull,
+            sourceDigest,
+            "cleanup after full scan must restore every source sentinel row",
+          );
+          const incrementalOracle = executeStrategy(
             fixture,
-            strategy === "fullRetainedScan" ? fullProcessing.photos : incrementalProcessing.photos,
+            incrementalProcessing.photos,
             expectedChanges,
             fullOracle.finalDatabase,
           );
           assert.deepEqual(
             digestQuery(fixture, SOURCE_ROWS_SQL),
             sourceDigest,
-            "fixture cleanup must retain source rows",
+            "cleanup after incremental scan must restore every source sentinel row",
           );
-          if (iteration >= configuration.warmupIterations) {
-            timingSamples[strategy].build.push(measurement.statementBuildMilliseconds);
-            timingSamples[strategy].execute.push(measurement.executeMilliseconds);
-            timingSamples[strategy].total.push(measurement.totalMilliseconds);
+          assert.equal(incrementalOracle.statementCalls, Math.ceil(expectedChanges / PHOTO_INGESTION_FLUSH_SIZE));
+          if (configuration.unknownAssets === 0) {
+            assert.equal(incrementalOracle.statementCalls, 0);
           }
+
+          const timingSamples = {
+            fullRetainedScan: { build: new Array<number>(), execute: new Array<number>(), total: new Array<number>() },
+            nativeIncrementalScan: {
+              build: new Array<number>(),
+              execute: new Array<number>(),
+              total: new Array<number>(),
+            },
+          } satisfies Record<Strategy, { build: number[]; execute: number[]; total: number[] }>;
+          const measuredIterations = configuration.warmupIterations + configuration.samples;
+          for (let iteration = 0; iteration < measuredIterations; iteration++) {
+            const order: readonly Strategy[] =
+              iteration % 2 === 0
+                ? ["fullRetainedScan", "nativeIncrementalScan"]
+                : ["nativeIncrementalScan", "fullRetainedScan"];
+            for (const strategy of order) {
+              const measurement = executeStrategy(
+                fixture,
+                strategy === "fullRetainedScan" ? fullProcessing.photos : incrementalProcessing.photos,
+                expectedChanges,
+                fullOracle.finalDatabase,
+              );
+              assert.deepEqual(
+                digestQuery(fixture, SOURCE_ROWS_SQL),
+                sourceDigest,
+                "fixture cleanup must retain source rows",
+              );
+              if (iteration >= configuration.warmupIterations) {
+                timingSamples[strategy].build.push(measurement.statementBuildMilliseconds);
+                timingSamples[strategy].execute.push(measurement.executeMilliseconds);
+                timingSamples[strategy].total.push(measurement.totalMilliseconds);
+              }
+            }
+          }
+
+          const fullTimings = {
+            statementBuild: summarize(timingSamples.fullRetainedScan.build),
+            statementExecute: summarize(timingSamples.fullRetainedScan.execute),
+            buildAndExecute: summarize(timingSamples.fullRetainedScan.total),
+          };
+          const incrementalTimings = {
+            statementBuild: summarize(timingSamples.nativeIncrementalScan.build),
+            statementExecute: summarize(timingSamples.nativeIncrementalScan.execute),
+            buildAndExecute: summarize(timingSamples.nativeIncrementalScan.total),
+          };
+          const fullAssetPayloadBytes = serializedBytes(libraryAssets);
+          const incrementalAssetPayloadBytes = serializedBytes(unknownAssets);
+          const identifierPayloadBytes = serializedBytes(queryMeasurement.identifiers);
+          const databaseIndexRecordPayloadBytes = serializedBytes(
+            sourceRows.map(({ id, creationTime, latitude, longitude }) => ({
+              id,
+              creationTime,
+              latitude,
+              longitude,
+            })),
+          );
+          const databaseStoredMetricPayloadBytes = serializedBytes(
+            [...databaseBackedIndex.metricsByIdentifier].map(([identifier, metrics]) => [
+              identifier,
+              metrics.hasUsableCreationTime,
+              metrics.hasValidLocation,
+            ]),
+          );
+          const identifierBridgeRetainedPayloadBytes = serializedBytes([
+            queryMeasurement.identifiers,
+            queryMeasurement.identifiers,
+          ]);
+          const fullPageCalls = fullProcessing.pageCalls;
+          const incrementalPageCalls = incrementalProcessing.pageCalls;
+          const incrementalPayloadBytes = identifierPayloadBytes + incrementalAssetPayloadBytes;
+          const fullModeledMedianMilliseconds =
+            fullProcessing.elapsedMilliseconds + fullTimings.buildAndExecute.medianMilliseconds;
+          const incrementalModeledMedianMilliseconds =
+            queryMeasurement.timing.medianMilliseconds +
+            setFiltering.setBuild.medianMilliseconds +
+            setFiltering.libraryPlan.medianMilliseconds +
+            incrementalProcessing.elapsedMilliseconds +
+            incrementalTimings.buildAndExecute.medianMilliseconds;
+          const databaseBackedModeledMedianMilliseconds =
+            databaseBackedIndex.openReadIndexAndCloseTiming.medianMilliseconds +
+            databaseBackedLookup.libraryLookupTiming.medianMilliseconds +
+            incrementalProcessing.elapsedMilliseconds +
+            incrementalTimings.buildAndExecute.medianMilliseconds;
+          const identifierBridgeSetupMedianMilliseconds =
+            queryMeasurement.timing.medianMilliseconds +
+            setFiltering.setBuild.medianMilliseconds +
+            setFiltering.libraryPlan.medianMilliseconds;
+          const databaseBackedSetupMedianMilliseconds =
+            databaseBackedIndex.openReadIndexAndCloseTiming.medianMilliseconds +
+            databaseBackedLookup.libraryLookupTiming.medianMilliseconds;
+
+          return {
+            schemaVersion: 2,
+            status: "ok",
+            generatedAt: new Date().toISOString(),
+            configuration: {
+              pageSize: configuration.pageSize,
+              samples: configuration.samples,
+              unknownAssets: configuration.unknownAssets,
+              warmupIterations: configuration.warmupIterations,
+            },
+            measurementModel: {
+              scope:
+                "isolated incremental PhotoKit/Expo SQLite integration model using this Mac's immutable Palate rows",
+              realInputs: ["all persisted photo IDs", "all persisted photo rows", "database byte and sequence state"],
+              modeledInputs: [
+                "deterministic PhotoKit-only unknown assets",
+                "native Set construction and fetch-result filtering",
+                "native read-only database index construction and fetch-result lookup",
+              ],
+              excludes: [
+                "PhotoKit fetch latency",
+                "Expo JSI serialization latency",
+                "Swift/ExpoSQLite versus Node/system-SQLite runtime differences",
+                "React Native scheduling",
+                "macOS UI work",
+              ],
+              timingExcludes: ["payload proxy serialization", "database digest validation", "fixture cleanup"],
+              caveats: [
+                "Node SQLite and V8 collections are timing proxies, not Swift/ExpoSQLite measurements",
+                "serialized byte counts model payload shape and are not RSS estimates",
+                "the immutable fixture does not model live-WAL contention or second-connection locking",
+                "the modeled library pairs persisted IDs and metadata with fixture assets; native tests cover stale IDs and metadata edge cases",
+                "the signed macOS app A/B is authoritative for production latency and maximum RSS",
+              ],
+            },
+            source: {
+              databaseBytes: statSync(configuration.databasePath).size,
+              databaseSha256: sha256File(configuration.databasePath),
+              integrityCheck: "ok",
+              persistedPhotoRows: sourceRows.length,
+              persistedPhotoRowsSha256: sourceDigest.sha256,
+            },
+            workload: {
+              visibleLibraryAssets: libraryAssets.length,
+              existingVisibleAssets: sourceRows.length,
+              unknownVisibleAssets: unknownAssets.length,
+              unknownAssetsWithUsableMetadata: incrementalProcessing.photos.length,
+              unknownSkippedAssets: incrementalProcessing.skippedAssets,
+            },
+            correctness: {
+              exactFullVsIncrementalDatabaseParity: true,
+              fullDatabaseRowCount: fullOracle.finalDatabase.rowCount,
+              fullDatabaseSha256: fullOracle.finalDatabase.sha256,
+              immutableRowsClonedExactly: true,
+              existingMetadataAndClassificationSentinelsPreserved: true,
+              sourceRowsRestoredAfterEveryFixtureRun: true,
+              identifierAndDatabaseIndexKeySetsMatchExactly: true,
+              databaseBackedIndexMatchesEveryPersistedRow: true,
+              databaseBackedUnknownOrderingMatchesIdentifierBridge: true,
+              excludedVisibleCountersMatchExactly: true,
+              excludedLocationCountersMatchExactly: true,
+              excludedSkippedCountersMatchExactly: true,
+              productionIdentifierSqlImportedDirectly: true,
+              productionPageProcessorImportedDirectly: true,
+              productionInsertBuilderImportedDirectly: true,
+            },
+            identifierQuery: {
+              sqliteCallsPerScan: 1,
+              rowsReturned: queryMeasurement.identifiers.length,
+              serializedPayloadBytesProxy: identifierPayloadBytes,
+              timing: queryMeasurement.timing,
+            },
+            nativeFilteringProxy: {
+              implementationNote:
+                "JavaScript Set timing is an isolated proxy for the equivalent native Swift Set/filter plan",
+              identifiersRetained: queryMeasurement.identifiers.length,
+              visibleAssetsExamined: libraryAssets.length,
+              setBuildTiming: setFiltering.setBuild,
+              libraryPlanTiming: setFiltering.libraryPlan,
+              excludedVisibleCount: setFiltering.excludedVisibleCount,
+              excludedPhotosWithLocation: setFiltering.excludedPhotosWithLocation,
+              excludedSkippedAssets: setFiltering.excludedSkippedAssets,
+              productionStructuralWork: {
+                photoKitObjectAtCalls: libraryAssets.length,
+                existingAssetsWhosePhotoKitCreationAndLocationAreRead: setFiltering.excludedVisibleCount,
+              },
+            },
+            databaseBackedNativeProxy: {
+              implementationNote:
+                "Node/system-SQLite timing proxies the native Swift/ExpoSQLite read-only index; the signed-app A/B measures production directly",
+              sqliteReadConnectionsPerScan: 1,
+              rowsRead: databaseBackedIndex.metricsByIdentifier.size,
+              columnsReadPerRow: 4,
+              sqliteStatementsPerScan: 3,
+              retainedStoredMetricEntries: databaseBackedIndex.metricsByIdentifier.size,
+              databaseRowsReadPayloadBytesProxy: databaseIndexRecordPayloadBytes,
+              retainedStoredMetricPayloadBytesProxy: databaseStoredMetricPayloadBytes,
+              serializedExistingRowsAcrossNativeBoundary: 0,
+              openReadIndexAndCloseTiming: databaseBackedIndex.openReadIndexAndCloseTiming,
+              visibleAssetsExamined: libraryAssets.length,
+              libraryLookupTiming: databaseBackedLookup.libraryLookupTiming,
+              excludedVisibleCount: databaseBackedLookup.excludedVisibleCount,
+              excludedPhotosWithLocation: databaseBackedLookup.excludedPhotosWithLocation,
+              excludedSkippedAssets: databaseBackedLookup.excludedSkippedAssets,
+              productionStructuralWork: {
+                photoKitObjectAtCalls: libraryAssets.length,
+                existingAssetsWhosePhotoKitCreationAndLocationAreRead: 0,
+              },
+            },
+            strategies: {
+              fullRetainedScan: {
+                nativeCalls: { begin: 1, pages: fullPageCalls, end: 1 },
+                existingIdQueryCalls: 0,
+                assetRecordsCrossingNativeBoundaryProxy: libraryAssets.length,
+                serializedAssetPayloadBytesProxy: fullAssetPayloadBytes,
+                insertStatementCalls: fullOracle.statementCalls,
+                boundParameters: fullOracle.boundParameters,
+                retainedObjectProxies: {
+                  retainedFetchAssets: libraryAssets.length,
+                  retainedExistingIdentifiersInJs: 0,
+                  maximumJsPageAssets: Math.min(configuration.pageSize, libraryAssets.length),
+                },
+                pageProcessingMilliseconds: fullProcessing.elapsedMilliseconds,
+                timings: fullTimings,
+              },
+              nativeIncrementalScan: {
+                selectedImplementation: "identifier-list",
+                nativeCalls: { begin: 1, pages: incrementalPageCalls, end: 1 },
+                existingIdQueryCalls: 1,
+                assetRecordsCrossingNativeBoundaryProxy: unknownAssets.length,
+                serializedAssetPayloadBytesProxy: incrementalAssetPayloadBytes,
+                existingIdentifierPayloadBytesProxy: identifierPayloadBytes,
+                insertStatementCalls: incrementalOracle.statementCalls,
+                boundParameters: incrementalOracle.boundParameters,
+                retainedObjectProxies: {
+                  retainedFetchAssets: libraryAssets.length,
+                  retainedExistingIdentifiersInJs: queryMeasurement.identifiers.length,
+                  nativeExistingIdentifierSetEntries: queryMeasurement.identifiers.length,
+                  duplicatedIdentifierPayloadBytesProxy: identifierBridgeRetainedPayloadBytes,
+                  retainedUnknownAssetIndexes: unknownAssets.length,
+                  maximumJsPageAssets: Math.min(configuration.pageSize, unknownAssets.length),
+                },
+                pageProcessingMilliseconds: incrementalProcessing.elapsedMilliseconds,
+                timings: incrementalTimings,
+              },
+              databaseBackedNativeIncrementalScan: {
+                selectedImplementation: "database-backed",
+                nativeCalls: { begin: 1, pages: incrementalPageCalls, end: 1 },
+                existingIdQueryCallsInJavaScript: 0,
+                nativeDatabaseReadConnections: 1,
+                assetRecordsCrossingNativeBoundaryProxy: unknownAssets.length,
+                serializedAssetPayloadBytesProxy: incrementalAssetPayloadBytes,
+                existingIdentifierPayloadBytesCrossingNativeBoundary: 0,
+                insertStatementCalls: incrementalOracle.statementCalls,
+                boundParameters: incrementalOracle.boundParameters,
+                retainedObjectProxies: {
+                  retainedFetchAssets: libraryAssets.length,
+                  retainedExistingIdentifiersInJs: 0,
+                  nativeStoredMetricEntries: databaseBackedIndex.metricsByIdentifier.size,
+                  storedMetricPayloadBytesProxy: databaseStoredMetricPayloadBytes,
+                  retainedUnknownAssetIndexes: unknownAssets.length,
+                  maximumJsPageAssets: Math.min(configuration.pageSize, unknownAssets.length),
+                },
+                pageProcessingMilliseconds: incrementalProcessing.elapsedMilliseconds,
+                timings: incrementalTimings,
+              },
+            },
+            comparison: {
+              pageCallsSaved: fullPageCalls - incrementalPageCalls,
+              assetRecordsAvoidedAcrossNativeBoundary: libraryAssets.length - unknownAssets.length,
+              serializedAssetPayloadBytesAvoided: fullAssetPayloadBytes - incrementalAssetPayloadBytes,
+              netSerializedPayloadBytesProxy: {
+                fullMetadataRecords: fullAssetPayloadBytes,
+                incrementalExistingIdsAndUnknownMetadata: incrementalPayloadBytes,
+                bytesSaved: fullAssetPayloadBytes - incrementalPayloadBytes,
+                reductionPercent:
+                  fullAssetPayloadBytes === 0
+                    ? 0
+                    : ((fullAssetPayloadBytes - incrementalPayloadBytes) / fullAssetPayloadBytes) * 100,
+              },
+              boundParametersAvoided: fullOracle.boundParameters - incrementalOracle.boundParameters,
+              insertStatementsAvoided: fullOracle.statementCalls - incrementalOracle.statementCalls,
+              medianStatementBuildAndExecuteSpeedup:
+                fullTimings.buildAndExecute.medianMilliseconds /
+                Math.max(Number.EPSILON, incrementalTimings.buildAndExecute.medianMilliseconds),
+              identifierBridgeVsDatabaseBackedProxy: {
+                existingIdentifierPayloadBytesEliminated: identifierPayloadBytes,
+                existingIdentifiersRetainedInJavaScriptEliminated: queryMeasurement.identifiers.length,
+                identifierBridgeSetupMedianMilliseconds,
+                databaseBackedSetupMedianMilliseconds,
+                setupSpeedup:
+                  identifierBridgeSetupMedianMilliseconds /
+                  Math.max(Number.EPSILON, databaseBackedSetupMedianMilliseconds),
+                ["retainedPayloadShapeProxy"]: {
+                  identifierBridgeDuplicatedAcrossJsAndNativeSet: identifierBridgeRetainedPayloadBytes,
+                  databaseBackedNativeStoredMetrics: databaseStoredMetricPayloadBytes,
+                  bytesAvoided: identifierBridgeRetainedPayloadBytes - databaseStoredMetricPayloadBytes,
+                },
+                productionStructuralWorkAvoided: {
+                  photoKitObjectAtCalls: 0,
+                  existingAssetsWithPhotoKitCreationAndLocationReads: setFiltering.excludedVisibleCount,
+                },
+                modeledEndToEndMedianMilliseconds: {
+                  identifierBridge: incrementalModeledMedianMilliseconds,
+                  databaseBacked: databaseBackedModeledMedianMilliseconds,
+                  speedup:
+                    incrementalModeledMedianMilliseconds /
+                    Math.max(Number.EPSILON, databaseBackedModeledMedianMilliseconds),
+                },
+              },
+              modeledMedianMilliseconds: {
+                fullScanPageProcessingAndPersistence: fullModeledMedianMilliseconds,
+                incrementalIdQuerySetFilterPageProcessingAndPersistence: incrementalModeledMedianMilliseconds,
+                databaseBackedReadLookupPageProcessingAndPersistence: databaseBackedModeledMedianMilliseconds,
+                speedup: fullModeledMedianMilliseconds / Math.max(Number.EPSILON, incrementalModeledMedianMilliseconds),
+                databaseBackedSpeedup:
+                  fullModeledMedianMilliseconds / Math.max(Number.EPSILON, databaseBackedModeledMedianMilliseconds),
+              },
+            },
+            privacy: {
+              aggregateOnly: true,
+              rawIdentifiersRetainedInReport: false,
+              rawUrisRetainedInReport: false,
+              rawMetadataRetainedInReport: false,
+              photosLibraryAccessedByThisScript: false,
+            },
+          };
+        } finally {
+          fixture.close();
         }
-      }
+      })();
 
-      const fullTimings = {
-        statementBuild: summarize(timingSamples.fullRetainedScan.build),
-        statementExecute: summarize(timingSamples.fullRetainedScan.execute),
-        buildAndExecute: summarize(timingSamples.fullRetainedScan.total),
-      };
-      const incrementalTimings = {
-        statementBuild: summarize(timingSamples.nativeIncrementalScan.build),
-        statementExecute: summarize(timingSamples.nativeIncrementalScan.execute),
-        buildAndExecute: summarize(timingSamples.nativeIncrementalScan.total),
-      };
-      const fullAssetPayloadBytes = serializedBytes(libraryAssets);
-      const incrementalAssetPayloadBytes = serializedBytes(unknownAssets);
-      const identifierPayloadBytes = serializedBytes(queryMeasurement.identifiers);
-      const databaseIndexRecordPayloadBytes = serializedBytes(
-        sourceRows.map(({ id, creationTime, latitude, longitude }) => ({
-          id,
-          creationTime,
-          latitude,
-          longitude,
-        })),
-      );
-      const databaseStoredMetricPayloadBytes = serializedBytes(
-        [...databaseBackedIndex.metricsByIdentifier].map(([identifier, metrics]) => [
-          identifier,
-          metrics.hasUsableCreationTime,
-          metrics.hasValidLocation,
-        ]),
-      );
-      const identifierBridgeRetainedPayloadBytes = serializedBytes([
-        queryMeasurement.identifiers,
-        queryMeasurement.identifiers,
-      ]);
-      const fullPageCalls = fullProcessing.pageCalls;
-      const incrementalPageCalls = incrementalProcessing.pageCalls;
-      const incrementalPayloadBytes = identifierPayloadBytes + incrementalAssetPayloadBytes;
-      const fullModeledMedianMilliseconds =
-        fullProcessing.elapsedMilliseconds + fullTimings.buildAndExecute.medianMilliseconds;
-      const incrementalModeledMedianMilliseconds =
-        queryMeasurement.timing.medianMilliseconds +
-        setFiltering.setBuild.medianMilliseconds +
-        setFiltering.libraryPlan.medianMilliseconds +
-        incrementalProcessing.elapsedMilliseconds +
-        incrementalTimings.buildAndExecute.medianMilliseconds;
-      const databaseBackedModeledMedianMilliseconds =
-        databaseBackedIndex.openReadIndexAndCloseTiming.medianMilliseconds +
-        databaseBackedLookup.libraryLookupTiming.medianMilliseconds +
-        incrementalProcessing.elapsedMilliseconds +
-        incrementalTimings.buildAndExecute.medianMilliseconds;
-      const identifierBridgeSetupMedianMilliseconds =
-        queryMeasurement.timing.medianMilliseconds +
-        setFiltering.setBuild.medianMilliseconds +
-        setFiltering.libraryPlan.medianMilliseconds;
-      const databaseBackedSetupMedianMilliseconds =
-        databaseBackedIndex.openReadIndexAndCloseTiming.medianMilliseconds +
-        databaseBackedLookup.libraryLookupTiming.medianMilliseconds;
-
-      report = {
-        schemaVersion: 2,
-        status: "ok",
-        generatedAt: new Date().toISOString(),
-        configuration: {
-          pageSize: configuration.pageSize,
-          samples: configuration.samples,
-          unknownAssets: configuration.unknownAssets,
-          warmupIterations: configuration.warmupIterations,
-        },
-        measurementModel: {
-          scope: "isolated incremental PhotoKit/Expo SQLite integration model using this Mac's immutable Palate rows",
-          realInputs: ["all persisted photo IDs", "all persisted photo rows", "database byte and sequence state"],
-          modeledInputs: [
-            "deterministic PhotoKit-only unknown assets",
-            "native Set construction and fetch-result filtering",
-            "native read-only database index construction and fetch-result lookup",
-          ],
-          excludes: [
-            "PhotoKit fetch latency",
-            "Expo JSI serialization latency",
-            "Swift/ExpoSQLite versus Node/system-SQLite runtime differences",
-            "React Native scheduling",
-            "macOS UI work",
-          ],
-          timingExcludes: ["payload proxy serialization", "database digest validation", "fixture cleanup"],
-          caveats: [
-            "Node SQLite and V8 collections are timing proxies, not Swift/ExpoSQLite measurements",
-            "serialized byte counts model payload shape and are not RSS estimates",
-            "the immutable fixture does not model live-WAL contention or second-connection locking",
-            "the modeled library pairs persisted IDs and metadata with fixture assets; native tests cover stale IDs and metadata edge cases",
-            "the signed macOS app A/B is authoritative for production latency and maximum RSS",
-          ],
-        },
-        source: {
-          databaseBytes: statSync(configuration.databasePath).size,
-          databaseSha256: sha256File(configuration.databasePath),
-          integrityCheck: "ok",
-          persistedPhotoRows: sourceRows.length,
-          persistedPhotoRowsSha256: sourceDigest.sha256,
-        },
-        workload: {
-          visibleLibraryAssets: libraryAssets.length,
-          existingVisibleAssets: sourceRows.length,
-          unknownVisibleAssets: unknownAssets.length,
-          unknownAssetsWithUsableMetadata: incrementalProcessing.photos.length,
-          unknownSkippedAssets: incrementalProcessing.skippedAssets,
-        },
-        correctness: {
-          exactFullVsIncrementalDatabaseParity: true,
-          fullDatabaseRowCount: fullOracle.finalDatabase.rowCount,
-          fullDatabaseSha256: fullOracle.finalDatabase.sha256,
-          immutableRowsClonedExactly: true,
-          existingMetadataAndClassificationSentinelsPreserved: true,
-          sourceRowsRestoredAfterEveryFixtureRun: true,
-          identifierAndDatabaseIndexKeySetsMatchExactly: true,
-          databaseBackedIndexMatchesEveryPersistedRow: true,
-          databaseBackedUnknownOrderingMatchesIdentifierBridge: true,
-          excludedVisibleCountersMatchExactly: true,
-          excludedLocationCountersMatchExactly: true,
-          excludedSkippedCountersMatchExactly: true,
-          productionIdentifierSqlImportedDirectly: true,
-          productionPageProcessorImportedDirectly: true,
-          productionInsertBuilderImportedDirectly: true,
-        },
-        identifierQuery: {
-          sqliteCallsPerScan: 1,
-          rowsReturned: queryMeasurement.identifiers.length,
-          serializedPayloadBytesProxy: identifierPayloadBytes,
-          timing: queryMeasurement.timing,
-        },
-        nativeFilteringProxy: {
-          implementationNote:
-            "JavaScript Set timing is an isolated proxy for the equivalent native Swift Set/filter plan",
-          identifiersRetained: queryMeasurement.identifiers.length,
-          visibleAssetsExamined: libraryAssets.length,
-          setBuildTiming: setFiltering.setBuild,
-          libraryPlanTiming: setFiltering.libraryPlan,
-          excludedVisibleCount: setFiltering.excludedVisibleCount,
-          excludedPhotosWithLocation: setFiltering.excludedPhotosWithLocation,
-          excludedSkippedAssets: setFiltering.excludedSkippedAssets,
-          productionStructuralWork: {
-            photoKitObjectAtCalls: libraryAssets.length,
-            existingAssetsWhosePhotoKitCreationAndLocationAreRead: setFiltering.excludedVisibleCount,
-          },
-        },
-        databaseBackedNativeProxy: {
-          implementationNote:
-            "Node/system-SQLite timing proxies the native Swift/ExpoSQLite read-only index; the signed-app A/B measures production directly",
-          sqliteReadConnectionsPerScan: 1,
-          rowsRead: databaseBackedIndex.metricsByIdentifier.size,
-          columnsReadPerRow: 4,
-          sqliteStatementsPerScan: 3,
-          retainedStoredMetricEntries: databaseBackedIndex.metricsByIdentifier.size,
-          databaseRowsReadPayloadBytesProxy: databaseIndexRecordPayloadBytes,
-          retainedStoredMetricPayloadBytesProxy: databaseStoredMetricPayloadBytes,
-          serializedExistingRowsAcrossNativeBoundary: 0,
-          openReadIndexAndCloseTiming: databaseBackedIndex.openReadIndexAndCloseTiming,
-          visibleAssetsExamined: libraryAssets.length,
-          libraryLookupTiming: databaseBackedLookup.libraryLookupTiming,
-          excludedVisibleCount: databaseBackedLookup.excludedVisibleCount,
-          excludedPhotosWithLocation: databaseBackedLookup.excludedPhotosWithLocation,
-          excludedSkippedAssets: databaseBackedLookup.excludedSkippedAssets,
-          productionStructuralWork: {
-            photoKitObjectAtCalls: libraryAssets.length,
-            existingAssetsWhosePhotoKitCreationAndLocationAreRead: 0,
-          },
-        },
-        strategies: {
-          fullRetainedScan: {
-            nativeCalls: { begin: 1, pages: fullPageCalls, end: 1 },
-            existingIdQueryCalls: 0,
-            assetRecordsCrossingNativeBoundaryProxy: libraryAssets.length,
-            serializedAssetPayloadBytesProxy: fullAssetPayloadBytes,
-            insertStatementCalls: fullOracle.statementCalls,
-            boundParameters: fullOracle.boundParameters,
-            retainedObjectProxies: {
-              retainedFetchAssets: libraryAssets.length,
-              retainedExistingIdentifiersInJs: 0,
-              maximumJsPageAssets: Math.min(configuration.pageSize, libraryAssets.length),
-            },
-            pageProcessingMilliseconds: fullProcessing.elapsedMilliseconds,
-            timings: fullTimings,
-          },
-          nativeIncrementalScan: {
-            selectedImplementation: "identifier-list",
-            nativeCalls: { begin: 1, pages: incrementalPageCalls, end: 1 },
-            existingIdQueryCalls: 1,
-            assetRecordsCrossingNativeBoundaryProxy: unknownAssets.length,
-            serializedAssetPayloadBytesProxy: incrementalAssetPayloadBytes,
-            existingIdentifierPayloadBytesProxy: identifierPayloadBytes,
-            insertStatementCalls: incrementalOracle.statementCalls,
-            boundParameters: incrementalOracle.boundParameters,
-            retainedObjectProxies: {
-              retainedFetchAssets: libraryAssets.length,
-              retainedExistingIdentifiersInJs: queryMeasurement.identifiers.length,
-              nativeExistingIdentifierSetEntries: queryMeasurement.identifiers.length,
-              duplicatedIdentifierPayloadBytesProxy: identifierBridgeRetainedPayloadBytes,
-              retainedUnknownAssetIndexes: unknownAssets.length,
-              maximumJsPageAssets: Math.min(configuration.pageSize, unknownAssets.length),
-            },
-            pageProcessingMilliseconds: incrementalProcessing.elapsedMilliseconds,
-            timings: incrementalTimings,
-          },
-          databaseBackedNativeIncrementalScan: {
-            selectedImplementation: "database-backed",
-            nativeCalls: { begin: 1, pages: incrementalPageCalls, end: 1 },
-            existingIdQueryCallsInJavaScript: 0,
-            nativeDatabaseReadConnections: 1,
-            assetRecordsCrossingNativeBoundaryProxy: unknownAssets.length,
-            serializedAssetPayloadBytesProxy: incrementalAssetPayloadBytes,
-            existingIdentifierPayloadBytesCrossingNativeBoundary: 0,
-            insertStatementCalls: incrementalOracle.statementCalls,
-            boundParameters: incrementalOracle.boundParameters,
-            retainedObjectProxies: {
-              retainedFetchAssets: libraryAssets.length,
-              retainedExistingIdentifiersInJs: 0,
-              nativeStoredMetricEntries: databaseBackedIndex.metricsByIdentifier.size,
-              storedMetricPayloadBytesProxy: databaseStoredMetricPayloadBytes,
-              retainedUnknownAssetIndexes: unknownAssets.length,
-              maximumJsPageAssets: Math.min(configuration.pageSize, unknownAssets.length),
-            },
-            pageProcessingMilliseconds: incrementalProcessing.elapsedMilliseconds,
-            timings: incrementalTimings,
-          },
-        },
-        comparison: {
-          pageCallsSaved: fullPageCalls - incrementalPageCalls,
-          assetRecordsAvoidedAcrossNativeBoundary: libraryAssets.length - unknownAssets.length,
-          serializedAssetPayloadBytesAvoided: fullAssetPayloadBytes - incrementalAssetPayloadBytes,
-          netSerializedPayloadBytesProxy: {
-            fullMetadataRecords: fullAssetPayloadBytes,
-            incrementalExistingIdsAndUnknownMetadata: incrementalPayloadBytes,
-            bytesSaved: fullAssetPayloadBytes - incrementalPayloadBytes,
-            reductionPercent:
-              fullAssetPayloadBytes === 0
-                ? 0
-                : ((fullAssetPayloadBytes - incrementalPayloadBytes) / fullAssetPayloadBytes) * 100,
-          },
-          boundParametersAvoided: fullOracle.boundParameters - incrementalOracle.boundParameters,
-          insertStatementsAvoided: fullOracle.statementCalls - incrementalOracle.statementCalls,
-          medianStatementBuildAndExecuteSpeedup:
-            fullTimings.buildAndExecute.medianMilliseconds /
-            Math.max(Number.EPSILON, incrementalTimings.buildAndExecute.medianMilliseconds),
-          identifierBridgeVsDatabaseBackedProxy: {
-            existingIdentifierPayloadBytesEliminated: identifierPayloadBytes,
-            existingIdentifiersRetainedInJavaScriptEliminated: queryMeasurement.identifiers.length,
-            identifierBridgeSetupMedianMilliseconds,
-            databaseBackedSetupMedianMilliseconds,
-            setupSpeedup:
-              identifierBridgeSetupMedianMilliseconds / Math.max(Number.EPSILON, databaseBackedSetupMedianMilliseconds),
-            retainedPayloadShapeProxy: {
-              identifierBridgeDuplicatedAcrossJsAndNativeSet: identifierBridgeRetainedPayloadBytes,
-              databaseBackedNativeStoredMetrics: databaseStoredMetricPayloadBytes,
-              bytesAvoided: identifierBridgeRetainedPayloadBytes - databaseStoredMetricPayloadBytes,
-            },
-            productionStructuralWorkAvoided: {
-              photoKitObjectAtCalls: 0,
-              existingAssetsWithPhotoKitCreationAndLocationReads: setFiltering.excludedVisibleCount,
-            },
-            modeledEndToEndMedianMilliseconds: {
-              identifierBridge: incrementalModeledMedianMilliseconds,
-              databaseBacked: databaseBackedModeledMedianMilliseconds,
-              speedup:
-                incrementalModeledMedianMilliseconds /
-                Math.max(Number.EPSILON, databaseBackedModeledMedianMilliseconds),
-            },
-          },
-          modeledMedianMilliseconds: {
-            fullScanPageProcessingAndPersistence: fullModeledMedianMilliseconds,
-            incrementalIdQuerySetFilterPageProcessingAndPersistence: incrementalModeledMedianMilliseconds,
-            databaseBackedReadLookupPageProcessingAndPersistence: databaseBackedModeledMedianMilliseconds,
-            speedup: fullModeledMedianMilliseconds / Math.max(Number.EPSILON, incrementalModeledMedianMilliseconds),
-            databaseBackedSpeedup:
-              fullModeledMedianMilliseconds / Math.max(Number.EPSILON, databaseBackedModeledMedianMilliseconds),
-          },
-        },
-        privacy: {
-          aggregateOnly: true,
-          rawIdentifiersRetainedInReport: false,
-          rawUrisRetainedInReport: false,
-          rawMetadataRetainedInReport: false,
-          photosLibraryAccessedByThisScript: false,
-        },
-      };
+      changesAfter = totalChanges(source);
+      sequenceAfter = snapshotSqliteSequence(source);
+      assert.equal(changesAfter, changesBefore, "read-only benchmark must not increment source total_changes()");
+      assert.deepEqual(sequenceAfter, sequenceBefore, "read-only benchmark must not alter source sqlite_sequence");
+      return fixtureReport;
     } finally {
-      fixture.close();
+      source.close();
     }
-
-    changesAfter = totalChanges(source);
-    sequenceAfter = snapshotSqliteSequence(source);
-    assert.equal(changesAfter, changesBefore, "read-only benchmark must not increment source total_changes()");
-    assert.deepEqual(sequenceAfter, sequenceBefore, "read-only benchmark must not alter source sqlite_sequence");
-  } finally {
-    source.close();
-  }
+  })();
 
   const sourceAfter = snapshotSource(configuration.databasePath);
   assert.deepEqual(sourceAfter, sourceBefore, "immutable benchmark must not alter the database or a SQLite sidecar");
-  report.sourceAttestation = { before: sourceBefore, after: sourceAfter, byteIdentical: true };
-  report.writeInvariants = {
-    totalChangesBefore: changesBefore,
-    totalChangesAfter: changesAfter,
-    totalChangesUnchanged: changesBefore === changesAfter,
-    sqliteSequenceBefore: sequenceBefore,
-    sqliteSequenceAfter: sequenceAfter,
-    sqliteSequenceUnchanged: sequenceBefore.sha256 === sequenceAfter.sha256,
-    mainAndSidecarsByteIdentical: true,
-    sourceOpenMode: "mode=ro, immutable=1, PRAGMA query_only=ON",
+  const report = {
+    ...reportBody,
+    sourceAttestation: { before: sourceBefore, after: sourceAfter, byteIdentical: true },
+    writeInvariants: {
+      totalChangesBefore: changesBefore,
+      totalChangesAfter: changesAfter,
+      totalChangesUnchanged: changesBefore === changesAfter,
+      sqliteSequenceBefore: sequenceBefore,
+      sqliteSequenceAfter: sequenceAfter,
+      sqliteSequenceUnchanged: sequenceBefore.sha256 === sequenceAfter.sha256,
+      mainAndSidecarsByteIdentical: true,
+      sourceOpenMode: "mode=ro, immutable=1, PRAGMA query_only=ON",
+    },
   };
 
   const serialized = `${JSON.stringify(report, null, 2)}\n`;

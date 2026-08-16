@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import {
@@ -26,6 +26,7 @@ import {
 import type { MichelinRestaurantRecord } from "../utils/db/types.ts";
 
 const DATASET_KEY = "michelin_dataset_version";
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
 const DECLARED_COLUMNS = [
   "id",
   "name",
@@ -40,6 +41,119 @@ const DECLARED_COLUMNS = [
 
 interface SeedRow extends MichelinRestaurantRecord {
   readonly datasetVersion: string | null;
+}
+
+interface FileSnapshot {
+  readonly exists: boolean;
+  readonly bytes: number;
+  readonly sha256: string;
+}
+
+interface BenchmarkJsonObject {
+  readonly status?: BenchmarkJsonValue;
+  readonly privacy?: BenchmarkJsonValue;
+  readonly measurementModel?: BenchmarkJsonValue;
+  readonly strategies?: BenchmarkJsonValue;
+  readonly writeInvariants?: BenchmarkJsonValue;
+  readonly sourceAttestation?: BenchmarkJsonValue;
+  readonly aggregateOnly?: BenchmarkJsonValue;
+  readonly calendarDataAccessed?: BenchmarkJsonValue;
+  readonly rawRestaurantFieldsRetainedInReport?: BenchmarkJsonValue;
+  readonly installedExpoTransactionAttestation?: BenchmarkJsonValue;
+  readonly runtime?: BenchmarkJsonValue;
+  readonly scope?: BenchmarkJsonValue;
+  readonly legacyFullGuide?: BenchmarkJsonValue;
+  readonly twoStageProjection?: BenchmarkJsonValue;
+  readonly nodeModelTiming?: BenchmarkJsonValue;
+  readonly timing?: BenchmarkJsonValue;
+  readonly totalChangesUnchanged?: BenchmarkJsonValue;
+  readonly sqliteSequenceUnchanged?: BenchmarkJsonValue;
+  readonly mainAndSidecarsByteIdentical?: BenchmarkJsonValue;
+  readonly byteIdentical?: BenchmarkJsonValue;
+  readonly executesLiteralDeferredBegin?: BenchmarkJsonValue;
+  readonly closesDedicatedTransactionConnection?: BenchmarkJsonValue;
+}
+
+type BenchmarkJsonValue = null | boolean | number | string | BenchmarkJsonValue[] | BenchmarkJsonObject;
+
+function isSQLiteString(value: SQLOutputValue): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function requiredNumber(value: SQLOutputValue, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function nullableNumber(value: SQLOutputValue, column: string): number | null {
+  return value === null ? null : requiredNumber(value, column);
+}
+
+function assertDefined<T>(value: T | undefined): T {
+  assert.ok(value !== undefined, "Expected the query to return a row.");
+  return value;
+}
+
+function parseSeedRow(row: SQLiteRow): SeedRow {
+  return {
+    id: requiredString(row.id, "michelin_restaurants.id"),
+    name: requiredString(row.name, "michelin_restaurants.name"),
+    latitude: requiredNumber(row.latitude, "michelin_restaurants.latitude"),
+    longitude: requiredNumber(row.longitude, "michelin_restaurants.longitude"),
+    address: requiredString(row.address, "michelin_restaurants.address"),
+    location: requiredString(row.location, "michelin_restaurants.location"),
+    cuisine: requiredString(row.cuisine, "michelin_restaurants.cuisine"),
+    latestAwardYear: nullableNumber(row.latestAwardYear, "michelin_restaurants.latestAwardYear"),
+    award: requiredString(row.award, "michelin_restaurants.award"),
+    datasetVersion: nullableString(row.datasetVersion, "michelin_restaurants.datasetVersion"),
+  };
+}
+
+function parseNameRow(row: SQLiteRow): MichelinCalendarNameRow {
+  return {
+    id: requiredString(row.id, "michelin_restaurants.id"),
+    name: requiredString(row.name, "michelin_restaurants.name"),
+  };
+}
+
+function parseHydrationRow(row: SQLiteRow): MichelinCalendarHydrationRow {
+  return {
+    requestedOrdinal: requiredNumber(row.requestedOrdinal, "requested_ids.requestedOrdinal"),
+    id: requiredString(row.id, "michelin_restaurants.id"),
+    name: requiredString(row.name, "michelin_restaurants.name"),
+    latitude: requiredNumber(row.latitude, "michelin_restaurants.latitude"),
+    longitude: requiredNumber(row.longitude, "michelin_restaurants.longitude"),
+    address: requiredString(row.address, "michelin_restaurants.address"),
+    location: requiredString(row.location, "michelin_restaurants.location"),
+    cuisine: requiredString(row.cuisine, "michelin_restaurants.cuisine"),
+    latestAwardYear: nullableNumber(row.latestAwardYear, "michelin_restaurants.latestAwardYear"),
+    award: requiredString(row.award, "michelin_restaurants.award"),
+  };
+}
+
+function parseQueryPlanDetail(row: SQLiteRow): string {
+  return requiredString(row.detail, "query plan.detail");
+}
+
+function parseTotalChanges(row: SQLiteRow): number {
+  return requiredNumber(row.count, "total_changes count");
+}
+
+function isBenchmarkJsonObject(value: BenchmarkJsonValue | undefined): value is BenchmarkJsonObject {
+  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value);
 }
 
 function createSchema(database: DatabaseSync): void {
@@ -147,7 +261,8 @@ function executeLiteralOracle(
        )
        ORDER BY m.rowid`,
     )
-    .all(DATASET_KEY, DATASET_KEY) as unknown as SeedRow[];
+    .all(DATASET_KEY, DATASET_KEY)
+    .map(parseSeedRow);
   return rows.filter((row) => requestedNormalizedNames.has(normalizeFixtureName(row.name))).map(pickDeclaredColumns);
 }
 
@@ -164,7 +279,8 @@ function executeCandidate(
   try {
     const nameRows = database
       .prepare(ACTIVE_MICHELIN_CALENDAR_NAME_ROWS_SQL)
-      .all(DATASET_KEY, DATASET_KEY) as unknown as MichelinCalendarNameRow[];
+      .all(DATASET_KEY, DATASET_KEY)
+      .map(parseNameRow);
     const ids = selectMichelinCalendarHydrationIds(nameRows, requestedNormalizedNames, normalizeFixtureName);
     afterNameRead?.();
     if (ids.length === 0) {
@@ -173,7 +289,8 @@ function executeCandidate(
     }
     const rows = database
       .prepare(ACTIVE_MICHELIN_CALENDAR_HYDRATION_SQL)
-      .all(JSON.stringify(ids), DATASET_KEY, DATASET_KEY) as unknown as MichelinCalendarHydrationRow[];
+      .all(JSON.stringify(ids), DATASET_KEY, DATASET_KEY)
+      .map(parseHydrationRow);
     assert.equal(rows.length, ids.length, "snapshot hydration must return every selected name row");
     database.exec("COMMIT");
     return parseMichelinCalendarHydrationRows(rows);
@@ -185,7 +302,7 @@ function executeCandidate(
   }
 }
 
-function assertDeclaredShape(rows: readonly MichelinRestaurantRecord[]): void {
+function assertRestaurantContract(rows: readonly MichelinRestaurantRecord[]): void {
   for (const row of rows) {
     assert.deepEqual(Object.keys(row), DECLARED_COLUMNS, "hydration must expose exactly MichelinRestaurantRecord");
     assert.ok(!("datasetVersion" in row), "datasetVersion must never cross the native-to-JS boundary");
@@ -193,7 +310,7 @@ function assertDeclaredShape(rows: readonly MichelinRestaurantRecord[]): void {
   }
 }
 
-function fileSnapshot(path: string): { readonly exists: boolean; readonly bytes: number; readonly sha256: string } {
+function fileSnapshot(path: string): FileSnapshot {
   if (!existsSync(path)) {
     return { exists: false, bytes: 0, sha256: createHash("sha256").update("").digest("hex") };
   }
@@ -243,9 +360,9 @@ function assertBenchmarkRejected(
   assert.match(`${result.stdout ?? ""}\n${result.stderr ?? ""}`, expectedMessage);
 }
 
-function requiredRecord(value: unknown, label: string): Record<string, unknown> {
-  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value), `${label} must be an object`);
-  return value as Record<string, unknown>;
+function requiredRecord(value: BenchmarkJsonValue | undefined, label: string): BenchmarkJsonObject {
+  assert.ok(isBenchmarkJsonObject(value), `${label} must be an object`);
+  return value;
 }
 
 function calendarRestaurant(id: string, overrides: Partial<MichelinRestaurantRecord> = {}): MichelinRestaurantRecord {
@@ -422,7 +539,7 @@ const fixtureRows: SeedRow[] = [
   );
   assert.equal(candidate[0]?.address, "", "empty address must survive unchanged");
   assert.equal(candidate[0]?.location, "", "empty location must survive unchanged");
-  assertDeclaredShape(candidate);
+  assertRestaurantContract(candidate);
 
   database.exec(`
     CREATE INDEX idx_calendar_covering
@@ -436,18 +553,17 @@ const fixtureRows: SeedRow[] = [
   );
   const forcedPlan = database
     .prepare(`EXPLAIN QUERY PLAN ${forcedCoveringSql}`)
-    .all(DATASET_KEY, DATASET_KEY) as unknown as Array<{ detail: string }>;
+    .all(DATASET_KEY, DATASET_KEY)
+    .map(parseQueryPlanDetail);
   assert.ok(
-    forcedPlan.some(({ detail }) => detail.includes("USING COVERING INDEX idx_calendar_covering")),
+    forcedPlan.some((detail) => detail.includes("USING COVERING INDEX idx_calendar_covering")),
     "adversarial fixture must actually traverse the covering index",
   );
   assert.ok(
-    forcedPlan.some(({ detail }) => detail.includes("USE TEMP B-TREE FOR ORDER BY")),
+    forcedPlan.some((detail) => detail.includes("USE TEMP B-TREE FOR ORDER BY")),
     "rowid order must be restored after an indexed traversal",
   );
-  const indexedNameRows = database
-    .prepare(forcedCoveringSql)
-    .all(DATASET_KEY, DATASET_KEY) as unknown as MichelinCalendarNameRow[];
+  const indexedNameRows = database.prepare(forcedCoveringSql).all(DATASET_KEY, DATASET_KEY).map(parseNameRow);
   assert.deepEqual(
     selectMichelinCalendarHydrationIds(indexedNameRows, new Set(["cafe"]), normalizeFixtureName),
     ["active-z", "active-quote-'雪'"],
@@ -496,7 +612,7 @@ const fixtureRows: SeedRow[] = [
   const candidate = executeCandidate(database, requested);
   assert.deepEqual(candidate, executeLiteralOracle(database, requested));
   assert.equal(candidate.length, largeRows.length, "JSON hydration must not inherit SQLite bind-variable limits");
-  assertDeclaredShape(candidate);
+  assertRestaurantContract(candidate);
   database.close();
 }
 
@@ -576,7 +692,9 @@ const fixtureRows: SeedRow[] = [
     setDatasetVersion(database, "active");
     database.exec("PRAGMA wal_checkpoint(TRUNCATE)");
 
-    const totalChangesBefore = (database.prepare("SELECT total_changes() AS count").get() as { count: number }).count;
+    const totalChangesBefore = parseTotalChanges(
+      assertDefined(database.prepare("SELECT total_changes() AS count").get()),
+    );
     const sequenceBefore = database.prepare("SELECT name, seq FROM sqlite_sequence ORDER BY name").all();
     const mainBefore = fileSnapshot(databasePath);
     const walBefore = fileSnapshot(walPath);
@@ -584,7 +702,9 @@ const fixtureRows: SeedRow[] = [
     const candidate = executeCandidate(database, new Set(["cafe", "salt and stone"]));
     assert.ok(candidate.length > 0);
 
-    const totalChangesAfter = (database.prepare("SELECT total_changes() AS count").get() as { count: number }).count;
+    const totalChangesAfter = parseTotalChanges(
+      assertDefined(database.prepare("SELECT total_changes() AS count").get()),
+    );
     const sequenceAfter = database.prepare("SELECT name, seq FROM sqlite_sequence ORDER BY name").all();
     assert.equal(totalChangesAfter, totalChangesBefore, "the read snapshot must not increment total_changes()");
     assert.deepEqual(sequenceAfter, sequenceBefore, "the read snapshot must not advance sqlite_sequence");
@@ -662,7 +782,8 @@ const fixtureRows: SeedRow[] = [
     const result = runBenchmarkProcess(repositoryRoot, databasePath, outputPath);
     assert.equal(result.status, 0, `${result.stdout ?? ""}\n${result.stderr ?? ""}`);
     const serialized = readFileSync(outputPath, "utf8");
-    const report = requiredRecord(JSON.parse(serialized), "report");
+    const parsedReport: BenchmarkJsonValue = JSON.parse(serialized);
+    const report = requiredRecord(parsedReport, "report");
     const privacy = requiredRecord(report.privacy, "privacy");
     const measurementModel = requiredRecord(report.measurementModel, "measurementModel");
     const strategies = requiredRecord(report.strategies, "strategies");

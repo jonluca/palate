@@ -259,11 +259,11 @@ export async function initializeMichelinData(
         listener(message);
       }
     };
-    const initialization = initializeMichelinDataInternal(emitProgress).catch((error: unknown) => {
-      if (error instanceof MichelinImportTerminalError) {
-        michelinInitializationTerminalError = error;
+    const initialization = initializeMichelinDataInternal(emitProgress).catch((cause: unknown) => {
+      if (cause instanceof MichelinImportTerminalError) {
+        michelinInitializationTerminalError = cause;
       }
-      throw error;
+      throw cause;
     });
     const trackedInitialization = initialization.finally(() => {
       if (michelinInitializationPromise === trackedInitialization) {
@@ -295,17 +295,6 @@ function generateVisitHash(startTime: number, endTime: number, centerLat: number
   const input = `${timeRounded}-${latRounded}-${lonRounded}`;
 
   return input;
-}
-
-// Visit group structure for batch processing
-interface VisitGroup {
-  photos: UnvisitedPhotoRecord[];
-  centroid: { lat: number; lon: number };
-  startTime: number;
-  endTime: number;
-  hash: string;
-  suggestedRestaurantId: string | null;
-  suggestedRestaurants: Array<{ id: string; distance: number }>;
 }
 
 // Keep the native acquisition/Vision pipeline busy while bounding one bridge result page.
@@ -467,7 +456,7 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
             id: restaurant.id,
             distance: distanceMeters,
           })),
-        } as VisitGroup;
+        };
       },
       GROUP_PROCESSING_CHUNK_SIZE,
     );
@@ -732,9 +721,9 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
         const record: FoodBatchResult = {
           photoId: result.assetId,
           foodDetected: result.containsFood,
-          foodLabels: result.foodLabels as FoodLabel[],
+          foodLabels: result.foodLabels,
           foodConfidence: result.foodConfidence,
-          allLabels: result.labels as FoodLabel[], // Store all labels from classifier
+          allLabels: result.labels, // Store all labels from classifier
         };
 
         if (collectResults) {

@@ -2,17 +2,123 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL,
   PENDING_VISITS_FOR_REVIEW_SQL,
   type PendingVisitReviewQueryRow,
 } from "../utils/db/visit-review-core.ts";
+import { parseFoodLabelArraysJson } from "../utils/db/food-label-json.ts";
+import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from "../utils/runtime-json.ts";
 
 interface QueryPlanRow {
   readonly id: number;
   readonly parent: number;
   readonly detail: string;
+}
+
+interface TestSuggestion {
+  readonly id: string;
+  readonly name: string;
+  readonly latestAwardYear: number | null;
+  readonly distance: number;
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue | undefined, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function requiredNumber(value: SQLOutputValue | undefined, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function nullableNumber(value: SQLOutputValue | undefined, column: string): number | null {
+  return value === null ? null : requiredNumber(value, column);
+}
+
+function parseVisitStatus(value: SQLOutputValue | undefined): PendingVisitReviewQueryRow["status"] {
+  assert.ok(value === "pending" || value === "confirmed" || value === "rejected", "visits.status is invalid");
+  return value;
+}
+
+function parsePendingVisitReviewQueryRow(row: SQLiteRow): PendingVisitReviewQueryRow {
+  return {
+    id: requiredString(row.id, "visits.id"),
+    restaurantId: nullableString(row.restaurantId, "visits.restaurantId"),
+    suggestedRestaurantId: nullableString(row.suggestedRestaurantId, "visits.suggestedRestaurantId"),
+    status: parseVisitStatus(row.status),
+    startTime: requiredNumber(row.startTime, "visits.startTime"),
+    endTime: requiredNumber(row.endTime, "visits.endTime"),
+    centerLat: requiredNumber(row.centerLat, "visits.centerLat"),
+    centerLon: requiredNumber(row.centerLon, "visits.centerLon"),
+    photoCount: requiredNumber(row.photoCount, "visits.photoCount"),
+    foodProbable: requiredNumber(row.foodProbable, "visits.foodProbable"),
+    calendarEventId: nullableString(row.calendarEventId, "visits.calendarEventId"),
+    calendarEventTitle: nullableString(row.calendarEventTitle, "visits.calendarEventTitle"),
+    calendarEventLocation: nullableString(row.calendarEventLocation, "visits.calendarEventLocation"),
+    calendarEventIsAllDay: nullableNumber(row.calendarEventIsAllDay, "visits.calendarEventIsAllDay"),
+    notes: nullableString(row.notes, "visits.notes"),
+    updatedAt: nullableNumber(row.updatedAt, "visits.updatedAt"),
+    exportedToCalendarId: nullableString(row.exportedToCalendarId, "visits.exportedToCalendarId"),
+    awardAtVisit: nullableString(row.awardAtVisit, "visits.awardAtVisit"),
+    restaurantName: nullableString(row.restaurantName, "restaurantName"),
+    suggestedRestaurantName: nullableString(row.suggestedRestaurantName, "suggestedRestaurantName"),
+    suggestedRestaurantAward: nullableString(row.suggestedRestaurantAward, "suggestedRestaurantAward"),
+    suggestedRestaurantCuisine: nullableString(row.suggestedRestaurantCuisine, "suggestedRestaurantCuisine"),
+    suggestedRestaurantAddress: nullableString(row.suggestedRestaurantAddress, "suggestedRestaurantAddress"),
+    previewPhotosJson: nullableString(row.previewPhotosJson, "previewPhotosJson"),
+    suggestedRestaurantsJson: nullableString(row.suggestedRestaurantsJson, "suggestedRestaurantsJson"),
+    foodLabelsJson: nullableString(row.foodLabelsJson, "foodLabelsJson"),
+    priority: requiredNumber(row.priority, "priority"),
+    hasUnanalyzedPhotos: requiredNumber(row.hasUnanalyzedPhotos, "hasUnanalyzedPhotos"),
+  };
+}
+
+function parseQueryPlanRow(row: SQLiteRow): QueryPlanRow {
+  return {
+    id: requiredNumber(row.id, "query plan.id"),
+    parent: requiredNumber(row.parent, "query plan.parent"),
+    detail: requiredString(row.detail, "query plan.detail"),
+  };
+}
+
+function parseSuggestion(value: JsonValue, index: number): TestSuggestion {
+  assert.ok(isJsonObject(value), `suggestion ${index} must be an object`);
+  assert.ok(isJsonString(value.id), `suggestion ${index}.id must be a string`);
+  assert.ok(isJsonString(value.name), `suggestion ${index}.name must be a string`);
+  assert.ok(
+    value.latestAwardYear === null || isJsonNumber(value.latestAwardYear),
+    `suggestion ${index}.latestAwardYear must be numeric or null`,
+  );
+  assert.ok(isJsonNumber(value.distance), `suggestion ${index}.distance must be numeric`);
+  return {
+    id: value.id,
+    name: value.name,
+    latestAwardYear: value.latestAwardYear,
+    distance: value.distance,
+  };
+}
+
+function parseSuggestions(serialized: string): TestSuggestion[] {
+  const decoded = parseJsonValue(serialized);
+  assert.ok(Array.isArray(decoded), "suggestions must be an array");
+  return decoded.map(parseSuggestion);
 }
 
 // Independent correctness oracle: rank all pending photos with a window, then
@@ -445,7 +551,7 @@ function seedParityFixture(database: DatabaseSync): void {
 }
 
 function execute(database: DatabaseSync, sql: string): PendingVisitReviewQueryRow[] {
-  return database.prepare(sql).all() as unknown as PendingVisitReviewQueryRow[];
+  return database.prepare(sql).all().map(parsePendingVisitReviewQueryRow);
 }
 
 function assertCompleteParity(database: DatabaseSync): void {
@@ -483,12 +589,8 @@ function assertCompleteParity(database: DatabaseSync): void {
   assert.equal(priorityOne.exportedToCalendarId, "export-calendar-id");
   assert.equal(priorityOne.awardAtVisit, "Historic Award");
 
-  const suggestions = JSON.parse(priorityOne.suggestedRestaurantsJson ?? "null") as Array<{
-    id: string;
-    name: string;
-    latestAwardYear: number | null;
-    distance: number;
-  }>;
+  assert.ok(priorityOne.suggestedRestaurantsJson);
+  const suggestions = parseSuggestions(priorityOne.suggestedRestaurantsJson);
   assert.deepEqual(suggestions.map((suggestion) => suggestion.id).sort(), ["michelin-near-a", "michelin-near-b"]);
   assert.ok(suggestions.some((suggestion) => suggestion.name === 'Near "B"' && suggestion.distance === 19.75));
   assert.deepEqual(suggestions.map((suggestion) => suggestion.latestAwardYear).sort(), [2025, null].sort());
@@ -511,9 +613,9 @@ function assertCompleteParity(database: DatabaseSync): void {
     "ph://p3-false",
   ]);
   assert.equal(priorityThree.hasUnanalyzedPhotos, 1);
-  const nestedFoodLabels = JSON.parse(priorityThree.foodLabelsJson ?? "null") as Array<
-    Array<{ label: string; confidence: number }>
-  >;
+  assert.ok(priorityThree.foodLabelsJson);
+  const nestedFoodLabels = parseFoodLabelArraysJson(priorityThree.foodLabelsJson);
+  assert.ok(nestedFoodLabels);
   assert.deepEqual(
     nestedFoodLabels
       .flat()
@@ -544,9 +646,7 @@ function isDescendantOf(row: QueryPlanRow, ancestorId: number, rowsById: Readonl
 }
 
 function assertCandidatePlan(database: DatabaseSync): void {
-  const plan = database
-    .prepare(`EXPLAIN QUERY PLAN ${PENDING_VISITS_FOR_REVIEW_SQL}`)
-    .all() as unknown as QueryPlanRow[];
+  const plan = database.prepare(`EXPLAIN QUERY PLAN ${PENDING_VISITS_FOR_REVIEW_SQL}`).all().map(parseQueryPlanRow);
   const previewSearch = plan.find((row) => row.detail.includes("idx_photos_visit_preview"));
   assert.ok(previewSearch, "candidate must use idx_photos_visit_preview for its top-three lookup");
   assert.doesNotMatch(PENDING_VISITS_FOR_REVIEW_SQL, /ROW_NUMBER|ranked_photos/i);

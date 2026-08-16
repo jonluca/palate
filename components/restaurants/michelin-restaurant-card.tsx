@@ -88,7 +88,7 @@ export function MichelinRestaurantCard({ restaurant, index, visited = false }: M
     </Pressable>
   );
 
-  if (typeof index !== "number") {
+  if (index === undefined) {
     return content;
   }
 

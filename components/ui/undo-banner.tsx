@@ -166,7 +166,7 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
   const insets = useSafeAreaInsets();
   const segments = useSegments();
   const hideUndoBar = useHideUndoBar();
-  const hasTabsSegment = (segments as readonly string[]).includes("(tabs)");
+  const hasTabsSegment = segments.some((segment) => segment === "(tabs)");
   const tabBarOffset = hasTabsSegment ? TAB_BAR_HEIGHT + TAB_BAR_BANNER_GAP : 0;
 
   const showUndo = useCallback(

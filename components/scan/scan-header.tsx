@@ -2,13 +2,12 @@ import React from "react";
 import { View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { ThemedText } from "@/components/themed-text";
-import { IconSymbol } from "@/components/icon-symbol";
-import type { SymbolViewProps } from "expo-symbols";
+import { IconSymbol, type IconSymbolName } from "@/components/icon-symbol";
 
 interface ScanHeaderProps {
   title: string;
   description: string;
-  iconName?: SymbolViewProps["name"];
+  iconName?: IconSymbolName;
   iconColor?: string;
   iconBackgroundColor?: string;
 }
@@ -23,7 +22,7 @@ export function ScanHeader({
   return (
     <Animated.View entering={FadeIn.duration(400)} className={"items-center mb-8"}>
       <View className={`w-20 h-20 rounded-full ${iconBackgroundColor} items-center justify-center mb-6`}>
-        <IconSymbol name={iconName as never} size={40} color={iconColor} />
+        <IconSymbol name={iconName} size={40} color={iconColor} />
       </View>
       <ThemedText variant={"largeTitle"} className={"font-bold text-center mb-2"}>
         {title}

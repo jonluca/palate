@@ -1,3 +1,5 @@
+import { isJsonString, parseJsonValue } from "../runtime-json.ts";
+
 export type VisitListFilter = "pending" | "confirmed" | "rejected" | "food";
 
 export const DEFAULT_VISIT_LIST_PAGE_SIZE = 128;
@@ -56,9 +58,13 @@ function normalizePageSize(pageSize: number): number {
 }
 
 function validateCursor(cursor: VisitListCursor): void {
-  if (!Number.isFinite(cursor.startTime) || typeof cursor.id !== "string") {
+  if (!isValidVisitListCursor(cursor)) {
     throw new TypeError("Visit-list cursor must contain a finite startTime and string id.");
   }
+}
+
+function isValidVisitListCursor(cursor: VisitListCursor): cursor is VisitListCursor {
+  return Number.isFinite(cursor.startTime) && typeof cursor.id === "string";
 }
 
 /**
@@ -125,8 +131,8 @@ function parsePreviewPhotos(value: string | null): string[] {
     return [];
   }
   try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed) && parsed.every((uri) => typeof uri === "string") ? parsed : [];
+    const parsed = parseJsonValue(value);
+    return Array.isArray(parsed) && parsed.every(isJsonString) ? parsed : [];
   } catch {
     return [];
   }

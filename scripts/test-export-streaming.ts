@@ -19,9 +19,42 @@ import {
   type ExportVisitHeader,
 } from "../utils/export-stream-core.ts";
 import { writeExportJsonSnapshot } from "../utils/export-stream-snapshot.ts";
+import {
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  parseJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from "../utils/runtime-json.ts";
 
 const EXPECTED_COMPLEX_BYTES = 4_140;
 const EXPECTED_COMPLEX_SHA256 = "b5a05a1d97bfe971644a8bc59f21765205a9ace650ada6211c7d0be4fe1bf953";
+
+function requiredJsonObject(value: JsonValue | undefined, name: string): JsonObject {
+  assert.ok(isJsonObject(value), `${name} must be an object`);
+  return value;
+}
+
+function requiredJsonArray(value: JsonValue | undefined, name: string): JsonValue[] {
+  assert.ok(Array.isArray(value), `${name} must be an array`);
+  return value;
+}
+
+function requiredJsonString(value: JsonValue | undefined, name: string): string {
+  assert.ok(isJsonString(value), `${name} must be a string`);
+  return value;
+}
+
+function requiredJsonNumber(value: JsonValue | undefined, name: string): number {
+  assert.ok(isJsonNumber(value), `${name} must be numeric`);
+  return value;
+}
+
+function findJsonObjectById(values: readonly JsonValue[], id: string): JsonObject {
+  const value = values.find((candidate) => isJsonObject(candidate) && candidate.id === id);
+  return requiredJsonObject(value, `entry ${id}`);
+}
 
 function documentFor(data: ExportData): ExportStreamDocument {
   return {
@@ -364,12 +397,21 @@ async function testSnapshotWriterIntegration(): Promise<void> {
   });
 
   const json = fragments.join("");
-  const parsed = JSON.parse(json) as ExportData;
+  const parsed = requiredJsonObject(parseJsonValue(json), "snapshot export");
+  const parsedStats = requiredJsonObject(parsed.stats, "snapshot export.stats");
+  const parsedVisits = requiredJsonArray(parsed.visits, "snapshot export.visits");
   assert.deepEqual(countRequests, [[visits[0]!.id, visits[1]!.id]]);
   assert.deepEqual(pageRequests, [[visits[0]!.id, visits[1]!.id]]);
-  assert.equal(parsed.stats.totalPhotos, 2);
+  assert.equal(requiredJsonNumber(parsedStats.totalPhotos, "snapshot export.stats.totalPhotos"), 2);
   assert.deepEqual(
-    parsed.visits.map((visit) => ({ id: visit.visitId, photoCount: visit.photoCount, photos: visit.photos.length })),
+    parsedVisits.map((value, index) => {
+      const visit = requiredJsonObject(value, `snapshot export.visits[${index}]`);
+      return {
+        id: requiredJsonString(visit.visitId, `snapshot export.visits[${index}].visitId`),
+        photoCount: requiredJsonNumber(visit.photoCount, `snapshot export.visits[${index}].photoCount`),
+        photos: requiredJsonArray(visit.photos, `snapshot export.visits[${index}].photos`).length,
+      };
+    }),
     [
       { id: visits[0]!.id, photoCount: 2, photos: 2 },
       { id: visits[1]!.id, photoCount: 0, photos: 0 },
@@ -422,7 +464,7 @@ function testWriterSinkFailure(data: ExportData): void {
 
   assert.throws(
     () => writer.beginVisit(headerFor(data.visits[0]!)),
-    (error: unknown) => error === failure,
+    (error: Error) => error === failure,
   );
   assert.equal(calls, 2);
   assert.throws(() => writer.finish(), /after the export sink failed/);
@@ -501,7 +543,7 @@ function testUtf8Buffering(data: ExportData): void {
   retry.write(retryFragment);
   assert.throws(
     () => retry.close(),
-    (error: unknown) => error === retryFailure,
+    (error: Error) => error === retryFailure,
   );
   assert.equal(retry.isClosed, false);
   assert.equal(retry.bufferedCodeUnits, retryFragment.length);
@@ -525,7 +567,8 @@ function testUtf8Buffering(data: ExportData): void {
 
 assert.throws(() => new BoundedUtf8BufferingSink(() => {}, 0), /positive safe integer/);
 assert.throws(
-  () => new ExportJsonStreamWriter(null as unknown as (fragment: string) => void, documentFor(createEmptyExport())),
+  // @ts-expect-error: The boundary test deliberately supplies a null sink.
+  () => new ExportJsonStreamWriter(null, documentFor(createEmptyExport())),
   /must be a function/,
 );
 
@@ -537,16 +580,19 @@ const complexJson = assertExactStreaming(complexExport);
 assert.equal(Buffer.byteLength(complexJson, "utf8"), EXPECTED_COMPLEX_BYTES);
 assert.equal(sha256(complexJson), EXPECTED_COMPLEX_SHA256);
 
-const parsed = JSON.parse(complexJson) as ExportData;
-const undefinedPhoto = parsed.visits[0]?.photos.find(({ id }) => id === "photo-undefined-雪");
-const malformedPhoto = parsed.visits[0]?.photos.find(({ id }) => id === "photo-malformed-is-null");
-assert.ok(undefinedPhoto && malformedPhoto);
+const parsed = requiredJsonObject(parseJsonValue(complexJson), "complex export");
+const parsedVisits = requiredJsonArray(parsed.visits, "complex export.visits");
+const firstVisit = requiredJsonObject(parsedVisits[0], "complex export.visits[0]");
+const firstVisitPhotos = requiredJsonArray(firstVisit.photos, "complex export.visits[0].photos");
+const undefinedPhoto = findJsonObjectById(firstVisitPhotos, "photo-undefined-雪");
+const malformedPhoto = findJsonObjectById(firstVisitPhotos, "photo-malformed-is-null");
 assert.equal(Object.hasOwn(undefinedPhoto, "foodConfidence"), false);
 assert.equal(Object.hasOwn(undefinedPhoto, "foodLabels"), false);
 assert.equal(Object.hasOwn(undefinedPhoto, "allLabels"), false);
 assert.equal(malformedPhoto.foodLabels, null);
 assert.equal(malformedPhoto.allLabels, null);
-assert.equal(parsed.visits[1]?.photos.length, 0);
+const secondVisit = requiredJsonObject(parsedVisits[1], "complex export.visits[1]");
+assert.equal(requiredJsonArray(secondVisit.photos, "complex export.visits[1].photos").length, 0);
 
 testPageLikeWrites(complexExport);
 testExactCountReconciliation(complexExport);

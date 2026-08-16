@@ -20,6 +20,10 @@ function formatDuration(seconds: number): string {
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
+function isMediaItem(item: string | MediaItem): item is MediaItem {
+  return typeof item === "object";
+}
+
 export function PhotoPreview({ photos, onPhotoPress }: PhotoPreviewProps) {
   if (photos.length === 0) {
     return null;
@@ -28,9 +32,10 @@ export function PhotoPreview({ photos, onPhotoPress }: PhotoPreviewProps) {
   return (
     <View className={"flex-row h-40"}>
       {photos.slice(0, 3).map((item, i) => {
-        const uri = typeof item === "string" ? item : item.uri;
-        const isVideo = typeof item === "object" && item.mediaType === "video";
-        const duration = typeof item === "object" ? item.duration : null;
+        const mediaItem = isMediaItem(item) ? item : { uri: item };
+        const { uri } = mediaItem;
+        const isVideo = mediaItem.mediaType === "video";
+        const duration = mediaItem.duration ?? null;
 
         return (
           <Pressable key={uri} className={"flex-1"} onPress={() => onPhotoPress?.(i)} disabled={!onPhotoPress}>

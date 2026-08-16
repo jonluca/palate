@@ -7,15 +7,26 @@ import Animated, { useAnimatedReaction, useAnimatedStyle, useSharedValue, withTi
 import { scheduleOnRN } from "react-native-worklets";
 
 import { RTL, SPACE_BETWEEN_IMAGES, DOUBLE_TAP_SCALE, MAX_SCALE, TIMING_CONFIG } from "./constants";
-import { ResizableImage, DefaultImage } from "./components";
-import type { GalleryProps, GalleryReactRef, ItemRef, RenderItem } from "./types";
+import { DefaultImage, ResizableImage } from "./components";
+import type { GalleryProps, GalleryReactRef, ItemRef, RenderItemInfo } from "./types";
 
 export type { RenderItemInfo } from "./types";
+
+function isDefaultImageUri<T>(item: T): item is T & string {
+  return typeof item === "string";
+}
+
+function renderDefaultImage<T>({ item, index, setImageDimensions }: RenderItemInfo<T>) {
+  if (!isDefaultImageUri(item)) {
+    throw new TypeError("Gallery requires renderItem when its data items are not image URI strings.");
+  }
+  return <DefaultImage item={item} index={index} setImageDimensions={setImageDimensions} />;
+}
 
 const GalleryComponent = <T = string,>(
   {
     data,
-    renderItem = DefaultImage as RenderItem<T>,
+    renderItem = renderDefaultImage,
     initialIndex = 0,
     numToRender = 5,
     emptySpaceWidth = SPACE_BETWEEN_IMAGES,
@@ -159,9 +170,11 @@ const GalleryComponent = <T = string,>(
   );
 };
 
-export const Gallery = React.forwardRef(GalleryComponent) as <T = string>(
-  p: GalleryProps<T> & { ref?: GalleryReactRef },
-) => React.ReactElement;
+export const Gallery =
+  // SAFETY: GalleryComponent's generic props and ref exactly match this call signature; React.forwardRef erases only T.
+  React.forwardRef(GalleryComponent) as <T = string>(
+    p: GalleryProps<T> & { ref?: GalleryReactRef },
+  ) => React.ReactElement;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "black" },

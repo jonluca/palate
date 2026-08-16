@@ -19,6 +19,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  parseJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from "../utils/runtime-json.ts";
+
 type ResultTransport = "legacy" | "packed-v1";
 type Strategy = "serial" | "lookahead";
 type TuningMode = "native-default" | "override";
@@ -223,12 +232,17 @@ interface MetricComparison {
   packedV1MinusLegacyPercent: number;
 }
 
+interface TransportMedianDelta {
+  packedV1MinusLegacy: number;
+  packedV1MinusLegacyPercent: number;
+}
+
 interface SuccessSummary {
   schemaVersion: number;
   inputReportSchemaVersion: number;
   status: string;
-  validation: Record<string, boolean>;
-  inputIdentity: Record<string, unknown>;
+  validation: TransportSummaryValidation;
+  inputIdentity: JsonObject;
   legacy: {
     reports: string[];
     runIds: string[];
@@ -253,22 +267,10 @@ interface SuccessSummary {
     interpretation: string;
     primaryMetric: string;
     medianDeltas: {
-      firstDurableProgressToCompletionSeconds: {
-        packedV1MinusLegacy: number;
-        packedV1MinusLegacyPercent: number;
-      };
-      triggerToDurableCompletionSeconds: {
-        packedV1MinusLegacy: number;
-        packedV1MinusLegacyPercent: number;
-      };
-      triggerToFirstDurableProgressSeconds: {
-        packedV1MinusLegacy: number;
-        packedV1MinusLegacyPercent: number;
-      };
-      maxRssKiB: {
-        packedV1MinusLegacy: number;
-        packedV1MinusLegacyPercent: number;
-      };
+      firstDurableProgressToCompletionSeconds: TransportMedianDelta;
+      triggerToDurableCompletionSeconds: TransportMedianDelta;
+      triggerToFirstDurableProgressSeconds: TransportMedianDelta;
+      maxRssKiB: TransportMedianDelta;
     };
     pairedWins: { packedV1: number; legacy: number; ties: number };
     pairs: Array<{
@@ -280,6 +282,10 @@ interface SuccessSummary {
     }>;
   };
   limitations: string[];
+}
+
+interface TransportSummaryValidation {
+  [attestation: string]: boolean;
 }
 
 const summarizerPath = fileURLToPath(new URL("./summarize-macos-vision-transport-ab.ts", import.meta.url));
@@ -514,15 +520,181 @@ function execute(fixtureSet: FixtureSet): SpawnSyncReturns<string> {
   );
 }
 
+function isJsonBoolean(value: JsonValue | undefined): value is boolean {
+  return value === true || value === false;
+}
+
+function hasErrorCode(cause: Error): cause is Error & { code: string } {
+  return "code" in cause && typeof cause.code === "string";
+}
+
+function requiredJsonObject(value: JsonValue | undefined, label: string): JsonObject {
+  if (!isJsonObject(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function requiredJsonNumber(value: JsonValue | undefined, label: string): number {
+  if (!isJsonNumber(value)) {
+    throw new TypeError(`${label} must be a number.`);
+  }
+  return value;
+}
+
+function requiredJsonString(value: JsonValue | undefined, label: string): string {
+  if (!isJsonString(value)) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requiredJsonBoolean(value: JsonValue | undefined, label: string): boolean {
+  if (!isJsonBoolean(value)) {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+  return value;
+}
+
+function requiredJsonStringArray(value: JsonValue | undefined, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => requiredJsonString(entry, `${label}[${index}]`));
+}
+
+function parseTransportSummaryValidation(value: JsonValue | undefined): TransportSummaryValidation {
+  const object = requiredJsonObject(value, "summary.validation");
+  const validation: TransportSummaryValidation = {};
+  for (const [key, entry] of Object.entries(object)) {
+    validation[key] = requiredJsonBoolean(entry, `summary.validation.${key}`);
+  }
+  return validation;
+}
+
+function parseTransportGroup(value: JsonValue | undefined, label: string): SuccessSummary["legacy"] {
+  const object = requiredJsonObject(value, label);
+  return {
+    reports: requiredJsonStringArray(object.reports, `${label}.reports`),
+    runIds: requiredJsonStringArray(object.runIds, `${label}.runIds`),
+    sampleCount: requiredJsonNumber(object.sampleCount, `${label}.sampleCount`),
+    medianWallSeconds: requiredJsonNumber(object.medianWallSeconds, `${label}.medianWallSeconds`),
+    medianFirstDurableProgressToCompletionSeconds: requiredJsonNumber(
+      object.medianFirstDurableProgressToCompletionSeconds,
+      `${label}.medianFirstDurableProgressToCompletionSeconds`,
+    ),
+    medianTriggerToDurableCompletionSeconds: requiredJsonNumber(
+      object.medianTriggerToDurableCompletionSeconds,
+      `${label}.medianTriggerToDurableCompletionSeconds`,
+    ),
+    medianTriggerToFirstDurableProgressSeconds: requiredJsonNumber(
+      object.medianTriggerToFirstDurableProgressSeconds,
+      `${label}.medianTriggerToFirstDurableProgressSeconds`,
+    ),
+    medianMaxRssKiB: requiredJsonNumber(object.medianMaxRssKiB, `${label}.medianMaxRssKiB`),
+  };
+}
+
+function parseMetricComparison(value: JsonValue | undefined, label: string): MetricComparison {
+  const object = requiredJsonObject(value, label);
+  return {
+    legacy: requiredJsonNumber(object.legacy, `${label}.legacy`),
+    packedV1: requiredJsonNumber(object.packedV1, `${label}.packedV1`),
+    packedV1MinusLegacy: requiredJsonNumber(object.packedV1MinusLegacy, `${label}.packedV1MinusLegacy`),
+    packedV1MinusLegacyPercent: requiredJsonNumber(
+      object.packedV1MinusLegacyPercent,
+      `${label}.packedV1MinusLegacyPercent`,
+    ),
+  };
+}
+
+function parseResultTransportOrTie(value: JsonValue | undefined, label: string): ResultTransport | "tie" {
+  if (value === "legacy" || value === "packed-v1" || value === "tie") {
+    return value;
+  }
+  throw new TypeError(`${label} is unsupported.`);
+}
+
+function parseTransportPair(value: JsonValue, index: number): SuccessSummary["comparison"]["pairs"][number] {
+  const label = `summary.comparison.pairs[${index}]`;
+  const object = requiredJsonObject(value, label);
+  return {
+    pairIndex: requiredJsonNumber(object.pairIndex, `${label}.pairIndex`),
+    legacyRunId: requiredJsonString(object.legacyRunId, `${label}.legacyRunId`),
+    packedV1RunId: requiredJsonString(object.packedV1RunId, `${label}.packedV1RunId`),
+    winner: parseResultTransportOrTie(object.winner, `${label}.winner`),
+    firstDurableProgressToCompletionSeconds: parseMetricComparison(
+      object.firstDurableProgressToCompletionSeconds,
+      `${label}.firstDurableProgressToCompletionSeconds`,
+    ),
+  };
+}
+
+function parseMedianDelta(value: JsonValue | undefined, label: string): TransportMedianDelta {
+  const object = requiredJsonObject(value, label);
+  return {
+    packedV1MinusLegacy: requiredJsonNumber(object.packedV1MinusLegacy, `${label}.packedV1MinusLegacy`),
+    packedV1MinusLegacyPercent: requiredJsonNumber(
+      object.packedV1MinusLegacyPercent,
+      `${label}.packedV1MinusLegacyPercent`,
+    ),
+  };
+}
+
+function parseSuccessSummary(source: string): SuccessSummary {
+  const object = requiredJsonObject(parseJsonValue(source), "summary");
+  const comparison = requiredJsonObject(object.comparison, "summary.comparison");
+  const medianDeltas = requiredJsonObject(comparison.medianDeltas, "summary.comparison.medianDeltas");
+  const pairedWins = requiredJsonObject(comparison.pairedWins, "summary.comparison.pairedWins");
+  if (!Array.isArray(comparison.pairs)) {
+    throw new TypeError("summary.comparison.pairs must be an array.");
+  }
+  return {
+    schemaVersion: requiredJsonNumber(object.schemaVersion, "summary.schemaVersion"),
+    inputReportSchemaVersion: requiredJsonNumber(object.inputReportSchemaVersion, "summary.inputReportSchemaVersion"),
+    status: requiredJsonString(object.status, "summary.status"),
+    validation: parseTransportSummaryValidation(object.validation),
+    inputIdentity: requiredJsonObject(object.inputIdentity, "summary.inputIdentity"),
+    legacy: parseTransportGroup(object.legacy, "summary.legacy"),
+    packedV1: parseTransportGroup(object.packedV1, "summary.packedV1"),
+    comparison: {
+      interpretation: requiredJsonString(comparison.interpretation, "summary.comparison.interpretation"),
+      primaryMetric: requiredJsonString(comparison.primaryMetric, "summary.comparison.primaryMetric"),
+      medianDeltas: {
+        firstDurableProgressToCompletionSeconds: parseMedianDelta(
+          medianDeltas.firstDurableProgressToCompletionSeconds,
+          "summary.comparison.medianDeltas.firstDurableProgressToCompletionSeconds",
+        ),
+        triggerToDurableCompletionSeconds: parseMedianDelta(
+          medianDeltas.triggerToDurableCompletionSeconds,
+          "summary.comparison.medianDeltas.triggerToDurableCompletionSeconds",
+        ),
+        triggerToFirstDurableProgressSeconds: parseMedianDelta(
+          medianDeltas.triggerToFirstDurableProgressSeconds,
+          "summary.comparison.medianDeltas.triggerToFirstDurableProgressSeconds",
+        ),
+        maxRssKiB: parseMedianDelta(medianDeltas.maxRssKiB, "summary.comparison.medianDeltas.maxRssKiB"),
+      },
+      pairedWins: {
+        packedV1: requiredJsonNumber(pairedWins.packedV1, "summary.comparison.pairedWins.packedV1"),
+        legacy: requiredJsonNumber(pairedWins.legacy, "summary.comparison.pairedWins.legacy"),
+        ties: requiredJsonNumber(pairedWins.ties, "summary.comparison.pairedWins.ties"),
+      },
+      pairs: comparison.pairs.map(parseTransportPair),
+    },
+    limitations: requiredJsonStringArray(object.limitations, "summary.limitations"),
+  };
+}
+
 function pathExistsIncludingDanglingSymlink(path: string): boolean {
   try {
     lstatSync(path);
     return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+  } catch (cause) {
+    if (cause instanceof Error && hasErrorCode(cause) && cause.code === "ENOENT") {
       return false;
     }
-    throw error;
+    throw cause;
   }
 }
 
@@ -563,7 +735,7 @@ try {
   const successResult = execute(success);
   assert.equal(successResult.status, 0, successResult.stderr);
   assert.match(successResult.stdout, /transport A\/B descriptive summary/);
-  const summary = JSON.parse(readFileSync(success.paths.output, "utf8")) as SuccessSummary;
+  const summary = parseSuccessSummary(readFileSync(success.paths.output, "utf8"));
   assert.equal(summary.schemaVersion, 1);
   assert.equal(summary.inputReportSchemaVersion, 6);
   assert.equal(summary.status, "ok");
@@ -612,8 +784,12 @@ try {
   expectReportFailure(
     "missing-native-attestation",
     (fixtureSet) => {
-      delete (fixtureSet.reports.packedA.runtimeAttestation as Partial<TestReport["runtimeAttestation"]>)
-        .nativeResultTransport;
+      Object.defineProperty(fixtureSet.reports.packedA.runtimeAttestation, "nativeResultTransport", {
+        configurable: true,
+        enumerable: true,
+        value: undefined,
+        writable: true,
+      });
     },
     "native result-transport attestation must be an object",
   );
@@ -701,11 +877,12 @@ try {
   expectReportFailure(
     "missing-reference-components",
     (fixtureSet) => {
-      delete (
-        fixtureSet.reports.packedA.semanticReference as unknown as {
-          components?: SemanticReference["components"];
-        }
-      ).components;
+      Object.defineProperty(fixtureSet.reports.packedA.semanticReference, "components", {
+        configurable: true,
+        enumerable: true,
+        value: undefined,
+        writable: true,
+      });
     },
     "semantic reference components must be an object",
   );

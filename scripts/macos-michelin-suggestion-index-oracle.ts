@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 
 const PRIMARY_RADIUS_METERS = 100;
 const SUGGESTION_RADIUS_METERS = 200;
@@ -92,6 +92,91 @@ interface ComparisonSummary {
   readonly digests: Record<string, string>;
   readonly mismatches: Record<string, number>;
   readonly correctness: Record<string, boolean>;
+}
+
+type SqlNode = SQLOutputValue | undefined;
+type SqlRow = Record<string, SQLOutputValue>;
+
+type JsonValue = boolean | JsonObject | JsonValue[] | null | number | string;
+type JsonNode = JsonValue | undefined;
+
+interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
+
+const ORACLE_SCHEMA_ERROR = "Oracle JSON does not match schema version 1";
+
+function isSqlNumber(value: SqlNode): value is number {
+  return typeof value === "number";
+}
+
+function isSqlString(value: SqlNode): value is string {
+  return typeof value === "string";
+}
+
+function isJsonObject(value: JsonNode): value is JsonObject {
+  return value !== null && value !== undefined && typeof value === "object" && !Array.isArray(value);
+}
+
+function isJsonNumber(value: JsonNode): value is number {
+  return typeof value === "number";
+}
+
+function isJsonString(value: JsonNode): value is string {
+  return typeof value === "string";
+}
+
+function parseJsonValue(source: string): JsonValue {
+  // JSON.parse either throws or returns exactly the recursive JSON domain represented by JsonValue.
+  return JSON.parse(source);
+}
+
+function oracleObject(value: JsonNode): JsonObject {
+  if (!isJsonObject(value)) {
+    throw new Error(ORACLE_SCHEMA_ERROR);
+  }
+  return value;
+}
+
+function oracleArray(value: JsonNode): JsonValue[] {
+  if (!Array.isArray(value)) {
+    throw new Error(ORACLE_SCHEMA_ERROR);
+  }
+  return value;
+}
+
+function oracleNumber(value: JsonNode): number {
+  if (!isJsonNumber(value) || !Number.isFinite(value)) {
+    throw new Error(ORACLE_SCHEMA_ERROR);
+  }
+  return value;
+}
+
+function oracleString(value: JsonNode): string {
+  if (!isJsonString(value)) {
+    throw new Error(ORACLE_SCHEMA_ERROR);
+  }
+  return value;
+}
+
+function oracleNullableString(value: JsonNode): string | null {
+  return value === null ? null : oracleString(value);
+}
+
+function sqlString(row: SqlRow, column: string): string {
+  const value = row[column];
+  if (!isSqlString(value)) {
+    throw new TypeError(`SQLite column ${column} must be text`);
+  }
+  return value;
+}
+
+function sqlNumber(row: SqlRow, column: string): number {
+  const value = row[column];
+  if (!isSqlNumber(value) || !Number.isFinite(value)) {
+    throw new TypeError(`SQLite column ${column} must be a finite number`);
+  }
+  return value;
 }
 
 function usage(): string {
@@ -199,7 +284,7 @@ function openImmutable(path: string, label: string): DatabaseSync {
   assertConsolidatedRegularFile(path, label);
   const database = new DatabaseSync(immutableUri(path), { readOnly: true });
   database.exec("PRAGMA query_only = ON");
-  const integrity = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
+  const integrity = database.prepare("PRAGMA integrity_check").get();
   if (integrity?.integrity_check !== "ok") {
     database.close();
     throw new Error(`${label} integrity_check failed: ${String(integrity?.integrity_check)}`);
@@ -207,8 +292,8 @@ function openImmutable(path: string, label: string): DatabaseSync {
   return database;
 }
 
-function coordinate(name: string, value: unknown, limit: number): number {
-  const numeric = typeof value === "number" ? value : Number.parseFloat(String(value));
+function coordinate(name: string, value: SqlNode, limit: number): number {
+  const numeric = isSqlNumber(value) ? value : Number.parseFloat(String(value));
   if (!Number.isFinite(numeric) || numeric < -limit || numeric > limit) {
     throw new RangeError(`${name} must be finite and between ${-limit} and ${limit}`);
   }
@@ -269,7 +354,7 @@ function loadBundledGuide(database: DatabaseSync): MichelinLocation[] {
          AND latitude != '' AND longitude != ''
        ORDER BY id`,
     )
-    .all() as Array<{ id: unknown; latitude: unknown; longitude: unknown }>;
+    .all();
   const locations: MichelinLocation[] = [];
   for (const row of rows) {
     const latitude = Number.parseFloat(String(row.latitude));
@@ -306,10 +391,10 @@ function loadMainGuide(database: DatabaseSync, datasetVersion: string, active: b
        WHERE datasetVersion ${operator} ?
        ORDER BY id`,
     )
-    .all(datasetVersion) as Array<{ id: string; latitude: unknown; longitude: unknown }>;
+    .all(datasetVersion);
   return canonicalGuide(
     rows.map((row) => ({
-      id: row.id,
+      id: sqlString(row, "id"),
       latitude: coordinate("restaurant latitude", row.latitude, 90),
       longitude: coordinate("restaurant longitude", row.longitude, 180),
     })),
@@ -324,16 +409,13 @@ function loadVisits(database: DatabaseSync): VisitRow[] {
        ORDER BY id`,
     )
     .all()
-    .map((row) => {
-      const value = row as Record<string, unknown>;
-      return {
-        id: String(value.id),
-        status: String(value.status),
-        centerLat: coordinate("visit latitude", value.centerLat, 90),
-        centerLon: coordinate("visit longitude", value.centerLon, 180),
-        suggestedRestaurantId: value.suggestedRestaurantId === null ? null : String(value.suggestedRestaurantId),
-      };
-    });
+    .map((row) => ({
+      id: String(row.id),
+      status: String(row.status),
+      centerLat: coordinate("visit latitude", row.centerLat, 90),
+      centerLon: coordinate("visit longitude", row.centerLon, 180),
+      suggestedRestaurantId: row.suggestedRestaurantId === null ? null : String(row.suggestedRestaurantId),
+    }));
 }
 
 function loadSuggestionRows(database: DatabaseSync, pending: boolean): SuggestionRow[] {
@@ -346,7 +428,12 @@ function loadSuggestionRows(database: DatabaseSync, pending: boolean): Suggestio
        WHERE v.status ${operator} 'pending'
        ORDER BY vsr.visitId, vsr.distance, vsr.restaurantId`,
     )
-    .all() as Array<{ visitId: string; restaurantId: string; distance: number }>;
+    .all()
+    .map((row) => ({
+      visitId: sqlString(row, "visitId"),
+      restaurantId: sqlString(row, "restaurantId"),
+      distance: sqlNumber(row, "distance"),
+    }));
   let previousVisitId: string | undefined;
   let ordinal = -1;
   return rows.map((row) => {
@@ -365,10 +452,7 @@ function loadSuggestionRows(database: DatabaseSync, pending: boolean): Suggestio
   });
 }
 
-function buildExpectedSuggestions(
-  visits: readonly VisitRow[],
-  restaurants: readonly MichelinLocation[],
-): { primary: PrimaryRow[]; suggestions: SuggestionRow[] } {
+function buildExpectedSuggestions(visits: readonly VisitRow[], restaurants: readonly MichelinLocation[]) {
   const primary: PrimaryRow[] = [];
   const suggestions: SuggestionRow[] = [];
   const boundaryToleranceMeters = Math.max(MIN_RADIUS_BOUNDARY_TOLERANCE_METERS, SUGGESTION_RADIUS_METERS * 1e-12);
@@ -399,11 +483,11 @@ function buildExpectedSuggestions(
   return { primary, suggestions };
 }
 
-function sha256(value: unknown): string {
+function sha256<Value>(value: Value): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function writeJsonAtomically(path: string, value: unknown): void {
+function writeJsonAtomically<Value extends object>(path: string, value: Value): void {
   mkdirSync(dirname(path), { recursive: true });
   const temporaryPath = resolve(
     dirname(path),
@@ -443,23 +527,68 @@ function assertNewOutput(path: string, protectedPaths: readonly string[]): void 
   }
 }
 
+function parseOracleLocations(value: JsonNode): MichelinLocation[] {
+  return oracleArray(value).map((entry) => {
+    const location = oracleObject(entry);
+    return {
+      id: oracleString(location.id),
+      latitude: oracleNumber(location.latitude),
+      longitude: oracleNumber(location.longitude),
+    };
+  });
+}
+
+function parseOracleStrings(value: JsonNode): string[] {
+  return oracleArray(value).map(oracleString);
+}
+
+function parseOraclePrimaryRows(value: JsonNode): PrimaryRow[] {
+  return oracleArray(value).map((entry) => {
+    const row = oracleObject(entry);
+    return {
+      visitId: oracleString(row.visitId),
+      restaurantId: oracleNullableString(row.restaurantId),
+    };
+  });
+}
+
+function parseOracleSuggestionRows(value: JsonNode): SuggestionRow[] {
+  return oracleArray(value).map((entry) => {
+    const row = oracleObject(entry);
+    const distanceBits = oracleString(row.distanceBits);
+    if (!/^[0-9a-f]{16}$/.test(distanceBits)) {
+      throw new Error(ORACLE_SCHEMA_ERROR);
+    }
+    const ordinal = oracleNumber(row.ordinal);
+    if (!Number.isSafeInteger(ordinal) || ordinal < 0) {
+      throw new Error(ORACLE_SCHEMA_ERROR);
+    }
+    return {
+      visitId: oracleString(row.visitId),
+      restaurantId: oracleString(row.restaurantId),
+      distanceBits,
+      ordinal,
+    };
+  });
+}
+
 function parseOracle(path: string): Oracle {
-  const value = JSON.parse(readFileSync(path, "utf8")) as Oracle;
-  if (
-    value.schemaVersion !== 1 ||
-    typeof value.datasetVersion !== "string" ||
-    typeof value.suggestionVersion !== "string" ||
-    !Array.isArray(value.activeGuide) ||
-    !Array.isArray(value.staleGuide) ||
-    !Array.isArray(value.pendingVisits) ||
-    !Array.isArray(value.expectedPendingPrimary) ||
-    !Array.isArray(value.expectedPendingSuggestions) ||
-    !Array.isArray(value.baselineNonPendingPrimary) ||
-    !Array.isArray(value.baselineNonPendingSuggestions)
-  ) {
+  const value = oracleObject(parseJsonValue(readFileSync(path, "utf8")));
+  if (value.schemaVersion !== 1) {
     throw new Error("Oracle JSON does not match schema version 1");
   }
-  return value;
+  return {
+    schemaVersion: 1,
+    datasetVersion: oracleString(value.datasetVersion),
+    suggestionVersion: oracleString(value.suggestionVersion),
+    activeGuide: parseOracleLocations(value.activeGuide),
+    staleGuide: parseOracleLocations(value.staleGuide),
+    pendingVisits: parseOracleStrings(value.pendingVisits),
+    expectedPendingPrimary: parseOraclePrimaryRows(value.expectedPendingPrimary),
+    expectedPendingSuggestions: parseOracleSuggestionRows(value.expectedPendingSuggestions),
+    baselineNonPendingPrimary: parseOraclePrimaryRows(value.baselineNonPendingPrimary),
+    baselineNonPendingSuggestions: parseOracleSuggestionRows(value.baselineNonPendingSuggestions),
+  };
 }
 
 function prepare(configuration: Configuration): void {
@@ -469,9 +598,7 @@ function prepare(configuration: Configuration): void {
   const main = openImmutable(databasePath, "Prepared main database");
   const guide = openImmutable(guidePath, "Signed bundled guide");
   try {
-    const importedVersion = main
-      .prepare("SELECT value FROM app_metadata WHERE key = 'michelin_dataset_version'")
-      .get() as { value?: unknown } | undefined;
+    const importedVersion = main.prepare("SELECT value FROM app_metadata WHERE key = 'michelin_dataset_version'").get();
     if (importedVersion?.value !== datasetVersion) {
       throw new Error(
         `Prepared database guide version ${String(importedVersion?.value)} does not match signed guide ${datasetVersion}`,
@@ -517,7 +644,7 @@ function prepare(configuration: Configuration): void {
   }
 }
 
-function mismatchCount(left: readonly unknown[], right: readonly unknown[]): number {
+function mismatchCount<Item>(left: readonly Item[], right: readonly Item[]): number {
   const maximum = Math.max(left.length, right.length);
   let count = 0;
   for (let index = 0; index < maximum; index += 1) {
@@ -529,7 +656,9 @@ function mismatchCount(left: readonly unknown[], right: readonly unknown[]): num
 }
 
 function compare(configuration: Configuration): boolean {
-  assertNewOutput(configuration.outputPath!, [configuration.databasePath, configuration.oraclePath]);
+  const outputPath = configuration.outputPath;
+  assert.ok(outputPath);
+  assertNewOutput(outputPath, [configuration.databasePath, configuration.oraclePath]);
   const oracle = parseOracle(configuration.oraclePath);
   const database = openImmutable(configuration.databasePath, "Result database");
   let summary: ComparisonSummary;
@@ -551,11 +680,12 @@ function compare(configuration: Configuration): boolean {
          WHERE v.id IN (SELECT value FROM json_each(?))
          ORDER BY vsr.visitId, vsr.distance, vsr.restaurantId`,
       )
-      .all(JSON.stringify(oracle.pendingVisits)) as Array<{
-      visitId: string;
-      restaurantId: string;
-      distance: number;
-    }>;
+      .all(JSON.stringify(oracle.pendingVisits))
+      .map((row) => ({
+        visitId: sqlString(row, "visitId"),
+        restaurantId: sqlString(row, "restaurantId"),
+        distance: sqlNumber(row, "distance"),
+      }));
     let previousVisitId: string | undefined;
     let ordinal = -1;
     const actualPendingSuggestions = pendingSuggestions.map((row) => {
@@ -581,24 +711,22 @@ function compare(configuration: Configuration): boolean {
     );
     const suggestionVersion = database
       .prepare("SELECT value FROM app_metadata WHERE key = 'michelin_suggestion_version'")
-      .get() as { value?: unknown } | undefined;
+      .get();
     const datasetVersion = database
       .prepare("SELECT value FROM app_metadata WHERE key = 'michelin_dataset_version'")
-      .get() as { value?: unknown } | undefined;
-    const staleSuggestionCount = Number(
-      (
-        database
-          .prepare(
-            `SELECT COUNT(*) AS count
-             FROM visit_suggested_restaurants vsr
-             JOIN visits v ON v.id = vsr.visitId
-             JOIN michelin_restaurants m ON m.id = vsr.restaurantId
-             WHERE v.id IN (SELECT value FROM json_each(?))
-               AND m.datasetVersion IS NOT ?`,
-          )
-          .get(JSON.stringify(oracle.pendingVisits), oracle.datasetVersion) as { count: number }
-      ).count,
-    );
+      .get();
+    const staleSuggestionRow = database
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM visit_suggested_restaurants vsr
+         JOIN visits v ON v.id = vsr.visitId
+         JOIN michelin_restaurants m ON m.id = vsr.restaurantId
+         WHERE v.id IN (SELECT value FROM json_each(?))
+           AND m.datasetVersion IS NOT ?`,
+      )
+      .get(JSON.stringify(oracle.pendingVisits), oracle.datasetVersion);
+    assert.ok(staleSuggestionRow, "Stale suggestion count query returned no row");
+    const staleSuggestionCount = sqlNumber(staleSuggestionRow, "count");
     const missingPendingVisitCount = oracle.pendingVisits.length - pending.length;
     const mismatches = {
       datasetVersion: datasetVersion?.value === oracle.datasetVersion ? 0 : 1,
@@ -648,7 +776,7 @@ function compare(configuration: Configuration): boolean {
       mismatches,
       correctness,
     };
-    writeJsonAtomically(configuration.outputPath!, summary);
+    writeJsonAtomically(outputPath, summary);
     return ok;
   } finally {
     database.close();

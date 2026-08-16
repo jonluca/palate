@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isJsonObject, isJsonString, parseJsonValue } from "../utils/runtime-json.ts";
 
 const repositoryRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -39,16 +40,15 @@ const visitSource = readRepositoryFile("services/visit.ts");
 const michelinServiceSource = readRepositoryFile("services/michelin.ts");
 const michelinDatabaseSource = readRepositoryFile("utils/db/michelin.ts");
 const appConfigSource = readRepositoryFile("app.config.ts");
-const podfileProperties = JSON.parse(readRepositoryFile("ios/Podfile.properties.json")) as Record<string, unknown>;
+const podfileProperties = parseJsonValue(readRepositoryFile("ios/Podfile.properties.json"));
+assert.ok(isJsonObject(podfileProperties), "Podfile properties must be a JSON object");
 
 const appSqlitePlugin = appConfigSource.match(/["']expo-sqlite["'][\s\S]{0,300}?customBuildFlags:\s*["']([^"']+)["']/);
 assert.ok(appSqlitePlugin, "app.config.ts must configure expo-sqlite custom build flags");
 assertBuildFlag(appSqlitePlugin[1]!, "-DSQLITE_USE_URI=1", "app.config.ts expo-sqlite configuration");
 
 const podfileSqliteFlags = podfileProperties["expo.sqlite.customBuildFlags"];
-if (typeof podfileSqliteFlags !== "string") {
-  throw new Error("Podfile properties must provide expo.sqlite.customBuildFlags");
-}
+assert.ok(isJsonString(podfileSqliteFlags), "Podfile properties must provide expo.sqlite.customBuildFlags");
 assertBuildFlag(podfileSqliteFlags, "-DSQLITE_USE_URI=1", "ios/Podfile.properties.json");
 
 const resolutionSource = section(
@@ -286,10 +286,10 @@ assertOrdered(
     "if (michelinInitializationTerminalError) {",
     "throw michelinInitializationTerminalError;",
     "if (!michelinInitializationPromise) {",
-    "initializeMichelinDataInternal(emitProgress).catch((error: unknown) => {",
-    "if (error instanceof MichelinImportTerminalError) {",
-    "michelinInitializationTerminalError = error;",
-    "throw error;",
+    "initializeMichelinDataInternal(emitProgress).catch((cause: unknown) => {",
+    "if (cause instanceof MichelinImportTerminalError) {",
+    "michelinInitializationTerminalError = cause;",
+    "throw cause;",
   ],
   "process-terminal Michelin latch",
 );

@@ -15,6 +15,7 @@ import {
   useImportProviderReservations,
 } from "@/hooks/queries";
 import type { ResyImportProgress } from "@/services/resy";
+import { asRecord, ReservationApiError, type JsonValue } from "@/services/reservation-import";
 
 const RESY_ACCOUNT_URL = "https://resy.com/account/reservations";
 const RESY_BRAND_COLOR = "#ff462d";
@@ -101,7 +102,29 @@ interface ResyBridgeMessage {
   token?: string | null;
 }
 
-function getFetchHistoryToast(reservationCount: number): { type: "success" | "error"; message: string } {
+interface FetchHistoryToast {
+  type: "success" | "error";
+  message: string;
+}
+
+function isJsonString(value: JsonValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function parseResyBridgeMessage(serializedMessage: string): ResyBridgeMessage | null {
+  const parsed: JsonValue = JSON.parse(serializedMessage);
+  const record = asRecord(parsed);
+  if (!record) {
+    return null;
+  }
+  return {
+    type: isJsonString(record.type) ? record.type : undefined,
+    hasToken: record.hasToken === true,
+    token: record.token === null ? null : isJsonString(record.token) ? record.token : undefined,
+  };
+}
+
+function getFetchHistoryToast(reservationCount: number): FetchHistoryToast {
   if (reservationCount === 0) {
     return { type: "error", message: "No importable Resy reservations were found." };
   }
@@ -112,8 +135,8 @@ function getFetchHistoryToast(reservationCount: number): { type: "success" | "er
   };
 }
 
-function getErrorStatus(error: unknown): number | null {
-  return typeof error === "object" && error !== null && "status" in error ? Number(error.status) : null;
+function getErrorStatus(cause: unknown): number | null {
+  return cause instanceof ReservationApiError ? cause.status : null;
 }
 
 export default function ResyImportScreen() {
@@ -185,7 +208,7 @@ export default function ResyImportScreen() {
   const handleMessage = useCallback((event: WebViewMessageEvent) => {
     let message: ResyBridgeMessage | null = null;
     try {
-      message = JSON.parse(event.nativeEvent.data) as ResyBridgeMessage;
+      message = parseResyBridgeMessage(event.nativeEvent.data);
     } catch {
       return;
     }

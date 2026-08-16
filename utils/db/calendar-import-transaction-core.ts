@@ -13,8 +13,14 @@ const ONE_DAY_MILLISECONDS = 24 * 60 * 60 * 1_000;
 
 type CalendarImportBindValue = string | number | null;
 
+export type CalendarImportQueryValue = string | number | bigint | Uint8Array | null;
+
+export interface CalendarImportQueryRow {
+  readonly [column: string]: CalendarImportQueryValue | undefined;
+}
+
 export interface CalendarImportTransactionBackend {
-  readonly getAllAsync: <Row>(sql: string, parameters: CalendarImportBindValue[]) => Promise<Row[]>;
+  readonly getAllAsync: (sql: string, parameters: CalendarImportBindValue[]) => Promise<CalendarImportQueryRow[]>;
   readonly runAsync: (sql: string, parameters: CalendarImportBindValue[]) => Promise<{ readonly changes: number }>;
 }
 
@@ -38,6 +44,17 @@ interface ReturnedVisitRow {
   readonly calendarEventId: string;
 }
 
+function isCalendarImportString(value: CalendarImportQueryValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function requireCalendarImportString(value: CalendarImportQueryValue | undefined, column: string): string {
+  if (!isCalendarImportString(value)) {
+    throw new TypeError(`${column} must be a SQLite TEXT value.`);
+  }
+  return value;
+}
+
 function chunks<T>(values: readonly T[], maximumSize: number): T[][] {
   const result: T[][] = [];
   for (let offset = 0; offset < values.length; offset += maximumSize) {
@@ -54,9 +71,9 @@ async function loadUnavailableEventIds(
   const eventIds = visits.map((visit) => visit.calendarEventId);
   for (const batch of chunks(eventIds, CALENDAR_IMPORT_AVAILABILITY_BATCH_SIZE)) {
     const statement = buildCalendarImportAvailabilityStatement(batch);
-    const rows = await transaction.getAllAsync<{ calendarEventId: string }>(statement.sql, statement.parameters);
+    const rows = await transaction.getAllAsync(statement.sql, statement.parameters);
     for (const row of rows) {
-      unavailableEventIds.add(row.calendarEventId);
+      unavailableEventIds.add(requireCalendarImportString(row.calendarEventId, "calendarEventId"));
     }
   }
   return unavailableEventIds;
@@ -85,7 +102,7 @@ async function loadNearbyConfirmedEventIds(
       candidate.startTime,
       candidate.restaurantId,
     ]);
-    const rows = await transaction.getAllAsync<{ calendarEventId: string }>(
+    const rows = await transaction.getAllAsync(
       `WITH candidates(calendarEventId, eventStartTime, restaurantId) AS (VALUES ${values})
        SELECT DISTINCT candidates.calendarEventId
        FROM candidates
@@ -100,7 +117,7 @@ async function loadNearbyConfirmedEventIds(
       parameters,
     );
     for (const row of rows) {
-      nearbyEventIds.add(row.calendarEventId);
+      nearbyEventIds.add(requireCalendarImportString(row.calendarEventId, "calendarEventId"));
     }
   }
   return nearbyEventIds;
@@ -156,9 +173,8 @@ async function insertVisits(
       visit.calendarEventLocation,
       updatedAt,
     ]);
-    insertedRows.push(
-      ...(await transaction.getAllAsync<ReturnedVisitRow>(
-        `INSERT OR IGNORE INTO visits (
+    const rows = await transaction.getAllAsync(
+      `INSERT OR IGNORE INTO visits (
            id,
            restaurantId,
            suggestedRestaurantId,
@@ -176,8 +192,13 @@ async function insertVisits(
            updatedAt
          ) VALUES ${values}
          RETURNING id, calendarEventId`,
-        parameters,
-      )),
+      parameters,
+    );
+    insertedRows.push(
+      ...rows.map((row) => ({
+        id: requireCalendarImportString(row.id, "visits.id"),
+        calendarEventId: requireCalendarImportString(row.calendarEventId, "visits.calendarEventId"),
+      })),
     );
   }
   return insertedRows;

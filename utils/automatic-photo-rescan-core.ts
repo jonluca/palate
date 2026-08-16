@@ -14,23 +14,23 @@ export type AutomaticPhotoQuickScanPhase =
 
 type ProgressRange = readonly [start: number, end: number];
 
-const QUICK_SCAN_RANGES_WITH_DEEP_SCAN_RESERVE: Record<AutomaticPhotoQuickScanPhase, ProgressRange> = {
+const QUICK_SCAN_RANGES_WITH_DEEP_SCAN_RESERVE = {
   scanning: [0.06, 0.36],
   "grouping-visits": [0.36, 0.52],
   "calendar-events": [0.52, 0.64],
   "calendar-only-visits": [0.64, 0.68],
   "detecting-food": [0.68, 0.7],
   "optimizing-database": [0.7, 0.72],
-};
+} satisfies Record<AutomaticPhotoQuickScanPhase, ProgressRange>;
 
-const QUICK_SCAN_RANGES_WITH_INLINE_FOOD_DETECTION: Record<AutomaticPhotoQuickScanPhase, ProgressRange> = {
+const QUICK_SCAN_RANGES_WITH_INLINE_FOOD_DETECTION = {
   scanning: [0.06, 0.43],
   "grouping-visits": [0.43, 0.6],
   "calendar-events": [0.6, 0.75],
   "calendar-only-visits": [0.75, 0.8],
   "detecting-food": [0.8, 0.95],
   "optimizing-database": [0.95, 0.98],
-};
+} satisfies Record<AutomaticPhotoQuickScanPhase, ProgressRange>;
 
 function clampProgress(progress: number | undefined): number {
   if (progress === undefined || !Number.isFinite(progress)) {
@@ -92,17 +92,17 @@ export function shouldRunAutomaticPhotoQuickScan(
   );
 }
 
-interface AutomaticPhotoScanSequenceDependencies<Result> {
+interface AutomaticPhotoScanSequenceDependencies<Result, DeepScanResult> {
   shouldRunQuickScan: boolean;
   scanPhotos: () => Promise<Result>;
   getDeepScanCandidates: () => Promise<Array<{ id: string }>>;
-  deepScanPhotos: (photos: Array<{ id: string }>) => Promise<unknown>;
+  deepScanPhotos: (photos: Array<{ id: string }>) => Promise<DeepScanResult>;
   finalizeDeepScanQueue: () => Promise<void>;
 }
 
 /** Run an optional quick import, then drain one durable deep-scan batch. */
-export async function runAutomaticPhotoScanSequence<Result>(
-  dependencies: AutomaticPhotoScanSequenceDependencies<Result>,
+export async function runAutomaticPhotoScanSequence<Result, DeepScanResult>(
+  dependencies: AutomaticPhotoScanSequenceDependencies<Result, DeepScanResult>,
 ): Promise<Result | null> {
   let result: Result | null = null;
   let operationFailed = false;
@@ -139,7 +139,7 @@ interface AutomaticPhotoRescanDependencies {
   canRun: () => boolean;
   hasPhotoLibraryPermission: () => Promise<boolean>;
   runAttempt: () => Promise<void>;
-  onError?: (error: unknown) => void;
+  onError?: (cause: unknown) => void;
 }
 
 export interface AutomaticPhotoRescanController {
@@ -163,9 +163,9 @@ export function createAutomaticPhotoRescanController(
   let activeRun: Promise<void> | null = null;
   let disposed = false;
 
-  const reportError = (error: unknown) => {
+  const reportError = (cause: unknown) => {
     try {
-      dependencies.onError?.(error);
+      dependencies.onError?.(cause);
     } catch {
       // Error reporting must not create an unhandled rejection in a lifecycle callback.
     }

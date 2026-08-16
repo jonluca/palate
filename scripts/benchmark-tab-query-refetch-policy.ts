@@ -175,10 +175,10 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   await measureCandidate(contract, configuration.staleNavigationEvents);
 }
 
-const measurements: Record<Strategy, NavigationMeasurement[]> = {
-  legacyPathnameSweep: [],
-  candidateFocusedInvalidation: [],
-};
+const measurements = {
+  legacyPathnameSweep: new Array<NavigationMeasurement>(),
+  candidateFocusedInvalidation: new Array<NavigationMeasurement>(),
+} satisfies Record<Strategy, NavigationMeasurement[]>;
 const measurementOrder: Strategy[][] = [];
 for (let sample = 0; sample < configuration.samples; sample++) {
   const order: Strategy[] =

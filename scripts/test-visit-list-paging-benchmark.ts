@@ -19,6 +19,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { isJsonObject, parseJsonValue, type JsonObject, type JsonValue } from "../utils/runtime-json.ts";
 
 type BenchmarkFilter = "all" | "pending" | "confirmed" | "rejected" | "food";
 type Component = "main" | "wal" | "shm" | "journal";
@@ -66,7 +67,7 @@ function lstatIfPresent(path: string): ReturnType<typeof lstatSync> | null {
   try {
     return lstatSync(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return null;
     }
     throw error;
@@ -260,7 +261,7 @@ function assertRejected(databasePath: string, outputPath: string, expectedMessag
 }
 
 function assertAggregateOnlyReport(
-  report: Record<string, unknown>,
+  report: JsonObject,
   reportText: string,
   filter: BenchmarkFilter,
   databasePath: string,
@@ -287,15 +288,15 @@ function assertAggregateOnlyReport(
   ]);
   assert.equal(report.schemaVersion, 2);
   assert.equal(report.status, "ok");
-  const configuration = report.configuration as Record<string, unknown>;
+  const configuration = requiredRecord(report.configuration, "configuration");
   assert.equal(configuration.mode, "immutable-real");
   assert.equal(configuration.filter, filter);
-  const correctness = report.correctness as Record<string, unknown>;
+  const correctness = requiredRecord(report.correctness, "correctness");
   assert.equal(correctness.exactFirstPagePrefixParityBeforeTiming, true);
   assert.equal(correctness.exactFullTraversalParityBeforeTiming, true);
   assert.equal(correctness.exactFirstPagePrefixParityAfterTiming, true);
   assert.equal(correctness.exactFullTraversalParityAfterTiming, true);
-  const privacy = report.privacy as Record<string, unknown>;
+  const privacy = requiredRecord(report.privacy, "privacy");
   assert.deepEqual(privacy, {
     aggregateOnly: true,
     rawRowsRetainedInReport: false,
@@ -306,7 +307,7 @@ function assertAggregateOnlyReport(
     photosLibraryAccessed: false,
     calendarLibraryAccessed: false,
   });
-  const sourceAttestation = report.sourceAttestation as Record<string, unknown>;
+  const sourceAttestation = requiredRecord(report.sourceAttestation, "sourceAttestation");
   assert.deepEqual(sourceAttestation.before, sourceBefore);
   assert.equal(sourceAttestation.afterMatchesBefore, true);
   assert.match(String(sourceAttestation.outputPublication), /O_NOFOLLOW/);
@@ -315,6 +316,11 @@ function assertAggregateOnlyReport(
     assert(!reportText.includes(forbidden), `aggregate report must not retain ${JSON.stringify(forbidden)}`);
   }
   assert(!/"(?:databasePath|outputPath|mainBasename)"\s*:/.test(reportText), "report must not expose paths");
+}
+
+function requiredRecord(value: JsonValue | undefined, name: string): JsonObject {
+  assert.ok(isJsonObject(value), `${name} must be an object`);
+  return value;
 }
 
 function assertSuccessfulFilters(databasePath: string, directory: string): void {
@@ -326,9 +332,9 @@ function assertSuccessfulFilters(databasePath: string, directory: string): void 
     assert.deepEqual(snapshotSource(databasePath), sourceBefore, `${filter} profile must preserve the source`);
     assert.equal(lstatSync(outputPath).mode & 0o777, 0o600, `${filter} report must be mode 0600`);
     const reportText = readFileSync(outputPath, "utf8");
-    const report = JSON.parse(reportText) as Record<string, unknown>;
+    const report = requiredRecord(parseJsonValue(reportText), "report");
     assertAggregateOnlyReport(report, reportText, filter, databasePath, outputPath, sourceBefore);
-    const planValidation = report.queryPlanValidation as Record<string, unknown>;
+    const planValidation = requiredRecord(report.queryPlanValidation, "queryPlanValidation");
     assert.equal(
       planValidation.expectedVisitIndex,
       filter === "all" ? "idx_visits_time" : filter === "food" ? "idx_visits_food_time" : "idx_visits_status_time",

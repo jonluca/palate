@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   buildMichelinProviderSpatialBounds,
   buildMichelinProviderSpatialCandidateSql,
@@ -45,6 +45,7 @@ import {
 
 const EARTH_RADIUS_METERS = 6_371_000;
 const SPATIAL_TABLE = "michelin_restaurant_spatial_index";
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
 
 interface CountRow {
   readonly count: number;
@@ -59,6 +60,105 @@ interface GuideRow {
   readonly id: string;
   readonly latitude: number;
   readonly longitude: number;
+}
+
+interface RowIdRow {
+  readonly rowid: number;
+}
+
+interface SequenceRow {
+  readonly seq: number;
+}
+
+interface QueryPlanRow {
+  readonly detail: string;
+}
+
+interface CandidateModelResult {
+  readonly matches: readonly (ProviderMichelinMatch | null)[];
+  readonly candidateRowCount: number;
+  readonly hydrationRowCount: number;
+}
+
+function isSQLiteNumber(value: SQLOutputValue): value is number {
+  return typeof value === "number";
+}
+
+function isSQLiteString(value: SQLOutputValue): value is string {
+  return typeof value === "string";
+}
+
+function requiredNumber(value: SQLOutputValue, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function nullableNumber(value: SQLOutputValue, column: string): number | null {
+  return value === null ? null : requiredNumber(value, column);
+}
+
+function requiredString(value: SQLOutputValue, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function assertDefined<T>(value: T | undefined): T {
+  assert.ok(value !== undefined, "Expected the query to return a row.");
+  return value;
+}
+
+function parseCountRow(row: SQLiteRow): CountRow {
+  return { count: requiredNumber(row.count, "count") };
+}
+
+function parseIssueRow(row: SQLiteRow): IssueRow {
+  return { issueCount: requiredNumber(row.issueCount, "issueCount") };
+}
+
+function parseRowIdRow(row: SQLiteRow): RowIdRow {
+  return { rowid: requiredNumber(row.rowid, "rowid") };
+}
+
+function parseSequenceRow(row: SQLiteRow): SequenceRow {
+  return { seq: requiredNumber(row.seq, "sqlite_sequence.seq") };
+}
+
+function parseQueryPlanRow(row: SQLiteRow): QueryPlanRow {
+  return { detail: requiredString(row.detail, "query plan.detail") };
+}
+
+function parseGuideRow(row: SQLiteRow): GuideRow {
+  return {
+    rowid: requiredNumber(row.rowid, "michelin_restaurants.rowid"),
+    id: requiredString(row.id, "michelin_restaurants.id"),
+    latitude: requiredNumber(row.latitude, "michelin_restaurants.latitude"),
+    longitude: requiredNumber(row.longitude, "michelin_restaurants.longitude"),
+  };
+}
+
+function parseCandidateRow(row: SQLiteRow): MichelinProviderSpatialCandidateRow {
+  return {
+    reservationOrdinal: requiredNumber(row.reservationOrdinal, "candidate.reservationOrdinal"),
+    sourceOrder: requiredNumber(row.sourceOrder, "candidate.sourceOrder"),
+    id: requiredString(row.id, "candidate.id"),
+    name: requiredString(row.name, "candidate.name"),
+    latitude: requiredNumber(row.latitude, "candidate.latitude"),
+    longitude: requiredNumber(row.longitude, "candidate.longitude"),
+  };
+}
+
+function parseMichelinRestaurantRow(row: SQLiteRow): MichelinRestaurantRecord {
+  return {
+    id: requiredString(row.id, "michelin_restaurants.id"),
+    name: requiredString(row.name, "michelin_restaurants.name"),
+    latitude: requiredNumber(row.latitude, "michelin_restaurants.latitude"),
+    longitude: requiredNumber(row.longitude, "michelin_restaurants.longitude"),
+    address: requiredString(row.address, "michelin_restaurants.address"),
+    location: requiredString(row.location, "michelin_restaurants.location"),
+    cuisine: requiredString(row.cuisine, "michelin_restaurants.cuisine"),
+    latestAwardYear: nullableNumber(row.latestAwardYear, "michelin_restaurants.latestAwardYear"),
+    award: requiredString(row.award, "michelin_restaurants.award"),
+  };
 }
 
 function createDatabase(path: string = ":memory:", withTextPrimaryKey: boolean = true): DatabaseSync {
@@ -84,8 +184,10 @@ function createDatabase(path: string = ":memory:", withTextPrimaryKey: boolean =
 function asyncDatabase(database: DatabaseSync): MichelinProviderSpatialDatabase {
   const executor = {
     execAsync: async (source: string): Promise<void> => database.exec(source),
-    getFirstAsync: async <T>(source: string): Promise<T | null> =>
-      (database.prepare(source).get() as T | undefined) ?? null,
+    getFirstAsync: async (source: string) => {
+      const row = database.prepare(source).get();
+      return row ? parseIssueRow(row) : null;
+    },
   };
   return {
     ...executor,
@@ -118,19 +220,22 @@ function insertRestaurant(
 }
 
 function count(database: DatabaseSync, table: string = SPATIAL_TABLE): number {
-  return (database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as unknown as CountRow).count;
+  return parseCountRow(assertDefined(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get())).count;
 }
 
 function issueCount(database: DatabaseSync): number {
-  return (database.prepare(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL).get() as unknown as IssueRow).issueCount;
+  return parseIssueRow(assertDefined(database.prepare(MICHELIN_PROVIDER_SPATIAL_HEALTH_SQL).get())).issueCount;
 }
 
 function rawCandidates(
   database: DatabaseSync,
   inputs: readonly MichelinProviderSpatialInput[],
 ): MichelinProviderSpatialCandidateRow[] {
-  return buildMichelinProviderSpatialQueryPlans(inputs).flatMap(
-    (plan) => database.prepare(plan.sql).all(...plan.parameters) as unknown as MichelinProviderSpatialCandidateRow[],
+  return buildMichelinProviderSpatialQueryPlans(inputs).flatMap((plan) =>
+    database
+      .prepare(plan.sql)
+      .all(...plan.parameters)
+      .map(parseCandidateRow),
   );
 }
 
@@ -148,7 +253,7 @@ function spatialContains(database: DatabaseSync, restaurantId: string, latitude:
       WHERE m.id = ?
         AND ? BETWEEN spatial.minimumLatitude AND spatial.maximumLatitude
         AND ? BETWEEN spatial.minimumLongitude AND spatial.maximumLongitude`)
-    .get(restaurantId, latitude, longitude) as { present?: unknown } | undefined;
+    .get(restaurantId, latitude, longitude);
   return row?.present === 1;
 }
 
@@ -235,9 +340,9 @@ async function testInvalidationSurvivesFailedRepair(): Promise<void> {
     assert.equal(await ensureInvalidatedMichelinProviderSpatialIndex(adapter), false);
     assert.equal(await ensureInvalidatedMichelinProviderSpatialIndex(adapter), false);
 
-    const row = database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = 'invalidation'").get() as {
-      rowid: number;
-    };
+    const row = parseRowIdRow(
+      assertDefined(database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = 'invalidation'").get()),
+    );
     database.prepare(`DELETE FROM ${SPATIAL_TABLE} WHERE restaurantRowId = ?`).run(row.rowid);
     invalidateMichelinProviderSpatialIndex();
     const failingAdapter: MichelinProviderSpatialDatabase = {
@@ -302,12 +407,12 @@ function testBackfillTriggersRepairAndRollback(): void {
     database.prepare("DELETE FROM michelin_restaurants WHERE id = ?").run("triggered");
     assert.equal(count(database), 2);
 
-    const activeRow = database
-      .prepare("SELECT rowid FROM michelin_restaurants WHERE id = ?")
-      .get("preexisting-active") as { rowid: number };
-    const oldRow = database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = ?").get("preexisting-old") as {
-      rowid: number;
-    };
+    const activeRow = parseRowIdRow(
+      assertDefined(database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = ?").get("preexisting-active")),
+    );
+    const oldRow = parseRowIdRow(
+      assertDefined(database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = ?").get("preexisting-old")),
+    );
     database.prepare(`DELETE FROM ${SPATIAL_TABLE} WHERE restaurantRowId = ?`).run(activeRow.rowid);
     database
       .prepare(`UPDATE ${SPATIAL_TABLE}
@@ -340,9 +445,9 @@ async function testEnsureUpsertsAndZeroWriteHealthyStartup(): Promise<void> {
     assert.equal(await ensureMichelinProviderSpatialIndex(adapter), true);
     assert.equal(issueCount(database), 0);
 
-    const firstRow = database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = 'ensure-a'").get() as {
-      rowid: number;
-    };
+    const firstRow = parseRowIdRow(
+      assertDefined(database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = 'ensure-a'").get()),
+    );
     database.prepare(`DELETE FROM ${SPATIAL_TABLE} WHERE restaurantRowId = ?`).run(firstRow.rowid);
     database.prepare(`INSERT INTO ${SPATIAL_TABLE} VALUES (?, ?, ?, ?, ?)`).run(999_999, 1, 1, 1, 1);
     assert.equal(count(database), 2, "equal-count corruption fixture must evade a count-only preflight");
@@ -367,22 +472,24 @@ async function testEnsureUpsertsAndZeroWriteHealthyStartup(): Promise<void> {
         latitude = excluded.latitude,
         longitude = excluded.longitude,
         datasetVersion = excluded.datasetVersion`);
-    const beforeUnchanged = (database.prepare("SELECT total_changes() AS count").get() as unknown as CountRow).count;
+    const beforeUnchanged = parseCountRow(
+      assertDefined(database.prepare("SELECT total_changes() AS count").get()),
+    ).count;
     upsert.run("ensure-a", "ensure-a", 10, 20, "v2");
     const unchangedDelta =
-      (database.prepare("SELECT total_changes() AS count").get() as unknown as CountRow).count - beforeUnchanged;
+      parseCountRow(assertDefined(database.prepare("SELECT total_changes() AS count").get())).count - beforeUnchanged;
     assert.equal(unchangedDelta, 1, "unchanged coordinates must not rewrite R-Tree shadow rows");
-    const beforeChanged = (database.prepare("SELECT total_changes() AS count").get() as unknown as CountRow).count;
+    const beforeChanged = parseCountRow(assertDefined(database.prepare("SELECT total_changes() AS count").get())).count;
     upsert.run("ensure-a", "ensure-a", 12, 22, "v2");
     const changedDelta =
-      (database.prepare("SELECT total_changes() AS count").get() as unknown as CountRow).count - beforeChanged;
+      parseCountRow(assertDefined(database.prepare("SELECT total_changes() AS count").get())).count - beforeChanged;
     assert.ok(changedDelta > 1, "changed coordinates must update the R-Tree");
     assert.ok(spatialContains(database, "ensure-a", 12, 22));
 
-    const beforeHealthy = (database.prepare("SELECT total_changes() AS count").get() as unknown as CountRow).count;
+    const beforeHealthy = parseCountRow(assertDefined(database.prepare("SELECT total_changes() AS count").get())).count;
     assert.equal(await ensureMichelinProviderSpatialIndex(adapter), false);
     assert.equal(
-      (database.prepare("SELECT total_changes() AS count").get() as unknown as CountRow).count,
+      parseCountRow(assertDefined(database.prepare("SELECT total_changes() AS count").get())).count,
       beforeHealthy,
     );
   } finally {
@@ -403,17 +510,21 @@ async function testEnsureUpsertsAndZeroWriteHealthyStartup(): Promise<void> {
     assert.equal(await ensureMichelinProviderSpatialIndex(adapter), true);
     fileDatabase.exec("PRAGMA wal_checkpoint(TRUNCATE)");
     assert.equal(existsSync(walPath) ? statSync(walPath).size : 0, 0);
-    const sequenceBefore = fileDatabase
-      .prepare("SELECT seq FROM sqlite_sequence WHERE name = 'sequence_probe'")
-      .get() as { seq: number };
-    const changesBefore = (fileDatabase.prepare("SELECT total_changes() AS count").get() as unknown as CountRow).count;
+    const sequenceBefore = parseSequenceRow(
+      assertDefined(fileDatabase.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'sequence_probe'").get()),
+    );
+    const changesBefore = parseCountRow(
+      assertDefined(fileDatabase.prepare("SELECT total_changes() AS count").get()),
+    ).count;
     assert.equal(await ensureMichelinProviderSpatialIndex(adapter), false);
     assert.equal(
-      (fileDatabase.prepare("SELECT total_changes() AS count").get() as unknown as CountRow).count,
+      parseCountRow(assertDefined(fileDatabase.prepare("SELECT total_changes() AS count").get())).count,
       changesBefore,
     );
     assert.deepEqual(
-      fileDatabase.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'sequence_probe'").get(),
+      parseSequenceRow(
+        assertDefined(fileDatabase.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'sequence_probe'").get()),
+      ),
       sequenceBefore,
     );
     assert.equal(existsSync(walPath) ? statSync(walPath).size : 0, 0);
@@ -437,14 +548,14 @@ async function testVacuumRowidRemapRequiresRebuild(): Promise<void> {
     const adapter = asyncDatabase(database);
     await ensureMichelinProviderSpatialIndex(adapter);
     database.prepare("DELETE FROM michelin_restaurants WHERE id = 'vacuum-b'").run();
-    const before = database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = 'vacuum-c'").get() as {
-      rowid: number;
-    };
+    const before = parseRowIdRow(
+      assertDefined(database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = 'vacuum-c'").get()),
+    );
     assert.equal(before.rowid, 3);
     database.exec("VACUUM");
-    const after = database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = 'vacuum-c'").get() as {
-      rowid: number;
-    };
+    const after = parseRowIdRow(
+      assertDefined(database.prepare("SELECT rowid FROM michelin_restaurants WHERE id = 'vacuum-c'").get()),
+    );
     assert.equal(after.rowid, 2, "fixture must prove VACUUM renumbered the TEXT-primary-key table");
     assert.ok(issueCount(database) > 0, "rowid-keyed R-Tree must be considered stale after remap");
     await rebuildMichelinProviderSpatialIndex(adapter);
@@ -473,7 +584,8 @@ function testConcurrentDatasetSnapshot(): void {
     const plan = buildMichelinProviderSpatialQueryPlans(input)[0]!;
     const oldRows = reader
       .prepare(plan.sql)
-      .all(...plan.parameters) as unknown as MichelinProviderSpatialCandidateRow[];
+      .all(...plan.parameters)
+      .map(parseCandidateRow);
     assert.deepEqual(
       groupMichelinProviderSpatialCandidates(oldRows, 1)[0]?.map(({ id }) => id),
       ["snapshot-old"],
@@ -482,11 +594,8 @@ function testConcurrentDatasetSnapshot(): void {
     writer.prepare("UPDATE app_metadata SET value = ? WHERE key = ?").run("v2", "michelin_dataset_version");
     const hydratedOld = reader
       .prepare(MICHELIN_PROVIDER_SPATIAL_HYDRATION_SQL)
-      .all(
-        JSON.stringify(["snapshot-old"]),
-        "michelin_dataset_version",
-        "michelin_dataset_version",
-      ) as unknown as MichelinRestaurantRecord[];
+      .all(JSON.stringify(["snapshot-old"]), "michelin_dataset_version", "michelin_dataset_version")
+      .map(parseMichelinRestaurantRow);
     assert.deepEqual(
       hydratedOld.map(({ id }) => id),
       ["snapshot-old"],
@@ -522,9 +631,11 @@ function testActiveDatasetSourceOrderAndQueryPlan(): void {
     assert.deepEqual(groupedCandidateIds(database, input), [["z-active-first", "a-old", "m-active-second"]]);
 
     const plan = buildMichelinProviderSpatialQueryPlans(input)[0]!;
-    const details = (
-      database.prepare(`EXPLAIN QUERY PLAN ${plan.sql}`).all(...plan.parameters) as unknown as Array<{ detail: string }>
-    ).map(({ detail }) => detail);
+    const details = database
+      .prepare(`EXPLAIN QUERY PLAN ${plan.sql}`)
+      .all(...plan.parameters)
+      .map(parseQueryPlanRow)
+      .map(({ detail }) => detail);
     assert.ok(details.some((detail) => detail.includes("VIRTUAL TABLE INDEX")));
     assert.ok(details.some((detail) => detail.includes("INTEGER PRIMARY KEY")));
   } finally {
@@ -569,7 +680,8 @@ function testCandidateSupersetAtBoundaries(): void {
 
     const sourceRows = database
       .prepare("SELECT rowid, id, latitude, longitude FROM michelin_restaurants ORDER BY rowid")
-      .all() as unknown as GuideRow[];
+      .all()
+      .map(parseGuideRow);
     const grouped = groupMichelinProviderSpatialCandidates(rawCandidates(database, queries), queries.length);
     for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
       const query = queries[queryIndex]!;
@@ -738,17 +850,14 @@ function activeFullGuide(database: DatabaseSync): MichelinRestaurantRecord[] {
       SELECT value FROM app_metadata WHERE key = 'michelin_dataset_version'
     )
     ORDER BY m.rowid`)
-    .all() as unknown as MichelinRestaurantRecord[];
+    .all()
+    .map(parseMichelinRestaurantRow);
 }
 
 function candidateModelMatches(
   database: DatabaseSync,
   reservations: readonly ProviderMichelinLocatedReservation[],
-): {
-  readonly matches: readonly (ProviderMichelinMatch | null)[];
-  readonly candidateRowCount: number;
-  readonly hydrationRowCount: number;
-} {
+): CandidateModelResult {
   const valid: ProviderMichelinLocatedReservation[] = [];
   const originalIndices: number[] = [];
   for (let index = 0; index < reservations.length; index++) {
@@ -768,13 +877,10 @@ function candidateModelMatches(
   const hydrated =
     selectedIds.length === 0
       ? []
-      : (database
+      : database
           .prepare(MICHELIN_PROVIDER_SPATIAL_HYDRATION_SQL)
-          .all(
-            JSON.stringify(selectedIds),
-            "michelin_dataset_version",
-            "michelin_dataset_version",
-          ) as unknown as MichelinRestaurantRecord[]);
+          .all(JSON.stringify(selectedIds), "michelin_dataset_version", "michelin_dataset_version")
+          .map(parseMichelinRestaurantRow);
   const hydratedById = new Map(hydrated.map((restaurant) => [restaurant.id, restaurant]));
   const matches: Array<ProviderMichelinMatch | null> = reservations.map(() => null);
   for (let validIndex = 0; validIndex < lightweightMatches.length; validIndex++) {

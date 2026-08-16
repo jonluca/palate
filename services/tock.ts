@@ -10,6 +10,8 @@ import {
   parseTimestamp,
   sanitizeIdPart,
   type ImportableReservation,
+  type JsonRecord,
+  type JsonValue,
   type ReservationImportResult,
 } from "@/services/reservation-import";
 
@@ -24,7 +26,7 @@ interface NormalizedTockHistory {
   invalidCount: number;
 }
 
-function getTockResultArray(payload: unknown): unknown[] {
+function getTockResultArray(payload: JsonValue): JsonValue[] {
   if (Array.isArray(payload)) {
     return payload;
   }
@@ -48,7 +50,7 @@ function getTockResultArray(payload: unknown): unknown[] {
   return [];
 }
 
-function isCanceledPurchase(record: Record<string, unknown>): boolean {
+function isCanceledPurchase(record: JsonRecord): boolean {
   const status = getString(record.status, record.state, record.reservationStatus)?.toLowerCase();
   return (
     record.cancelledOrRefunded === true ||
@@ -59,7 +61,7 @@ function isCanceledPurchase(record: Record<string, unknown>): boolean {
   );
 }
 
-function normalizeTockPurchase(rawPurchase: unknown): TockImportableReservation | null {
+function normalizeTockPurchase(rawPurchase: JsonValue): TockImportableReservation | null {
   const purchase = asRecord(rawPurchase);
   if (!purchase || isCanceledPurchase(purchase)) {
     return null;
@@ -124,7 +126,7 @@ function normalizeTockPurchase(rawPurchase: unknown): TockImportableReservation 
   };
 }
 
-export function normalizeTockVisitHistory(payload: unknown): NormalizedTockHistory {
+export function normalizeTockVisitHistory(payload: JsonValue): NormalizedTockHistory {
   const rawPurchases = getTockResultArray(payload);
   const reservations: TockImportableReservation[] = [];
   let invalidCount = 0;
@@ -145,7 +147,7 @@ export function normalizeTockVisitHistory(payload: unknown): NormalizedTockHisto
   };
 }
 
-export async function importTockVisitHistory(payload: unknown): Promise<TockImportResult> {
+export async function importTockVisitHistory(payload: JsonValue): Promise<TockImportResult> {
   const history = normalizeTockVisitHistory(payload);
   return importReservationVisitHistory(history.reservations, {
     sourceDisplayName: "Tock",

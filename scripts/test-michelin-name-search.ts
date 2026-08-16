@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { QueryClient, timeoutManager, type TimeoutCallback } from "@tanstack/query-core";
 import {
   ACTIVE_MICHELIN_UNICODE_NAME_ROWS_SQL,
@@ -45,11 +45,8 @@ interface Deferred<T> {
 }
 
 function createDeferred<T>(): Deferred<T> {
-  let resolveDeferred!: (value: T) => void;
-  const promise = new Promise<T>((resolve) => {
-    resolveDeferred = resolve;
-  });
-  return { promise, resolve: resolveDeferred };
+  const { promise, resolve } = Promise.withResolvers<T>();
+  return { promise, resolve };
 }
 
 function createDatabase(): DatabaseSync {
@@ -130,15 +127,65 @@ function seedFixture(database: DatabaseSync): void {
   insertVisit.run("confirmed-composed", "michelin-composed", "confirmed");
 }
 
-function plainRows(rows: readonly Record<string, unknown>[]): RestaurantRow[] {
-  return rows.map((row) => ({ ...row })) as unknown as RestaurantRow[];
+function isSqlString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSqlNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredSqlString(value: SQLOutputValue | undefined, label: string): string {
+  if (!isSqlString(value)) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requiredSqlNumber(value: SQLOutputValue | undefined, label: string): number {
+  if (!isSqlNumber(value)) {
+    throw new TypeError(`${label} must be a number.`);
+  }
+  return value;
+}
+
+function nullableSqlString(value: SQLOutputValue | undefined, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredSqlString(value, label);
+}
+
+function nullableSqlNumber(value: SQLOutputValue | undefined, label: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredSqlNumber(value, label);
+}
+
+function parseRestaurantRow(row: Record<string, SQLOutputValue>, index: number): RestaurantRow {
+  const label = `restaurant row ${index}`;
+  return {
+    id: requiredSqlString(row.id, `${label}.id`),
+    name: requiredSqlString(row.name, `${label}.name`),
+    latitude: requiredSqlNumber(row.latitude, `${label}.latitude`),
+    longitude: requiredSqlNumber(row.longitude, `${label}.longitude`),
+    address: requiredSqlString(row.address, `${label}.address`),
+    location: requiredSqlString(row.location, `${label}.location`),
+    cuisine: requiredSqlString(row.cuisine, `${label}.cuisine`),
+    latestAwardYear: nullableSqlNumber(row.latestAwardYear, `${label}.latestAwardYear`),
+    award: requiredSqlString(row.award, `${label}.award`),
+    datasetVersion: nullableSqlString(row.datasetVersion, `${label}.datasetVersion`),
+  };
+}
+
+function plainRows(rows: readonly Record<string, SQLOutputValue>[]): RestaurantRow[] {
+  return rows.map(parseRestaurantRow);
 }
 
 function readDatasetVersion(database: DatabaseSync): string | null {
-  const row = database.prepare("SELECT value FROM app_metadata WHERE key = ?").get(DATASET_KEY) as
-    | { value: string }
-    | undefined;
-  return row?.value ?? null;
+  const row = database.prepare("SELECT value FROM app_metadata WHERE key = ?").get(DATASET_KEY);
+  return row === undefined ? null : requiredSqlString(row.value, "dataset version");
 }
 
 function literalLegacyOracle(database: DatabaseSync, rawQuery: string, limit: number = 50): RestaurantRow[] {
@@ -148,11 +195,10 @@ function literalLegacyOracle(database: DatabaseSync, rawQuery: string, limit: nu
   }
   const datasetVersion = readDatasetVersion(database);
   const confirmedIds = new Set(
-    (
-      database.prepare("SELECT restaurantId FROM visits WHERE status = 'confirmed'").all() as unknown as Array<{
-        restaurantId: string;
-      }>
-    ).map((row) => row.restaurantId),
+    database
+      .prepare("SELECT restaurantId FROM visits WHERE status = 'confirmed'")
+      .all()
+      .map((row, index) => requiredSqlString(row.restaurantId, `confirmed visit ${index}.restaurantId`)),
   );
   return plainRows(database.prepare("SELECT * FROM michelin_restaurants").all())
     .filter((row) => datasetVersion === null || row.datasetVersion === datasetVersion)
@@ -166,7 +212,10 @@ function readCandidateIndex(database: DatabaseSync): MichelinUnicodeNameIndexRow
   const rows = database
     .prepare(ACTIVE_MICHELIN_UNICODE_NAME_ROWS_SQL)
     .all(DATASET_KEY, DATASET_KEY)
-    .map((row) => ({ ...row })) as unknown as MichelinUnicodeNameRow[];
+    .map((row, index): MichelinUnicodeNameRow => ({
+      id: requiredSqlString(row.id, `Unicode index row ${index}.id`),
+      name: requiredSqlString(row.name, `Unicode index row ${index}.name`),
+    }));
   return createMichelinUnicodeNameIndex(rows);
 }
 

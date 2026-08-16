@@ -16,11 +16,11 @@ export const VISIT_MERGE_RETRY_POLICY = {
   maxDelayMs: 1_000,
 } as const satisfies VisitMergeRetryPolicy;
 
-export function isVisitMergeDatabaseBusyError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
+export function isVisitMergeDatabaseBusyError(cause: unknown): boolean {
+  if (!(cause instanceof Error)) {
     return false;
   }
-  const message = error.message.toLowerCase();
+  const message = cause.message.toLowerCase();
   return message.includes("database is locked") || message.includes("sqlite_busy");
 }
 

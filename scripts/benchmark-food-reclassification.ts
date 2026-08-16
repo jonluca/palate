@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildFoodReclassificationStatement,
   buildFoodReclassificationUpdate,
@@ -15,6 +15,41 @@ import {
   type FoodReclassificationSource,
   type FoodReclassificationUpdate,
 } from "../utils/db/food-reclassification-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
+
+interface OracleFoodLabel {
+  readonly label: string;
+  readonly confidence: number;
+}
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isOracleFoodLabel<Value>(value: Value): value is Value & OracleFoodLabel {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "label" in value &&
+    isStringValue(value.label) &&
+    "confidence" in value &&
+    isNumberValue(value.confidence)
+  );
+}
+
+function parseOracleFoodLabels(serialized: string): OracleFoodLabel[] {
+  const parsed: unknown = JSON.parse(serialized);
+  if (!Array.isArray(parsed) || !parsed.every(isOracleFoodLabel)) {
+    throw new TypeError("Food reclassification labels must be an array of label/confidence objects");
+  }
+  return parsed;
+}
 
 interface Configuration {
   readonly photos: number;
@@ -292,8 +327,8 @@ function oracleUpdate(
   source: FoodReclassificationSource,
   enabledKeywords: ReadonlySet<string>,
 ): FoodReclassificationUpdate {
-  const labels = JSON.parse(source.allLabelsJson) as Array<{ label: string; confidence: number }>;
-  const matches: Array<{ label: string; confidence: number }> = [];
+  const labels = parseOracleFoodLabels(source.allLabelsJson);
+  const matches = new Array<OracleFoodLabel>();
   let maximumConfidence: number | null = null;
   for (const label of labels) {
     if (enabledKeywords.has(label.label.trim().toLowerCase())) {
@@ -309,22 +344,19 @@ function oracleUpdate(
   };
 }
 
-function readInputs(database: DatabaseSync): {
-  readonly enabledKeywords: Set<string>;
-  readonly sources: FoodReclassificationSource[];
-} {
-  const enabledKeywords = new Set(
-    database
-      .prepare("SELECT keyword FROM food_keywords WHERE enabled = 1 ORDER BY keyword ASC")
-      .all()
-      .map((row) => row.keyword as string),
-  );
+function readInputs(database: DatabaseSync) {
+  // SAFETY: The fixed keyword SELECT and benchmark schema guarantee a string keyword column.
+  const keywordRows = database
+    .prepare("SELECT keyword FROM food_keywords WHERE enabled = 1 ORDER BY keyword ASC")
+    .all() as BenchmarkSQLiteRow<{ readonly keyword: string }>[];
+  const enabledKeywords = new Set(keywordRows.map((row) => row.keyword));
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const sources = database
     .prepare(
       `SELECT id AS photoId, allLabels AS allLabelsJson
        FROM photos WHERE allLabels IS NOT NULL`,
     )
-    .all() as unknown as FoodReclassificationSource[];
+    .all() as BenchmarkSQLiteRow<FoodReclassificationSource>[];
   return { enabledKeywords, sources };
 }
 
@@ -343,10 +375,7 @@ function transformInputs(
   });
 }
 
-function executeStrategy(
-  templatePath: string,
-  strategy: StrategyName,
-): { readonly database: DatabaseSync; readonly measurement: Measurement } {
+function executeStrategy(templatePath: string, strategy: StrategyName) {
   const database = cloneDatabase(templatePath);
   try {
     const totalStartedAt = performance.now();
@@ -577,8 +606,10 @@ const seed = seedDatabase(configuration, join(temporaryDirectory, "template.sqli
 const transformChecksum = assertProductionTransformParity(seed.templatePath);
 const oracleDatabase = applyOracle(seed.templatePath);
 const expectedDigest = databaseDigest(oracleDatabase);
-const sqliteVersion = (oracleDatabase.prepare("SELECT sqlite_version() AS version").get() as { version: string })
-  .version;
+// SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+const sqliteVersion = (
+  oracleDatabase.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>
+).version;
 oracleDatabase.close();
 
 const strategyNames: readonly StrategyName[] = [
@@ -593,11 +624,11 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   }
 }
 
-const measurements: Record<StrategyName, Measurement[]> = {
-  legacyPerRowAutocommit: [],
-  parameterizedSetBasedRunAsync: [],
-  parameterizedSetBasedPrepared: [],
-};
+const measurements = {
+  legacyPerRowAutocommit: new Array<Measurement>(),
+  parameterizedSetBasedRunAsync: new Array<Measurement>(),
+  parameterizedSetBasedPrepared: new Array<Measurement>(),
+} satisfies Record<StrategyName, Measurement[]>;
 const measurementOrder: string[] = [];
 for (let sample = 0; sample < configuration.samples; sample++) {
   const order = sample % 2 === 0 ? strategyNames : [...strategyNames].reverse();

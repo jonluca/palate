@@ -71,8 +71,12 @@ function restoreItemsFromSnapshot<Item>(
     }
   }
 
-  const before = Array.from({ length: currentItems.length }, () => [] as Item[]);
-  const after = Array.from({ length: currentItems.length }, () => [] as Item[]);
+  const before: Item[][] = [];
+  const after: Item[][] = [];
+  for (let index = 0; index < currentItems.length; index++) {
+    before.push([]);
+    after.push([]);
+  }
   const unanchored: Item[] = [];
   for (const [previousIndex, previousItem] of previousItems.entries()) {
     const identifier = getIdentifier(previousItem);

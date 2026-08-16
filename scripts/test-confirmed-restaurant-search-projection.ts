@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { QueryClient } from "@tanstack/query-core";
 import {
   CONFIRMED_RESTAURANTS_QUERY_KEY,
@@ -10,6 +10,85 @@ import {
   shouldLoadConfirmedRestaurantSearch,
   type ConfirmedRestaurantSearchRow,
 } from "../utils/db/confirmed-restaurant-search-core.ts";
+
+interface RestaurantOracleRow {
+  readonly id: string;
+  readonly name: string;
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly address: string | null;
+  readonly cuisine: string | null;
+}
+
+interface VisitOracleRow {
+  readonly id: string;
+  readonly restaurantId: string;
+  readonly startTime: number;
+}
+
+interface AwardOracleRow {
+  readonly id: string;
+  readonly award: string;
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue | undefined, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function requiredNumber(value: SQLOutputValue | undefined, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function parseRestaurantOracleRow(row: SQLiteRow): RestaurantOracleRow {
+  return {
+    id: requiredString(row.id, "restaurants.id"),
+    name: requiredString(row.name, "restaurants.name"),
+    latitude: requiredNumber(row.latitude, "restaurants.latitude"),
+    longitude: requiredNumber(row.longitude, "restaurants.longitude"),
+    address: nullableString(row.address, "restaurants.address"),
+    cuisine: nullableString(row.cuisine, "restaurants.cuisine"),
+  };
+}
+
+function parseVisitOracleRow(row: SQLiteRow): VisitOracleRow {
+  return {
+    id: requiredString(row.id, "visits.id"),
+    restaurantId: requiredString(row.restaurantId, "visits.restaurantId"),
+    startTime: requiredNumber(row.startTime, "visits.startTime"),
+  };
+}
+
+function parseAwardOracleRow(row: SQLiteRow): AwardOracleRow {
+  return {
+    id: requiredString(row.id, "michelin_restaurants.id"),
+    award: requiredString(row.award, "michelin_restaurants.award"),
+  };
+}
+
+function parseConfirmedRestaurantSearchRow(row: SQLiteRow): ConfirmedRestaurantSearchRow {
+  return {
+    ...parseRestaurantOracleRow(row),
+    visitCount: requiredNumber(row.visitCount, "visitCount"),
+    lastVisit: requiredNumber(row.lastVisit, "lastVisit"),
+    currentAward: nullableString(row.currentAward, "currentAward"),
+  };
+}
 
 function createSchema(database: DatabaseSync): void {
   database.exec(`
@@ -110,28 +189,22 @@ function seedFixture(database: DatabaseSync): void {
 function literalOracle(database: DatabaseSync): ConfirmedRestaurantSearchRow[] {
   const restaurants = database
     .prepare("SELECT id, name, latitude, longitude, address, cuisine FROM restaurants")
-    .all() as unknown as Array<{
-    id: string;
-    name: string;
-    latitude: number;
-    longitude: number;
-    address: string | null;
-    cuisine: string | null;
-  }>;
+    .all()
+    .map(parseRestaurantOracleRow);
   const visits = database
     .prepare(
       `SELECT id, restaurantId, startTime
        FROM visits
        WHERE status = 'confirmed' AND restaurantId IS NOT NULL`,
     )
-    .all() as unknown as Array<{ id: string; restaurantId: string; startTime: number }>;
+    .all()
+    .map(parseVisitOracleRow);
   const awards = new Map(
-    (
-      database.prepare("SELECT id, award FROM michelin_restaurants").all() as unknown as Array<{
-        id: string;
-        award: string;
-      }>
-    ).map((row) => [row.id, row.award] as const),
+    database
+      .prepare("SELECT id, award FROM michelin_restaurants")
+      .all()
+      .map(parseAwardOracleRow)
+      .map((row) => [row.id, row.award] as const),
   );
 
   const rows: ConfirmedRestaurantSearchRow[] = [];
@@ -155,10 +228,7 @@ try {
   createSchema(database);
   seedFixture(database);
 
-  const projectedRows = database
-    .prepare(CONFIRMED_RESTAURANT_SEARCH_SQL)
-    .all()
-    .map((row) => ({ ...row })) as unknown as ConfirmedRestaurantSearchRow[];
+  const projectedRows = database.prepare(CONFIRMED_RESTAURANT_SEARCH_SQL).all().map(parseConfirmedRestaurantSearchRow);
   const oracleRows = literalOracle(database);
   assert.deepEqual(projectedRows, oracleRows);
   assert.deepEqual(

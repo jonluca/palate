@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   buildExportPhotoCountsQuery,
   buildExportPhotosQuery,
@@ -24,6 +24,13 @@ import {
 } from "../utils/export-core.ts";
 
 type StatusFilter = "all" | "confirmed" | "pending" | "rejected";
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+type SQLiteBoolean = 0 | 1;
+
+interface RawVisitRow extends Omit<VisitRecord, "foodProbable" | "calendarEventIsAllDay"> {
+  readonly foodProbable: SQLiteBoolean;
+  readonly calendarEventIsAllDay: SQLiteBoolean | null;
+}
 
 interface RawPhotoRow extends Omit<PhotoRecord, "foodDetected" | "foodLabels" | "allLabels" | "mediaType"> {
   readonly foodDetected: number | null;
@@ -36,13 +43,21 @@ interface QueryPlanRow {
   readonly detail: string;
 }
 
+interface PhotoCountRow {
+  readonly visitId: string;
+  readonly photoCount: number;
+}
+
+interface StoredPhotoCountRow {
+  readonly id: string;
+  readonly photoCount: number;
+}
+
 interface IndependentExportResult {
   readonly data: ExportData;
   readonly restaurantLookupCount: number;
   readonly photoLookupCount: number;
 }
-
-type VisitBooleanMode = "raw-legacy" | "json-schema";
 
 interface CandidateResult {
   readonly data: ExportData;
@@ -71,6 +86,19 @@ interface RaceResult {
   readonly afterConcurrentWrite: string[];
 }
 
+interface PhotosByVisitCandidateResult {
+  readonly photosByVisitId: Map<string, PhotoRecord[]>;
+  readonly lookupCount: number;
+  readonly paginationAudit: PaginationAudit;
+}
+
+interface PossibleFoodLabel {
+  readonly label?: FoodLabelJsonValue;
+  readonly confidence?: FoodLabelJsonValue;
+}
+
+type FoodLabelJsonValue = null | boolean | number | string | FoodLabelJsonValue[] | PossibleFoodLabel;
+
 const EXPORTED_AT = "2026-07-08T19:20:30.456Z";
 const EDGE_VISIT_ID = "visit-雪'\"\\path\nline";
 const TIE_ONLY_VISIT_ID = "visit-intentional-ordering-ties";
@@ -79,6 +107,153 @@ const FILTERS: readonly StatusFilter[] = ["all", "confirmed", "pending", "reject
 const LEGACY_PHOTOS_SQL = `SELECT * FROM photos WHERE visitId = ? ORDER BY
   CASE WHEN foodDetected = 1 THEN 0 WHEN foodDetected = 0 THEN 1 ELSE 2 END ASC,
   creationTime ASC`;
+
+function isSQLiteString(value: SQLOutputValue): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function requiredNumber(value: SQLOutputValue, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function nullableNumber(value: SQLOutputValue, column: string): number | null {
+  return value === null ? null : requiredNumber(value, column);
+}
+
+function requiredSQLiteBoolean(value: SQLOutputValue, column: string): SQLiteBoolean {
+  assert.ok(value === 0 || value === 1, `${column} must be a SQLite boolean`);
+  return value;
+}
+
+function nullableSQLiteBoolean(value: SQLOutputValue, column: string): SQLiteBoolean | null {
+  return value === null ? null : requiredSQLiteBoolean(value, column);
+}
+
+function assertDefined<T>(value: T | undefined): T {
+  assert.ok(value !== undefined, "Expected the query to return a row.");
+  return value;
+}
+
+function visitStatus(value: SQLOutputValue): VisitRecord["status"] {
+  assert.ok(value === "pending" || value === "confirmed" || value === "rejected", "status must be a visit status");
+  return value;
+}
+
+function parseVisitRow(row: SQLiteRow): RawVisitRow {
+  return {
+    id: requiredString(row.id, "visits.id"),
+    restaurantId: nullableString(row.restaurantId, "visits.restaurantId"),
+    suggestedRestaurantId: nullableString(row.suggestedRestaurantId, "visits.suggestedRestaurantId"),
+    status: visitStatus(row.status),
+    startTime: requiredNumber(row.startTime, "visits.startTime"),
+    endTime: requiredNumber(row.endTime, "visits.endTime"),
+    centerLat: requiredNumber(row.centerLat, "visits.centerLat"),
+    centerLon: requiredNumber(row.centerLon, "visits.centerLon"),
+    photoCount: requiredNumber(row.photoCount, "visits.photoCount"),
+    foodProbable: requiredSQLiteBoolean(row.foodProbable, "visits.foodProbable"),
+    calendarEventId: nullableString(row.calendarEventId, "visits.calendarEventId"),
+    calendarEventTitle: nullableString(row.calendarEventTitle, "visits.calendarEventTitle"),
+    calendarEventLocation: nullableString(row.calendarEventLocation, "visits.calendarEventLocation"),
+    calendarEventIsAllDay: nullableSQLiteBoolean(row.calendarEventIsAllDay, "visits.calendarEventIsAllDay"),
+    exportedToCalendarId: nullableString(row.exportedToCalendarId, "visits.exportedToCalendarId"),
+    notes: nullableString(row.notes, "visits.notes"),
+    updatedAt: nullableNumber(row.updatedAt, "visits.updatedAt"),
+    awardAtVisit: nullableString(row.awardAtVisit, "visits.awardAtVisit"),
+  };
+}
+
+function parseRestaurantRow(row: SQLiteRow): RestaurantRecord {
+  return {
+    id: requiredString(row.id, "restaurants.id"),
+    name: requiredString(row.name, "restaurants.name"),
+    latitude: requiredNumber(row.latitude, "restaurants.latitude"),
+    longitude: requiredNumber(row.longitude, "restaurants.longitude"),
+    address: nullableString(row.address, "restaurants.address"),
+    phone: nullableString(row.phone, "restaurants.phone"),
+    website: nullableString(row.website, "restaurants.website"),
+    googlePlaceId: nullableString(row.googlePlaceId, "restaurants.googlePlaceId"),
+    cuisine: nullableString(row.cuisine, "restaurants.cuisine"),
+    priceLevel: nullableNumber(row.priceLevel, "restaurants.priceLevel"),
+    rating: nullableNumber(row.rating, "restaurants.rating"),
+    notes: nullableString(row.notes, "restaurants.notes"),
+  };
+}
+
+function parseRawPhotoRow(row: SQLiteRow): RawPhotoRow {
+  return {
+    id: requiredString(row.id, "photos.id"),
+    uri: requiredString(row.uri, "photos.uri"),
+    creationTime: requiredNumber(row.creationTime, "photos.creationTime"),
+    latitude: nullableNumber(row.latitude, "photos.latitude"),
+    longitude: nullableNumber(row.longitude, "photos.longitude"),
+    visitId: nullableString(row.visitId, "photos.visitId"),
+    foodDetected: nullableNumber(row.foodDetected, "photos.foodDetected"),
+    foodLabels: nullableString(row.foodLabels, "photos.foodLabels"),
+    foodConfidence: nullableNumber(row.foodConfidence, "photos.foodConfidence"),
+    allLabels: nullableString(row.allLabels, "photos.allLabels"),
+    mediaType: nullableString(row.mediaType, "photos.mediaType"),
+    duration: nullableNumber(row.duration, "photos.duration"),
+  };
+}
+
+function parseRacePhotoRow(row: SQLiteRow): RacePhotoRow {
+  return {
+    id: requiredString(row.id, "photos.id"),
+    visitId: nullableString(row.visitId, "photos.visitId"),
+    foodDetected: nullableNumber(row.foodDetected, "photos.foodDetected"),
+    creationTime: requiredNumber(row.creationTime, "photos.creationTime"),
+  };
+}
+
+function parsePhotoCountRow(row: SQLiteRow): PhotoCountRow {
+  return {
+    visitId: requiredString(row.visitId, "photo counts.visitId"),
+    photoCount: requiredNumber(row.photoCount, "photo counts.photoCount"),
+  };
+}
+
+function parseStoredPhotoCountRow(row: SQLiteRow): StoredPhotoCountRow {
+  return {
+    id: requiredString(row.id, "visits.id"),
+    photoCount: requiredNumber(row.photoCount, "visits.photoCount"),
+  };
+}
+
+function parseQueryPlanRow(row: SQLiteRow): QueryPlanRow {
+  return { detail: requiredString(row.detail, "query plan.detail") };
+}
+
+function isFoodLabel(value: FoodLabelJsonValue): value is FoodLabel {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof value.label === "string" &&
+    typeof value.confidence === "number"
+  );
+}
+
+function parseFoodLabelsJson(value: string): FoodLabel[] {
+  const parsed: FoodLabelJsonValue = JSON.parse(value);
+  if (!Array.isArray(parsed) || !parsed.every(isFoodLabel)) {
+    throw new TypeError("Food labels must be an array of label and confidence objects.");
+  }
+  return parsed;
+}
 
 function createDatabase(): DatabaseSync {
   const database = new DatabaseSync(":memory:");
@@ -514,27 +689,24 @@ function seedFixture(database: DatabaseSync): void {
   }
 }
 
-function getVisitsLegacy(database: DatabaseSync, filter: StatusFilter): VisitRecord[] {
+function getVisitsLegacy(database: DatabaseSync, filter: StatusFilter): RawVisitRow[] {
   const statement =
     filter === "all"
       ? database.prepare("SELECT * FROM visits ORDER BY startTime DESC")
       : database.prepare("SELECT * FROM visits WHERE status = ? ORDER BY startTime DESC");
   const rows = filter === "all" ? statement.all() : statement.all(filter);
-  return rows.map((row) => ({ ...row })) as unknown as VisitRecord[];
+  return rows.map(parseVisitRow);
 }
 
 function getAllRestaurantsLegacy(database: DatabaseSync): RestaurantRecord[] {
-  return database
-    .prepare("SELECT * FROM restaurants")
-    .all()
-    .map((row) => ({ ...row })) as unknown as RestaurantRecord[];
+  return database.prepare("SELECT * FROM restaurants").all().map(parseRestaurantRow);
 }
 
 function parseLegacyPhoto(raw: RawPhotoRow): PhotoRecord {
   let foodLabels: FoodLabel[] | null = null;
   if (raw.foodLabels) {
     try {
-      foodLabels = JSON.parse(raw.foodLabels) as FoodLabel[];
+      foodLabels = parseFoodLabelsJson(raw.foodLabels);
     } catch {
       // The former database helper silently discarded malformed label JSON.
     }
@@ -543,7 +715,7 @@ function parseLegacyPhoto(raw: RawPhotoRow): PhotoRecord {
   let allLabels: FoodLabel[] | null = null;
   if (raw.allLabels) {
     try {
-      allLabels = JSON.parse(raw.allLabels) as FoodLabel[];
+      allLabels = parseFoodLabelsJson(raw.allLabels);
     } catch {
       // The former database helper silently discarded malformed label JSON.
     }
@@ -559,7 +731,7 @@ function parseLegacyPhoto(raw: RawPhotoRow): PhotoRecord {
 }
 
 function getPhotosForVisitLegacy(database: DatabaseSync, visitId: string): PhotoRecord[] {
-  const rows = database.prepare(LEGACY_PHOTOS_SQL).all(visitId) as unknown as RawPhotoRow[];
+  const rows = database.prepare(LEGACY_PHOTOS_SQL).all(visitId).map(parseRawPhotoRow);
   return rows.map(parseLegacyPhoto);
 }
 
@@ -588,13 +760,20 @@ function formatDurationLegacy(start: number, end: number): string {
   return mins > 0 ? `${hours}h ${mins}m` : `${hours} hours`;
 }
 
-function normalizeExpectedSqliteBoolean(value: unknown): boolean {
-  assert.ok(value === 0 || value === 1 || value === false || value === true);
-  return value === 1 || value === true;
+function normalizeExpectedSqliteBoolean(value: SQLiteBoolean): boolean {
+  return value === 1;
 }
 
-function normalizeExpectedNullableSqliteBoolean(value: unknown): boolean | null {
+function normalizeExpectedNullableSqliteBoolean(value: SQLiteBoolean | null): boolean | null {
   return value === null ? null : normalizeExpectedSqliteBoolean(value);
+}
+
+function normalizeVisitRow(row: RawVisitRow): VisitRecord {
+  return {
+    ...row,
+    foodProbable: normalizeExpectedSqliteBoolean(row.foodProbable),
+    calendarEventIsAllDay: normalizeExpectedNullableSqliteBoolean(row.calendarEventIsAllDay),
+  };
 }
 
 /** Independent database access and assembly oracle, with an explicit boolean-schema mode. */
@@ -602,7 +781,6 @@ function buildIndependentExport(
   database: DatabaseSync,
   filter: StatusFilter,
   includePhotos: boolean,
-  booleanMode: VisitBooleanMode = "json-schema",
 ): IndependentExportResult {
   const visitsEntries = getVisitsLegacy(database, filter);
   const allRestaurants = getAllRestaurantsLegacy(database);
@@ -615,7 +793,7 @@ function buildIndependentExport(
     if (visit.restaurantId) {
       restaurantLookupCount += 1;
       const row = database.prepare("SELECT * FROM restaurants WHERE id = ?").get(visit.restaurantId);
-      restaurant = row ? ({ ...row } as unknown as RestaurantRecord) : null;
+      restaurant = row ? parseRestaurantRow(row) : null;
       if (restaurant) {
         restaurantVisitCounts.set(restaurant.id, (restaurantVisitCounts.get(restaurant.id) ?? 0) + 1);
       }
@@ -626,13 +804,13 @@ function buildIndependentExport(
       photoLookupCount += 1;
       photos = getPhotosForVisitLegacy(database, visit.id);
     }
-    const exactPhotoCount = includePhotos
-      ? photos.length
-      : (
-          database.prepare("SELECT COUNT(*) AS photoCount FROM photos WHERE visitId = ?").get(visit.id) as unknown as {
-            readonly photoCount: number;
-          }
-        ).photoCount;
+    let exactPhotoCount = photos.length;
+    if (!includePhotos) {
+      const countRow = database
+        .prepare("SELECT ? AS visitId, COUNT(*) AS photoCount FROM photos WHERE visitId = ?")
+        .get(visit.id, visit.id);
+      exactPhotoCount = parsePhotoCountRow(assertDefined(countRow)).photoCount;
+    }
 
     return {
       visitId: visit.id,
@@ -664,21 +842,15 @@ function buildIndependentExport(
         latitude: visit.centerLat,
         longitude: visit.centerLon,
       },
-      photoCount: booleanMode === "json-schema" ? exactPhotoCount : visit.photoCount,
-      // The raw branch deliberately reproduces the historical type lie: Expo
-      // SQLite returned 0/1 even though VisitRecord declared a boolean.
-      foodProbable:
-        booleanMode === "json-schema" ? normalizeExpectedSqliteBoolean(visit.foodProbable) : visit.foodProbable,
+      photoCount: exactPhotoCount,
+      foodProbable: normalizeExpectedSqliteBoolean(visit.foodProbable),
       awardAtVisit: visit.awardAtVisit,
       notes: visit.notes,
       calendarEvent: {
         id: visit.calendarEventId,
         title: visit.calendarEventTitle,
         location: visit.calendarEventLocation,
-        isAllDay:
-          booleanMode === "json-schema"
-            ? normalizeExpectedNullableSqliteBoolean(visit.calendarEventIsAllDay)
-            : visit.calendarEventIsAllDay,
+        isAllDay: normalizeExpectedNullableSqliteBoolean(visit.calendarEventIsAllDay),
       },
       exportedToCalendarId: visit.exportedToCalendarId,
       updatedAt: visit.updatedAt ? new Date(visit.updatedAt).toISOString() : null,
@@ -740,7 +912,7 @@ function parseCandidateLabels(value: string | null): FoodLabel[] | null {
     return null;
   }
   try {
-    return JSON.parse(value) as FoodLabel[];
+    return parseFoodLabelsJson(value);
   } catch {
     return null;
   }
@@ -798,7 +970,10 @@ function comparePhotoKeys(left: ExportPhotoCursor, right: ExportPhotoCursor): nu
 
 function getIndependentOrderedRawPhotos(database: DatabaseSync, visitIds: readonly string[]): RawPhotoRow[] {
   const requestedVisitIds = new Set(visitIds);
-  return (database.prepare("SELECT * FROM photos").all() as unknown as RawPhotoRow[])
+  return database
+    .prepare("SELECT * FROM photos")
+    .all()
+    .map(parseRawPhotoRow)
     .filter((photo) => photo.visitId !== null && requestedVisitIds.has(photo.visitId))
     .sort((left, right) => comparePhotoKeys(cursorForRawPhoto(left), cursorForRawPhoto(right)));
 }
@@ -807,7 +982,7 @@ function getPhotosByVisitIdsCandidate(
   database: DatabaseSync,
   visitIds: readonly string[],
   pageSize = TEST_PAGE_SIZE,
-): { photosByVisitId: Map<string, PhotoRecord[]>; lookupCount: number; paginationAudit: PaginationAudit } {
+): PhotosByVisitCandidateResult {
   const photosByVisitId = new Map<string, PhotoRecord[]>();
   const rawRowCounts: number[] = [];
   const emittedRowCounts: number[] = [];
@@ -836,7 +1011,10 @@ function getPhotosByVisitIdsCandidate(
     const query = buildExportPhotosQuery(visitIds, cursor, pageSize);
     assert.ok(query);
     assert.equal(query.pageSize, pageSize);
-    const rawRows = database.prepare(query.sql).all(...query.parameters) as unknown as RawPhotoRow[];
+    const rawRows = database
+      .prepare(query.sql)
+      .all(...query.parameters)
+      .map(parseRawPhotoRow);
     rawRowCounts.push(rawRows.length);
     assert.ok(
       rawRows.length <= pageSize + 1,
@@ -970,7 +1148,10 @@ function readRacePhotoPages(reader: DatabaseSync, afterFirstPage?: () => void): 
   do {
     const query = buildExportPhotosQuery(visitIds, cursor, 2);
     assert.ok(query);
-    const rawRows = reader.prepare(query.sql).all(...query.parameters) as unknown as RacePhotoRow[];
+    const rawRows = reader
+      .prepare(query.sql)
+      .all(...query.parameters)
+      .map(parseRacePhotoRow);
     assert.ok(rawRows.length <= 3);
     const hasNextPage = rawRows.length > query.pageSize;
     const pageRows = hasNextPage ? rawRows.slice(0, query.pageSize) : rawRows;
@@ -1044,7 +1225,7 @@ function assertWalSnapshotPreventsCursorRaces(): void {
 }
 
 function buildCandidateExport(database: DatabaseSync, filter: StatusFilter, includePhotos: boolean): CandidateResult {
-  const visits = getVisitsLegacy(database, filter);
+  const visits = getVisitsLegacy(database, filter).map(normalizeVisitRow);
   const restaurants = getAllRestaurantsLegacy(database);
   const visitIds = visits.map((visit) => visit.id);
   const loaded = includePhotos
@@ -1064,10 +1245,10 @@ function buildCandidateExport(database: DatabaseSync, filter: StatusFilter, incl
   } else {
     const countQuery = buildExportPhotoCountsQuery(visitIds);
     if (countQuery) {
-      const countRows = database.prepare(countQuery.sql).all(...countQuery.parameters) as unknown as {
-        readonly visitId: string;
-        readonly photoCount: number;
-      }[];
+      const countRows = database
+        .prepare(countQuery.sql)
+        .all(...countQuery.parameters)
+        .map(parsePhotoCountRow);
       photoCountLookupCount = 1;
       for (const row of countRows) {
         exactPhotoCounts.set(row.visitId, row.photoCount);
@@ -1188,7 +1369,8 @@ function assertByteParity(actual: string, expected: string, context: string): vo
 function assertExportQueryPlan(database: DatabaseSync, query: ExportPhotosQuery, context: string): void {
   const plan = database
     .prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
-    .all(...query.parameters) as unknown as QueryPlanRow[];
+    .all(...query.parameters)
+    .map(parseQueryPlanRow);
   const planDetails = plan.map(({ detail }) => detail).join("\n");
   assert.match(planDetails, /SEARCH p USING INDEX idx_photos_visit_preview/, `${context}: expression index`);
   assert.match(planDetails, /SCAN json_each VIRTUAL TABLE/, `${context}: JSON ID source`);
@@ -1202,22 +1384,18 @@ try {
   seedFixture(database);
 
   assert.equal(buildExportPhotosQuery([]), null);
-  assert.throws(() => buildExportPhotosQuery(["valid", 42 as unknown as string]), /string visit IDs/);
-  assert.throws(() => buildExportPhotosQuery([null as unknown as string]), /string visit IDs/);
-  assert.throws(() => buildExportPhotosQuery([undefined as unknown as string]), /string visit IDs/);
+  // @ts-expect-error -- a numeric ID exercises the runtime boundary validation.
+  assert.throws(() => buildExportPhotosQuery(["valid", 42]), /string visit IDs/);
+  // @ts-expect-error -- a null ID exercises the runtime boundary validation.
+  assert.throws(() => buildExportPhotosQuery([null]), /string visit IDs/);
+  // @ts-expect-error -- an undefined ID exercises the runtime boundary validation.
+  assert.throws(() => buildExportPhotosQuery([undefined]), /string visit IDs/);
   assert.throws(() => buildExportPhotosQuery(["valid"], null, 0), /page size/);
   assert.throws(() => buildExportPhotosQuery(["valid"], null, 1.5), /page size/);
   assert.throws(() => buildExportPhotosQuery(["valid"], null, EXPORT_PHOTO_PAGE_SIZE + 1), /page size/);
-  assert.throws(
-    () =>
-      buildExportPhotosQuery(["valid"], {
-        visitId: "valid",
-        foodRank: 3,
-        creationTime: 1,
-        id: "photo",
-      } as unknown as ExportPhotoCursor),
-    /valid ordered photo key/,
-  );
+  // @ts-expect-error -- rank 3 is outside ExportPhotoCursor and must be rejected at runtime too.
+  const invalidFoodRankCursor: ExportPhotoCursor = { visitId: "valid", foodRank: 3, creationTime: 1, id: "photo" };
+  assert.throws(() => buildExportPhotosQuery(["valid"], invalidFoodRankCursor), /valid ordered photo key/);
   assert.throws(
     () =>
       buildExportPhotosQuery(["valid"], {
@@ -1309,37 +1487,35 @@ try {
 
   // Prove the historical runtime bug separately from the corrected schema
   // oracle. The raw legacy object was typed as boolean but JSON contained 0/1.
-  const rawLegacy = buildIndependentExport(database, "all", true, "raw-legacy");
-  const correctedExpectedAll = buildIndependentExport(database, "all", true, "json-schema");
-  const rawLegacyRichVisit = rawLegacy.data.visits.find(({ visitId }) => visitId === "visit-confirmed-rich");
-  const rawLegacyPendingVisit = rawLegacy.data.visits.find(({ visitId }) => visitId === EDGE_VISIT_ID);
+  const rawVisitRows = getVisitsLegacy(database, "all");
+  const correctedExpectedAll = buildIndependentExport(database, "all", true);
+  const rawLegacyRichVisit = rawVisitRows.find(({ id }) => id === "visit-confirmed-rich");
+  const rawLegacyPendingVisit = rawVisitRows.find(({ id }) => id === EDGE_VISIT_ID);
   const correctedRichVisit = correctedExpectedAll.data.visits.find(({ visitId }) => visitId === "visit-confirmed-rich");
   const correctedPendingVisit = correctedExpectedAll.data.visits.find(({ visitId }) => visitId === EDGE_VISIT_ID);
   assert.ok(rawLegacyRichVisit && rawLegacyPendingVisit && correctedRichVisit && correctedPendingVisit);
-  assert.equal(typeof rawLegacyRichVisit.foodProbable, "number");
-  assert.equal(rawLegacyRichVisit.foodProbable as unknown, 1);
-  assert.equal(typeof rawLegacyRichVisit.calendarEvent.isAllDay, "number");
-  assert.equal(rawLegacyRichVisit.calendarEvent.isAllDay as unknown, 0);
-  assert.equal(rawLegacyPendingVisit.foodProbable as unknown, 0);
+  assert.equal(rawLegacyRichVisit.foodProbable, 1);
+  assert.equal(rawLegacyRichVisit.calendarEventIsAllDay, 0);
+  assert.equal(rawLegacyPendingVisit.foodProbable, 0);
   assert.equal(correctedRichVisit.foodProbable, true);
   assert.equal(correctedRichVisit.calendarEvent.isAllDay, false);
   assert.equal(correctedPendingVisit.foodProbable, false);
   assert.equal(correctedPendingVisit.calendarEvent.isAllDay, null);
 
-  const rawLegacyJson = independentJSONString(rawLegacy.data);
-  const correctedExpectedJson = independentJSONString(correctedExpectedAll.data);
-  const parsedRawLegacyJson = JSON.parse(rawLegacyJson) as {
-    visits: Array<{ visitId: string; foodProbable: unknown; calendarEvent: { isAllDay: unknown } }>;
-  };
-  const parsedRawRichVisit = parsedRawLegacyJson.visits.find(({ visitId }) => visitId === "visit-confirmed-rich");
-  assert.ok(parsedRawRichVisit);
-  assert.equal(parsedRawRichVisit.foodProbable, 1);
-  assert.equal(parsedRawRichVisit.calendarEvent.isAllDay, 0);
+  const rawLegacyJson = JSON.stringify({
+    foodProbable: rawLegacyRichVisit.foodProbable,
+    calendarEvent: { isAllDay: rawLegacyRichVisit.calendarEventIsAllDay },
+  });
+  const correctedExpectedJson = JSON.stringify({
+    foodProbable: correctedRichVisit.foodProbable,
+    calendarEvent: { isAllDay: correctedRichVisit.calendarEvent.isAllDay },
+  });
+  assert.deepEqual(JSON.parse(rawLegacyJson), { foodProbable: 1, calendarEvent: { isAllDay: 0 } });
   assert.notEqual(rawLegacyJson, correctedExpectedJson, "the corrected JSON schema must not claim buggy legacy parity");
 
   for (const filter of FILTERS) {
     for (const includePhotos of [false, true]) {
-      const expected = buildIndependentExport(database, filter, includePhotos, "json-schema");
+      const expected = buildIndependentExport(database, filter, includePhotos);
       const candidate = buildCandidateExport(database, filter, includePhotos);
       const context = `${filter}, includePhotos=${includePhotos}`;
 
@@ -1396,15 +1572,7 @@ try {
   assert.ok(richVisit);
   assert.equal(richVisit.foodProbable, true);
   assert.equal(richVisit.calendarEvent.isAllDay, false);
-  const parsedCandidateJson = JSON.parse(exportDataToJSONString(candidateAll)) as {
-    visits: Array<{ visitId: string; foodProbable: unknown; calendarEvent: { isAllDay: unknown } }>;
-  };
-  const parsedCandidateRichVisit = parsedCandidateJson.visits.find(({ visitId }) => visitId === "visit-confirmed-rich");
-  assert.ok(parsedCandidateRichVisit);
-  assert.equal(parsedCandidateRichVisit.foodProbable, true);
-  assert.equal(typeof parsedCandidateRichVisit.foodProbable, "boolean");
-  assert.equal(parsedCandidateRichVisit.calendarEvent.isAllDay, false);
-  assert.equal(typeof parsedCandidateRichVisit.calendarEvent.isAllDay, "boolean");
+  assert.deepEqual(JSON.parse(exportDataToJSONString(candidateAll)), candidateAll);
   assert.deepEqual(
     richVisit.photos.map(({ id }) => id),
     [
@@ -1442,7 +1610,8 @@ try {
 
   const storedCounts = database
     .prepare("SELECT id, photoCount FROM visits WHERE status = ? ORDER BY id")
-    .all("confirmed") as unknown as { readonly id: string; readonly photoCount: number }[];
+    .all("confirmed")
+    .map(parseStoredPhotoCountRow);
   database.prepare("UPDATE visits SET photoCount = photoCount + 1000 WHERE status = ?").run("confirmed");
   try {
     const correctedCsvCandidate = buildCandidateExport(database, "confirmed", false);
@@ -1455,7 +1624,8 @@ try {
          GROUP BY v.id
          ORDER BY v.id`,
       )
-      .all("confirmed") as unknown as { readonly visitId: string; readonly photoCount: number }[];
+      .all("confirmed")
+      .map(parsePhotoCountRow);
     assert.equal(correctedCsvCandidate.photoLookupCount, 0);
     assert.equal(correctedCsvCandidate.photoCountLookupCount, 1);
     assert.deepEqual(

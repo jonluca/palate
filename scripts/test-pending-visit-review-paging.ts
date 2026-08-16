@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { PENDING_VISITS_FOR_REVIEW_SQL, type PendingVisitReviewQueryRow } from "../utils/db/visit-review-core.ts";
 import {
   DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE,
@@ -21,7 +21,6 @@ import {
   partitionPendingVisitReviewKeys,
   serializePendingVisitReviewPageKeys,
   validatePendingVisitReviewPageSize,
-  type PendingVisitReviewOrderedKeysRow,
   type PendingVisitReviewFilters,
   type PendingVisitReviewManifestRow,
   type PendingVisitReviewMatchTools,
@@ -36,8 +35,107 @@ import {
   BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS,
   assertCalendarTitleMatchingSourceContract,
 } from "./calendar-title-matching-benchmark-core.ts";
+import { parseFoodLabelArraysJson } from "../utils/db/food-label-json.ts";
+import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from "../utils/runtime-json.ts";
 
 type ReviewStatement = ReturnType<DatabaseSync["prepare"]>;
+type SQLiteOutputRow = Record<string, SQLOutputValue>;
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function requireSQLiteString(value: SQLOutputValue | undefined, context: string): string {
+  if (!isSQLiteString(value)) {
+    throw new TypeError(`${context} must be a string.`);
+  }
+  return value;
+}
+
+function requireNullableSQLiteString(value: SQLOutputValue | undefined, context: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requireSQLiteString(value, context);
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requireSQLiteNumber(value: SQLOutputValue | undefined, context: string): number {
+  if (!isSQLiteNumber(value)) {
+    throw new TypeError(`${context} must be a number.`);
+  }
+  return value;
+}
+
+function requireNullableSQLiteNumber(value: SQLOutputValue | undefined, context: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  return requireSQLiteNumber(value, context);
+}
+
+function requirePendingVisitStatus(value: SQLOutputValue | undefined): PendingVisitReviewQueryRow["status"] {
+  if (value !== "pending" && value !== "confirmed" && value !== "rejected") {
+    throw new TypeError("Pending-review row status is invalid.");
+  }
+  return value;
+}
+
+function parsePendingVisitReviewQueryRow(row: SQLiteOutputRow, index: number): PendingVisitReviewQueryRow {
+  const context = `pending-review row ${index}`;
+  return {
+    id: requireSQLiteString(row.id, `${context}.id`),
+    restaurantId: requireNullableSQLiteString(row.restaurantId, `${context}.restaurantId`),
+    suggestedRestaurantId: requireNullableSQLiteString(row.suggestedRestaurantId, `${context}.suggestedRestaurantId`),
+    status: requirePendingVisitStatus(row.status),
+    startTime: requireSQLiteNumber(row.startTime, `${context}.startTime`),
+    endTime: requireSQLiteNumber(row.endTime, `${context}.endTime`),
+    centerLat: requireSQLiteNumber(row.centerLat, `${context}.centerLat`),
+    centerLon: requireSQLiteNumber(row.centerLon, `${context}.centerLon`),
+    photoCount: requireSQLiteNumber(row.photoCount, `${context}.photoCount`),
+    foodProbable: requireSQLiteNumber(row.foodProbable, `${context}.foodProbable`),
+    calendarEventId: requireNullableSQLiteString(row.calendarEventId, `${context}.calendarEventId`),
+    calendarEventTitle: requireNullableSQLiteString(row.calendarEventTitle, `${context}.calendarEventTitle`),
+    calendarEventLocation: requireNullableSQLiteString(row.calendarEventLocation, `${context}.calendarEventLocation`),
+    calendarEventIsAllDay: requireNullableSQLiteNumber(row.calendarEventIsAllDay, `${context}.calendarEventIsAllDay`),
+    notes: requireNullableSQLiteString(row.notes, `${context}.notes`),
+    updatedAt: requireNullableSQLiteNumber(row.updatedAt, `${context}.updatedAt`),
+    exportedToCalendarId: requireNullableSQLiteString(row.exportedToCalendarId, `${context}.exportedToCalendarId`),
+    awardAtVisit: requireNullableSQLiteString(row.awardAtVisit, `${context}.awardAtVisit`),
+    restaurantName: requireNullableSQLiteString(row.restaurantName, `${context}.restaurantName`),
+    suggestedRestaurantName: requireNullableSQLiteString(
+      row.suggestedRestaurantName,
+      `${context}.suggestedRestaurantName`,
+    ),
+    suggestedRestaurantAward: requireNullableSQLiteString(
+      row.suggestedRestaurantAward,
+      `${context}.suggestedRestaurantAward`,
+    ),
+    suggestedRestaurantCuisine: requireNullableSQLiteString(
+      row.suggestedRestaurantCuisine,
+      `${context}.suggestedRestaurantCuisine`,
+    ),
+    suggestedRestaurantAddress: requireNullableSQLiteString(
+      row.suggestedRestaurantAddress,
+      `${context}.suggestedRestaurantAddress`,
+    ),
+    previewPhotosJson: requireNullableSQLiteString(row.previewPhotosJson, `${context}.previewPhotosJson`),
+    suggestedRestaurantsJson: requireNullableSQLiteString(
+      row.suggestedRestaurantsJson,
+      `${context}.suggestedRestaurantsJson`,
+    ),
+    foodLabelsJson: requireNullableSQLiteString(row.foodLabelsJson, `${context}.foodLabelsJson`),
+    priority: requireSQLiteNumber(row.priority, `${context}.priority`),
+    hasUnanalyzedPhotos: requireSQLiteNumber(row.hasUnanalyzedPhotos, `${context}.hasUnanalyzedPhotos`),
+  };
+}
+
+function parsePendingVisitReviewQueryRows(rows: SQLiteOutputRow[]): PendingVisitReviewQueryRow[] {
+  return rows.map(parsePendingVisitReviewQueryRow);
+}
 
 interface FixtureStatements {
   readonly insertVisit: ReviewStatement;
@@ -401,11 +499,11 @@ function seedRandomFixture(database: DatabaseSync, seed: number): void {
 }
 
 function orderedKeys(database: DatabaseSync): PendingVisitReviewPageKey[] {
-  const row = database.prepare(PENDING_VISIT_REVIEW_ORDERED_KEYS_SQL).get() as
-    | PendingVisitReviewOrderedKeysRow
-    | undefined;
+  const row = database.prepare(PENDING_VISIT_REVIEW_ORDERED_KEYS_SQL).get();
   assert.ok(row, "ordered-key query must return its aggregate row");
-  return parsePendingVisitReviewOrderedKeys(row);
+  return parsePendingVisitReviewOrderedKeys({
+    keysJson: requireSQLiteString(row.keysJson, "ordered-key query keysJson"),
+  });
 }
 
 function canonicalReviewOrder(rows: readonly PendingVisitReviewQueryRow[]): PendingVisitReviewQueryRow[] {
@@ -427,6 +525,28 @@ interface LegacyReviewSuggestion {
   readonly longitude: number;
 }
 
+function requireLegacyReviewSuggestion(value: JsonValue, context: string): LegacyReviewSuggestion {
+  if (!isJsonObject(value)) {
+    throw new TypeError(`${context} must be an object.`);
+  }
+  const { id, name, latitude, longitude } = value;
+  if (id === undefined || !isJsonString(id) || name === undefined || !isJsonString(name)) {
+    throw new TypeError(`${context} must contain string identity fields.`);
+  }
+  if (latitude === undefined || !isJsonNumber(latitude) || longitude === undefined || !isJsonNumber(longitude)) {
+    throw new TypeError(`${context} must contain numeric coordinates.`);
+  }
+  return { id, name, latitude, longitude };
+}
+
+function parseLegacyReviewSuggestions(serialized: string): LegacyReviewSuggestion[] {
+  const decoded = parseJsonValue(serialized);
+  if (!Array.isArray(decoded)) {
+    throw new TypeError("Legacy review suggestions must decode to an array.");
+  }
+  return decoded.map((value, index) => requireLegacyReviewSuggestion(value, `legacy suggestion ${index}`));
+}
+
 function legacyReviewSelectionOracle(
   rows: readonly PendingVisitReviewQueryRow[],
   filters: PendingVisitReviewFilters,
@@ -434,9 +554,7 @@ function legacyReviewSelectionOracle(
 ) {
   const visits = rows.map((row) => ({
     row,
-    suggestions: row.suggestedRestaurantsJson
-      ? (JSON.parse(row.suggestedRestaurantsJson) as LegacyReviewSuggestion[])
-      : [],
+    suggestions: row.suggestedRestaurantsJson ? parseLegacyReviewSuggestions(row.suggestedRestaurantsJson) : [],
   }));
   const fuzzyMatches: typeof visits = [];
   const remaining: typeof visits = [];
@@ -507,15 +625,13 @@ async function executePaged(
   const pageStatement = database.prepare(PENDING_VISIT_REVIEW_PAGE_SQL);
   return hydratePendingVisitReviewPages(
     keys,
-    async (serializedKeys) => pageStatement.all(serializedKeys) as unknown as PendingVisitReviewQueryRow[],
+    async (serializedKeys) => parsePendingVisitReviewQueryRows(pageStatement.all(serializedKeys)),
     pageSize,
   );
 }
 
 async function assertFixtureParity(database: DatabaseSync, pageSizes: readonly number[], expectLegacyOrder = false) {
-  const productionRows = database
-    .prepare(PENDING_VISITS_FOR_REVIEW_SQL)
-    .all() as unknown as PendingVisitReviewQueryRow[];
+  const productionRows = parsePendingVisitReviewQueryRows(database.prepare(PENDING_VISITS_FOR_REVIEW_SQL).all());
   // The literal production SQL does not define order inside equal
   // (priority,startTime) groups. Compare every raw field after applying only
   // the paging contract's explicit ID refinement to those otherwise unordered ties.
@@ -619,9 +735,8 @@ for (const withIndexes of [false, true]) {
     assert.equal(focusedFood.restaurantName, 'Local "Bistro" 東京');
     assert.equal(focusedFood.hasUnanalyzedPhotos, 1);
     assert.ok((focusedFood.suggestedRestaurantsJson ?? "").includes("東京"));
-    const nestedLabels = JSON.parse(focusedFood.foodLabelsJson ?? "null") as Array<
-      Array<{ readonly label: string; readonly confidence: number }>
-    >;
+    const nestedLabels = focusedFood.foodLabelsJson ? parseFoodLabelArraysJson(focusedFood.foodLabelsJson) : null;
+    assert.ok(nestedLabels);
     assert.ok(nestedLabels.flat().some((label) => label.label === 'crème "brûlée" 🍮'));
     assert.equal(
       rows.some((row) => row.id.includes("excluded")),
@@ -648,10 +763,11 @@ try {
   assert.deepEqual(await executePaged(empty, 1), []);
   assert.deepEqual(partitionPendingVisitReviewKeys([], 1), []);
   assert.deepEqual(empty.prepare(PENDING_VISIT_REVIEW_PAGE_SQL).all("[]"), []);
-  const emptyManifestRow = empty.prepare(PENDING_VISIT_REVIEW_MANIFEST_SQL).get() as
-    | PendingVisitReviewManifestRow
-    | undefined;
-  assert.ok(emptyManifestRow);
+  const emptyManifestResult = empty.prepare(PENDING_VISIT_REVIEW_MANIFEST_SQL).get();
+  assert.ok(emptyManifestResult);
+  const emptyManifestRow: PendingVisitReviewManifestRow = {
+    manifestJson: requireSQLiteString(emptyManifestResult.manifestJson, "empty manifest manifestJson"),
+  };
   assert.deepEqual(parsePendingVisitReviewManifest(emptyManifestRow), []);
 } finally {
   empty.close();
@@ -663,10 +779,11 @@ try {
   progressive
     .prepare("UPDATE visits SET calendarEventTitle = ? WHERE id = ?")
     .run("Unrelated calendar title", "priority-4-empty");
-  const manifestRow = progressive.prepare(PENDING_VISIT_REVIEW_MANIFEST_SQL).get() as
-    | PendingVisitReviewManifestRow
-    | undefined;
-  assert.ok(manifestRow);
+  const manifestResult = progressive.prepare(PENDING_VISIT_REVIEW_MANIFEST_SQL).get();
+  assert.ok(manifestResult);
+  const manifestRow: PendingVisitReviewManifestRow = {
+    manifestJson: requireSQLiteString(manifestResult.manifestJson, "progressive manifest manifestJson"),
+  };
   const manifestItems = parsePendingVisitReviewManifest(manifestRow);
   assert.equal(manifestItems.length, 9);
   const tools = {
@@ -730,7 +847,7 @@ try {
   );
 
   const legacyRows = canonicalReviewOrder(
-    progressive.prepare(PENDING_VISITS_FOR_REVIEW_SQL).all() as unknown as PendingVisitReviewQueryRow[],
+    parsePendingVisitReviewQueryRows(progressive.prepare(PENDING_VISITS_FOR_REVIEW_SQL).all()),
   );
   for (const filters of [
     { food: "off", restaurantMatches: "off" },
@@ -768,17 +885,15 @@ try {
     (key) => key.id === "priority-2-duplicate-name-exact",
   );
   assert.ok(duplicateBranchKey);
-  const duplicateBranchPage = progressive
-    .prepare(PENDING_VISIT_REVIEW_PAGE_SQL)
-    .all(serializePendingVisitReviewPageKeys([duplicateBranchKey])) as unknown as PendingVisitReviewQueryRow[];
+  const duplicateBranchPage = parsePendingVisitReviewQueryRows(
+    progressive.prepare(PENDING_VISIT_REVIEW_PAGE_SQL).all(serializePendingVisitReviewPageKeys([duplicateBranchKey])),
+  );
   assert.equal(duplicateBranchPage.length, 1);
-  const progressiveSuggestionIds = (
-    JSON.parse(duplicateBranchPage[0]!.suggestedRestaurantsJson ?? "[]") as LegacyReviewSuggestion[]
+  const progressiveSuggestionIds = parseLegacyReviewSuggestions(
+    duplicateBranchPage[0]!.suggestedRestaurantsJson ?? "[]",
   ).map((restaurant) => restaurant.id);
-  const legacySuggestionIds = (
-    JSON.parse(
-      legacyRows.find((row) => row.id === "priority-2-duplicate-name-exact")?.suggestedRestaurantsJson ?? "[]",
-    ) as LegacyReviewSuggestion[]
+  const legacySuggestionIds = parseLegacyReviewSuggestions(
+    legacyRows.find((row) => row.id === "priority-2-duplicate-name-exact")?.suggestedRestaurantsJson ?? "[]",
   ).map((restaurant) => restaurant.id);
   assert.deepEqual(progressiveSuggestionIds, ["michelin-branch-z-near", "michelin-branch-a-far"]);
   assert.deepEqual(legacySuggestionIds, progressiveSuggestionIds);
@@ -874,7 +989,7 @@ try {
         if (calls === 2) {
           throw new Error("injected later-page failure");
         }
-        return pageStatement.all(serializedKeys) as unknown as PendingVisitReviewQueryRow[];
+        return parsePendingVisitReviewQueryRows(pageStatement.all(serializedKeys));
       },
       2,
     ).then((rows) => {
@@ -904,7 +1019,7 @@ const snapshotWriter = new DatabaseSync(snapshotPath);
 try {
   snapshotReader.exec("PRAGMA query_only = ON; BEGIN");
   const snapshotOracle = canonicalReviewOrder(
-    snapshotReader.prepare(PENDING_VISITS_FOR_REVIEW_SQL).all() as unknown as PendingVisitReviewQueryRow[],
+    parsePendingVisitReviewQueryRows(snapshotReader.prepare(PENDING_VISITS_FOR_REVIEW_SQL).all()),
   );
   const snapshotKeys = orderedKeys(snapshotReader);
   const snapshotPage = snapshotReader.prepare(PENDING_VISIT_REVIEW_PAGE_SQL);
@@ -916,7 +1031,7 @@ try {
       if (snapshotPageCalls === 2) {
         snapshotWriter.prepare("UPDATE visits SET status = 'confirmed' WHERE id = ?").run("priority-4-empty");
       }
-      return snapshotPage.all(serializedKeys) as unknown as PendingVisitReviewQueryRow[];
+      return parsePendingVisitReviewQueryRows(snapshotPage.all(serializedKeys));
     },
     2,
   );

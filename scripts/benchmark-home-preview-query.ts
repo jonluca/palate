@@ -3,7 +3,14 @@
 
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
+
+function isStringValue<Value>(value: Value): value is Extract<Value, string> {
+  return typeof value === "string";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly restaurants: number;
@@ -436,7 +443,7 @@ function parsePreviewPhotos(value: string | null): string[] {
   const parsed: unknown = JSON.parse(value);
   assert.ok(Array.isArray(parsed), "previewPhotosJson must decode to an array");
   assert.ok(
-    parsed.every((uri) => typeof uri === "string"),
+    parsed.every((uri) => isStringValue(uri)),
     "every preview URI must be a string",
   );
   return parsed;
@@ -449,7 +456,8 @@ function normalizeRows(rows: readonly PreviewRow[]): PreviewResult[] {
 }
 
 function execute(statement: PreviewStatement): PreviewRow[] {
-  return statement.all() as unknown as PreviewRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return statement.all() as BenchmarkSQLiteRow<PreviewRow>[];
 }
 
 function assertQueryParity(database: DatabaseSync): PreviewResult[] {
@@ -463,10 +471,11 @@ function assertQueryParity(database: DatabaseSync): PreviewResult[] {
 }
 
 function assertCandidateUsesPreviewIndexes(database: DatabaseSync): string[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const details = database
     .prepare(`EXPLAIN QUERY PLAN ${CORRELATED_TOP_THREE_QUERY}`)
     .all()
-    .map((row) => (row as unknown as QueryPlanRow).detail);
+    .map((row) => (row as BenchmarkSQLiteRow<QueryPlanRow>).detail);
   const expectedIndexes = ["idx_visits_restaurant_status_time", "idx_photos_visit_food_time"];
   for (const index of expectedIndexes) {
     assert.ok(
@@ -498,7 +507,7 @@ function assertEdgeCases(): number {
   }
 }
 
-function measure(statement: PreviewStatement): { readonly elapsedMs: number; readonly rows: PreviewRow[] } {
+function measure(statement: PreviewStatement) {
   const startedAt = performance.now();
   const rows = execute(statement);
   return { elapsedMs: performance.now() - startedAt, rows };
@@ -551,16 +560,7 @@ function assertMeasuredRows(
   assert.equal(checksum(normalized), expectedChecksum);
 }
 
-function benchmark(
-  database: DatabaseSync,
-  configuration: Configuration,
-): {
-  readonly globalWindow: MeasurementSummary;
-  readonly correlatedTopThree: MeasurementSummary;
-  readonly comparedRestaurants: number;
-  readonly resultChecksum: number;
-  readonly candidateIndexesUsed: string[];
-} {
+function benchmark(database: DatabaseSync, configuration: Configuration) {
   const globalStatement = database.prepare(GLOBAL_WINDOW_QUERY);
   const correlatedStatement = database.prepare(CORRELATED_TOP_THREE_QUERY);
   const expected = normalizeRows(execute(globalStatement));
@@ -626,12 +626,14 @@ try {
       ? benchmarkResult.globalWindow.medianMs / benchmarkResult.correlatedTopThree.medianMs
       : 0;
 
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const report = {
     schemaVersion: 1,
     status: "ok",
     runtime: {
       node: process.version,
-      sqlite: (database.prepare("SELECT sqlite_version() AS version").get() as { version: string }).version,
+      sqlite: (database.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>)
+        .version,
     },
     configuration,
     dataset: {

@@ -8,6 +8,10 @@ export interface VisitStatusBatchStatement {
 
 const VALID_VISIT_STATUSES = new Set<VisitStatus>(["pending", "confirmed", "rejected"]);
 
+function isVisitStatusBatchId(value: string): value is string {
+  return typeof value === "string";
+}
+
 /**
  * Build one set-based update for a bulk status action. A JSON parameter avoids
  * SQLite's variable limit while keeping identifiers fully parameterized.
@@ -27,7 +31,7 @@ export function buildVisitStatusBatchStatement(
     throw new RangeError(`updatedAt must be finite; received ${updatedAt}.`);
   }
   for (const visitId of visitIds) {
-    if (typeof visitId !== "string") {
+    if (!isVisitStatusBatchId(visitId)) {
       throw new TypeError("Visit status batches require string visit IDs.");
     }
   }

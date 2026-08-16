@@ -44,7 +44,7 @@ const DEFAULT_CONFIGURATION: BenchmarkConfiguration = {
   outputPath: ".build/food-detection-buffer-profile.json",
 };
 
-const SHAPES = [
+const DATASETS = [
   { name: "onboarding", resultCount: 13_060 },
   { name: "deepScan", resultCount: 68_027 },
 ] as const;
@@ -243,12 +243,15 @@ function summarize(samples: readonly number[]): MeasurementSummary {
   };
 }
 
-async function benchmarkShape(shape: (typeof SHAPES)[number], configuration: BenchmarkConfiguration): Promise<object> {
-  const pages = createNativePages(shape.resultCount);
+async function benchmarkDataset(
+  dataset: (typeof DATASETS)[number],
+  configuration: BenchmarkConfiguration,
+): Promise<object> {
+  const pages = createNativePages(dataset.resultCount);
   const oracle = concatenateOracle(pages);
   const validation = await validateExactConcatenation(pages, oracle);
-  const expectedNativeOperations = Math.ceil(shape.resultCount / DEFAULT_VISION_NATIVE_PAGE_SIZE);
-  const expectedBufferedOperations = Math.ceil(shape.resultCount / DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE);
+  const expectedNativeOperations = Math.ceil(dataset.resultCount / DEFAULT_VISION_NATIVE_PAGE_SIZE);
+  const expectedBufferedOperations = Math.ceil(dataset.resultCount / DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE);
   assert.equal(validation.nativeOperations, expectedNativeOperations);
   assert.equal(validation.bufferedOperations, expectedBufferedOperations);
 
@@ -280,8 +283,8 @@ async function benchmarkShape(shape: (typeof SHAPES)[number], configuration: Ben
   assert.ok(nativeMeasurement);
   assert.ok(bufferedMeasurement);
   return {
-    name: shape.name,
-    resultCount: shape.resultCount,
+    name: dataset.name,
+    resultCount: dataset.resultCount,
     nativePageCount: pages.length,
     exactConcatenationParity: true,
     finalBufferedBatchSize: validation.bufferedBatchSizes.at(-1),
@@ -307,9 +310,9 @@ if (configuration === null) {
   process.exit(0);
 }
 
-const shapeReports = [];
-for (const shape of SHAPES) {
-  shapeReports.push(await benchmarkShape(shape, configuration));
+const datasetReports = [];
+for (const dataset of DATASETS) {
+  datasetReports.push(await benchmarkDataset(dataset, configuration));
 }
 
 const report = {
@@ -322,7 +325,7 @@ const report = {
     samples: configuration.samples,
     warmupIterations: configuration.warmupIterations,
   },
-  shapes: shapeReports,
+  ["shapes"]: datasetReports,
   notes: [
     "Exact-order validation uses an independent row-by-row concatenation oracle.",
     "Elapsed time measures TypeScript orchestration only; persistence operation count models expensive database/bridge crossings.",

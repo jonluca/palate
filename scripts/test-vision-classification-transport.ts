@@ -321,7 +321,7 @@ const policyPackedArrayBuffer = Uint8Array.from(policyPackedPayload).buffer;
         return policyResults;
       },
     }),
-    (error: unknown) => error === packedFailure,
+    (cause: unknown) => cause === packedFailure,
   );
   assert.equal(legacyCalls, 0, "a rejected packed call must not be retried through legacy");
 }
@@ -474,9 +474,13 @@ Object.freeze(immutableResults);
 const immutablePayload = encoded(immutableAssetIds, immutableResults);
 const immutablePayloadBefore = copyBytes(immutablePayload);
 const firstDecode = decodePackedVisionClassificationResults(immutableAssetIds, immutablePayload);
+const secondDecode = decodePackedVisionClassificationResults(immutableAssetIds, immutablePayload);
 assert.deepEqual(immutablePayload, immutablePayloadBefore);
-(firstDecode[0]!.labels[0] as { label: string }).label = "mutated decoded copy";
-assert.deepEqual(decodePackedVisionClassificationResults(immutableAssetIds, immutablePayload), immutableResults);
+assert.notStrictEqual(firstDecode, secondDecode);
+assert.notStrictEqual(firstDecode[0], secondDecode[0]);
+assert.notStrictEqual(firstDecode[0]!.labels, secondDecode[0]!.labels);
+assert.notStrictEqual(firstDecode[0]!.labels[0], secondDecode[0]!.labels[0]);
+assert.deepEqual(secondDecode, immutableResults);
 assert.deepEqual(immutablePayload, immutablePayloadBefore);
 
 // Encoder-side validation prevents ambiguous native output from entering the

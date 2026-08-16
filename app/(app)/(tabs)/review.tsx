@@ -104,7 +104,7 @@ async function approveAllExactMatches({
   showToast,
 }: {
   exactMatches: readonly ExactCalendarConfirmation[];
-  batchConfirm: (matches: ExactCalendarConfirmation[]) => Promise<unknown>;
+  batchConfirm: ReturnType<typeof useBatchConfirmVisits>["mutateAsync"];
   setIsApproving: React.Dispatch<React.SetStateAction<boolean>>;
   showToast: ReturnType<typeof useToast>["showToast"];
 }) {

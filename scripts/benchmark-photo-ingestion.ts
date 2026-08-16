@@ -7,12 +7,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { tmpdir } from "node:os";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildPhotoIngestionStatement,
   getPhotoIngestionFlushCount,
   type PhotoIngestionRecord,
 } from "../utils/db/photo-ingestion-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   photos: number;
@@ -180,13 +183,7 @@ function createExpectedRows(photos: readonly PhotoIngestionRecord[], preexisting
   return [...rows.values()].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
 }
 
-function createDatabase(
-  photos: readonly PhotoIngestionRecord[],
-  preexistingCount: number,
-): {
-  database: DatabaseSync;
-  directory: string;
-} {
+function createDatabase(photos: readonly PhotoIngestionRecord[], preexistingCount: number) {
   const directory = mkdtempSync(join(tmpdir(), "palate-photo-ingestion-"));
   const database = new DatabaseSync(join(directory, "profile.sqlite"));
   database.exec(`
@@ -246,6 +243,7 @@ function createDatabase(
 }
 
 function snapshot(database: DatabaseSync): StoredPhotoRow[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   return database
     .prepare(
       `SELECT
@@ -255,21 +253,14 @@ function snapshot(database: DatabaseSync): StoredPhotoRow[] {
        ORDER BY id ASC`,
     )
     .all()
-    .map((row) => ({ ...row })) as unknown as StoredPhotoRow[];
+    .map((row) => ({ ...row })) as BenchmarkSQLiteRow<StoredPhotoRow>[];
 }
 
 function checksum(rows: readonly StoredPhotoRow[]): string {
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex");
 }
 
-function runLegacy(
-  database: DatabaseSync,
-  photos: readonly PhotoIngestionRecord[],
-  pageSize: number,
-): {
-  changes: number;
-  calls: number;
-} {
+function runLegacy(database: DatabaseSync, photos: readonly PhotoIngestionRecord[], pageSize: number) {
   let changes = 0;
   let calls = 0;
   for (let pageOffset = 0; pageOffset < photos.length; pageOffset += pageSize) {
@@ -301,15 +292,7 @@ function runLegacy(
   return { changes, calls };
 }
 
-function runCandidate(
-  database: DatabaseSync,
-  photos: readonly PhotoIngestionRecord[],
-  pageSize: number,
-): {
-  changes: number;
-  calls: number;
-  boundParameters: number;
-} {
+function runCandidate(database: DatabaseSync, photos: readonly PhotoIngestionRecord[], pageSize: number) {
   const pending: PhotoIngestionRecord[] = [];
   let changes = 0;
   let calls = 0;
@@ -376,7 +359,7 @@ function summarize(samples: readonly number[]): MeasurementSummary {
   };
 }
 
-function structuralCounts(totalPhotos: number, pageSize: number): { legacyCalls: number; candidateCalls: number } {
+function structuralCounts(totalPhotos: number, pageSize: number) {
   let legacyCalls = 0;
   for (let offset = 0; offset < totalPhotos; offset += pageSize) {
     legacyCalls += Math.ceil(Math.min(pageSize, totalPhotos - offset) / 1_000);
@@ -387,7 +370,9 @@ function structuralCounts(totalPhotos: number, pageSize: number): { legacyCalls:
 function sqliteVersion(): string {
   const database = new DatabaseSync(":memory:");
   try {
-    return (database.prepare("SELECT sqlite_version() AS version").get() as { version: string }).version;
+    // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+    return (database.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>)
+      .version;
   } finally {
     database.close();
   }
@@ -418,7 +403,10 @@ for (let iteration = 0; iteration < configuration.warmupIterations; iteration++)
   }
 }
 
-const samples: Record<Strategy, number[]> = { legacyPageAutocommit: [], bufferedBoundInsert: [] };
+const samples = {
+  legacyPageAutocommit: new Array<number>(),
+  bufferedBoundInsert: new Array<number>(),
+} satisfies Record<Strategy, number[]>;
 let legacyCalls = 0;
 let candidateCalls = 0;
 let candidateBoundParameters = 0;

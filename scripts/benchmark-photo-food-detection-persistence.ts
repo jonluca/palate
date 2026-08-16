@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildLabeledPhotoFoodDetectionStatement,
   buildSimplePhotoFoodDetectionStatement,
@@ -19,6 +19,9 @@ import {
   DEFAULT_VISION_NATIVE_PAGE_SIZE,
   DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE,
 } from "../utils/food-detection-buffer-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   photos: number;
@@ -184,13 +187,7 @@ function isLabeledUpdate(update: PhotoFoodDetectionUpdate): boolean {
   return update.foodLabels !== undefined || update.foodConfidence !== undefined || update.allLabels !== undefined;
 }
 
-function createCalls(
-  rows: readonly PhotoRow[],
-  callSize: number,
-): {
-  readonly calls: PhotoFoodDetectionUpdate[][];
-  readonly missingUpdates: number;
-} {
+function createCalls(rows: readonly PhotoRow[], callSize: number) {
   const calls: PhotoFoodDetectionUpdate[][] = [];
   let missingUpdates = 0;
   for (let offset = 0, callIndex = 0; offset < rows.length; offset += callSize, callIndex++) {
@@ -381,7 +378,8 @@ function databaseDigest(database: DatabaseSync): DatabaseDigest {
        FROM photos ORDER BY id`,
     )
     .iterate()) {
-    const row = rawRow as unknown as PhotoRow;
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const row = rawRow as BenchmarkSQLiteRow<PhotoRow>;
     hashRow(hash, row);
     rows += 1;
     detectedRows += row.foodDetected === 1 ? 1 : 0;
@@ -598,7 +596,10 @@ for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
   }
 }
 
-const measurements: Record<Strategy, Measurement[]> = { legacySequential: [], productionSetBased: [] };
+const measurements = {
+  legacySequential: new Array<Measurement>(),
+  productionSetBased: new Array<Measurement>(),
+} satisfies Record<Strategy, Measurement[]>;
 const measurementOrder: string[] = [];
 for (let sample = 0; sample < configuration.samples; sample++) {
   const order = strategyOrder(sample);
@@ -611,8 +612,10 @@ for (let sample = 0; sample < configuration.samples; sample++) {
 const legacy = summarizeStrategy(measurements.legacySequential);
 const candidate = summarizeStrategy(measurements.productionSetBased);
 const runtimeDatabase = new DatabaseSync(":memory:");
-const sqliteVersion = (runtimeDatabase.prepare("SELECT sqlite_version() AS version").get() as { version: string })
-  .version;
+// SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+const sqliteVersion = (
+  runtimeDatabase.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>
+).version;
 runtimeDatabase.close();
 const eliminatedExecutions = legacy.executions - candidate.executions;
 const candidateNodeOverheadMilliseconds = candidate.timing.medianMilliseconds - legacy.timing.medianMilliseconds;

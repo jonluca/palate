@@ -94,12 +94,8 @@ async function assertDatabaseResetLifecycle(): Promise<void> {
     },
   };
 
-  const lifecycleGlobal = globalThis as typeof globalThis & {
-    __DEV__: boolean;
-    __palateDatabaseLifecycleHarness: DatabaseLifecycleHarness;
-  };
-  lifecycleGlobal.__DEV__ = true;
-  lifecycleGlobal.__palateDatabaseLifecycleHarness = harness;
+  Reflect.set(globalThis, "__DEV__", true);
+  Reflect.set(globalThis, "__palateDatabaseLifecycleHarness", harness);
 
   const coreModuleUrl = new URL("../utils/db/core.ts?database-lifecycle-test", import.meta.url).href;
   const resetCoreModuleUrl = new URL("../utils/db/reset-core.ts", import.meta.url).href;
@@ -126,7 +122,7 @@ async function assertDatabaseResetLifecycle(): Promise<void> {
   const concurrentReset = core.nukeDatabase();
 
   let acquisitionSettled = false;
-  const acquisitionDuringReset = core.getDatabase().then((database: unknown) => {
+  const acquisitionDuringReset = core.getDatabase().then((database: FakeLifecycleDatabase) => {
     acquisitionSettled = true;
     return database;
   });
@@ -172,7 +168,10 @@ async function assertDatabaseResetLifecycle(): Promise<void> {
 const coreSource = readFileSync(new URL("../utils/db/core.ts", import.meta.url), "utf8");
 const initializedCoreTables = Array.from(
   new Set([
-    ...Array.from(coreSource.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_]+)/g), (match) => match[1]!),
+    ...Array.from(coreSource.matchAll(/CREATE TABLE IF NOT EXISTS\s+([a-z_]+)/g)).flatMap((match) => {
+      const table = match[1];
+      return table ? [table] : [];
+    }),
     AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE,
   ]),
 ).sort();
@@ -204,11 +203,9 @@ const remainingTables = database
   .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
   .all();
 assert.deepEqual(remainingTables, [], "reset must remove all app-owned tables");
-assert.equal(
-  (database.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys,
-  1,
-  "reset must restore foreign-key enforcement",
-);
+const foreignKeysRow = database.prepare("PRAGMA foreign_keys").get();
+assert.ok(foreignKeysRow, "PRAGMA foreign_keys must return one row");
+assert.equal(foreignKeysRow.foreign_keys, 1, "reset must restore foreign-key enforcement");
 
 const calls: string[] = [];
 await assert.rejects(

@@ -8,6 +8,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  parseJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from "../utils/runtime-json.ts";
+
 type Strategy = "serial" | "lookahead";
 type TuningMode = "native-default" | "override";
 type ResultTransport = "legacy" | "packed-v1";
@@ -210,7 +219,7 @@ interface SuccessSummary {
   schemaVersion: number;
   inputReportSchemaVersion: number;
   status: string;
-  validation: Record<string, boolean>;
+  validation: OrchestrationSummaryValidation;
   inputIdentity: {
     appName: string;
     pageSize: number;
@@ -255,6 +264,10 @@ interface SuccessSummary {
     pairs: Array<{ winner: Strategy | "tie"; lookaheadMinusSerialSeconds: number }>;
   };
   limitations: string[];
+}
+
+interface OrchestrationSummaryValidation {
+  [attestation: string]: boolean;
 }
 
 const summarizerPath = fileURLToPath(new URL("./summarize-macos-vision-orchestration-ab.ts", import.meta.url));
@@ -500,6 +513,241 @@ function execute(fixtureSet: FixtureSet): SpawnSyncReturns<string> {
   );
 }
 
+function isJsonBoolean(value: JsonValue | undefined): value is boolean {
+  return value === true || value === false;
+}
+
+function hasErrorCode(cause: Error): cause is Error & { code: string } {
+  return "code" in cause && typeof cause.code === "string";
+}
+
+function requiredJsonObject(value: JsonValue | undefined, label: string): JsonObject {
+  if (!isJsonObject(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function requiredJsonNumber(value: JsonValue | undefined, label: string): number {
+  if (!isJsonNumber(value)) {
+    throw new TypeError(`${label} must be a number.`);
+  }
+  return value;
+}
+
+function requiredNullableJsonNumber(value: JsonValue | undefined, label: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredJsonNumber(value, label);
+}
+
+function requiredJsonString(value: JsonValue | undefined, label: string): string {
+  if (!isJsonString(value)) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requiredNullableJsonString(value: JsonValue | undefined, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredJsonString(value, label);
+}
+
+function requiredJsonBoolean(value: JsonValue | undefined, label: string): boolean {
+  if (!isJsonBoolean(value)) {
+    throw new TypeError(`${label} must be a boolean.`);
+  }
+  return value;
+}
+
+function requiredJsonNumberArray(value: JsonValue | undefined, label: string): number[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => requiredJsonNumber(entry, `${label}[${index}]`));
+}
+
+function requiredJsonStringArray(value: JsonValue | undefined, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array.`);
+  }
+  return value.map((entry, index) => requiredJsonString(entry, `${label}[${index}]`));
+}
+
+function parseStrategy(value: JsonValue | undefined, label: string): Strategy {
+  if (value === "serial" || value === "lookahead") {
+    return value;
+  }
+  throw new TypeError(`${label} is unsupported.`);
+}
+
+function parseStrategyOrTie(value: JsonValue | undefined, label: string): Strategy | "tie" {
+  if (value === "tie") {
+    return value;
+  }
+  return parseStrategy(value, label);
+}
+
+function parseResultTransport(value: JsonValue | undefined, label: string): ResultTransport {
+  if (value === "legacy" || value === "packed-v1") {
+    return value;
+  }
+  throw new TypeError(`${label} is unsupported.`);
+}
+
+function parseTuningMode(value: JsonValue | undefined, label: string): TuningMode {
+  if (value === "native-default" || value === "override") {
+    return value;
+  }
+  throw new TypeError(`${label} is unsupported.`);
+}
+
+function parseSemanticReferenceSource(value: JsonValue | undefined, label: string): SemanticReferenceSource {
+  if (value === "live-original-snapshot" || value === "external-current-control") {
+    return value;
+  }
+  throw new TypeError(`${label} is unsupported.`);
+}
+
+function parseSemanticReferenceComponent(value: JsonValue | undefined, label: string): SemanticReferenceComponent {
+  const object = requiredJsonObject(value, label);
+  return {
+    present: requiredJsonBoolean(object.present, `${label}.present`),
+    sha256: requiredNullableJsonString(object.sha256, `${label}.sha256`),
+    mode: requiredNullableJsonString(object.mode, `${label}.mode`),
+    bytes: requiredNullableJsonNumber(object.bytes, `${label}.bytes`),
+  };
+}
+
+function parseSemanticReference(value: JsonValue | undefined, label: string): SemanticReference {
+  const object = requiredJsonObject(value, label);
+  const components = requiredJsonObject(object.components, `${label}.components`);
+  return {
+    source: parseSemanticReferenceSource(object.source, `${label}.source`),
+    sha256: requiredJsonString(object.sha256, `${label}.sha256`),
+    components: {
+      main: parseSemanticReferenceComponent(components.main, `${label}.components.main`),
+      wal: parseSemanticReferenceComponent(components.wal, `${label}.components.wal`),
+      shm: parseSemanticReferenceComponent(components.shm, `${label}.components.shm`),
+      journal: parseSemanticReferenceComponent(components.journal, `${label}.components.journal`),
+    },
+  };
+}
+
+function parseSummaryValidation(value: JsonValue | undefined): OrchestrationSummaryValidation {
+  const object = requiredJsonObject(value, "summary.validation");
+  const validation: OrchestrationSummaryValidation = {};
+  for (const [key, entry] of Object.entries(object)) {
+    validation[key] = requiredJsonBoolean(entry, `summary.validation.${key}`);
+  }
+  return validation;
+}
+
+function parseSummaryGroup(value: JsonValue | undefined, label: string): SuccessSummary["serial"] {
+  const object = requiredJsonObject(value, label);
+  return {
+    reports: requiredJsonStringArray(object.reports, `${label}.reports`),
+    runIds: requiredJsonStringArray(object.runIds, `${label}.runIds`),
+    sampleCount: requiredJsonNumber(object.sampleCount, `${label}.sampleCount`),
+    wallSeconds: requiredJsonNumberArray(object.wallSeconds, `${label}.wallSeconds`),
+    medianWallSeconds: requiredJsonNumber(object.medianWallSeconds, `${label}.medianWallSeconds`),
+    medianTriggerToDurableCompletionSeconds: requiredJsonNumber(
+      object.medianTriggerToDurableCompletionSeconds,
+      `${label}.medianTriggerToDurableCompletionSeconds`,
+    ),
+    medianTriggerToFirstDurableProgressSeconds: requiredJsonNumber(
+      object.medianTriggerToFirstDurableProgressSeconds,
+      `${label}.medianTriggerToFirstDurableProgressSeconds`,
+    ),
+    medianMaxRssKiB: requiredJsonNumber(object.medianMaxRssKiB, `${label}.medianMaxRssKiB`),
+  };
+}
+
+function parseComparisonPair(value: JsonValue, index: number): SuccessSummary["comparison"]["pairs"][number] {
+  const label = `summary.comparison.pairs[${index}]`;
+  const object = requiredJsonObject(value, label);
+  return {
+    winner: parseStrategyOrTie(object.winner, `${label}.winner`),
+    lookaheadMinusSerialSeconds: requiredJsonNumber(
+      object.lookaheadMinusSerialSeconds,
+      `${label}.lookaheadMinusSerialSeconds`,
+    ),
+  };
+}
+
+function parseSuccessSummary(source: string): SuccessSummary {
+  const object = requiredJsonObject(parseJsonValue(source), "summary");
+  const inputIdentity = requiredJsonObject(object.inputIdentity, "summary.inputIdentity");
+  const comparison = requiredJsonObject(object.comparison, "summary.comparison");
+  const pairedWins = requiredJsonObject(comparison.pairedWins, "summary.comparison.pairedWins");
+  if (!Array.isArray(comparison.pairs)) {
+    throw new TypeError("summary.comparison.pairs must be an array.");
+  }
+  return {
+    schemaVersion: requiredJsonNumber(object.schemaVersion, "summary.schemaVersion"),
+    inputReportSchemaVersion: requiredJsonNumber(object.inputReportSchemaVersion, "summary.inputReportSchemaVersion"),
+    status: requiredJsonString(object.status, "summary.status"),
+    validation: parseSummaryValidation(object.validation),
+    inputIdentity: {
+      appName: requiredJsonString(inputIdentity.appName, "summary.inputIdentity.appName"),
+      pageSize: requiredJsonNumber(inputIdentity.pageSize, "summary.inputIdentity.pageSize"),
+      resultTransport: parseResultTransport(inputIdentity.resultTransport, "summary.inputIdentity.resultTransport"),
+      fixtureCount: requiredJsonNumber(inputIdentity.fixtureCount, "summary.inputIdentity.fixtureCount"),
+      visionConcurrency: requiredJsonNumber(inputIdentity.visionConcurrency, "summary.inputIdentity.visionConcurrency"),
+      visionConcurrencyMode: parseTuningMode(
+        inputIdentity.visionConcurrencyMode,
+        "summary.inputIdentity.visionConcurrencyMode",
+      ),
+      pipelineDepth: requiredJsonNumber(inputIdentity.pipelineDepth, "summary.inputIdentity.pipelineDepth"),
+      pipelineDepthMode: parseTuningMode(inputIdentity.pipelineDepthMode, "summary.inputIdentity.pipelineDepthMode"),
+      semanticReference: parseSemanticReference(
+        inputIdentity.semanticReference,
+        "summary.inputIdentity.semanticReference",
+      ),
+    },
+    serial: parseSummaryGroup(object.serial, "summary.serial"),
+    lookahead: parseSummaryGroup(object.lookahead, "summary.lookahead"),
+    comparison: {
+      interpretation: requiredJsonString(comparison.interpretation, "summary.comparison.interpretation"),
+      primaryMetric: requiredJsonString(comparison.primaryMetric, "summary.comparison.primaryMetric"),
+      medianWallSecondsDelta: requiredJsonNumber(
+        comparison.medianWallSecondsDelta,
+        "summary.comparison.medianWallSecondsDelta",
+      ),
+      medianWallSecondsPercentDelta: requiredJsonNumber(
+        comparison.medianWallSecondsPercentDelta,
+        "summary.comparison.medianWallSecondsPercentDelta",
+      ),
+      medianWallSecondsSaved: requiredJsonNumber(
+        comparison.medianWallSecondsSaved,
+        "summary.comparison.medianWallSecondsSaved",
+      ),
+      medianTriggerToDurableCompletionSecondsDelta: requiredJsonNumber(
+        comparison.medianTriggerToDurableCompletionSecondsDelta,
+        "summary.comparison.medianTriggerToDurableCompletionSecondsDelta",
+      ),
+      medianTriggerToFirstDurableProgressSecondsDelta: requiredJsonNumber(
+        comparison.medianTriggerToFirstDurableProgressSecondsDelta,
+        "summary.comparison.medianTriggerToFirstDurableProgressSecondsDelta",
+      ),
+      medianMaxRssDeltaKiB: requiredJsonNumber(
+        comparison.medianMaxRssDeltaKiB,
+        "summary.comparison.medianMaxRssDeltaKiB",
+      ),
+      pairedWins: {
+        lookahead: requiredJsonNumber(pairedWins.lookahead, "summary.comparison.pairedWins.lookahead"),
+        serial: requiredJsonNumber(pairedWins.serial, "summary.comparison.pairedWins.serial"),
+        ties: requiredJsonNumber(pairedWins.ties, "summary.comparison.pairedWins.ties"),
+      },
+      pairs: comparison.pairs.map(parseComparisonPair),
+    },
+    limitations: requiredJsonStringArray(object.limitations, "summary.limitations"),
+  };
+}
+
 function expectFailure(caseName: string, mutate: (fixtureSet: FixtureSet) => void, expectedMessage: string): void {
   const fixtureSet = createFixtureSet(caseName);
   mutate(fixtureSet);
@@ -523,11 +771,11 @@ function statelessPathExists(path: string): boolean {
   try {
     statSync(path);
     return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+  } catch (cause) {
+    if (cause instanceof Error && hasErrorCode(cause) && cause.code === "ENOENT") {
       return false;
     }
-    throw error;
+    throw cause;
   }
 }
 
@@ -599,7 +847,7 @@ try {
   assert.equal(successResult.status, 0, successResult.stderr);
   assert.match(successResult.stdout, /descriptive summary/);
   const summaryText = readFileSync(success.paths.output, "utf8");
-  const summary = JSON.parse(summaryText) as SuccessSummary;
+  const summary = parseSuccessSummary(summaryText);
   assert.equal(summary.schemaVersion, 1);
   assert.equal(summary.inputReportSchemaVersion, 6);
   assert.equal(summary.status, "ok");
@@ -658,7 +906,7 @@ try {
   writeFixtureSet(externalSuccess);
   const externalSuccessResult = execute(externalSuccess);
   assert.equal(externalSuccessResult.status, 0, externalSuccessResult.stderr);
-  const externalSummary = JSON.parse(readFileSync(externalSuccess.paths.output, "utf8")) as SuccessSummary;
+  const externalSummary = parseSuccessSummary(readFileSync(externalSuccess.paths.output, "utf8"));
   assert.deepEqual(
     externalSummary.inputIdentity.semanticReference,
     makeSemanticReference("external-current-control", externalSemanticReferenceSha256),
@@ -681,11 +929,12 @@ try {
   expectFailure(
     "missing-native-result-transport-attestation",
     ({ reports }) => {
-      delete (
-        reports.lookaheadB.runtimeAttestation as unknown as {
-          nativeResultTransport?: TestReport["runtimeAttestation"]["nativeResultTransport"];
-        }
-      ).nativeResultTransport;
+      Object.defineProperty(reports.lookaheadB.runtimeAttestation, "nativeResultTransport", {
+        configurable: true,
+        enumerable: true,
+        value: undefined,
+        writable: true,
+      });
     },
     "nativeResultTransport must be an object",
   );
@@ -781,7 +1030,12 @@ try {
   expectFailure(
     "missing-trigger-boundary",
     ({ reports }) => {
-      delete (reports.lookaheadB as unknown as { triggerBoundary?: TestReport["triggerBoundary"] }).triggerBoundary;
+      Object.defineProperty(reports.lookaheadB, "triggerBoundary", {
+        configurable: true,
+        enumerable: true,
+        value: undefined,
+        writable: true,
+      });
     },
     "triggerBoundary must be an object",
   );
@@ -1036,19 +1290,24 @@ try {
   expectFailure(
     "missing-semantic-reference",
     ({ reports }) => {
-      delete (reports.lookaheadB as unknown as { semanticReference?: TestReport["semanticReference"] })
-        .semanticReference;
+      Object.defineProperty(reports.lookaheadB, "semanticReference", {
+        configurable: true,
+        enumerable: true,
+        value: undefined,
+        writable: true,
+      });
     },
     "semanticReference must be an object",
   );
   expectFailure(
     "missing-semantic-reference-components",
     ({ reports }) => {
-      delete (
-        reports.lookaheadB.semanticReference as unknown as {
-          components?: SemanticReference["components"];
-        }
-      ).components;
+      Object.defineProperty(reports.lookaheadB.semanticReference, "components", {
+        configurable: true,
+        enumerable: true,
+        value: undefined,
+        writable: true,
+      });
     },
     "semantic reference components must be an object",
   );
@@ -1071,7 +1330,12 @@ try {
   expectFailure(
     "invalid-semantic-reference-source",
     ({ reports }) => {
-      reports.lookaheadB.semanticReference.source = "unsupported" as SemanticReferenceSource;
+      Object.defineProperty(reports.lookaheadB.semanticReference, "source", {
+        configurable: true,
+        enumerable: true,
+        value: "unsupported",
+        writable: true,
+      });
     },
     "semantic reference source must be live-original-snapshot or external-current-control",
   );

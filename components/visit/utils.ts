@@ -1,25 +1,31 @@
 import type { VisitStatus } from "@/hooks/queries";
 
 export const formatDate = (timestamp: number, timeZone?: string | null) => {
-  return new Date(timestamp).toLocaleDateString(undefined, {
+  const options: Intl.DateTimeFormatOptions = {
     weekday: "long",
     month: "long",
     day: "numeric",
     year: "numeric",
-    ...(timeZone ? { timeZone } : {}),
-  });
+  };
+  if (timeZone) {
+    options.timeZone = timeZone;
+  }
+  return new Date(timestamp).toLocaleDateString(undefined, options);
 };
 
 export const formatTime = (timestamp: number, timeZone?: string | null) => {
-  return new Date(timestamp).toLocaleTimeString(undefined, {
+  const options: Intl.DateTimeFormatOptions = {
     hour: "numeric",
     minute: "2-digit",
-    ...(timeZone ? { timeZone } : {}),
-  });
+  };
+  if (timeZone) {
+    options.timeZone = timeZone;
+  }
+  return new Date(timestamp).toLocaleTimeString(undefined, options);
 };
 
-export const statusVariant: Record<VisitStatus, "warning" | "success" | "destructive"> = {
+export const statusVariant = {
   pending: "warning",
   confirmed: "success",
   rejected: "destructive",
-};
+} satisfies Record<VisitStatus, "warning" | "success" | "destructive">;

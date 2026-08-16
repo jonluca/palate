@@ -55,6 +55,13 @@ interface NativeCalendarMatchingModule {
 const CalendarMatchingModule =
   Platform.OS === "ios" ? requireOptionalNativeModule<NativeCalendarMatchingModule>("CalendarMatching") : null;
 
+function hasNativeMethod<Module, MethodName extends keyof Module>(
+  module: Module | null,
+  methodName: MethodName,
+): module is Module & Required<Pick<Module, MethodName>> {
+  return module !== null && module !== undefined && typeof module[methodName] === "function";
+}
+
 function requireCalendarMatchingModule(): NativeCalendarMatchingModule {
   if (!CalendarMatchingModule) {
     throw new Error("CalendarMatching native module is unavailable on this platform or binary.");
@@ -73,12 +80,12 @@ export function isCalendarMatchingAvailable(): boolean {
 
 /** Whether this binary contains the native EventKit batch-create method. */
 export function isCalendarBatchCreateAvailable(): boolean {
-  return typeof CalendarMatchingModule?.batchCreateExportEvents === "function";
+  return hasNativeMethod(CalendarMatchingModule, "batchCreateExportEvents");
 }
 
 /** Whether this binary contains the native EventKit batch-delete method. */
 export function isCalendarBatchDeleteAvailable(): boolean {
-  return typeof CalendarMatchingModule?.batchDeleteEvents === "function";
+  return hasNativeMethod(CalendarMatchingModule, "batchDeleteEvents");
 }
 
 /** Invoke native batch creation. Call only after checking its independent capability. */
@@ -88,7 +95,7 @@ export async function batchCreateExportEvents(
   requests: readonly NativeCalendarExportEventMutationRequest[],
 ): Promise<NativeCalendarMutationResult[]> {
   const module = CalendarMatchingModule;
-  if (typeof module?.batchCreateExportEvents !== "function") {
+  if (!hasNativeMethod(module, "batchCreateExportEvents")) {
     throw new Error("Native calendar batch creation is unavailable on this platform or binary.");
   }
   return module.batchCreateExportEvents(
@@ -103,7 +110,7 @@ export async function batchDeleteEvents(
   requests: readonly NativeCalendarDeleteEventMutationRequest[],
 ): Promise<NativeCalendarMutationResult[]> {
   const module = CalendarMatchingModule;
-  if (typeof module?.batchDeleteEvents !== "function") {
+  if (!hasNativeMethod(module, "batchDeleteEvents")) {
     throw new Error("Native calendar batch deletion is unavailable on this platform or binary.");
   }
   return module.batchDeleteEvents(requests.map((request) => ({ ...request })));

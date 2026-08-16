@@ -175,7 +175,7 @@ function nodeBackend(
     }
   };
   return {
-    getAllAsync: async <Row>(sql: string, parameters: Array<string | number | null>) => {
+    getAllAsync: async (sql: string, parameters: Array<string | number | null>) => {
       if (sql.startsWith("WITH requested")) {
         if (counters) {
           counters.availabilityReads += 1;
@@ -184,7 +184,7 @@ function nodeBackend(
       if (sql.startsWith("INSERT")) {
         interceptWrite();
       }
-      return database.prepare(sql).all(...parameters) as unknown as Row[];
+      return database.prepare(sql).all(...parameters);
     },
     runAsync: async (sql: string, parameters: Array<string | number | null>) => {
       interceptWrite();

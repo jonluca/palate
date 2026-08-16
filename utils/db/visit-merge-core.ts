@@ -20,6 +20,12 @@ export interface VisitMergePreflightRow {
   readonly existingVisitCount: number;
 }
 
+function hasValidMergeVisitId(
+  visit: MergeableVisitGroup["visits"][number],
+): visit is MergeableVisitGroup["visits"][number] {
+  return typeof visit.id === "string";
+}
+
 /**
  * Convert UI/database merge groups into one deterministic, disjoint mutation plan.
  *
@@ -44,7 +50,7 @@ export function buildVisitMergePlan(groups: readonly MergeableVisitGroup[]): Vis
     }
 
     for (const [visitIndex, visit] of group.visits.entries()) {
-      if (typeof visit.id !== "string") {
+      if (!hasValidMergeVisitId(visit)) {
         throw new Error(`Invalid visit ID at group ${groupIndex}, visit ${visitIndex}`);
       }
       if (claimedVisitIds.has(visit.id)) {

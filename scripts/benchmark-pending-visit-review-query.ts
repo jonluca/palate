@@ -6,8 +6,11 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { PENDING_VISITS_FOR_REVIEW_SQL, type PendingVisitReviewQueryRow } from "../utils/db/visit-review-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   pendingVisits: number;
@@ -503,14 +506,20 @@ function seedDataset(database: DatabaseSync, configuration: Configuration): Data
   }
 
   assert.equal(photoCount, configuration.photos, "fixture must contain the requested exact photo count");
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const pendingCount = (
-    database.prepare("SELECT COUNT(*) AS count FROM visits WHERE status = 'pending'").get() as { count: number }
+    database.prepare("SELECT COUNT(*) AS count FROM visits WHERE status = 'pending'").get() as BenchmarkSQLiteRow<{
+      count: number;
+    }>
   ).count;
-  const persistedPhotoCount = (database.prepare("SELECT COUNT(*) AS count FROM photos").get() as { count: number })
-    .count;
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const persistedPhotoCount = (
+    database.prepare("SELECT COUNT(*) AS count FROM photos").get() as BenchmarkSQLiteRow<{ count: number }>
+  ).count;
   assert.equal(pendingCount, configuration.pendingVisits);
   assert.equal(persistedPhotoCount, configuration.photos);
 
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   return {
     pendingVisits: pendingCount,
     excludedVisits: 2,
@@ -523,7 +532,7 @@ function seedDataset(database: DatabaseSync, configuration: Configuration): Data
           WHERE v.status = 'pending'
             AND NOT EXISTS (SELECT 1 FROM photos p WHERE p.visitId = v.id)
         `)
-        .get() as { count: number }
+        .get() as BenchmarkSQLiteRow<{ count: number }>
     ).count,
     directSuggestions,
     nearbySuggestions,
@@ -533,7 +542,8 @@ function seedDataset(database: DatabaseSync, configuration: Configuration): Data
 }
 
 function execute(statement: ReviewStatement): PendingVisitReviewQueryRow[] {
-  return statement.all() as unknown as PendingVisitReviewQueryRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return statement.all() as BenchmarkSQLiteRow<PendingVisitReviewQueryRow>[];
 }
 
 function checksum(rows: readonly PendingVisitReviewQueryRow[]): string {
@@ -566,9 +576,10 @@ function isDescendantOf(row: QueryPlanRow, ancestorId: number, rowsById: Readonl
 }
 
 function candidatePlanEvidence(database: DatabaseSync): CandidatePlanEvidence {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const plan = database
     .prepare(`EXPLAIN QUERY PLAN ${PENDING_VISITS_FOR_REVIEW_SQL}`)
-    .all() as unknown as QueryPlanRow[];
+    .all() as BenchmarkSQLiteRow<QueryPlanRow>[];
   const previewSearch = plan.find((row) => row.detail.includes("idx_photos_visit_preview"));
   assert.ok(previewSearch, "candidate query must use idx_photos_visit_preview for top-three previews");
   assert.doesNotMatch(PENDING_VISITS_FOR_REVIEW_SQL, /ROW_NUMBER|ranked_photos/i);
@@ -620,12 +631,13 @@ function summarize(samples: readonly number[]): MeasurementSummary {
   };
 }
 
-function priorityCounts(rows: readonly PendingVisitReviewQueryRow[]): Record<string, number> {
-  const counts: Record<string, number> = { priority1: 0, priority2: 0, priority3: 0, priority4: 0 };
-  for (const row of rows) {
-    counts[`priority${row.priority}`] = (counts[`priority${row.priority}`] ?? 0) + 1;
-  }
-  return counts;
+function priorityCounts(rows: readonly PendingVisitReviewQueryRow[]) {
+  return {
+    priority1: rows.filter((row) => row.priority === 1).length,
+    priority2: rows.filter((row) => row.priority === 2).length,
+    priority3: rows.filter((row) => row.priority === 3).length,
+    priority4: rows.filter((row) => row.priority === 4).length,
+  };
 }
 
 const configuration = parseConfiguration(process.argv.slice(2));
@@ -660,7 +672,10 @@ try {
     }
   }
 
-  const samples: Record<Strategy, number[]> = { windowOracle: [], correlatedTopThree: [] };
+  const samples = { windowOracle: new Array<number>(), correlatedTopThree: new Array<number>() } satisfies Record<
+    Strategy,
+    number[]
+  >;
   const measuredChecksums = new Set<string>();
   for (let iteration = 0; iteration < configuration.samples; iteration++) {
     // Alternate execution order to avoid systematically favoring either query
@@ -687,6 +702,7 @@ try {
   const windowSummary = summarize(samples.windowOracle);
   const correlatedSummary = summarize(samples.correlatedTopThree);
   const speedup = windowSummary.medianMilliseconds / correlatedSummary.medianMilliseconds;
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const report = {
     schemaVersion: 1,
     status: "ok",
@@ -695,7 +711,8 @@ try {
     runtime: {
       node: process.version,
       v8: process.versions.v8,
-      sqlite: (database.prepare("SELECT sqlite_version() AS version").get() as { version: string }).version,
+      sqlite: (database.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>)
+        .version,
     },
     configuration,
     dataset: {

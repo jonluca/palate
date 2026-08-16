@@ -17,16 +17,17 @@ function makeResults(count: number, start = 0): TestResult[] {
   }));
 }
 
-async function captureRejection(operation: Promise<unknown>): Promise<unknown> {
+async function captureRejection(operation: Promise<unknown>): Promise<Error> {
   try {
     await operation;
-  } catch (error) {
-    return error;
+  } catch (cause) {
+    assert.ok(cause instanceof Error, "Expected the rejection reason to be an Error.");
+    return cause;
   }
   assert.fail("Expected operation to reject.");
 }
 
-function assertAggregateErrors(error: unknown, expectedErrors: readonly unknown[]): void {
+function assertAggregateErrors(error: Error, expectedErrors: readonly Error[]): void {
   assert.ok(error instanceof AggregateError);
   assert.deepEqual(error.errors, expectedErrors);
 }

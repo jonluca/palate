@@ -1,4 +1,5 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
+import { isJsonString, parseJsonValue } from "../runtime-json.ts";
 import { CONFIRMED_RESTAURANT_SEARCH_SQL, type ConfirmedRestaurantSearchRow } from "./confirmed-restaurant-search-core";
 import { getMichelinRestaurantById } from "./michelin";
 import type { RestaurantRecord, RestaurantWithVisits, UpdateRestaurantData } from "./types";
@@ -188,7 +189,8 @@ export async function getConfirmedRestaurantsWithVisits(): Promise<RestaurantWit
     let previewPhotos: string[] = [];
     if (row.previewPhotosJson) {
       try {
-        previewPhotos = JSON.parse(row.previewPhotosJson) as string[];
+        const decoded = parseJsonValue(row.previewPhotosJson);
+        previewPhotos = Array.isArray(decoded) && decoded.every(isJsonString) ? decoded : [];
       } catch {
         // Skip malformed JSON
       }

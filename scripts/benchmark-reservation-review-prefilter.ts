@@ -7,12 +7,14 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue, type SQLOutputValue } from "node:sqlite";
 import {
   matchReservationReviewCandidatesToSameDateConfirmedVisits,
   prepareReservationReviewPrefilter,
   readReservationReviewPrefilterSnapshotRows,
   type ReservationReviewPrefilterCandidate,
+  type ReservationReviewPrefilterConfirmedVisitRow,
+  type ReservationReviewPrefilterFactRow,
   type ReservationReviewPrefilterSnapshot,
 } from "../utils/db/reservation-review-prefilter-core.ts";
 import {
@@ -23,6 +25,8 @@ import {
   snapshotHash,
   type PrefilterHarnessMetrics,
 } from "./test-reservation-review-prefilter.ts";
+
+type SQLiteValue = SQLOutputValue;
 
 process.env.TZ = "America/Los_Angeles";
 
@@ -112,10 +116,57 @@ function parseConfiguration(arguments_: readonly string[]): Configuration | null
 }
 
 function sqlValues(parameters: readonly (string | number | null)[]): SQLInputValue[] {
-  return parameters as SQLInputValue[];
+  return [...parameters];
 }
 
-function bytes(value: unknown): number {
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function requiredString(value: SQLiteValue | undefined, label: string): string {
+  if (!isStringValue(value)) {
+    throw new TypeError(`${label} must be a string`);
+  }
+  return value;
+}
+
+function nullableString(value: SQLiteValue | undefined, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredString(value, label);
+}
+
+function decodeFactRows(rows: readonly Record<string, SQLiteValue>[]): ReservationReviewPrefilterFactRow[] {
+  return rows.map((row, index) => {
+    const kind = row.kind;
+    if (kind !== "dismissed" && kind !== "fingerprint" && kind !== "confirmed") {
+      throw new TypeError(`fact row ${index + 1}.kind is invalid`);
+    }
+    return {
+      kind,
+      sourceEventId: requiredString(row.sourceEventId, `fact row ${index + 1}.sourceEventId`),
+    };
+  });
+}
+
+function decodeConfirmedVisitRows(
+  rows: readonly Record<string, SQLiteValue>[],
+): ReservationReviewPrefilterConfirmedVisitRow[] {
+  return rows.map((row, index) => {
+    const label = `confirmed visit row ${index + 1}`;
+    return {
+      dayKey: requiredString(row.dayKey, `${label}.dayKey`),
+      restaurantId: nullableString(row.restaurantId, `${label}.restaurantId`),
+      suggestedRestaurantId: nullableString(row.suggestedRestaurantId, `${label}.suggestedRestaurantId`),
+      restaurantName: nullableString(row.restaurantName, `${label}.restaurantName`),
+      suggestedRestaurantName: nullableString(row.suggestedRestaurantName, `${label}.suggestedRestaurantName`),
+      calendarEventTitle: nullableString(row.calendarEventTitle, `${label}.calendarEventTitle`),
+    };
+  });
+}
+
+function bytes<Value>(value: Value): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
@@ -224,13 +275,21 @@ async function runOptimized(
   try {
     rows = await readReservationReviewPrefilterSnapshotRows(
       {
-        getAllAsync: async <Row>(sql: string, parameters: Array<string | number | null>) => {
+        getFactRowsAsync: async (sql, parameters) => {
           metrics.queryCalls += 1;
           metrics.parameterBytes += bytes(parameters);
-          const result = database.prepare(sql).all(...sqlValues(parameters)) as Row[];
+          const result = database.prepare(sql).all(...sqlValues(parameters));
           metrics.returnedRows += result.length;
           metrics.returnedBytes += bytes(result);
-          return result;
+          return decodeFactRows(result);
+        },
+        getConfirmedVisitRowsAsync: async (sql, parameters) => {
+          metrics.queryCalls += 1;
+          metrics.parameterBytes += bytes(parameters);
+          const result = database.prepare(sql).all(...sqlValues(parameters));
+          metrics.returnedRows += result.length;
+          metrics.returnedBytes += bytes(result);
+          return decodeConfirmedVisitRows(result);
         },
       },
       prepared,
@@ -285,7 +344,7 @@ function assertOutputsEqual(first: Execution, second: Execution, label: string):
   assert.equal(first.outputHash, second.outputHash, `${label}: exact output hashes`);
 }
 
-async function benchmarkScale(scale: number, configuration: Configuration): Promise<Record<string, unknown>> {
+async function benchmarkScale(scale: number, configuration: Configuration) {
   const directory = mkdtempSync(join(tmpdir(), `palate-review-prefilter-${scale}-`));
   const databasePath = join(directory, "fixture.db");
   const database = new DatabaseSync(databasePath);
@@ -297,10 +356,10 @@ async function benchmarkScale(scale: number, configuration: Configuration): Prom
     const preflightOptimized = await runOptimized(database, candidates);
     assertOutputsEqual(preflightLegacy, preflightOptimized, `scale ${scale} preflight`);
 
-    const measured: Record<Strategy, Execution[]> = {
-      "legacy-autocommit-batches": [],
-      "snapshot-json-day-index": [],
-    };
+    const measured = {
+      "legacy-autocommit-batches": new Array<Execution>(),
+      "snapshot-json-day-index": new Array<Execution>(),
+    } satisfies Record<Strategy, Execution[]>;
     const pairCount = configuration.warmupPairs + configuration.samples;
     for (let pair = 0; pair < pairCount; pair++) {
       const order: Strategy[] =
@@ -368,7 +427,7 @@ async function main(): Promise<void> {
     console.log(usage());
     return;
   }
-  const scaleReports: Record<string, unknown>[] = [];
+  const scaleReports = new Array<Awaited<ReturnType<typeof benchmarkScale>>>();
   for (const scale of configuration.scales) {
     scaleReports.push(await benchmarkScale(scale, configuration));
   }
@@ -403,7 +462,7 @@ async function main(): Promise<void> {
   console.log(`Reservation review prefilter benchmark: ${configuration.outputPath}`);
   console.log(`Report SHA-256: ${reportHash}`);
   for (const scale of scaleReports) {
-    const structural = scale.structural as { medianSpeedupRatio: number; queryCallReduction: number };
+    const structural = scale.structural;
     console.log(
       `${String(scale.candidateCount)} candidates: ${structural.medianSpeedupRatio.toFixed(2)}x median; ${structural.queryCallReduction} fewer SELECTs`,
     );

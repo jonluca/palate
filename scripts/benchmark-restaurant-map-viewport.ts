@@ -3,9 +3,16 @@
 
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { RestaurantViewportIndex, type RestaurantViewportEntry } from "../utils/restaurant-viewport-index.ts";
+
+function isNumberValue<Value>(value: Value): value is Extract<Value, number> {
+  return typeof value === "number";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly samples: number;
@@ -447,7 +454,7 @@ function assertSelectionParity(
   return expected;
 }
 
-function assertEdgeCases(): { readonly queryCount: number; readonly checksum: string } {
+function assertEdgeCases() {
   const selections: Array<{ query: ViewportQuery; selection: ViewportSelection }> = [];
 
   const zeroSizedQuery: ViewportQuery = {
@@ -580,6 +587,7 @@ function assertEdgeCases(): { readonly queryCount: number; readonly checksum: st
 }
 
 function loadDataset(database: DatabaseSync, configuredMinimumAwardYear: number | null): Dataset {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const rows = database
     .prepare(
       `SELECT
@@ -608,10 +616,10 @@ function loadDataset(database: DatabaseSync, configuredMinimumAwardYear: number 
          AND r.longitude != ''
        ORDER BY r.id ASC`,
     )
-    .all() as unknown as DatabaseRestaurantRow[];
+    .all() as BenchmarkSQLiteRow<DatabaseRestaurantRow>[];
 
   const latestAwardYear = rows.reduce(
-    (latest, row) => (typeof row.latest_year === "number" ? Math.max(latest, row.latest_year) : latest),
+    (latest, row) => (isNumberValue(row.latest_year) ? Math.max(latest, row.latest_year) : latest),
     Number.NEGATIVE_INFINITY,
   );
   assert.ok(Number.isFinite(latestAwardYear), "bundled Michelin database has no award years");
@@ -626,7 +634,7 @@ function loadDataset(database: DatabaseSync, configuredMinimumAwardYear: number 
       continue;
     }
     validCoordinateRows++;
-    if (typeof row.latest_year !== "number" || row.latest_year < minimumAwardYear) {
+    if (!isNumberValue(row.latest_year) || row.latest_year < minimumAwardYear) {
       continue;
     }
 
@@ -769,13 +777,7 @@ function benchmark(
   restaurants: readonly MapRestaurant[],
   selector: IndexedViewportSelector,
   configuration: Configuration,
-): {
-  readonly exhaustive: MeasurementSummary;
-  readonly indexed: MeasurementSummary;
-  readonly measurementOrder: string[];
-  readonly resultGuard: string;
-  readonly speedup: number;
-} {
+) {
   const trace = expandTrace(configuration.traceRepetitions);
   const exhaustiveSelect = (query: ViewportQuery) => selectViewportExhaustively(restaurants, query);
   const indexedSelect = (query: ViewportQuery) => selector.select(query);
@@ -833,7 +835,10 @@ const edgeCases = assertEdgeCases();
 const databasePath = fileURLToPath(new URL("../assets/michelin.db", import.meta.url));
 const database = new DatabaseSync(databasePath, { readOnly: true });
 try {
-  const sqliteVersion = (database.prepare("SELECT sqlite_version() AS version").get() as { version: string }).version;
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const sqliteVersion = (
+    database.prepare("SELECT sqlite_version() AS version").get() as BenchmarkSQLiteRow<{ version: string }>
+  ).version;
   const dataset = loadDataset(database, configuration.minimumAwardYear);
   const selector = new IndexedViewportSelector(dataset.restaurants);
   const correctness = assertTraceParity(dataset.restaurants, selector);

@@ -5,7 +5,18 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
+
+function isStringValue<Value>(value: Value): value is Extract<Value, string> {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Extract<Value, number> {
+  return typeof value === "number";
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 interface Configuration {
   readonly databasePath: string | null;
@@ -66,6 +77,12 @@ interface DatasetSummary {
   readonly maximumVisitEndMs: number;
   readonly rawVisitSpanDays: number;
   readonly bufferedSearchSpanDays: number;
+}
+
+interface LoadedDataset {
+  readonly source: DatasetSummary["source"];
+  readonly databasePath: string | null;
+  readonly visits: VisitInterval[];
 }
 
 interface ProfileReport {
@@ -556,10 +573,10 @@ function seedSyntheticDatabase(database: DatabaseSync): void {
 }
 
 function parseSQLiteVisitRow(row: SQLiteVisitRow, index: number): VisitInterval {
-  if (typeof row.id !== "string") {
+  if (!isStringValue(row.id)) {
     throw new TypeError(`Visit row ${index} has a non-string ID.`);
   }
-  if (typeof row.startTime !== "number" || typeof row.endTime !== "number") {
+  if (!isNumberValue(row.startTime) || !isNumberValue(row.endTime)) {
     throw new TypeError(`Visit ${row.id} has non-numeric timestamps.`);
   }
   const visit = { id: row.id, startMs: row.startTime, endMs: row.endTime };
@@ -568,24 +585,22 @@ function parseSQLiteVisitRow(row: SQLiteVisitRow, index: number): VisitInterval 
 }
 
 function loadVisits(database: DatabaseSync): VisitInterval[] {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
   const table = database.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'visits'").get() as
-    | { name?: unknown }
+    | BenchmarkSQLiteRow<{ name?: SQLiteValue }>
     | undefined;
   if (table?.name !== "visits") {
     throw new Error("SQLite database does not contain a visits table.");
   }
 
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   const rows = database
     .prepare("SELECT id, startTime, endTime FROM visits ORDER BY id DESC")
-    .all() as unknown as SQLiteVisitRow[];
+    .all() as BenchmarkSQLiteRow<SQLiteVisitRow>[];
   return rows.map(parseSQLiteVisitRow);
 }
 
-function loadDataset(configuration: Configuration): {
-  readonly source: DatasetSummary["source"];
-  readonly databasePath: string | null;
-  readonly visits: readonly VisitInterval[];
-} {
+function loadDataset(configuration: Configuration): LoadedDataset {
   if (configuration.databasePath !== null) {
     if (!existsSync(configuration.databasePath) || !statSync(configuration.databasePath).isFile()) {
       throw new Error(`Database path is not a file: ${configuration.databasePath}`);

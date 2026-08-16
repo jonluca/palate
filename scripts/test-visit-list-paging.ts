@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { InfiniteQueryObserver, QueryClient, type InfiniteData } from "@tanstack/query-core";
 import {
   buildVisitListPageQuery,
@@ -22,6 +22,7 @@ import {
   VISIT_LIST_QUERY_POLICY,
 } from "../utils/query-cache-policy.ts";
 import { ensureMichelinDataInitialized } from "../utils/michelin-query-cache-policy.ts";
+import { isJsonString, parseJsonValue } from "../utils/runtime-json.ts";
 
 const VISIT_COUNT = 263;
 
@@ -150,11 +151,79 @@ interface LiteralRow extends Omit<VisitListItem, "foodProbable" | "calendarEvent
   readonly previewPhotosJson: string | null;
 }
 
-function literalSelection(filter?: VisitListFilter): { readonly sql: string; readonly parameters: string[] } {
+interface LiteralVisitSelection {
+  readonly sql: string;
+  readonly parameters: string[];
+}
+
+function literalSelection(filter?: VisitListFilter): LiteralVisitSelection {
   if (filter === "food") {
     return { sql: "WHERE c.foodProbable = 1", parameters: [] };
   }
   return filter ? { sql: "WHERE c.status = ?", parameters: [filter] } : { sql: "", parameters: [] };
+}
+
+function isSqlString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSqlNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredSqlString(value: SQLOutputValue | undefined, label: string): string {
+  if (!isSqlString(value)) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requiredSqlNumber(value: SQLOutputValue | undefined, label: string): number {
+  if (!isSqlNumber(value)) {
+    throw new TypeError(`${label} must be a number.`);
+  }
+  return value;
+}
+
+function nullableSqlString(value: SQLOutputValue | undefined, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredSqlString(value, label);
+}
+
+function nullableSqlNumber(value: SQLOutputValue | undefined, label: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredSqlNumber(value, label);
+}
+
+function parseVisitStatus(value: SQLOutputValue | undefined, label: string): VisitListItem["status"] {
+  if (value === "pending" || value === "confirmed" || value === "rejected") {
+    return value;
+  }
+  throw new TypeError(`${label} must be a supported visit status.`);
+}
+
+function parseLiteralRow(row: Record<string, SQLOutputValue>, index: number): LiteralRow {
+  const label = `literal visit row ${index}`;
+  return {
+    id: requiredSqlString(row.id, `${label}.id`),
+    status: parseVisitStatus(row.status, `${label}.status`),
+    startTime: requiredSqlNumber(row.startTime, `${label}.startTime`),
+    photoCount: requiredSqlNumber(row.photoCount, `${label}.photoCount`),
+    foodProbable: requiredSqlNumber(row.foodProbable, `${label}.foodProbable`),
+    calendarEventTitle: nullableSqlString(row.calendarEventTitle, `${label}.calendarEventTitle`),
+    calendarEventIsAllDay: nullableSqlNumber(row.calendarEventIsAllDay, `${label}.calendarEventIsAllDay`),
+    restaurantName: nullableSqlString(row.restaurantName, `${label}.restaurantName`),
+    suggestedRestaurantName: nullableSqlString(row.suggestedRestaurantName, `${label}.suggestedRestaurantName`),
+    previewPhotosJson: nullableSqlString(row.previewPhotosJson, `${label}.previewPhotosJson`),
+  };
+}
+
+function parseVisitListPageRow(row: Record<string, SQLOutputValue>, index: number): VisitListPageRow {
+  return parseLiteralRow(row, index);
 }
 
 /** Literal full-list oracle. It intentionally imports no production SQL or parser. */
@@ -188,13 +257,14 @@ function runLiteralOracle(database: DatabaseSync, filter?: VisitListFilter): Vis
        ${selection.sql}
        ORDER BY c.startTime DESC, c.id COLLATE BINARY DESC`,
     )
-    .all(...selection.parameters) as unknown as LiteralRow[];
+    .all(...selection.parameters)
+    .map(parseLiteralRow);
   return rows.map((row) => {
     let previewPhotos: string[] = [];
     if (row.previewPhotosJson) {
       try {
-        const parsed: unknown = JSON.parse(row.previewPhotosJson);
-        if (Array.isArray(parsed) && parsed.every((value) => typeof value === "string")) {
+        const parsed = parseJsonValue(row.previewPhotosJson);
+        if (Array.isArray(parsed) && parsed.every(isJsonString)) {
           previewPhotos = parsed;
         }
       } catch {
@@ -223,7 +293,10 @@ function readCandidatePage(
   pageSize: number,
 ) {
   const query = buildVisitListPageQuery(filter, cursor, pageSize);
-  const rows = database.prepare(query.sql).all(...query.parameters) as unknown as VisitListPageRow[];
+  const rows = database
+    .prepare(query.sql)
+    .all(...query.parameters)
+    .map(parseVisitListPageRow);
   return parseVisitListPageRows(rows, query.pageSize);
 }
 
@@ -291,8 +364,10 @@ function assertFractionalCursorTieBoundary(): void {
 
 function explain(database: DatabaseSync, filter?: VisitListFilter, cursor: VisitListCursor | null = null): string {
   const query = buildVisitListPageQuery(filter, cursor, 128);
-  return (database.prepare(`EXPLAIN QUERY PLAN ${query.sql}`).all(...query.parameters) as Array<{ detail: string }>)
-    .map(({ detail }) => detail)
+  return database
+    .prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
+    .all(...query.parameters)
+    .map((row, index) => requiredSqlString(row.detail, `query plan row ${index}.detail`))
     .join("\n");
 }
 
@@ -592,7 +667,7 @@ async function assertInFlightContinuationResetContract(): Promise<void> {
       () => observer.getCurrentResult().data?.pages.length === 1 && !observer.getCurrentResult().isFetching,
       "initial page did not load before continuation race",
     );
-    const continuationResult = observer.fetchNextPage().catch((error: unknown) => error);
+    const continuationResult = observer.fetchNextPage().catch((cause: Error) => cause);
     await continuationDidStart;
     await resetVisitListPageQueries(queryClient);
     await continuationResult;

@@ -62,7 +62,7 @@ function useAggregatedFoodLabels(
         continue;
       }
 
-      for (const label of photo.foodLabels as FoodLabel[]) {
+      for (const label of photo.foodLabels) {
         const existing = labelMap.get(label.label);
         if (existing) {
           existing.maxConfidence = Math.max(existing.maxConfidence, label.confidence);
@@ -127,11 +127,6 @@ export default function VisitDetailScreen() {
     }
 
     const visit = data.visit;
-    const explicitTimeZone = (visit as { timeZone?: string | null }).timeZone;
-    if (explicitTimeZone) {
-      return explicitTimeZone;
-    }
-
     const photos = data.photos ?? [];
     const photoWithCoords = photos.find((p) => Number.isFinite(p.latitude) && Number.isFinite(p.longitude));
     const lat = photoWithCoords?.latitude ?? visit.centerLat;
@@ -181,7 +176,7 @@ export default function VisitDetailScreen() {
       photos.map((p) => ({
         id: p.id,
         uri: p.uri,
-        foodLabels: p.foodLabels as FoodLabel[] | null,
+        foodLabels: p.foodLabels ?? null,
         mediaType: p.mediaType,
         duration: p.duration,
       })),

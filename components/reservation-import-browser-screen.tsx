@@ -7,10 +7,13 @@ import { Button, ButtonText, Card } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ReservationImportReviewList, useReservationImportReview } from "@/components/reservation-import-review";
 import { useDismissProviderReservations, useFilterProviderReservationReviewCandidates } from "@/hooks/queries";
-import type {
-  ImportableReservation,
-  NormalizedReservationHistory,
-  ReservationImportResult,
+import {
+  asRecord,
+  type JsonNode,
+  type JsonValue,
+  type ImportableReservation,
+  type NormalizedReservationHistory,
+  type ReservationImportResult,
 } from "@/services/reservation-import";
 import {
   beginProviderReservationReplay,
@@ -34,29 +37,78 @@ interface ReservationBrowserImportScreenProps {
   brandColor: string;
   importMutation: ReservationBrowserImportMutation;
   instructions: string;
-  normalizePayload: (payload: unknown) => NormalizedReservationHistory;
+  normalizePayload: (payload: JsonValue) => NormalizedReservationHistory;
 }
 
 interface ReservationBridgeMessage {
   type?: string;
   hasSession?: boolean;
-  payload?: unknown;
-  reservations?: unknown;
+  payload?: JsonValue;
+  reservations?: JsonValue;
   count?: number;
   error?: string | null;
   debugMessage?: string;
-  debug?: unknown;
+  debug?: JsonValue;
 }
 
-function getPayloadCount(payload: unknown, fallbackCount?: number): number {
-  if (typeof fallbackCount === "number" && Number.isFinite(fallbackCount)) {
+function isFiniteJsonNumber(value: JsonNode): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isJsonString(value: JsonNode): value is string {
+  return typeof value === "string";
+}
+
+function parseReservationBridgeMessage(serializedMessage: string): ReservationBridgeMessage | null {
+  const parsed: JsonValue = JSON.parse(serializedMessage);
+  const record = asRecord(parsed);
+  if (!record) {
+    return null;
+  }
+
+  return {
+    type: isJsonString(record.type) ? record.type : undefined,
+    hasSession: record.hasSession === true,
+    payload: record.payload,
+    reservations: record.reservations,
+    count: isFiniteJsonNumber(record.count) ? record.count : undefined,
+    error: record.error === null ? null : isJsonString(record.error) ? record.error : undefined,
+    debugMessage: isJsonString(record.debugMessage) ? record.debugMessage : undefined,
+    debug: record.debug,
+  };
+}
+
+function getJsonNodeType(value: JsonNode): "array" | "boolean" | "null" | "number" | "object" | "string" | "undefined" {
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  if (asRecord(value)) {
+    return "object";
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (value === undefined) {
+    return "undefined";
+  }
+  if (isFiniteJsonNumber(value)) {
+    return "number";
+  }
+  if (isJsonString(value)) {
+    return "string";
+  }
+  return "boolean";
+}
+
+function getPayloadCount(payload: JsonNode, fallbackCount?: number): number {
+  if (fallbackCount !== undefined && Number.isFinite(fallbackCount)) {
     return fallbackCount;
   }
   if (Array.isArray(payload)) {
     return payload.length;
   }
-  if (payload && typeof payload === "object") {
-    const record = payload as Record<string, unknown>;
+  const record = asRecord(payload);
+  if (record) {
     if (Array.isArray(record.result)) {
       return record.result.length;
     }
@@ -70,28 +122,28 @@ function getPayloadCount(payload: unknown, fallbackCount?: number): number {
   return 0;
 }
 
-function describePayloadForLog(payload: unknown): Record<string, unknown> {
+function describePayloadForLog(payload: JsonNode) {
   if (Array.isArray(payload)) {
     return { type: "array", length: payload.length };
   }
 
-  if (!payload || typeof payload !== "object") {
-    return { type: payload === null ? "null" : typeof payload };
+  const record = asRecord(payload);
+  if (!record) {
+    return { type: getJsonNodeType(payload) };
   }
 
-  const record = payload as Record<string, unknown>;
   return {
     type: "object",
     keys: Object.keys(record).slice(0, 12),
     reservationsLength: Array.isArray(record.reservations) ? record.reservations.length : null,
     purchasesLength: Array.isArray(record.purchases) ? record.purchases.length : null,
     resultLength: Array.isArray(record.result) ? record.result.length : null,
-    fetchedCount: typeof record.fetchedCount === "number" ? record.fetchedCount : null,
-    totalCount: typeof record.totalCount === "number" ? record.totalCount : null,
+    fetchedCount: isFiniteJsonNumber(record.fetchedCount) ? record.fetchedCount : null,
+    totalCount: isFiniteJsonNumber(record.totalCount) ? record.totalCount : null,
   };
 }
 
-function logImportDebug(displayName: string, message: string, details?: unknown): void {
+function logImportDebug<Details>(displayName: string, message: string, details?: Details): void {
   if (!__DEV__) {
     return;
   }
@@ -172,7 +224,7 @@ export function ReservationImportBrowserScreen({
     (event: WebViewMessageEvent) => {
       let message: ReservationBridgeMessage | null = null;
       try {
-        message = JSON.parse(event.nativeEvent.data) as ReservationBridgeMessage;
+        message = parseReservationBridgeMessage(event.nativeEvent.data);
       } catch {
         return;
       }

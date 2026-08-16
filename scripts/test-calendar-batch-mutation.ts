@@ -159,7 +159,8 @@ async function testNativeCreateRoutingAndValidation(): Promise<void> {
 }
 
 async function testExpoCreateFallback(): Promise<void> {
-  const calls = { permission: 0, timeZone: 0, expo: 0, errors: [] as number[] };
+  const errors: number[] = [];
+  const calls = { permission: 0, timeZone: 0, expo: 0, errors };
   const capturedRequests: string[] = [];
   const result = await executeCalendarCreateMutations(visits, "fallback-calendar", {
     hasCalendarPermission: async () => {
@@ -274,7 +275,8 @@ async function testDeleteRoutingAndExactSelection(): Promise<void> {
 }
 
 async function testExpoDeleteFallback(): Promise<void> {
-  const calls = { permission: 0, expo: 0, errors: [] as number[] };
+  const errors: number[] = [];
+  const calls = { permission: 0, expo: 0, errors };
   const result = await executeCalendarDeleteMutations(["a", "b", "c"], {
     hasCalendarPermission: async () => {
       calls.permission++;
@@ -364,7 +366,8 @@ function testClearStatementPlanningAndExecution(): void {
        WHERE calendarEventId IS NULL AND calendarEventTitle IS NULL
          AND exportedToCalendarId IS NULL AND updatedAt = 777`,
     )
-    .get() as { count: number };
+    .get();
+  assert.ok(cleared, "the aggregate query must return one row");
   assert.equal(cleared.count, 1_001);
   assert.deepEqual(
     { ...database.prepare("SELECT * FROM visits WHERE id = 'visit-1001'").get() },

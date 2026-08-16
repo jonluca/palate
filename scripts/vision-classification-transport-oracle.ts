@@ -31,11 +31,19 @@ interface EncodedEmptySlot {
 
 type EncodedSlot = EncodedSuccessSlot | EncodedFailureSlot | EncodedEmptySlot;
 
+function isFiniteNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
 function assertLabel(label: VisionClassificationLabel, resultIndex: number, labelIndex: number): void {
-  if (typeof label?.label !== "string") {
+  if (!isStringValue(label?.label)) {
     throw new TypeError(`Vision result ${resultIndex} label ${labelIndex} has an invalid identifier`);
   }
-  if (typeof label.confidence !== "number" || !Number.isFinite(label.confidence)) {
+  if (!isFiniteNumberValue(label.confidence)) {
     throw new TypeError(`Vision result ${resultIndex} label ${labelIndex} has a non-finite confidence`);
   }
 }
@@ -76,7 +84,7 @@ export function encodePackedVisionClassificationResults(
   const resultByInputIndex = new Map<number, VisionClassificationResult>();
   let previousInputIndex = -1;
   for (const [resultIndex, result] of results.entries()) {
-    if (typeof result?.assetId !== "string") {
+    if (!isStringValue(result?.assetId)) {
       throw new TypeError(`Vision result ${resultIndex} has an invalid asset ID`);
     }
     const inputIndex = firstInputIndexByAssetId.get(result.assetId);
@@ -91,7 +99,7 @@ export function encodePackedVisionClassificationResults(
       throw new TypeError(`Vision result ${resultIndex} has invalid labels`);
     }
     if (result.error !== undefined) {
-      if (typeof result.error !== "string") {
+      if (!isStringValue(result.error)) {
         throw new TypeError(`Vision result ${resultIndex} has an invalid error`);
       }
       if (result.labels.length !== 0) {

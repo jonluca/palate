@@ -1,4 +1,4 @@
-import { Button, Host, type ButtonProps } from "@expo/ui/swift-ui";
+import { Button, Host } from "@expo/ui/swift-ui";
 import { buttonStyle, controlSize, disabled as disabledModifier, labelStyle, tint } from "@expo/ui/swift-ui/modifiers";
 import type { NativeStatsButtonProps } from "./native-stats-button.types";
 
@@ -26,12 +26,7 @@ export function NativeStatsButton({
 
   return (
     <Host matchContents>
-      <Button
-        label={label}
-        onPress={onPress}
-        systemImage={systemImage as ButtonProps["systemImage"]}
-        modifiers={modifiers}
-      />
+      <Button label={label} onPress={onPress} systemImage={systemImage} modifiers={modifiers} />
     </Host>
   );
 }

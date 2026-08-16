@@ -1,4 +1,5 @@
 import { PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL, type PendingVisitReviewQueryRow } from "./visit-review-core.ts";
+import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from "../runtime-json.ts";
 
 export const DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE = 128;
 export const MAX_PENDING_VISIT_REVIEW_PAGE_SIZE = 1_024;
@@ -296,29 +297,25 @@ LEFT JOIN suggested_restaurants sr ON pv.id = sr.visitId
 LEFT JOIN food_labels fl ON pv.id = fl.visitId
 ORDER BY pi.ordinal ASC`;
 
-function requirePageKey(value: unknown, context: string): PendingVisitReviewPageKey {
-  if (typeof value !== "object" || value === null) {
+function requirePageKey(value: JsonValue | undefined, context: string): PendingVisitReviewPageKey {
+  if (value === undefined || !isJsonObject(value)) {
     throw new TypeError(`${context} must be an object`);
   }
-  const candidate = value as { readonly id?: unknown; readonly priority?: unknown };
-  if (typeof candidate.id !== "string" || candidate.id.length === 0) {
+  const id = value.id;
+  const priority = value.priority;
+  if (id === undefined || !isJsonString(id) || id.length === 0) {
     throw new TypeError(`${context}.id must be a non-empty string`);
   }
-  if (
-    typeof candidate.priority !== "number" ||
-    !Number.isInteger(candidate.priority) ||
-    candidate.priority < 1 ||
-    candidate.priority > 4
-  ) {
+  if (priority !== 1 && priority !== 2 && priority !== 3 && priority !== 4) {
     throw new RangeError(`${context}.priority must be an integer from 1 through 4`);
   }
-  return candidate as PendingVisitReviewPageKey;
+  return { id, priority };
 }
 
 function assertUniquePageKeys(keys: readonly PendingVisitReviewPageKey[], context: string): void {
   const identifiers = new Set<string>();
   for (const [index, key] of keys.entries()) {
-    requirePageKey(key, `${context}[${index}]`);
+    requirePageKey({ id: key.id, priority: key.priority }, `${context}[${index}]`);
     if (identifiers.has(key.id)) {
       throw new RangeError(`${context} contains duplicate visit id ${JSON.stringify(key.id)}`);
     }
@@ -327,12 +324,12 @@ function assertUniquePageKeys(keys: readonly PendingVisitReviewPageKey[], contex
 }
 
 export function parsePendingVisitReviewOrderedKeys(row: PendingVisitReviewOrderedKeysRow): PendingVisitReviewPageKey[] {
-  if (typeof row?.keysJson !== "string") {
+  if (!hasPendingVisitReviewOrderedKeysJson(row)) {
     throw new TypeError("Pending-review ordered-key query must return keysJson as a string");
   }
-  let decoded: unknown;
+  let decoded: JsonValue;
   try {
-    decoded = JSON.parse(row.keysJson);
+    decoded = parseJsonValue(row.keysJson);
   } catch (error) {
     throw new SyntaxError(`Pending-review ordered keys are not valid JSON: ${String(error)}`);
   }
@@ -344,22 +341,22 @@ export function parsePendingVisitReviewOrderedKeys(row: PendingVisitReviewOrdere
   return keys;
 }
 
-function requireFiniteNumber(value: unknown, context: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
+function requireFiniteNumber(value: JsonValue | undefined, context: string): number {
+  if (value === undefined || !isJsonNumber(value) || !Number.isFinite(value)) {
     throw new TypeError(`${context} must be a finite number`);
   }
   return value;
 }
 
-function requireManifestSuggestion(value: unknown, context: string): PendingVisitReviewManifestSuggestion {
+function requireManifestSuggestion(value: JsonValue, context: string): PendingVisitReviewManifestSuggestion {
   if (!Array.isArray(value) || value.length !== 4) {
     throw new TypeError(`${context} must be a four-value array`);
   }
   const [id, name, latitude, longitude] = value;
-  if (typeof id !== "string" || id.length === 0) {
+  if (id === undefined || !isJsonString(id) || id.length === 0) {
     throw new TypeError(`${context}.id must be a non-empty string`);
   }
-  if (typeof name !== "string") {
+  if (name === undefined || !isJsonString(name)) {
     throw new TypeError(`${context}.name must be a string`);
   }
   return {
@@ -370,16 +367,16 @@ function requireManifestSuggestion(value: unknown, context: string): PendingVisi
   };
 }
 
-function requireManifestItem(value: unknown, context: string): PendingVisitReviewManifestItem {
+function requireManifestItem(value: JsonValue, context: string): PendingVisitReviewManifestItem {
   if (!Array.isArray(value) || value.length !== 6) {
     throw new TypeError(`${context} must be a six-value array`);
   }
   const [id, priority, startTime, foodProbable, calendarEventTitle, suggestedRestaurants] = value;
-  const key = requirePageKey({ id, priority }, context);
+  const key = requirePageKey(id === undefined || priority === undefined ? undefined : { id, priority }, context);
   if (foodProbable !== 0 && foodProbable !== 1) {
     throw new TypeError(`${context}.foodProbable must be 0 or 1`);
   }
-  if (calendarEventTitle !== null && typeof calendarEventTitle !== "string") {
+  if (calendarEventTitle === undefined || (calendarEventTitle !== null && !isJsonString(calendarEventTitle))) {
     throw new TypeError(`${context}.calendarEventTitle must be a string or null`);
   }
   if (!Array.isArray(suggestedRestaurants)) {
@@ -397,12 +394,12 @@ function requireManifestItem(value: unknown, context: string): PendingVisitRevie
 }
 
 export function parsePendingVisitReviewManifest(row: PendingVisitReviewManifestRow): PendingVisitReviewManifestItem[] {
-  if (typeof row?.manifestJson !== "string") {
+  if (!hasPendingVisitReviewManifestJson(row)) {
     throw new TypeError("Pending-review manifest query must return manifestJson as a string");
   }
-  let decoded: unknown;
+  let decoded: JsonValue;
   try {
-    decoded = JSON.parse(row.manifestJson);
+    decoded = parseJsonValue(row.manifestJson);
   } catch (error) {
     throw new SyntaxError(`Pending-review manifest is not valid JSON: ${String(error)}`);
   }
@@ -412,6 +409,16 @@ export function parsePendingVisitReviewManifest(row: PendingVisitReviewManifestR
   const items = decoded.map((value, index) => requireManifestItem(value, `manifest[${index}]`));
   assertUniquePageKeys(items, "manifest");
   return items;
+}
+
+function hasPendingVisitReviewOrderedKeysJson(
+  row: PendingVisitReviewOrderedKeysRow,
+): row is PendingVisitReviewOrderedKeysRow {
+  return typeof row?.keysJson === "string";
+}
+
+function hasPendingVisitReviewManifestJson(row: PendingVisitReviewManifestRow): row is PendingVisitReviewManifestRow {
+  return typeof row?.manifestJson === "string";
 }
 
 function hashGenerationSeed(seed: string): string {

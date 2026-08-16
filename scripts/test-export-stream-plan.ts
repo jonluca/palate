@@ -2,7 +2,7 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   buildExportPhotoCountsQuery,
   EXPORT_PHOTO_PAGE_SIZE,
@@ -22,6 +22,46 @@ interface CountRow {
 
 interface QueryPlanRow {
   readonly detail: string;
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function requiredNumber(value: SQLOutputValue, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function assertDefined<T>(value: T | undefined): T {
+  assert.ok(value !== undefined, "Expected the count query to return a row.");
+  return value;
+}
+
+function parseCountRow(row: SQLiteRow): CountRow {
+  return {
+    visitId: requiredString(row.visitId, "photo counts.visitId"),
+    photoCount: requiredNumber(row.photoCount, "photo counts.photoCount"),
+  };
+}
+
+function parsePhotoCount(row: SQLiteRow): number {
+  return requiredNumber(row.photoCount, "photo count");
+}
+
+function parseQueryPlanRow(row: SQLiteRow): QueryPlanRow {
+  return { detail: requiredString(row.detail, "query plan.detail") };
 }
 
 const EDGE_VISIT_ID = "訪問-雪-🍣\n'quoted'\"\\path";
@@ -71,7 +111,10 @@ function requireCountQuery(visitIds: readonly string[]): ExportPhotoCountsQuery 
 
 function runCountQuery(database: DatabaseSync, visitIds: readonly string[]): Map<string, number> {
   const query = requireCountQuery(visitIds);
-  const rows = database.prepare(query.sql).all(...query.parameters) as unknown as CountRow[];
+  const rows = database
+    .prepare(query.sql)
+    .all(...query.parameters)
+    .map(parseCountRow);
   return new Map(rows.map((row) => [row.visitId, row.photoCount]));
 }
 
@@ -79,8 +122,8 @@ function runIndependentCounts(database: DatabaseSync, visitIds: readonly string[
   const count = database.prepare("SELECT COUNT(*) AS photoCount FROM photos WHERE visitId = ?");
   return new Map(
     [...new Set(visitIds)].map((visitId) => {
-      const row = count.get(visitId) as unknown as { readonly photoCount: number };
-      return [visitId, row.photoCount] as const;
+      const photoCount = parsePhotoCount(assertDefined(count.get(visitId)));
+      return [visitId, photoCount] as const;
     }),
   );
 }
@@ -143,14 +186,16 @@ function testExactCountQuery(): void {
 
     const plan = database
       .prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
-      .all(...query.parameters) as unknown as QueryPlanRow[];
+      .all(...query.parameters)
+      .map(parseQueryPlanRow);
     const planDetails = plan.map((row) => row.detail).join("\n");
     assert.match(planDetails, /SCAN json_each VIRTUAL TABLE/);
     assert.match(planDetails, /SEARCH p USING COVERING INDEX idx_photos_visit/);
     assert.doesNotMatch(planDetails, /SCAN p(?:\s|$)/);
 
     assert.equal(buildExportPhotoCountsQuery([]), null);
-    assert.throws(() => buildExportPhotoCountsQuery(["valid", 42 as unknown as string]), /string visit IDs/);
+    // @ts-expect-error -- a numeric ID exercises runtime validation at the query boundary.
+    assert.throws(() => buildExportPhotoCountsQuery(["valid", 42]), /string visit IDs/);
   } finally {
     database.close();
   }
@@ -242,10 +287,12 @@ function testInvalidPlannerInputs(): void {
   );
   assert.throws(() => planExportPhotoBatches(["missing"], new Map()), /missing visit ID/);
   assert.throws(() => planExportPhotoBatches(["expected"], new Map([["unexpected", 0]])), /unexpected visit ID/);
-  assert.throws(() => planExportPhotoBatches([42 as unknown as string], new Map([["42", 0]])), /string visit IDs/);
+  // @ts-expect-error -- a numeric ID exercises runtime validation at the planner boundary.
+  assert.throws(() => planExportPhotoBatches([42], new Map([["42", 0]])), /string visit IDs/);
+  const invalidKeyCounts = new Map([[42, 0]]);
   assert.throws(
-    () =>
-      planExportPhotoBatches(["valid"], new Map<unknown, number>([[42, 0]]) as unknown as ReadonlyMap<string, number>),
+    // @ts-expect-error -- a numeric map key exercises runtime validation of count keys.
+    () => planExportPhotoBatches(["valid"], invalidKeyCounts),
     /string visit IDs/,
   );
   for (const invalidCount of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
@@ -254,10 +301,13 @@ function testInvalidPlannerInputs(): void {
       /non-negative safe integer/,
     );
   }
-  assert.throws(() => planExportPhotoBatches(null as unknown as string[], new Map()), /array of visit IDs/);
-  assert.throws(() => planExportPhotoBatches([], {} as unknown as ReadonlyMap<string, number>), /requires a Map/);
+  // @ts-expect-error -- null exercises runtime validation of the visit ID collection.
+  assert.throws(() => planExportPhotoBatches(null, new Map()), /array of visit IDs/);
+  // @ts-expect-error -- a plain object exercises runtime validation of the count map.
+  assert.throws(() => planExportPhotoBatches([], {}), /requires a Map/);
   assert.throws(
-    () => planExportPhotoBatches([], new Map(), null as unknown as ExportStreamPlanOptions),
+    // @ts-expect-error -- null exercises runtime validation of planner options.
+    () => planExportPhotoBatches([], new Map(), null),
     /options must be an object/,
   );
 

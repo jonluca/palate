@@ -8,7 +8,7 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, statSync, writeFil
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
   buildExportPhotoCountsQuery,
@@ -27,6 +27,88 @@ import {
 } from "../utils/export-core.ts";
 import { BoundedUtf8BufferingSink, ExportJsonStreamWriter } from "../utils/export-stream-core.ts";
 import { planExportPhotoBatches } from "../utils/export-stream-plan.ts";
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isObjectValue<Value>(value: Value): value is Value & object {
+  return typeof value === "object";
+}
+
+function isFoodLabel<Value>(value: Value): value is Value & FoodLabel {
+  return (
+    value !== null &&
+    isObjectValue(value) &&
+    "label" in value &&
+    isStringValue(value.label) &&
+    "confidence" in value &&
+    isNumberValue(value.confidence)
+  );
+}
+
+function parseFoodLabels(serialized: string): FoodLabel[] {
+  const parsed: unknown = JSON.parse(serialized);
+  if (!Array.isArray(parsed) || !parsed.every(isFoodLabel)) {
+    throw new TypeError("Photo labels must contain label/confidence objects");
+  }
+  return parsed;
+}
+
+type ChildOutputProperty = string | number | boolean | null | undefined;
+type ChildOutputRecord = Readonly<Record<string, ChildOutputProperty>>;
+
+function isChildOutputProperty<Value>(value: Value): value is Extract<Value, ChildOutputProperty> {
+  return value === null || ["string", "number", "boolean", "undefined"].includes(typeof value);
+}
+
+function isChildOutputRecord<Value>(value: Value): value is Value & ChildOutputRecord {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value).every(isChildOutputProperty)
+  );
+}
+
+function requiredNumberProperty(value: ChildOutputRecord, key: string, context: string): number {
+  if (!(key in value) || !isNumberValue(value[key])) {
+    throw new TypeError(`${context}.${String(key)} must be a number`);
+  }
+  return value[key];
+}
+
+function nullableNumberProperty(value: ChildOutputRecord, key: string, context: string): number | null {
+  if (!(key in value) || (value[key] !== null && !isNumberValue(value[key]))) {
+    throw new TypeError(`${context}.${String(key)} must be a number or null`);
+  }
+  return value[key];
+}
+
+function requiredStringProperty(value: ChildOutputRecord, key: string, context: string): string {
+  if (!(key in value) || !isStringValue(value[key])) {
+    throw new TypeError(`${context}.${String(key)} must be a string`);
+  }
+  return value[key];
+}
+
+function assertLiteralProperty<Expected>(
+  value: ChildOutputRecord,
+  key: string,
+  expected: Expected,
+  context: string,
+): void {
+  if (!(key in value) || value[key] !== expected) {
+    throw new TypeError(`${context}.${String(key)} must equal ${JSON.stringify(expected)}`);
+  }
+}
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
 
 type Scenario = "distributed" | "singleVisitOwnsAllPhotos";
 type Strategy = "legacyFullString" | "streamedCandidate";
@@ -419,10 +501,12 @@ function seedScenarioDatabase(path: string, scenario: Scenario, visitCount: numb
       throw error;
     }
 
-    const totals = database.prepare("SELECT COUNT(*) AS count FROM photos").get() as unknown as {
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const totals = database.prepare("SELECT COUNT(*) AS count FROM photos").get() as BenchmarkSQLiteRow<{
       readonly count: number;
-    };
+    }>;
     assert.equal(totals.count, photoCount);
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
     const tieGroups = database
       .prepare(
         `SELECT COUNT(*) AS count FROM (
@@ -432,7 +516,7 @@ function seedScenarioDatabase(path: string, scenario: Scenario, visitCount: numb
           HAVING COUNT(*) > 1
         )`,
       )
-      .get() as unknown as { readonly count: number };
+      .get() as BenchmarkSQLiteRow<{ readonly count: number }>;
     assert.equal(tieGroups.count, 0, "profile fixtures must not depend on unspecified legacy tie ordering");
   } finally {
     database.close();
@@ -440,16 +524,19 @@ function seedScenarioDatabase(path: string, scenario: Scenario, visitCount: numb
   return statSync(path).size;
 }
 
-function asVisitRecords(rows: readonly Record<string, unknown>[]): VisitRecord[] {
-  return rows.map((row) => ({ ...row })) as unknown as VisitRecord[];
+function asVisitRecords(rows: readonly Record<string, SQLiteValue>[]): VisitRecord[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return rows.map((row) => ({ ...row })) as BenchmarkSQLiteRow<VisitRecord>[];
 }
 
-function asRestaurantRecords(rows: readonly Record<string, unknown>[]): RestaurantRecord[] {
-  return rows.map((row) => ({ ...row })) as unknown as RestaurantRecord[];
+function asRestaurantRecords(rows: readonly Record<string, SQLiteValue>[]): RestaurantRecord[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return rows.map((row) => ({ ...row })) as BenchmarkSQLiteRow<RestaurantRecord>[];
 }
 
-function asRawPhotoRecords(rows: readonly Record<string, unknown>[]): RawPhotoRecord[] {
-  return rows.map((row) => ({ ...row })) as unknown as RawPhotoRecord[];
+function asRawPhotoRecords(rows: readonly Record<string, SQLiteValue>[]): RawPhotoRecord[] {
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  return rows.map((row) => ({ ...row })) as BenchmarkSQLiteRow<RawPhotoRecord>[];
 }
 
 function parsePhotoRecord(raw: RawPhotoRecord): PhotoRecord {
@@ -458,7 +545,7 @@ function parsePhotoRecord(raw: RawPhotoRecord): PhotoRecord {
       return null;
     }
     try {
-      return JSON.parse(serialized) as FoodLabel[];
+      return parseFoodLabels(serialized);
     } catch {
       return null;
     }
@@ -484,12 +571,11 @@ function cursorForRawPhoto(raw: RawPhotoRecord): ExportPhotoCursor {
   };
 }
 
-function getBaseExportRows(database: DatabaseSync): {
-  readonly visits: VisitRecord[];
-  readonly restaurants: RestaurantRecord[];
-} {
-  const visits = asVisitRecords(database.prepare(VISITS_SQL).all("confirmed") as Record<string, unknown>[]);
-  const restaurants = asRestaurantRecords(database.prepare(RESTAURANTS_SQL).all() as Record<string, unknown>[]);
+function getBaseExportRows(database: DatabaseSync) {
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const visits = asVisitRecords(database.prepare(VISITS_SQL).all("confirmed") as Record<string, SQLiteValue>[]);
+  // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+  const restaurants = asRestaurantRecords(database.prepare(RESTAURANTS_SQL).all() as Record<string, SQLiteValue>[]);
   return { visits, restaurants };
 }
 
@@ -504,7 +590,7 @@ function writeAll(fd: number, chunk: Uint8Array): void {
   }
 }
 
-function createHeapSampler(): { sample: () => void; peak: () => number } {
+function createHeapSampler() {
   let peakHeapUsedBytes = process.memoryUsage().heapUsed;
   return {
     sample: () => {
@@ -535,8 +621,9 @@ function runLegacyFullString(database: DatabaseSync, outputPath: string): Strate
       do {
         const query = buildExportPhotosQuery(visitIds, cursor);
         assert.ok(query);
+        // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
         const rawRows = asRawPhotoRecords(
-          database.prepare(query.sql).all(...query.parameters) as Record<string, unknown>[],
+          database.prepare(query.sql).all(...query.parameters) as Record<string, SQLiteValue>[],
         );
         sqliteCalls += 1;
         photoPageQueries += 1;
@@ -594,7 +681,8 @@ function readExactPhotoCounts(database: DatabaseSync, visitIds: readonly string[
   if (!query) {
     return new Map();
   }
-  const rows = database.prepare(query.sql).all(...query.parameters) as unknown as PhotoCountRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rows = database.prepare(query.sql).all(...query.parameters) as BenchmarkSQLiteRow<PhotoCountRow>[];
   const counts = new Map(rows.map((row) => [row.visitId, Number(row.photoCount)]));
   assert.equal(counts.size, visitIds.length);
   return counts;
@@ -604,7 +692,7 @@ function groupBoundedPhotos(
   rawRows: readonly RawPhotoRecord[],
   expectedVisitIds: readonly string[],
 ): Map<string, ExportVisitPhoto[]> {
-  const photosByVisitId = new Map(expectedVisitIds.map((visitId) => [visitId, [] as ExportVisitPhoto[]]));
+  const photosByVisitId = new Map(expectedVisitIds.map((visitId) => [visitId, new Array<ExportVisitPhoto>()]));
   for (const raw of rawRows) {
     const photos = raw.visitId === null ? undefined : photosByVisitId.get(raw.visitId);
     if (!photos) {
@@ -681,8 +769,9 @@ function runStreamedCandidate(database: DatabaseSync, outputPath: string): Strat
 
           const query = buildExportPhotosQuery(batch.visitIds);
           assert.ok(query);
+          // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
           const rawRows = asRawPhotoRecords(
-            database.prepare(query.sql).all(...query.parameters) as Record<string, unknown>[],
+            database.prepare(query.sql).all(...query.parameters) as Record<string, SQLiteValue>[],
           );
           sqliteCalls += 1;
           photoPageQueries += 1;
@@ -713,8 +802,9 @@ function runStreamedCandidate(database: DatabaseSync, outputPath: string): Strat
         do {
           const query = buildExportPhotosQuery(batch.visitIds, cursor);
           assert.ok(query);
+          // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
           const rawRows = asRawPhotoRecords(
-            database.prepare(query.sql).all(...query.parameters) as Record<string, unknown>[],
+            database.prepare(query.sql).all(...query.parameters) as Record<string, SQLiteValue>[],
           );
           sqliteCalls += 1;
           photoPageQueries += 1;
@@ -832,19 +922,50 @@ function runChildIfRequested(): void {
 }
 
 function parseChildResult(stdout: string, scenario: Scenario, strategy: Strategy): ChildResult {
-  let parsed: unknown;
+  let parsedValue: unknown;
   try {
-    parsed = JSON.parse(stdout.trim());
+    parsedValue = JSON.parse(stdout.trim());
   } catch (error) {
     throw new Error(`Could not parse ${scenario}/${strategy} child output: ${String(error)}`, { cause: error });
   }
-  assert.ok(parsed && typeof parsed === "object");
-  const result = parsed as ChildResult;
-  assert.equal(result.scenario, scenario);
-  assert.equal(result.strategy, strategy);
-  assert.equal(typeof result.sha256, "string");
-  assert.equal(typeof result.resourceUsageMaxRSSKiB, "number");
-  return result;
+  if (!isChildOutputRecord(parsedValue)) {
+    throw new TypeError(`${scenario}/${strategy} child output must be an object`);
+  }
+  const context = `${scenario}/${strategy} child output`;
+  assertLiteralProperty(parsedValue, "scenario", scenario, context);
+  assertLiteralProperty(parsedValue, "strategy", strategy, context);
+  assertLiteralProperty(parsedValue, "platform", process.platform, context);
+  return {
+    scenario,
+    strategy,
+    sha256: requiredStringProperty(parsedValue, "sha256", context),
+    bytes: requiredNumberProperty(parsedValue, "bytes", context),
+    outputFileBytes: requiredNumberProperty(parsedValue, "outputFileBytes", context),
+    sqliteCalls: requiredNumberProperty(parsedValue, "sqliteCalls", context),
+    countQueryCalls: requiredNumberProperty(parsedValue, "countQueryCalls", context),
+    photoPageQueries: requiredNumberProperty(parsedValue, "photoPageQueries", context),
+    photoPages: requiredNumberProperty(parsedValue, "photoPages", context),
+    maximumFetchedPhotoRows: requiredNumberProperty(parsedValue, "maximumFetchedPhotoRows", context),
+    maximumHeldPhotoRows: requiredNumberProperty(parsedValue, "maximumHeldPhotoRows", context),
+    maximumEmittedByteChunk: requiredNumberProperty(parsedValue, "maximumEmittedByteChunk", context),
+    maximumBufferedCodeUnitsObserved: nullableNumberProperty(parsedValue, "maximumBufferedCodeUnitsObserved", context),
+    boundedBatches: nullableNumberProperty(parsedValue, "boundedBatches", context),
+    streamingBatches: nullableNumberProperty(parsedValue, "streamingBatches", context),
+    zeroPhotoBatches: nullableNumberProperty(parsedValue, "zeroPhotoBatches", context),
+    elapsedMilliseconds: requiredNumberProperty(parsedValue, "elapsedMilliseconds", context),
+    peakObservedHeapUsedBytes: requiredNumberProperty(parsedValue, "peakObservedHeapUsedBytes", context),
+    visits: requiredNumberProperty(parsedValue, "visits", context),
+    photos: requiredNumberProperty(parsedValue, "photos", context),
+    labelsPerPhotoField: requiredNumberProperty(parsedValue, "labelsPerPhotoField", context),
+    resourceUsageMaxRSSKiB: requiredNumberProperty(parsedValue, "resourceUsageMaxRSSKiB", context),
+    rssBytesAtCompletion: requiredNumberProperty(parsedValue, "rssBytesAtCompletion", context),
+    heapUsedBytesAtCompletion: requiredNumberProperty(parsedValue, "heapUsedBytesAtCompletion", context),
+    heapTotalBytesAtCompletion: requiredNumberProperty(parsedValue, "heapTotalBytesAtCompletion", context),
+    externalBytesAtCompletion: requiredNumberProperty(parsedValue, "externalBytesAtCompletion", context),
+    platform: process.platform,
+    architecture: requiredStringProperty(parsedValue, "architecture", context),
+    node: requiredStringProperty(parsedValue, "node", context),
+  };
 }
 
 function runChild(
@@ -907,16 +1028,16 @@ function ratio(candidate: number, legacy: number): number {
 function profileScenario(directory: string, scenario: Scenario, configuration: Configuration): ScenarioResult {
   const databasePath = join(directory, `${scenario}.sqlite`);
   const databaseBytes = seedScenarioDatabase(databasePath, scenario, configuration.visits, configuration.photos);
-  const samples: Record<Strategy, ChildResult[]> = {
-    legacyFullString: [],
-    streamedCandidate: [],
-  };
+  const samples = {
+    legacyFullString: new Array<ChildResult>(),
+    streamedCandidate: new Array<ChildResult>(),
+  } satisfies Record<Strategy, ChildResult[]>;
   const executionOrderBySample: Strategy[][] = [];
   const strategies: readonly Strategy[] = ["legacyFullString", "streamedCandidate"];
 
   for (let sample = 0; sample < configuration.samples; sample++) {
-    const baseOrder = scenario === "distributed" ? strategies : ([...strategies].reverse() as Strategy[]);
-    const order = sample % 2 === 0 ? baseOrder : ([...baseOrder].reverse() as Strategy[]);
+    const baseOrder = scenario === "distributed" ? strategies : [...strategies].reverse();
+    const order = sample % 2 === 0 ? baseOrder : [...baseOrder].reverse();
     executionOrderBySample.push([...order]);
     for (const strategy of order) {
       const outputPath = join(directory, `${scenario}-${strategy}-${sample}.json`);

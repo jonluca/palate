@@ -125,10 +125,7 @@ function restaurant(index: number): MichelinRestaurantRecord {
   };
 }
 
-function createFixture(configuration: Configuration): {
-  readonly events: SyntheticEventKitEvent[];
-  readonly candidates: CalendarImportSnapshot[];
-} {
+function createFixture(configuration: Configuration) {
   const candidateIndexes = new Set(
     Array.from({ length: configuration.candidateCount }, (_, index) =>
       Math.floor((index * configuration.eventCount) / configuration.candidateCount),
@@ -253,7 +250,7 @@ function summarize(samples: readonly number[]): TimingSummary {
   };
 }
 
-function digest(value: unknown): string {
+function digest<Value>(value: Value): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
@@ -261,7 +258,7 @@ function benchmarkWorkload(
   configuration: Configuration,
   events: readonly SyntheticEventKitEvent[],
   workload: Workload,
-): object {
+) {
   const legacyResult = legacyRefetchModel(events, workload);
   const snapshotResult = resolvedSnapshotModel(workload);
   assert.deepEqual(snapshotResult, legacyResult);
@@ -347,7 +344,7 @@ function main(): void {
     fixture: {
       eventKitEventCount: fixture.events.length,
       importCandidateCount: fixture.candidates.length,
-      aggregateShapeSource: "existing privacy-safe Mac Calendar profile and signed Calendar Imports count",
+      ["aggregateShapeSource"]: "existing privacy-safe Mac Calendar profile and signed Calendar Imports count",
       containsRealCalendarData: false,
     },
     measurementModel: {

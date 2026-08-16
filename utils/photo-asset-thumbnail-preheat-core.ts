@@ -109,6 +109,11 @@ export interface PhotoAssetThumbnailPreheatBridgeRequest {
   readonly target: PhotoAssetThumbnailPixelTarget;
 }
 
+interface PhotoAssetThumbnailPixelTargetCandidate {
+  readonly pixelWidth?: number | string | boolean | null;
+  readonly pixelHeight?: number | string | boolean | null;
+}
+
 export interface PhotoAssetThumbnailPreheatProducerState {
   /** `initial` is reserved for bootstrap or data changes with no retained valid visible rows. */
   readonly selection: "initial" | "window";
@@ -138,8 +143,8 @@ function normalizedProducerRowIndices(values: readonly unknown[], rowCount: numb
   }
   const indices = new Set<number>();
   for (const value of values) {
-    if (Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) < rowCount) {
-      indices.add(value as number);
+    if (isValidPhotoAssetThumbnailRowIndex(value, rowCount)) {
+      indices.add(value);
     }
   }
   return [...indices].sort((left, right) => left - right);
@@ -201,8 +206,8 @@ function orderedVisibleRowIndices(values: readonly unknown[] | null | undefined,
 
   const indices = new Set<number>();
   for (const value of values) {
-    if (Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) < rowCount) {
-      indices.add(value as number);
+    if (isValidPhotoAssetThumbnailRowIndex(value, rowCount)) {
+      indices.add(value);
     }
   }
   return [...indices].sort((left, right) => left - right);
@@ -252,35 +257,54 @@ function payloadSizeLimit(value: number | undefined): number {
   return Math.min(value, MAXIMUM_PHOTO_ASSET_THUMBNAIL_PREHEAT_PAYLOAD_SIZE);
 }
 
-function isPhotoAssetUri(value: unknown): value is string {
+function isValidPhotoAssetThumbnailRowIndex<Value>(value: Value, rowCount: number): value is Value & number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value < rowCount;
+}
+
+function isPhotoAssetUri<Value>(value: Value): value is Value & string {
   return typeof value === "string" && value.startsWith("ph://") && value.length > "ph://".length;
+}
+
+function isPhotoAssetThumbnailScopeId<Value>(value: Value): value is Value & string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isPhotoAssetThumbnailPixelTargetCandidate<Value>(
+  value: Value,
+): value is Value & PhotoAssetThumbnailPixelTargetCandidate {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isValidPhotoAssetThumbnailTargetDimension<Value>(value: Value): value is Value & number {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value > 0 &&
+    value <= MAXIMUM_PHOTO_ASSET_THUMBNAIL_TARGET_DIMENSION
+  );
 }
 
 /**
  * Validate the public JavaScript/native boundary before Expo converts numbers to Swift `Int`.
  * The input is sliced before filtering so no caller can serialize more than the native hard cap.
  */
-export function preparePhotoAssetThumbnailPreheatBridgeRequest(
-  scopeID: unknown,
-  uris: unknown,
-  target: unknown,
+export function preparePhotoAssetThumbnailPreheatBridgeRequest<ScopeId, Uris, Target>(
+  scopeID: ScopeId,
+  uris: Uris,
+  target: Target,
 ): PhotoAssetThumbnailPreheatBridgeRequest | null {
-  if (typeof scopeID !== "string" || scopeID.length === 0 || !Array.isArray(uris)) {
+  if (!isPhotoAssetThumbnailScopeId(scopeID) || !Array.isArray(uris)) {
     return null;
   }
-  if (typeof target !== "object" || target === null) {
+  if (!isPhotoAssetThumbnailPixelTargetCandidate(target)) {
     return null;
   }
-  const pixelWidth = Reflect.get(target, "pixelWidth");
-  const pixelHeight = Reflect.get(target, "pixelHeight");
+  const pixelWidth = target.pixelWidth;
+  const pixelHeight = target.pixelHeight;
   if (
-    !Number.isSafeInteger(pixelWidth) ||
-    !Number.isSafeInteger(pixelHeight) ||
-    (pixelWidth as number) <= 0 ||
-    (pixelHeight as number) <= 0 ||
-    (pixelWidth as number) > MAXIMUM_PHOTO_ASSET_THUMBNAIL_TARGET_DIMENSION ||
-    (pixelHeight as number) > MAXIMUM_PHOTO_ASSET_THUMBNAIL_TARGET_DIMENSION ||
-    (pixelWidth as number) * (pixelHeight as number) > MAXIMUM_PHOTO_ASSET_THUMBNAIL_TARGET_PIXEL_COUNT
+    !isValidPhotoAssetThumbnailTargetDimension(pixelWidth) ||
+    !isValidPhotoAssetThumbnailTargetDimension(pixelHeight) ||
+    pixelWidth * pixelHeight > MAXIMUM_PHOTO_ASSET_THUMBNAIL_TARGET_PIXEL_COUNT
   ) {
     return null;
   }
@@ -299,8 +323,8 @@ export function preparePhotoAssetThumbnailPreheatBridgeRequest(
     scopeID,
     uris: boundedUris,
     target: {
-      pixelWidth: pixelWidth as number,
-      pixelHeight: pixelHeight as number,
+      pixelWidth,
+      pixelHeight,
     },
   };
 }

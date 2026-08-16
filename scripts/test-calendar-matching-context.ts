@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import {
   buildCalendarEnrichmentVisitSnapshot,
   CALENDAR_ENRICHMENT_SNAPSHOT_SQL,
@@ -23,6 +23,60 @@ interface LegacySuggestionRow {
   readonly name: string;
 }
 
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue | undefined, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function requiredNumber(value: SQLOutputValue | undefined, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function parseLegacyVisitRow(row: SQLiteRow): LegacyVisitRow {
+  return {
+    id: requiredString(row.id, "visits.id"),
+    startTime: requiredNumber(row.startTime, "visits.startTime"),
+    endTime: requiredNumber(row.endTime, "visits.endTime"),
+  };
+}
+
+function parseLegacySuggestionRow(row: SQLiteRow): LegacySuggestionRow {
+  return {
+    visitId: requiredString(row.visitId, "suggestions.visitId"),
+    id: requiredString(row.id, "suggestions.id"),
+    name: requiredString(row.name, "suggestions.name"),
+  };
+}
+
+function parseCalendarEnrichmentSnapshotRow(row: SQLiteRow): CalendarEnrichmentSnapshotRow {
+  return {
+    visitId: requiredString(row.visitId, "snapshot.visitId"),
+    startTime: requiredNumber(row.startTime, "snapshot.startTime"),
+    endTime: requiredNumber(row.endTime, "snapshot.endTime"),
+    suggestedRestaurantId: nullableString(row.suggestedRestaurantId, "snapshot.suggestedRestaurantId"),
+    suggestedRestaurantName: nullableString(row.suggestedRestaurantName, "snapshot.suggestedRestaurantName"),
+  };
+}
+
+function parseQueryPlanDetail(row: SQLiteRow): string {
+  return requiredString(row.detail, "query plan.detail");
+}
+
 function loadLegacyOracle(database: DatabaseSync, batchSize: number): CalendarEnrichmentVisitSnapshot[] {
   const visits = database
     .prepare(
@@ -31,7 +85,8 @@ function loadLegacyOracle(database: DatabaseSync, batchSize: number): CalendarEn
        WHERE calendarEventId IS NULL
        ORDER BY startTime DESC`,
     )
-    .all() as unknown as LegacyVisitRow[];
+    .all()
+    .map(parseLegacyVisitRow);
   const suggestionsByVisitId = new Map<string, Array<{ id: string; name: string }>>();
 
   for (let offset = 0; offset < visits.length; offset += batchSize) {
@@ -45,7 +100,8 @@ function loadLegacyOracle(database: DatabaseSync, batchSize: number): CalendarEn
          WHERE vsr.visitId IN (${placeholders})
          ORDER BY vsr.visitId, vsr.distance ASC`,
       )
-      .all(...visitIds) as unknown as LegacySuggestionRow[];
+      .all(...visitIds)
+      .map(parseLegacySuggestionRow);
     for (const suggestion of suggestions) {
       const grouped = suggestionsByVisitId.get(suggestion.visitId) ?? [];
       grouped.push({ id: suggestion.id, name: suggestion.name });
@@ -114,7 +170,8 @@ function assertProductionQueryMatchesLegacy(database: DatabaseSync): void {
   const legacy = loadLegacyOracle(database, 2);
   const candidateRows = database
     .prepare(CALENDAR_ENRICHMENT_SNAPSHOT_SQL)
-    .all() as unknown as CalendarEnrichmentSnapshotRow[];
+    .all()
+    .map(parseCalendarEnrichmentSnapshotRow);
   const candidate = buildCalendarEnrichmentVisitSnapshot(candidateRows);
 
   assert.deepEqual(candidate, legacy);
@@ -164,7 +221,7 @@ function testProductionQueryAgainstLegacyOracle(): void {
       .prepare(`EXPLAIN QUERY PLAN SELECT id, startTime, endTime
         FROM visits WHERE calendarEventId IS NULL ORDER BY startTime DESC`)
       .all()
-      .map((row) => String((row as { detail?: unknown }).detail ?? ""))
+      .map(parseQueryPlanDetail)
       .join("\n");
     const suggestionPlan = database
       .prepare(`EXPLAIN QUERY PLAN SELECT vsr.visitId, m.id, m.name
@@ -173,7 +230,7 @@ function testProductionQueryAgainstLegacyOracle(): void {
         WHERE vsr.visitId IN (?, ?)
         ORDER BY vsr.visitId, vsr.distance ASC`)
       .all("visit-tie-first", "visit-early")
-      .map((row) => String((row as { detail?: unknown }).detail ?? ""))
+      .map(parseQueryPlanDetail)
       .join("\n");
     assert.match(visitPlan, /idx_visits_calendar_event/);
     assert.match(suggestionPlan, /idx_visit_suggested_distance/);

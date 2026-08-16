@@ -11,7 +11,18 @@ type ReviewStarFilter = "any" | "1plus" | "2plus" | "3";
 
 // Scan progress state
 interface ScanProgress {
-  phase: "idle" | "scanning" | "analyzing-visits" | "enriching" | "complete" | "error";
+  phase:
+    | "idle"
+    | "scanning"
+    | "grouping-visits"
+    | "calendar-events"
+    | "calendar-only-visits"
+    | "detecting-food"
+    | "optimizing-database"
+    | "analyzing-visits"
+    | "enriching"
+    | "complete"
+    | "error";
   detail: string;
   photosPerSecond?: number;
   eta?: string;
@@ -249,7 +260,7 @@ export const useAppStore = create<AppState>()(
         }),
 
       // UI state
-      selectedVisitId: null as string | null,
+      selectedVisitId: null,
       setSelectedVisitId: (id: string | null) => set({ selectedVisitId: id }),
 
       // UI preferences
@@ -260,7 +271,7 @@ export const useAppStore = create<AppState>()(
 
       // Restaurant search modal
       isRestaurantSearchOpen: false,
-      restaurantSearchVisitId: null as string | null,
+      restaurantSearchVisitId: null,
 
       openRestaurantSearch: (visitId: string) =>
         set({

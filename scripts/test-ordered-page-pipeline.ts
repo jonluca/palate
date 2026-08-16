@@ -9,17 +9,12 @@ import { resolveVisionPageOrchestrationStrategy } from "../utils/vision-page-orc
 interface Deferred<Value> {
   readonly promise: Promise<Value>;
   resolve(value: Value): void;
-  reject(reason: unknown): void;
+  reject(cause: Error): void;
 }
 
 function createDeferred<Value>(): Deferred<Value> {
-  let resolveDeferred!: (value: Value) => void;
-  let rejectDeferred!: (reason: unknown) => void;
-  const promise = new Promise<Value>((resolve, reject) => {
-    resolveDeferred = resolve;
-    rejectDeferred = reject;
-  });
-  return { promise, resolve: resolveDeferred, reject: rejectDeferred };
+  const { promise, resolve, reject } = Promise.withResolvers<Value>();
+  return { promise, resolve, reject };
 }
 
 async function flushMicrotasks(): Promise<void> {
@@ -28,13 +23,26 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
-async function captureRejection(operation: Promise<unknown>): Promise<unknown> {
+async function captureRejection(operation: Promise<void>): Promise<Error> {
   try {
     await operation;
-  } catch (error) {
-    return error;
+  } catch (cause) {
+    if (cause instanceof Error) {
+      return cause;
+    }
+    throw new TypeError("Expected operation to reject with an Error.", { cause });
   }
   assert.fail("Expected operation to reject.");
+}
+
+function makeValidEmptyPipelineOptions() {
+  const pages: string[] = [];
+  return {
+    pages,
+    strategy: "serial" as const,
+    produce: async () => "unused",
+    consume: async () => {},
+  };
 }
 
 // Selection is deliberately conservative for old binaries and malformed native constants.
@@ -47,43 +55,21 @@ for (const invalid of ["", "LOOKAHEAD", " lookahead", "parallel", 1, true, {}]) 
 }
 
 // Runtime validation rejects malformed injected dependencies before work starts.
-await assert.rejects(runOrderedPagePipeline(null as never), /options must be an object/);
-await assert.rejects(
-  runOrderedPagePipeline({
-    pages: null as never,
-    strategy: "serial",
-    produce: async () => "unused",
-    consume: async () => {},
-  }),
-  /pages must be an array/,
-);
-await assert.rejects(
-  runOrderedPagePipeline({
-    pages: [],
-    strategy: "serial",
-    produce: null as never,
-    consume: async () => {},
-  }),
-  /producer must be a function/,
-);
-await assert.rejects(
-  runOrderedPagePipeline({
-    pages: [],
-    strategy: "serial",
-    produce: async () => "unused",
-    consume: null as never,
-  }),
-  /consumer must be a function/,
-);
-await assert.rejects(
-  runOrderedPagePipeline({
-    pages: [],
-    strategy: "parallel" as never,
-    produce: async () => "unused",
-    consume: async () => {},
-  }),
-  /Unsupported ordered page pipeline strategy/,
-);
+const invalidPagesOptions = makeValidEmptyPipelineOptions();
+Object.defineProperty(invalidPagesOptions, "pages", { enumerable: true, value: null });
+await assert.rejects(runOrderedPagePipeline(invalidPagesOptions), /pages must be an array/);
+
+const invalidProducerOptions = makeValidEmptyPipelineOptions();
+Object.defineProperty(invalidProducerOptions, "produce", { enumerable: true, value: null });
+await assert.rejects(runOrderedPagePipeline(invalidProducerOptions), /producer must be a function/);
+
+const invalidConsumerOptions = makeValidEmptyPipelineOptions();
+Object.defineProperty(invalidConsumerOptions, "consume", { enumerable: true, value: null });
+await assert.rejects(runOrderedPagePipeline(invalidConsumerOptions), /consumer must be a function/);
+
+const invalidStrategyOptions = makeValidEmptyPipelineOptions();
+Object.defineProperty(invalidStrategyOptions, "strategy", { enumerable: true, value: "parallel" });
+await assert.rejects(runOrderedPagePipeline(invalidStrategyOptions), /Unsupported ordered page pipeline strategy/);
 
 // Empty plans do no work in either mode.
 for (const strategy of ["serial", "lookahead"] as const) {
@@ -259,8 +245,8 @@ for (const strategy of ["serial", "lookahead"] as const) {
   const consumeFailure = new Error("injected consume failure before lookahead");
   const lookaheadFailure = new Error("injected late lookahead failure");
   const lookahead = createDeferred<number>();
-  const unhandled: unknown[] = [];
-  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  const unhandled: Error[] = [];
+  const onUnhandled = (cause: Error) => unhandled.push(cause);
   process.on("unhandledRejection", onUnhandled);
   try {
     const error = await captureRejection(
@@ -337,8 +323,8 @@ for (const strategy of ["serial", "lookahead"] as const) {
 // The speculative rejection handler is installed immediately: even when the
 // current consumer stays pending for another turn, Node sees no unhandled event.
 {
-  const unhandled: unknown[] = [];
-  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  const unhandled: Error[] = [];
+  const onUnhandled = (cause: Error) => unhandled.push(cause);
   process.on("unhandledRejection", onUnhandled);
   try {
     const failure = new Error("immediate speculative rejection");

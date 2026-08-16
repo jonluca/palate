@@ -149,10 +149,10 @@ async function assertFailureAndNullBehavior(): Promise<void> {
       throw new Error("injected lookup failure");
     }
     if (year === 2026) {
-      const noAwards: Record<string, string | null> = { "michelin-null-batch": null };
+      const noAwards = { "michelin-null-batch": null } satisfies Record<string, string | null>;
       return noAwards;
     }
-    const awards: Record<string, string | null> = { "michelin-empty": "", "michelin-null": null };
+    const awards = { "michelin-empty": "", "michelin-null": null } satisfies Record<string, string | null>;
     return awards;
   };
   const isolatedCalls: string[] = [];

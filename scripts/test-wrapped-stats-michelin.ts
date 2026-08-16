@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { WrappedStats } from "../utils/db/types.ts";
 import {
@@ -15,6 +15,7 @@ import {
   parseWrappedStatsMichelinRows,
   type WrappedStatsMichelinQueryRow,
 } from "../utils/db/wrapped-stats-michelin-core.ts";
+import { isJsonObject, isJsonString, parseJsonValue, type JsonObject, type JsonValue } from "../utils/runtime-json.ts";
 
 process.env.TZ = "America/Los_Angeles";
 import { assertBenchmarkOutputDoesNotAliasDatabase } from "./benchmark-wrapped-stats-michelin.ts";
@@ -38,6 +39,104 @@ interface DistinctStarsRow {
 interface Execution {
   readonly value: MichelinStats;
   readonly sqliteCalls: number;
+}
+
+function isSqlString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSqlNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredSqlNumber(value: SQLOutputValue | undefined, label: string): number {
+  if (!isSqlNumber(value)) {
+    throw new TypeError(`${label} must be a number.`);
+  }
+  return value;
+}
+
+function nullableSqlString(value: SQLOutputValue | undefined, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  if (!isSqlString(value)) {
+    throw new TypeError(`${label} must be a string or null.`);
+  }
+  return value;
+}
+
+function nullableSqlNumber(value: SQLOutputValue | undefined, label: string): number | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredSqlNumber(value, label);
+}
+
+function queryAll<Row>(
+  database: DatabaseSync,
+  sql: string,
+  parameters: readonly string[],
+  parseRow: (row: Record<string, SQLOutputValue>, index: number) => Row,
+): Row[] {
+  return database
+    .prepare(sql)
+    .all(...parameters)
+    .map(parseRow);
+}
+
+function queryFirst<Row>(
+  database: DatabaseSync,
+  sql: string,
+  parameters: readonly string[],
+  parseRow: (row: Record<string, SQLOutputValue>) => Row,
+): Row | undefined {
+  const row = database.prepare(sql).get(...parameters);
+  return row === undefined ? undefined : parseRow(row);
+}
+
+function parseAwardCountRow(row: Record<string, SQLOutputValue>, index: number): AwardCountRow {
+  return {
+    award: nullableSqlString(row.award, `award count row ${index}.award`),
+    count: requiredSqlNumber(row.count, `award count row ${index}.count`),
+  };
+}
+
+function parseCountRow(row: Record<string, SQLOutputValue>): CountRow {
+  return { count: requiredSqlNumber(row.count, "count row.count") };
+}
+
+function parseDistinctStarsRow(row: Record<string, SQLOutputValue>): DistinctStarsRow {
+  return { distinctStars: nullableSqlNumber(row.distinctStars, "distinct stars row.distinctStars") };
+}
+
+function parseMichelinQueryRow(row: Record<string, SQLOutputValue>, index: number): WrappedStatsMichelinQueryRow {
+  const label = `Michelin query row ${index}`;
+  return {
+    award: nullableSqlString(row.award, `${label}.award`),
+    visitCount: nullableSqlNumber(row.visitCount, `${label}.visitCount`),
+    restaurantCount: nullableSqlNumber(row.restaurantCount, `${label}.restaurantCount`),
+    distinctStarredRestaurants: requiredSqlNumber(
+      row.distinctStarredRestaurants,
+      `${label}.distinctStarredRestaurants`,
+    ),
+    distinctStars: nullableSqlNumber(row.distinctStars, `${label}.distinctStars`),
+    greenStarVisits: requiredSqlNumber(row.greenStarVisits, `${label}.greenStarVisits`),
+  };
+}
+
+function requiredJsonObject(value: JsonValue | undefined, label: string): JsonObject {
+  if (!isJsonObject(value)) {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value;
+}
+
+function requiredJsonString(value: JsonValue | undefined, label: string): string {
+  if (!isJsonString(value)) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
 }
 
 // Independent oracle copied literally from the former production
@@ -117,16 +216,26 @@ function emptyMichelinStats(
 
 function executeLegacy(database: DatabaseSync, year?: number | null): Execution {
   const parameters = year ? [String(year)] : [];
-  const all = <T>(sql: string): T[] =>
-    database.prepare(withLegacyYearFilter(sql, year)).all(...parameters) as unknown as T[];
-  const get = <T>(sql: string): T | undefined =>
-    database.prepare(withLegacyYearFilter(sql, year)).get(...parameters) as unknown as T | undefined;
-
-  const visitCounts = all<AwardCountRow>(LEGACY_VISIT_COUNTS_SQL);
-  const restaurantCounts = all<AwardCountRow>(LEGACY_RESTAURANT_COUNTS_SQL);
-  const distinctStarredRestaurants = get<CountRow>(LEGACY_DISTINCT_STARRED_SQL)?.count ?? 0;
-  const distinctStars = get<DistinctStarsRow>(LEGACY_DISTINCT_STARS_SQL)?.distinctStars ?? 0;
-  const greenStarVisits = get<CountRow>(LEGACY_GREEN_STARS_SQL)?.count ?? 0;
+  const visitCounts = queryAll(
+    database,
+    withLegacyYearFilter(LEGACY_VISIT_COUNTS_SQL, year),
+    parameters,
+    parseAwardCountRow,
+  );
+  const restaurantCounts = queryAll(
+    database,
+    withLegacyYearFilter(LEGACY_RESTAURANT_COUNTS_SQL, year),
+    parameters,
+    parseAwardCountRow,
+  );
+  const distinctStarredRestaurants =
+    queryFirst(database, withLegacyYearFilter(LEGACY_DISTINCT_STARRED_SQL, year), parameters, parseCountRow)?.count ??
+    0;
+  const distinctStars =
+    queryFirst(database, withLegacyYearFilter(LEGACY_DISTINCT_STARS_SQL, year), parameters, parseDistinctStarsRow)
+      ?.distinctStars ?? 0;
+  const greenStarVisits =
+    queryFirst(database, withLegacyYearFilter(LEGACY_GREEN_STARS_SQL, year), parameters, parseCountRow)?.count ?? 0;
   const value = emptyMichelinStats(Number(distinctStarredRestaurants), Number(distinctStars), Number(greenStarVisits));
 
   for (const row of visitCounts) {
@@ -176,7 +285,10 @@ function executeLegacy(database: DatabaseSync, year?: number | null): Execution 
 
 function executeCandidate(database: DatabaseSync, year?: number | null): Execution {
   const query = buildWrappedStatsMichelinQuery(year);
-  const rows = database.prepare(query.sql).all(...query.parameters) as unknown as WrappedStatsMichelinQueryRow[];
+  const rows = database
+    .prepare(query.sql)
+    .all(...query.parameters)
+    .map(parseMichelinQueryRow);
   return { value: parseWrappedStatsMichelinRows(rows), sqliteCalls: 1 };
 }
 
@@ -563,14 +675,23 @@ try {
   assert.deepEqual(readFileSync(databasePath), sourceBefore);
   assert.deepEqual(readFileSync(shmPath), shmSentinel);
 
-  const report = JSON.parse(readFileSync(reportPath, "utf8")) as {
-    scope?: { sourceMutation?: unknown };
-    dataset?: { sourceDatabaseSha256?: unknown };
-    sqliteCalls?: { productionPlan?: unknown };
-  };
-  assert.match(String(report.scope?.sourceMutation), /read-only SQLite immutable URI in one read transaction/);
-  assert.equal(report.dataset?.sourceDatabaseSha256, createHash("sha256").update(sourceBefore).digest("hex"));
-  assert.deepEqual(report.sqliteCalls?.productionPlan, productionPlan);
+  const report = requiredJsonObject(parseJsonValue(readFileSync(reportPath, "utf8")), "benchmark report");
+  const scope = requiredJsonObject(report.scope, "benchmark report.scope");
+  const dataset = requiredJsonObject(report.dataset, "benchmark report.dataset");
+  const sqliteCalls = requiredJsonObject(report.sqliteCalls, "benchmark report.sqliteCalls");
+  const reportProductionPlan = requiredJsonObject(
+    sqliteCalls.productionPlan,
+    "benchmark report.sqliteCalls.productionPlan",
+  );
+  assert.match(
+    requiredJsonString(scope.sourceMutation, "benchmark report.scope.sourceMutation"),
+    /read-only SQLite immutable URI in one read transaction/,
+  );
+  assert.equal(
+    requiredJsonString(dataset.sourceDatabaseSha256, "benchmark report.dataset.sourceDatabaseSha256"),
+    createHash("sha256").update(sourceBefore).digest("hex"),
+  );
+  assert.deepEqual(reportProductionPlan, productionPlan);
 
   const walSentinel = Buffer.from("non-empty-wal-sentinel", "utf8");
   writeFileSync(walPath, walSentinel);

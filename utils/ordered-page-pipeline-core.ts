@@ -47,7 +47,7 @@ function startSettled<Value>(operation: () => Value | PromiseLike<Value>): Start
   try {
     promise = Promise.resolve(operation()).then(
       (value) => record({ status: "fulfilled", value }),
-      (reason: unknown) => record({ status: "rejected", reason }),
+      (cause: unknown) => record({ status: "rejected", reason: cause }),
     );
   } catch (reason) {
     promise = Promise.resolve(record({ status: "rejected", reason }));
@@ -61,7 +61,9 @@ function startSettled<Value>(operation: () => Value | PromiseLike<Value>): Start
   };
 }
 
-function assertOptions<Page, Produced>(options: OrderedPagePipelineOptions<Page, Produced>): void {
+function assertOptions<Page, Produced>(
+  options: OrderedPagePipelineOptions<Page, Produced>,
+): asserts options is OrderedPagePipelineOptions<Page, Produced> {
   if (options === null || typeof options !== "object") {
     throw new TypeError("Ordered page pipeline options must be an object.");
   }

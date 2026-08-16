@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   finalizeReservationReviewPrefilterSnapshot,
@@ -15,6 +15,8 @@ import {
   RESERVATION_REVIEW_PREFILTER_CONFIRMED_DAYS_SQL,
   RESERVATION_REVIEW_PREFILTER_EXACT_FACTS_SQL,
   type ReservationReviewPrefilterCandidate,
+  type ReservationReviewPrefilterConfirmedVisitRow,
+  type ReservationReviewPrefilterFactRow,
   type ReservationReviewPrefilterSnapshot,
 } from "../utils/db/reservation-review-prefilter-core.ts";
 
@@ -39,13 +41,35 @@ interface ExistingVisitRow {
   readonly calendarEventTitle: string | null;
 }
 
-const BATCH_SIZE = 1_000;
-
-function values(parameters: readonly (string | number | null)[]): SQLInputValue[] {
-  return parameters as SQLInputValue[];
+interface SourceEventRow {
+  readonly sourceEventId: string;
 }
 
-function serializedBytes(value: unknown): number {
+interface FingerprintRow {
+  readonly fingerprint: string;
+}
+
+interface CalendarEventRow {
+  readonly calendarEventId: string;
+}
+
+interface PrefilterLocalDateRange {
+  readonly startTime: number;
+  readonly endTime: number;
+}
+
+interface PrefilterHarnessResult {
+  readonly snapshot: ReservationReviewPrefilterSnapshot;
+  readonly metrics: PrefilterHarnessMetrics;
+}
+
+const BATCH_SIZE = 1_000;
+
+function serializedParameterBytes(value: readonly (string | number | null)[]): number {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function serializedRowBytes(value: readonly Record<string, SQLOutputValue>[]): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
@@ -66,13 +90,102 @@ function query<Row>(
   metrics: PrefilterHarnessMetrics,
   sql: string,
   parameters: readonly (string | number | null)[],
+  parseRow: (row: Record<string, SQLOutputValue>, index: number) => Row,
 ): Row[] {
   metrics.queryCalls += 1;
-  metrics.parameterBytes += serializedBytes(parameters);
-  const rows = database.prepare(sql).all(...values(parameters)) as Row[];
+  metrics.parameterBytes += serializedParameterBytes(parameters);
+  const rawRows = database.prepare(sql).all(...parameters);
+  const rows = rawRows.map(parseRow);
   metrics.returnedRows += rows.length;
-  metrics.returnedBytes += serializedBytes(rows);
+  metrics.returnedBytes += serializedRowBytes(rawRows);
   return rows;
+}
+
+function isSqlString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSqlNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredSqlString(value: SQLOutputValue | undefined, label: string): string {
+  if (!isSqlString(value)) {
+    throw new TypeError(`${label} must be a string.`);
+  }
+  return value;
+}
+
+function requiredSqlNumber(value: SQLOutputValue | undefined, label: string): number {
+  if (!isSqlNumber(value)) {
+    throw new TypeError(`${label} must be a number.`);
+  }
+  return value;
+}
+
+function nullableSqlString(value: SQLOutputValue | undefined, label: string): string | null {
+  if (value === null) {
+    return null;
+  }
+  return requiredSqlString(value, label);
+}
+
+function parseSourceEventRow(row: Record<string, SQLOutputValue>, index: number): SourceEventRow {
+  return { sourceEventId: requiredSqlString(row.sourceEventId, `source event row ${index}.sourceEventId`) };
+}
+
+function parseFingerprintRow(row: Record<string, SQLOutputValue>, index: number): FingerprintRow {
+  return { fingerprint: requiredSqlString(row.fingerprint, `fingerprint row ${index}.fingerprint`) };
+}
+
+function parseCalendarEventRow(row: Record<string, SQLOutputValue>, index: number): CalendarEventRow {
+  return { calendarEventId: requiredSqlString(row.calendarEventId, `calendar event row ${index}.calendarEventId`) };
+}
+
+function parseExistingVisitRow(row: Record<string, SQLOutputValue>, index: number): ExistingVisitRow {
+  const label = `existing visit row ${index}`;
+  return {
+    restaurantId: nullableSqlString(row.restaurantId, `${label}.restaurantId`),
+    suggestedRestaurantId: nullableSqlString(row.suggestedRestaurantId, `${label}.suggestedRestaurantId`),
+    startTime: requiredSqlNumber(row.startTime, `${label}.startTime`),
+    restaurantName: nullableSqlString(row.restaurantName, `${label}.restaurantName`),
+    suggestedRestaurantName: nullableSqlString(row.suggestedRestaurantName, `${label}.suggestedRestaurantName`),
+    calendarEventTitle: nullableSqlString(row.calendarEventTitle, `${label}.calendarEventTitle`),
+  };
+}
+
+function parsePrefilterFactRow(row: Record<string, SQLOutputValue>, index: number): ReservationReviewPrefilterFactRow {
+  const kind = requiredSqlString(row.kind, `prefilter fact row ${index}.kind`);
+  if (kind !== "dismissed" && kind !== "fingerprint" && kind !== "confirmed") {
+    throw new TypeError(`prefilter fact row ${index}.kind is unsupported.`);
+  }
+  return {
+    kind,
+    sourceEventId: requiredSqlString(row.sourceEventId, `prefilter fact row ${index}.sourceEventId`),
+  };
+}
+
+function parseConfirmedVisitRow(
+  row: Record<string, SQLOutputValue>,
+  index: number,
+): ReservationReviewPrefilterConfirmedVisitRow {
+  const label = `confirmed visit row ${index}`;
+  return {
+    dayKey: requiredSqlString(row.dayKey, `${label}.dayKey`),
+    restaurantId: nullableSqlString(row.restaurantId, `${label}.restaurantId`),
+    suggestedRestaurantId: nullableSqlString(row.suggestedRestaurantId, `${label}.suggestedRestaurantId`),
+    restaurantName: nullableSqlString(row.restaurantName, `${label}.restaurantName`),
+    suggestedRestaurantName: nullableSqlString(row.suggestedRestaurantName, `${label}.suggestedRestaurantName`),
+    calendarEventTitle: nullableSqlString(row.calendarEventTitle, `${label}.calendarEventTitle`),
+  };
+}
+
+function readTotalChanges(database: DatabaseSync): number {
+  const row = database.prepare("SELECT total_changes() AS value").get();
+  if (row === undefined) {
+    throw new Error("SQLite total_changes() returned no row.");
+  }
+  return requiredSqlNumber(row.value, "SQLite total_changes() value");
 }
 
 export function initializePrefilterDatabase(database: DatabaseSync): void {
@@ -137,12 +250,16 @@ function oracleLocalDateKey(timestamp: number): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function oracleLocalDateRange(timestamp: number): { readonly startTime: number; readonly endTime: number } {
+function oracleLocalDateRange(timestamp: number): PrefilterLocalDateRange {
   const date = new Date(timestamp);
   return {
     startTime: new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime(),
     endTime: new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime(),
   };
+}
+
+function isExistingVisitName(value: string | null): value is string {
+  return value !== null;
 }
 
 function oracleSameLocalDate(a: number, b: number, metrics: PrefilterHarnessMetrics): boolean {
@@ -240,9 +357,9 @@ function oracleRestaurantMatch(
   ) {
     return true;
   }
-  return [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle].some(
-    (name) => typeof name === "string" && oracleNamesSimilar(candidate.restaurantName, name, metrics),
-  );
+  return [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle]
+    .filter(isExistingVisitName)
+    .some((name) => oracleNamesSimilar(candidate.restaurantName, name, metrics));
 }
 
 function batches<T>(items: readonly T[]): T[][] {
@@ -257,15 +374,16 @@ export function runLiteralLegacyPrefilter(
   database: DatabaseSync,
   candidates: readonly ReservationReviewPrefilterCandidate[],
   metrics = emptyPrefilterHarnessMetrics(),
-): { readonly snapshot: ReservationReviewPrefilterSnapshot; readonly metrics: PrefilterHarnessMetrics } {
+): PrefilterHarnessResult {
   const dismissedSourceEventIds = new Set<string>();
   const sourceEventIds = candidates.map(({ sourceEventId }) => sourceEventId);
   for (const batch of batches(sourceEventIds)) {
-    const rows = query<{ sourceEventId: string }>(
+    const rows = query(
       database,
       metrics,
       `SELECT sourceEventId FROM dismissed_reservation_import_sources WHERE sourceEventId IN (${batch.map(() => "?").join(", ")})`,
       batch,
+      parseSourceEventRow,
     );
     rows.forEach(({ sourceEventId }) => dismissedSourceEventIds.add(sourceEventId));
   }
@@ -273,11 +391,12 @@ export function runLiteralLegacyPrefilter(
   // The legacy exclusion helper independently reads dismissals a second time.
   const excludedSourceEventIds = new Set<string>();
   for (const batch of batches(sourceEventIds)) {
-    const rows = query<{ sourceEventId: string }>(
+    const rows = query(
       database,
       metrics,
       `SELECT sourceEventId FROM dismissed_reservation_import_sources WHERE sourceEventId IN (${batch.map(() => "?").join(", ")})`,
       batch,
+      parseSourceEventRow,
     );
     rows.forEach(({ sourceEventId }) => excludedSourceEventIds.add(sourceEventId));
   }
@@ -294,11 +413,12 @@ export function runLiteralLegacyPrefilter(
   const uniqueFingerprints = [...new Set(fingerprintsBySource.values())];
   const excludedFingerprints = new Set<string>();
   for (const batch of batches(uniqueFingerprints)) {
-    const rows = query<{ fingerprint: string }>(
+    const rows = query(
       database,
       metrics,
       `SELECT fingerprint FROM reservation_import_review_exclusions WHERE fingerprint IN (${batch.map(() => "?").join(", ")})`,
       batch,
+      parseFingerprintRow,
     );
     rows.forEach(({ fingerprint }) => excludedFingerprints.add(fingerprint));
   }
@@ -311,22 +431,24 @@ export function runLiteralLegacyPrefilter(
   const exactConfirmedSourceEventIds = new Set<string>();
   for (const batch of batches(sourceEventIds)) {
     const placeholders = batch.map(() => "?").join(", ");
-    const linked = query<{ sourceEventId: string }>(
+    const linked = query(
       database,
       metrics,
       `SELECT sources.sourceEventId
        FROM reservation_import_sources AS sources
        LEFT JOIN visits AS visit ON visit.id = sources.visitId
-       WHERE sources.sourceEventId IN (${placeholders})
+      WHERE sources.sourceEventId IN (${placeholders})
          AND (visit.status = 'confirmed' OR visit.id IS NULL)`,
       batch,
+      parseSourceEventRow,
     );
-    const legacy = query<{ calendarEventId: string }>(
+    const legacy = query(
       database,
       metrics,
       `SELECT calendarEventId FROM visits
        WHERE calendarEventId IN (${placeholders}) AND status = 'confirmed'`,
       batch,
+      parseCalendarEventRow,
     );
     linked.forEach(({ sourceEventId }) => exactConfirmedSourceEventIds.add(sourceEventId));
     legacy.forEach(({ calendarEventId }) => exactConfirmedSourceEventIds.add(calendarEventId));
@@ -338,7 +460,7 @@ export function runLiteralLegacyPrefilter(
     const ranges = sameDateCandidates.map(({ startTime }) => oracleLocalDateRange(startTime));
     const minimum = Math.min(...ranges.map(({ startTime }) => startTime));
     const maximum = Math.max(...ranges.map(({ endTime }) => endTime));
-    const visits = query<ExistingVisitRow>(
+    const visits = query(
       database,
       metrics,
       `SELECT visit.restaurantId, visit.suggestedRestaurantId, visit.startTime,
@@ -351,6 +473,7 @@ export function runLiteralLegacyPrefilter(
        WHERE visit.status = 'confirmed' AND visit.startTime >= ? AND visit.startTime < ?
        ORDER BY visit.startTime ASC`,
       [minimum, maximum],
+      parseExistingVisitRow,
     );
     for (const candidate of sameDateCandidates) {
       if (
@@ -379,14 +502,16 @@ export async function runSnapshotPrefilter(
   database: DatabaseSync,
   candidates: readonly ReservationReviewPrefilterCandidate[],
   metrics = emptyPrefilterHarnessMetrics(),
-): Promise<{ readonly snapshot: ReservationReviewPrefilterSnapshot; readonly metrics: PrefilterHarnessMetrics }> {
+): Promise<PrefilterHarnessResult> {
   const prepared = prepareReservationReviewPrefilter(candidates);
   database.exec("BEGIN");
   try {
     const rows = await readReservationReviewPrefilterSnapshotRows(
       {
-        getAllAsync: async <Row>(sql: string, parameters: Array<string | number | null>) =>
-          query<Row>(database, metrics, sql, parameters),
+        getFactRowsAsync: async (sql: string, parameters: Array<string | number | null>) =>
+          query(database, metrics, sql, parameters, parsePrefilterFactRow),
+        getConfirmedVisitRowsAsync: async (sql: string, parameters: Array<string | number | null>) =>
+          query(database, metrics, sql, parameters, parseConfirmedVisitRow),
       },
       prepared,
     );
@@ -624,7 +749,7 @@ async function assertComprehensiveParity(): Promise<void> {
     const before = database
       .prepare("SELECT name, (SELECT COUNT(*) FROM visits) AS count FROM sqlite_schema ORDER BY name")
       .all();
-    const totalChangesBefore = (database.prepare("SELECT total_changes() AS value").get() as { value: number }).value;
+    const totalChangesBefore = readTotalChanges(database);
     const legacy = runLiteralLegacyPrefilter(database, candidates);
     const optimized = await runSnapshotPrefilter(database, candidates);
     assertSnapshotEqual(optimized.snapshot, legacy.snapshot, "comprehensive fixture");
@@ -656,11 +781,7 @@ async function assertComprehensiveParity(): Promise<void> {
       .prepare("SELECT name, (SELECT COUNT(*) FROM visits) AS count FROM sqlite_schema ORDER BY name")
       .all();
     assert.deepEqual(after, before, "prefilter must not write schema or visit rows");
-    assert.equal(
-      (database.prepare("SELECT total_changes() AS value").get() as { value: number }).value,
-      totalChangesBefore,
-      "prefilter must execute no writes",
-    );
+    assert.equal(readTotalChanges(database), totalChangesBefore, "prefilter must execute no writes");
   } finally {
     database.close();
   }
@@ -705,9 +826,10 @@ async function assertAllExcludedSkipsSameDateSelect(): Promise<void> {
 }
 
 function explainDetails(database: DatabaseSync, sql: string, parameter: string): string[] {
-  return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(parameter) as Array<{ detail: string }>).map(
-    ({ detail }) => detail,
-  );
+  return database
+    .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+    .all(parameter)
+    .map((row, index) => requiredSqlString(row.detail, `query plan row ${index}.detail`));
 }
 
 function assertQueryPlans(): void {
@@ -750,8 +872,11 @@ async function assertWalSnapshotContract(): Promise<void> {
     reader.exec("BEGIN");
     const rows = await readReservationReviewPrefilterSnapshotRows(
       {
-        getAllAsync: async <Row>(sql: string, parameters: Array<string | number | null>) => {
-          const result = reader.prepare(sql).all(...values(parameters)) as Row[];
+        getFactRowsAsync: async (sql: string, parameters: Array<string | number | null>) => {
+          const result = reader
+            .prepare(sql)
+            .all(...parameters)
+            .map(parsePrefilterFactRow);
           calls += 1;
           if (calls === 1) {
             writer.exec("BEGIN IMMEDIATE");
@@ -764,6 +889,13 @@ async function assertWalSnapshotContract(): Promise<void> {
             writer.exec("COMMIT");
           }
           return result;
+        },
+        getConfirmedVisitRowsAsync: async (sql: string, parameters: Array<string | number | null>) => {
+          calls += 1;
+          return reader
+            .prepare(sql)
+            .all(...parameters)
+            .map(parseConfirmedVisitRow);
         },
       },
       prepared,

@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildMichelinMapViewportQuery,
   finalizeMichelinMapViewportRows,
@@ -59,6 +59,63 @@ interface DatabaseSnapshot {
   readonly totalChanges: number;
 }
 
+type SQLiteRow = Record<string, SQLOutputValue>;
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function readNumberColumn(row: SQLiteRow | undefined, column: string, context: string): number {
+  const value = row?.[column];
+  if (!isNumberValue(value)) {
+    throw new TypeError(`${context} must contain a numeric ${column} column`);
+  }
+  return value;
+}
+
+function readNullableNumberColumn(row: SQLiteRow, column: string, context: string): number | null {
+  const value = row[column];
+  if (value === null) {
+    return null;
+  }
+  if (!isNumberValue(value)) {
+    throw new TypeError(`${context} must contain a numeric or null ${column} column`);
+  }
+  return value;
+}
+
+function readStringColumn(row: SQLiteRow, column: string, context: string): string {
+  const value = row[column];
+  if (!isStringValue(value)) {
+    throw new TypeError(`${context} must contain a text ${column} column`);
+  }
+  return value;
+}
+
+function parseViewportQueryRow(row: SQLiteRow, index: number): MichelinMapViewportQueryRow {
+  const context = `Michelin viewport row ${index}`;
+  return {
+    sourceOrder: readNumberColumn(row, "sourceOrder", context),
+    id: readStringColumn(row, "id", context),
+    name: readStringColumn(row, "name", context),
+    latitude: readNumberColumn(row, "latitude", context),
+    longitude: readNumberColumn(row, "longitude", context),
+    address: readStringColumn(row, "address", context),
+    location: readStringColumn(row, "location", context),
+    cuisine: readStringColumn(row, "cuisine", context),
+    latestAwardYear: readNullableNumberColumn(row, "latestAwardYear", context),
+    award: readStringColumn(row, "award", context),
+    visited: readNumberColumn(row, "visited", context),
+    totalInView: readNumberColumn(row, "totalInView", context),
+    centerDistanceScore: readNumberColumn(row, "centerDistanceScore", context),
+    awardPriority: readNumberColumn(row, "awardPriority", context),
+  };
+}
+
 function fixtureRestaurant(
   id: string,
   latitude: number,
@@ -91,7 +148,7 @@ function worldRequest(
     readonly camera?: Partial<MichelinMapViewportRequest["camera"]>;
   } = {},
 ): MichelinMapViewportRequest {
-  return {
+  const request = {
     camera: {
       latitude: overrides.camera?.latitude ?? 0,
       longitude: overrides.camera?.longitude ?? 0,
@@ -102,8 +159,11 @@ function worldRequest(
     minimumAwardYear: overrides.minimumAwardYear ?? 2024,
     visitStatusFilter: overrides.visitStatusFilter ?? "all",
     awardFilter: overrides.awardFilter ?? "all",
-    ...(overrides.maximumResults === undefined ? {} : { maximumResults: overrides.maximumResults }),
-  };
+  } satisfies MichelinMapViewportRequest;
+  if (overrides.maximumResults === undefined) {
+    return request;
+  }
+  return { ...request, maximumResults: overrides.maximumResults };
 }
 
 function clampLatitude(latitude: number): number {
@@ -297,7 +357,7 @@ function selectWithLiteralOracle(
     if (request.visitStatusFilter === "unvisited" && visited) {
       continue;
     }
-    if (typeof restaurant.latestAwardYear !== "number" || restaurant.latestAwardYear < request.minimumAwardYear) {
+    if (restaurant.latestAwardYear === null || restaurant.latestAwardYear < request.minimumAwardYear) {
       continue;
     }
     if (!awardMatches(restaurant.award, request.awardFilter)) {
@@ -337,9 +397,9 @@ function selectWithLiteralOracle(
 }
 
 function numericValue(database: DatabaseSync, source: string): number {
-  const row = database.prepare(source).get() as { readonly value: number } | undefined;
-  assert.ok(row && Number.isSafeInteger(row.value));
-  return row.value;
+  const value = readNumberColumn(database.prepare(source).get(), "value", "numeric SQLite query");
+  assert.ok(Number.isSafeInteger(value));
+  return value;
 }
 
 function snapshotDatabase(database: DatabaseSync): DatabaseSnapshot {
@@ -464,11 +524,15 @@ class TestDatabase {
     this.database.exec("PRAGMA query_only = ON");
   }
 
-  async getAllAsync<T>(source: string, parameters: readonly (number | string)[]): Promise<T[]> {
+  async getAllAsync<T>(source: string, parameters: readonly (number | string)[]): Promise<T[]>;
+  async getAllAsync(source: string, parameters: readonly (number | string)[]): Promise<unknown[]> {
     this.queryCalls += 1;
     assert.match(source.trimStart(), /^WITH\b/i, "viewport execution must remain one read-only CTE query");
     assert.doesNotMatch(source, /\b(?:INSERT|UPDATE|DELETE|REPLACE|CREATE|DROP|ALTER)\b/i);
-    return this.database.prepare(source).all(...parameters) as T[];
+    return this.database
+      .prepare(source)
+      .all(...parameters)
+      .map(parseViewportQueryRow);
   }
 
   async withReadTransaction<T>(task: (transaction: TestDatabase) => Promise<T>): Promise<T> {

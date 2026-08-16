@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import {
   PENDING_QUICK_ACTIONS_SQL,
@@ -18,6 +18,63 @@ import {
   BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS,
   assertCalendarTitleMatchingSourceContract,
 } from "./calendar-title-matching-benchmark-core.ts";
+
+type SQLiteValue = SQLOutputValue;
+type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
+
+interface LegacySuggestion {
+  readonly id: string;
+  readonly name: string;
+  readonly latitude: number;
+  readonly longitude: number;
+}
+
+interface LegacyFoodLabel {
+  readonly label: string;
+  readonly confidence: number;
+}
+
+function isStringValue<Value>(value: Value): value is Value & string {
+  return typeof value === "string";
+}
+
+function isNumberValue<Value>(value: Value): value is Value & number {
+  return typeof value === "number";
+}
+
+function isLegacySuggestion<Value>(value: Value): value is Value & LegacySuggestion {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "id" in value &&
+    isStringValue(value.id) &&
+    "name" in value &&
+    isStringValue(value.name) &&
+    "latitude" in value &&
+    isNumberValue(value.latitude) &&
+    "longitude" in value &&
+    isNumberValue(value.longitude)
+  );
+}
+
+function isLegacyFoodLabel<Value>(value: Value): value is Value & LegacyFoodLabel {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "label" in value &&
+    isStringValue(value.label) &&
+    "confidence" in value &&
+    isNumberValue(value.confidence)
+  );
+}
+
+function parseLegacySuggestions(serialized: string): LegacySuggestion[] {
+  const parsed: unknown = JSON.parse(serialized);
+  if (!Array.isArray(parsed) || !parsed.every(isLegacySuggestion)) {
+    throw new TypeError("Legacy suggestions must contain ID, name, latitude, and longitude values");
+  }
+  return parsed;
+}
 
 type Strategy = "legacy-card-hydration" | "quick-actions-slim-rows";
 
@@ -338,14 +395,9 @@ function seedSyntheticDatabase(database: DatabaseSync, configuration: Configurat
 
 function parseLegacyRows(rows: readonly PendingVisitReviewQueryRow[]): PendingQuickActionVisit[] {
   return rows.map((row) => {
-    let suggestions: Array<{ id: string; name: string; latitude: number; longitude: number }> = [];
+    let suggestions = new Array<LegacySuggestion>();
     if (row.suggestedRestaurantsJson) {
-      const decoded = JSON.parse(row.suggestedRestaurantsJson) as Array<{
-        id: string;
-        name: string;
-        latitude: number;
-        longitude: number;
-      }>;
+      const decoded = parseLegacySuggestions(row.suggestedRestaurantsJson);
       suggestions = decoded.map(({ id, name, latitude, longitude }) => ({ id, name, latitude, longitude }));
     }
     return {
@@ -370,13 +422,19 @@ function literalLegacyFoodLabels(
     return [];
   }
   try {
-    const arrays = JSON.parse(foodLabelsJson) as Array<Array<{ label: string; confidence: number }>>;
+    const arrays: unknown = JSON.parse(foodLabelsJson);
+    if (!Array.isArray(arrays)) {
+      return [];
+    }
     const labels = new Map<string, { label: string; maxConfidence: number; photoCount: number }>();
     for (const photoLabels of arrays) {
       if (!Array.isArray(photoLabels)) {
         continue;
       }
       for (const label of photoLabels) {
+        if (!isLegacyFoodLabel(label)) {
+          continue;
+        }
         const existing = labels.get(label.label);
         if (existing) {
           existing.maxConfidence = Math.max(existing.maxConfidence, label.confidence);
@@ -439,7 +497,7 @@ function createLiteralLegacyQuickActionsData(
   return { visits, exactMatches };
 }
 
-function canonicalData(data: PendingQuickActionsData): object {
+function canonicalData(data: PendingQuickActionsData) {
   const thresholds = [2, 3, 5, 10, 20];
   const labels = new Map<string, string[]>();
   for (const visit of data.visits) {
@@ -477,15 +535,19 @@ function canonicalData(data: PendingQuickActionsData): object {
   };
 }
 
-function execute(database: DatabaseSync, strategy: Strategy): { data: PendingQuickActionsData; rawRows: unknown[] } {
+function execute(database: DatabaseSync, strategy: Strategy) {
   if (strategy === "legacy-card-hydration") {
-    const rawRows = database.prepare(PENDING_VISITS_FOR_REVIEW_SQL).all() as unknown as PendingVisitReviewQueryRow[];
+    // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+    const rawRows = database
+      .prepare(PENDING_VISITS_FOR_REVIEW_SQL)
+      .all() as BenchmarkSQLiteRow<PendingVisitReviewQueryRow>[];
     return {
       data: createLiteralLegacyQuickActionsData(parseLegacyRows(rawRows)),
       rawRows,
     };
   }
-  const rawRows = database.prepare(PENDING_QUICK_ACTIONS_SQL).all() as unknown as PendingQuickActionQueryRow[];
+  // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
+  const rawRows = database.prepare(PENDING_QUICK_ACTIONS_SQL).all() as BenchmarkSQLiteRow<PendingQuickActionQueryRow>[];
   return {
     data: createPendingQuickActionsData(parsePendingQuickActionRows(rawRows), BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS),
     rawRows,
@@ -505,17 +567,17 @@ function measure(database: DatabaseSync, strategy: Strategy): Measurement {
   };
 }
 
-function summarize(samples: readonly number[]): object {
+function summarize(samples: readonly number[]) {
   assert.ok(samples.length > 0);
   const sorted = [...samples].sort((left, right) => left - right);
   const medianIndex = Math.floor(sorted.length / 2);
   return {
     samplesMilliseconds: samples,
-    minimumMilliseconds: sorted[0],
+    minimumMilliseconds: sorted[0]!,
     medianMilliseconds:
-      sorted.length % 2 === 0 ? (sorted[medianIndex - 1]! + sorted[medianIndex]!) / 2 : sorted[medianIndex],
-    p95Milliseconds: sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)],
-    maximumMilliseconds: sorted.at(-1),
+      sorted.length % 2 === 0 ? (sorted[medianIndex - 1]! + sorted[medianIndex]!) / 2 : sorted[medianIndex]!,
+    p95Milliseconds: sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)]!,
+    maximumMilliseconds: sorted.at(-1)!,
   };
 }
 
@@ -538,156 +600,161 @@ const database = configuration.databasePath
   ? new DatabaseSync(immutableDatabaseUri(configuration.databasePath), { readOnly: true })
   : new DatabaseSync(":memory:");
 
-let report: object;
-try {
-  if (configuration.databasePath) {
-    database.exec("PRAGMA query_only = ON; BEGIN");
-    const integrity = database.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown } | undefined;
-    assert.equal(integrity?.integrity_check, "ok");
-  } else {
-    createSchema(database);
-    seedSyntheticDatabase(database, configuration);
-  }
-  const calendarTitleMatchingSource = assertCalendarTitleMatchingSourceContract();
-  const quickActionsCoreSource = readFileSync(new URL("../utils/db/quick-actions-core.ts", import.meta.url));
-  const visitReviewRuntimeSource = readFileSync(new URL("../utils/db/visit-review.ts", import.meta.url));
-  const legacyBefore = execute(database, "legacy-card-hydration");
-  const slimBefore = execute(database, "quick-actions-slim-rows");
-  const canonicalLegacy = canonicalData(legacyBefore.data);
-  const canonicalSlim = canonicalData(slimBefore.data);
-  assert.deepEqual(canonicalSlim, canonicalLegacy, "slim Quick Actions data must match the legacy card oracle");
-  const resultDigest = sha256(JSON.stringify(canonicalLegacy));
-
-  for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
-    const order: Strategy[] =
-      warmup % 2 === 0
-        ? ["legacy-card-hydration", "quick-actions-slim-rows"]
-        : ["quick-actions-slim-rows", "legacy-card-hydration"];
-    for (const strategy of order) {
-      const sample = measure(database, strategy);
-      assert.equal(sample.resultDigest, resultDigest);
+const report = (() => {
+  try {
+    if (sourceBefore !== null) {
+      database.exec("PRAGMA query_only = ON; BEGIN");
+      // SAFETY: The fixed benchmark SQL and validated schema match this named SQLite result contract.
+      const integrity = database.prepare("PRAGMA integrity_check").get() as
+        | BenchmarkSQLiteRow<{ integrity_check?: SQLiteValue }>
+        | undefined;
+      assert.equal(integrity?.integrity_check, "ok");
+    } else {
+      createSchema(database);
+      seedSyntheticDatabase(database, configuration);
     }
-  }
+    const calendarTitleMatchingSource = assertCalendarTitleMatchingSourceContract();
+    const quickActionsCoreSource = readFileSync(new URL("../utils/db/quick-actions-core.ts", import.meta.url));
+    const visitReviewRuntimeSource = readFileSync(new URL("../utils/db/visit-review.ts", import.meta.url));
+    const legacyBefore = execute(database, "legacy-card-hydration");
+    const slimBefore = execute(database, "quick-actions-slim-rows");
+    const canonicalLegacy = canonicalData(legacyBefore.data);
+    const canonicalSlim = canonicalData(slimBefore.data);
+    assert.deepEqual(canonicalSlim, canonicalLegacy, "slim Quick Actions data must match the legacy card oracle");
+    const resultDigest = sha256(JSON.stringify(canonicalLegacy));
 
-  const timings: Record<Strategy, number[]> = {
-    "legacy-card-hydration": [],
-    "quick-actions-slim-rows": [],
-  };
-  let pairedSlimWins = 0;
-  for (let sampleIndex = 0; sampleIndex < configuration.samples; sampleIndex++) {
-    const order: Strategy[] =
-      sampleIndex % 2 === 0
-        ? ["legacy-card-hydration", "quick-actions-slim-rows"]
-        : ["quick-actions-slim-rows", "legacy-card-hydration"];
-    const pair = new Map<Strategy, number>();
-    for (const strategy of order) {
-      const sample = measure(database, strategy);
-      assert.equal(sample.resultDigest, resultDigest);
-      timings[strategy].push(sample.milliseconds);
-      pair.set(strategy, sample.milliseconds);
+    for (let warmup = 0; warmup < configuration.warmupIterations; warmup++) {
+      const order: Strategy[] =
+        warmup % 2 === 0
+          ? ["legacy-card-hydration", "quick-actions-slim-rows"]
+          : ["quick-actions-slim-rows", "legacy-card-hydration"];
+      for (const strategy of order) {
+        const sample = measure(database, strategy);
+        assert.equal(sample.resultDigest, resultDigest);
+      }
     }
-    if (pair.get("quick-actions-slim-rows")! < pair.get("legacy-card-hydration")!) {
-      pairedSlimWins++;
+
+    const timings = {
+      "legacy-card-hydration": new Array<number>(),
+      "quick-actions-slim-rows": new Array<number>(),
+    } satisfies Record<Strategy, number[]>;
+    let pairedSlimWins = 0;
+    for (let sampleIndex = 0; sampleIndex < configuration.samples; sampleIndex++) {
+      const order: Strategy[] =
+        sampleIndex % 2 === 0
+          ? ["legacy-card-hydration", "quick-actions-slim-rows"]
+          : ["quick-actions-slim-rows", "legacy-card-hydration"];
+      const pair = new Map<Strategy, number>();
+      for (const strategy of order) {
+        const sample = measure(database, strategy);
+        assert.equal(sample.resultDigest, resultDigest);
+        timings[strategy].push(sample.milliseconds);
+        pair.set(strategy, sample.milliseconds);
+      }
+      if (pair.get("quick-actions-slim-rows")! < pair.get("legacy-card-hydration")!) {
+        pairedSlimWins++;
+      }
     }
-  }
 
-  const legacyAfter = execute(database, "legacy-card-hydration");
-  const slimAfter = execute(database, "quick-actions-slim-rows");
-  assert.deepEqual(canonicalData(slimAfter.data), canonicalData(legacyAfter.data));
-  assert.equal(sha256(JSON.stringify(canonicalData(legacyAfter.data))), resultDigest);
-  const legacyMedian = (summarize(timings["legacy-card-hydration"]) as { medianMilliseconds: number })
-    .medianMilliseconds;
-  const slimMedian = (summarize(timings["quick-actions-slim-rows"]) as { medianMilliseconds: number })
-    .medianMilliseconds;
-  const actionCounts = {
-    totalPending: legacyAfter.data.visits.length,
-    exactMatches: legacyAfter.data.exactMatches.length,
-    nonFood: legacyAfter.data.visits.filter((visit) => !visit.foodProbable).length,
-    unmatched: legacyAfter.data.visits.filter(
-      (visit) => !visit.suggestedRestaurantId && visit.suggestedRestaurants.length === 0,
-    ).length,
-    thresholds: Object.fromEntries(
-      [2, 3, 5, 10, 20].map((threshold) => [
-        threshold,
-        legacyAfter.data.visits.filter((visit) => visit.photoCount < threshold).length,
-      ]),
-    ),
-  };
-  report = {
-    benchmark: "quick-actions-lightweight-query",
-    schemaVersion: 1,
-    mode: configuration.databasePath ? "immutable-real" : "deterministic-synthetic",
-    configuration: {
-      visits: configuration.databasePath ? undefined : configuration.visits,
-      photos: configuration.databasePath ? undefined : configuration.photos,
-      suggestionEdges: configuration.databasePath ? undefined : configuration.suggestionEdges,
-      warmupIterations: configuration.warmupIterations,
-      samples: configuration.samples,
-    },
-    source: configuration.databasePath
-      ? {
-          fileName: basename(configuration.databasePath),
-          files: sourceBefore,
-        }
-      : { seed: "closed-form-v1" },
-    productionContract: {
-      quickActionsSqlSha256: sha256(PENDING_QUICK_ACTIONS_SQL),
-      legacySqlSha256: sha256(PENDING_VISITS_FOR_REVIEW_SQL),
-      quickActionsCoreSourceSha256: sha256(quickActionsCoreSource),
-      visitReviewRuntimeSourceSha256: sha256(visitReviewRuntimeSource),
-      legacyTransformOracle: "independent literal benchmark implementation",
-      calendarTitleMatchingSource,
-    },
-    correctness: {
-      exactCanonicalParityBeforeAndAfterTiming: true,
-      exactFloat64StartTimeTransport: "direct SQLite scalar",
-      resultDigest,
-      actionCounts,
-    },
-    payload: {
-      legacyRows: legacyAfter.rawRows.length,
-      slimRows: slimAfter.rawRows.length,
-      legacyJsonEquivalentBytes: Buffer.byteLength(JSON.stringify(legacyAfter.rawRows)),
-      slimJsonEquivalentBytes: Buffer.byteLength(JSON.stringify(slimAfter.rawRows)),
-      bytesSaved:
-        Buffer.byteLength(JSON.stringify(legacyAfter.rawRows)) - Buffer.byteLength(JSON.stringify(slimAfter.rawRows)),
-      reductionPercent:
-        (1 -
-          Buffer.byteLength(JSON.stringify(slimAfter.rawRows)) /
-            Buffer.byteLength(JSON.stringify(legacyAfter.rawRows))) *
-        100,
-    },
-    timings: {
-      legacyCardHydration: summarize(timings["legacy-card-hydration"]),
-      quickActionsSlimRows: summarize(timings["quick-actions-slim-rows"]),
-      medianSpeedup: legacyMedian / slimMedian,
-      medianMillisecondsSaved: legacyMedian - slimMedian,
-      pairedSlimWins,
-      pairs: configuration.samples,
-    },
-    scope:
-      "Node/V8 node:sqlite query, row conversion, JSON parsing, food-label reduction, and Calendar title matching; excludes Expo SQLite scheduling, React Native bridge conversion, Hermes, and rendering.",
-    privacy: {
-      aggregateOnlyReport: true,
-      rawVisitIdsRetained: false,
-      rawCalendarTitlesRetained: false,
-      rawPhotoUrisRetained: false,
-    },
-  };
+    const legacyAfter = execute(database, "legacy-card-hydration");
+    const slimAfter = execute(database, "quick-actions-slim-rows");
+    assert.deepEqual(canonicalData(slimAfter.data), canonicalData(legacyAfter.data));
+    assert.equal(sha256(JSON.stringify(canonicalData(legacyAfter.data))), resultDigest);
+    const legacyMedian = summarize(timings["legacy-card-hydration"]).medianMilliseconds;
+    const slimMedian = summarize(timings["quick-actions-slim-rows"]).medianMilliseconds;
+    const actionCounts = {
+      totalPending: legacyAfter.data.visits.length,
+      exactMatches: legacyAfter.data.exactMatches.length,
+      nonFood: legacyAfter.data.visits.filter((visit) => !visit.foodProbable).length,
+      unmatched: legacyAfter.data.visits.filter(
+        (visit) => !visit.suggestedRestaurantId && visit.suggestedRestaurants.length === 0,
+      ).length,
+      thresholds: Object.fromEntries(
+        [2, 3, 5, 10, 20].map((threshold) => [
+          threshold,
+          legacyAfter.data.visits.filter((visit) => visit.photoCount < threshold).length,
+        ]),
+      ),
+    };
+    return {
+      benchmark: "quick-actions-lightweight-query",
+      schemaVersion: 1,
+      mode: configuration.databasePath ? "immutable-real" : "deterministic-synthetic",
+      configuration: {
+        visits: configuration.databasePath ? undefined : configuration.visits,
+        photos: configuration.databasePath ? undefined : configuration.photos,
+        suggestionEdges: configuration.databasePath ? undefined : configuration.suggestionEdges,
+        warmupIterations: configuration.warmupIterations,
+        samples: configuration.samples,
+      },
+      source: configuration.databasePath
+        ? {
+            fileName: basename(configuration.databasePath),
+            files: sourceBefore,
+          }
+        : { seed: "closed-form-v1" },
+      productionContract: {
+        quickActionsSqlSha256: sha256(PENDING_QUICK_ACTIONS_SQL),
+        legacySqlSha256: sha256(PENDING_VISITS_FOR_REVIEW_SQL),
+        quickActionsCoreSourceSha256: sha256(quickActionsCoreSource),
+        visitReviewRuntimeSourceSha256: sha256(visitReviewRuntimeSource),
+        legacyTransformOracle: "independent literal benchmark implementation",
+        calendarTitleMatchingSource,
+      },
+      correctness: {
+        exactCanonicalParityBeforeAndAfterTiming: true,
+        exactFloat64StartTimeTransport: "direct SQLite scalar",
+        resultDigest,
+        actionCounts,
+      },
+      payload: {
+        legacyRows: legacyAfter.rawRows.length,
+        slimRows: slimAfter.rawRows.length,
+        legacyJsonEquivalentBytes: Buffer.byteLength(JSON.stringify(legacyAfter.rawRows)),
+        slimJsonEquivalentBytes: Buffer.byteLength(JSON.stringify(slimAfter.rawRows)),
+        bytesSaved:
+          Buffer.byteLength(JSON.stringify(legacyAfter.rawRows)) - Buffer.byteLength(JSON.stringify(slimAfter.rawRows)),
+        reductionPercent:
+          (1 -
+            Buffer.byteLength(JSON.stringify(slimAfter.rawRows)) /
+              Buffer.byteLength(JSON.stringify(legacyAfter.rawRows))) *
+          100,
+      },
+      timings: {
+        legacyCardHydration: summarize(timings["legacy-card-hydration"]),
+        quickActionsSlimRows: summarize(timings["quick-actions-slim-rows"]),
+        medianSpeedup: legacyMedian / slimMedian,
+        medianMillisecondsSaved: legacyMedian - slimMedian,
+        pairedSlimWins,
+        pairs: configuration.samples,
+      },
+      scope:
+        "Node/V8 node:sqlite query, row conversion, JSON parsing, food-label reduction, and Calendar title matching; excludes Expo SQLite scheduling, React Native bridge conversion, Hermes, and rendering.",
+      privacy: {
+        aggregateOnlyReport: true,
+        rawVisitIdsRetained: false,
+        rawCalendarTitlesRetained: false,
+        rawPhotoUrisRetained: false,
+      },
+    };
 
-  if (configuration.databasePath) {
-    database.exec("ROLLBACK");
+    if (sourceBefore !== null) {
+      database.exec("ROLLBACK");
+    }
+  } finally {
+    database.close();
   }
-} finally {
-  database.close();
-}
+})();
 
 if (configuration.databasePath) {
   const sourceAfter = snapshotDatabaseFiles(configuration.databasePath);
   assert.deepEqual(sourceAfter, sourceBefore, "source database and sidecars must remain byte-exact");
-  (report as { source: { filesUnchanged?: boolean } }).source.filesUnchanged = true;
 }
 
-writeFileSync(configuration.outputPath, `${JSON.stringify(report, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-console.log(JSON.stringify(report));
+const outputReport = configuration.databasePath
+  ? { ...report, source: { ...report.source, filesUnchanged: true } }
+  : report;
+
+writeFileSync(configuration.outputPath, `${JSON.stringify(outputReport, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+console.log(JSON.stringify(outputReport));
 console.error(`Saved Quick Actions query profile to ${configuration.outputPath}`);

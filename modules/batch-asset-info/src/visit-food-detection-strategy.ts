@@ -6,8 +6,19 @@ export type VisitFoodDetectionStrategy =
   | typeof FULL_PLAN_VISIT_FOOD_DETECTION_STRATEGY
   | typeof RANK3_BULK_TAIL_VISIT_FOOD_DETECTION_STRATEGY;
 
+export type NativeVisitFoodDetectionStrategyValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | readonly NativeVisitFoodDetectionStrategyValue[]
+  | { readonly [key: string]: NativeVisitFoodDetectionStrategyValue };
+
 /** Resolves an exact native strategy value, retaining the full path for older binaries. */
-export function resolveVisitFoodDetectionStrategy(value: unknown): VisitFoodDetectionStrategy {
+export function resolveVisitFoodDetectionStrategy(
+  value: NativeVisitFoodDetectionStrategyValue,
+): VisitFoodDetectionStrategy {
   if (value === FULL_PLAN_VISIT_FOOD_DETECTION_STRATEGY || value === RANK3_BULK_TAIL_VISIT_FOOD_DETECTION_STRATEGY) {
     return value;
   }

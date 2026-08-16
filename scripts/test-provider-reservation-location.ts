@@ -35,6 +35,29 @@ interface InstrumentedLookup {
   readonly getMaxInFlight: () => number;
 }
 
+interface TockBridgeMessage {
+  readonly count?: number;
+  readonly error?: string;
+  readonly payload?: TockBridgePayload;
+}
+
+interface TockBridgePayload {
+  readonly purchases?: readonly TockPurchase[];
+}
+
+interface TockPurchase {
+  readonly id: string;
+}
+
+interface TockBridgeWindow {
+  readonly ReactNativeWebView: {
+    readonly postMessage: (serialized: string) => void;
+  };
+  __palateTockHistoryPayload?: TockBridgePayload;
+}
+
+type TockBridgeCallback = () => Promise<void>;
+
 function reservation(
   id: string,
   restaurantName: string,
@@ -130,7 +153,7 @@ async function literalSequentialOracle(
   const output: Array<LocatedProviderReservation<TestReservation> | null> = [];
   for (const input of inputs) {
     if (input.latitude !== null && input.longitude !== null) {
-      output.push(input as LocatedProviderReservation<TestReservation>);
+      output.push({ ...input, latitude: input.latitude, longitude: input.longitude });
       continue;
     }
 
@@ -413,6 +436,7 @@ function extractTemplateLiteral(source: string, declaration: string): string {
   const bodyStart = start + startMarker.length;
   const bodyEnd = source.indexOf("\n`;", bodyStart);
   assert.notEqual(bodyEnd, -1, `${declaration} closing delimiter is missing`);
+  // SAFETY: the VM expression is a template literal, so evaluating it produces a string.
   return runInNewContext(`\`${source.slice(bodyStart, bodyEnd)}\``) as string;
 }
 
@@ -442,14 +466,15 @@ async function testTockSuccessfulPayloadCache(): Promise<void> {
   );
   assert.match(bridgeScript, /setInterval\(readHistory, 2500\);/);
 
-  const messages: Array<Record<string, unknown>> = [];
+  const messages: TockBridgeMessage[] = [];
   const fetchUrls: string[] = [];
-  const intervalCallbacks: Array<() => unknown> = [];
-  const timeoutCallbacks: Array<() => unknown> = [];
-  const windowObject: Record<string, unknown> = {
+  const intervalCallbacks: TockBridgeCallback[] = [];
+  const timeoutCallbacks: TockBridgeCallback[] = [];
+  const windowObject: TockBridgeWindow = {
     ReactNativeWebView: {
       postMessage: (serialized: string) => {
-        messages.push(JSON.parse(serialized) as Record<string, unknown>);
+        const message: TockBridgeMessage = JSON.parse(serialized);
+        messages.push(message);
       },
     },
   };
@@ -471,12 +496,12 @@ async function testTockSuccessfulPayloadCache(): Promise<void> {
         json: async () => ({ data: { purchases: [{ id: "purchase-1" }, { id: "purchase-2" }] } }),
       };
     },
-    setInterval: (callback: () => unknown, milliseconds: number) => {
+    setInterval: (callback: TockBridgeCallback, milliseconds: number) => {
       assert.equal(milliseconds, 2_500);
       intervalCallbacks.push(callback);
       return 1;
     },
-    setTimeout: (callback: () => unknown, milliseconds: number) => {
+    setTimeout: (callback: TockBridgeCallback, milliseconds: number) => {
       assert.equal(milliseconds, 300);
       timeoutCallbacks.push(callback);
       return 2;
@@ -506,15 +531,16 @@ async function testTockSuccessfulPayloadCache(): Promise<void> {
 async function testTockShortKnownTotalRetriesUntilComplete(): Promise<void> {
   const source = readFileSync(new URL("../app/(app)/tock-import.tsx", import.meta.url), "utf8");
   const bridgeScript = extractTemplateLiteral(source, "TOCK_HISTORY_BRIDGE_SCRIPT");
-  const messages: Array<Record<string, unknown>> = [];
+  const messages: TockBridgeMessage[] = [];
   const fetchUrls: string[] = [];
-  const intervalCallbacks: Array<() => unknown> = [];
-  const timeoutCallbacks: Array<() => unknown> = [];
+  const intervalCallbacks: TockBridgeCallback[] = [];
+  const timeoutCallbacks: TockBridgeCallback[] = [];
   let historyRequestCount = 0;
-  const windowObject: Record<string, unknown> = {
+  const windowObject: TockBridgeWindow = {
     ReactNativeWebView: {
       postMessage: (serialized: string) => {
-        messages.push(JSON.parse(serialized) as Record<string, unknown>);
+        const message: TockBridgeMessage = JSON.parse(serialized);
+        messages.push(message);
       },
     },
   };
@@ -542,11 +568,11 @@ async function testTockShortKnownTotalRetriesUntilComplete(): Promise<void> {
         }),
       };
     },
-    setInterval: (callback: () => unknown) => {
+    setInterval: (callback: TockBridgeCallback) => {
       intervalCallbacks.push(callback);
       return 1;
     },
-    setTimeout: (callback: () => unknown) => {
+    setTimeout: (callback: TockBridgeCallback) => {
       timeoutCallbacks.push(callback);
       return 2;
     },

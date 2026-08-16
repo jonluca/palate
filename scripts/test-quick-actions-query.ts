@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { QueryClient } from "@tanstack/query-core";
 import {
   PENDING_QUICK_ACTIONS_SQL,
@@ -27,8 +27,124 @@ import {
   reviewQueryKeys,
   type PendingReviewInfiniteData,
 } from "../utils/review-query-policy.ts";
+import {
+  isJsonNumber,
+  isJsonObject,
+  isJsonString,
+  parseJsonValue,
+  type JsonObject,
+  type JsonValue,
+} from "../utils/runtime-json.ts";
 
 const FRACTIONAL_START_TIME = Number("1657669852199.4983");
+const REVIEW_PRIORITIES = [1, 2, 3, 4] as const;
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+interface IndependentFoodLabel {
+  readonly label: string;
+  readonly confidence: number;
+}
+
+interface IndependentAggregatedFoodLabel {
+  readonly label: string;
+  readonly maxConfidence: number;
+  readonly photoCount: number;
+}
+
+interface BaseQuickActionRow {
+  readonly id: string;
+  readonly photoCount: number;
+  readonly foodProbable: number;
+  readonly suggestedRestaurantId: string | null;
+  readonly calendarEventTitle: string | null;
+  readonly startTime: number;
+}
+
+interface SuggestionVisitRow extends PendingQuickActionSuggestion {
+  readonly visitId: string;
+}
+
+interface FoodLabelsRow {
+  readonly visitId: string;
+  readonly foodLabels: string;
+}
+
+function isSQLiteString(value: SQLOutputValue): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function requiredNumber(value: SQLOutputValue, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function parseBaseQuickActionRow(row: SQLiteRow): BaseQuickActionRow {
+  return {
+    id: requiredString(row.id, "visits.id"),
+    photoCount: requiredNumber(row.photoCount, "visits.photoCount"),
+    foodProbable: requiredNumber(row.foodProbable, "visits.foodProbable"),
+    suggestedRestaurantId: nullableString(row.suggestedRestaurantId, "visits.suggestedRestaurantId"),
+    calendarEventTitle: nullableString(row.calendarEventTitle, "visits.calendarEventTitle"),
+    startTime: requiredNumber(row.startTime, "visits.startTime"),
+  };
+}
+
+function parseSuggestionVisitRow(row: SQLiteRow): SuggestionVisitRow {
+  return {
+    visitId: requiredString(row.visitId, "visit_suggested_restaurants.visitId"),
+    id: requiredString(row.id, "michelin_restaurants.id"),
+    name: requiredString(row.name, "michelin_restaurants.name"),
+    latitude: requiredNumber(row.latitude, "michelin_restaurants.latitude"),
+    longitude: requiredNumber(row.longitude, "michelin_restaurants.longitude"),
+  };
+}
+
+function parseFoodLabelsRow(row: SQLiteRow): FoodLabelsRow {
+  return {
+    visitId: requiredString(row.visitId, "photos.visitId"),
+    foodLabels: requiredString(row.foodLabels, "photos.foodLabels"),
+  };
+}
+
+function parsePendingQuickActionQueryRow(row: SQLiteRow): PendingQuickActionQueryRow {
+  return {
+    id: requiredString(row.id, "visits.id"),
+    photoCount: requiredNumber(row.photoCount, "visits.photoCount"),
+    foodProbable: requiredNumber(row.foodProbable, "visits.foodProbable"),
+    suggestedRestaurantId: nullableString(row.suggestedRestaurantId, "visits.suggestedRestaurantId"),
+    calendarEventTitle: nullableString(row.calendarEventTitle, "visits.calendarEventTitle"),
+    startTime: requiredNumber(row.startTime, "visits.startTime"),
+    suggestedRestaurantsJson: requiredString(row.suggestedRestaurantsJson, "suggestedRestaurantsJson"),
+    foodLabelsJson: nullableString(row.foodLabelsJson, "foodLabelsJson"),
+  };
+}
+
+function parseQueryPlanDetail(row: SQLiteRow): string {
+  return requiredString(row.detail, "query plan.detail");
+}
+
+function isIndependentFoodLabel(value: JsonValue): value is JsonObject & IndependentFoodLabel {
+  return isJsonObject(value) && isJsonString(value.label) && isJsonNumber(value.confidence);
+}
+
+function parseIndependentFoodLabels(serialized: string): IndependentFoodLabel[] {
+  const parsed = parseJsonValue(serialized);
+  assert.ok(Array.isArray(parsed) && parsed.every(isIndependentFoodLabel), "fixture food labels must be valid");
+  return parsed.map(({ label, confidence }) => ({ label, confidence }));
+}
 
 function createSchema(database: DatabaseSync): void {
   database.exec(`
@@ -159,28 +275,20 @@ function compareBinary(left: string, right: string): number {
   return Buffer.compare(Buffer.from(left), Buffer.from(right));
 }
 
-function independentAggregateLabels(rawArrays: readonly unknown[]): Array<{
-  label: string;
-  maxConfidence: number;
-  photoCount: number;
-}> {
+function independentAggregateLabels(
+  rawArrays: readonly (readonly IndependentFoodLabel[])[],
+): IndependentAggregatedFoodLabel[] {
   const labels = new Map<string, { label: string; maxConfidence: number; photoCount: number }>();
   for (const rawArray of rawArrays) {
-    assert.ok(Array.isArray(rawArray));
-    for (const rawLabel of rawArray) {
-      assert.equal(typeof rawLabel, "object");
-      assert.notEqual(rawLabel, null);
-      const label = rawLabel as { label: unknown; confidence: unknown };
-      assert.equal(typeof label.label, "string");
-      assert.equal(typeof label.confidence, "number");
-      const existing = labels.get(label.label as string);
+    for (const label of rawArray) {
+      const existing = labels.get(label.label);
       if (existing) {
-        existing.maxConfidence = Math.max(existing.maxConfidence, label.confidence as number);
+        existing.maxConfidence = Math.max(existing.maxConfidence, label.confidence);
         existing.photoCount += 1;
       } else {
-        labels.set(label.label as string, {
-          label: label.label as string,
-          maxConfidence: label.confidence as number,
+        labels.set(label.label, {
+          label: label.label,
+          maxConfidence: label.confidence,
           photoCount: 1,
         });
       }
@@ -196,14 +304,8 @@ function independentOracle(database: DatabaseSync): PendingQuickActionsData {
        FROM visits
        WHERE status = 'pending'`,
     )
-    .all() as Array<{
-    id: string;
-    photoCount: number;
-    foodProbable: number;
-    suggestedRestaurantId: string | null;
-    calendarEventTitle: string | null;
-    startTime: number;
-  }>;
+    .all()
+    .map(parseBaseQuickActionRow);
   const suggestionsByVisit = new Map<string, PendingQuickActionSuggestion[]>();
   const suggestionRows = database
     .prepare(
@@ -214,14 +316,15 @@ function independentOracle(database: DatabaseSync): PendingQuickActionsData {
        WHERE v.status = 'pending'
        ORDER BY vsr.visitId COLLATE BINARY, vsr.distance ASC, m.id COLLATE BINARY ASC`,
     )
-    .all() as unknown as Array<PendingQuickActionSuggestion & { visitId: string }>;
+    .all()
+    .map(parseSuggestionVisitRow);
   for (const row of suggestionRows) {
     const suggestions = suggestionsByVisit.get(row.visitId) ?? [];
     suggestions.push({ id: row.id, name: row.name, latitude: row.latitude, longitude: row.longitude });
     suggestionsByVisit.set(row.visitId, suggestions);
   }
 
-  const foodArraysByVisit = new Map<string, unknown[]>();
+  const foodArraysByVisit = new Map<string, IndependentFoodLabel[][]>();
   const foodRows = database
     .prepare(
       `SELECT p.visitId, p.foodLabels
@@ -233,10 +336,11 @@ function independentOracle(database: DatabaseSync): PendingQuickActionsData {
          AND p.foodLabels IS NOT NULL
        ORDER BY p.rowid ASC`,
     )
-    .all() as Array<{ visitId: string; foodLabels: string }>;
+    .all()
+    .map(parseFoodLabelsRow);
   for (const row of foodRows) {
     const arrays = foodArraysByVisit.get(row.visitId) ?? [];
-    arrays.push(JSON.parse(row.foodLabels));
+    arrays.push(parseIndependentFoodLabels(row.foodLabels));
     foodArraysByVisit.set(row.visitId, arrays);
   }
 
@@ -339,7 +443,7 @@ const database = new DatabaseSync(":memory:");
 try {
   createSchema(database);
   seedFixture(database);
-  const rawRows = database.prepare(PENDING_QUICK_ACTIONS_SQL).all() as unknown as PendingQuickActionQueryRow[];
+  const rawRows = database.prepare(PENDING_QUICK_ACTIONS_SQL).all().map(parsePendingQuickActionQueryRow);
   const parsed = parsePendingQuickActionRows(rawRows);
   const actual = createPendingQuickActionsData(parsed, BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS);
   const expected = independentOracle(database);
@@ -373,7 +477,7 @@ try {
         generationId: "quick-actions-cache-test",
         requestedKeys: actual.visits.map((visit, index) => ({
           id: visit.id,
-          priority: ((index % 4) + 1) as 1 | 2 | 3 | 4,
+          priority: REVIEW_PRIORITIES[index % REVIEW_PRIORITIES.length]!,
         })),
         visits: actual.visits.map(({ id }) => ({ id })),
         manifest: null,
@@ -422,8 +526,8 @@ try {
     3,
   );
 
-  const plan = database.prepare(`EXPLAIN QUERY PLAN ${PENDING_QUICK_ACTIONS_SQL}`).all() as Array<{ detail: string }>;
-  const planText = plan.map((row) => row.detail).join("\n");
+  const plan = database.prepare(`EXPLAIN QUERY PLAN ${PENDING_QUICK_ACTIONS_SQL}`).all().map(parseQueryPlanDetail);
+  const planText = plan.join("\n");
   assert.match(planText, /idx_visit_suggested_distance|sqlite_autoindex_visit_suggested_restaurants_1/);
   assert.match(planText, /idx_photos_food_labels/);
   assert.doesNotMatch(planText, /CORRELATED SCALAR SUBQUERY/);

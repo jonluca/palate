@@ -17,6 +17,10 @@ interface SkeletonProps extends ViewProps {
   variant?: "rect" | "circle" | "text";
 }
 
+function isNumericSkeletonWidth(width: SkeletonProps["width"]): width is number {
+  return typeof width === "number";
+}
+
 function Skeleton({
   width = "100%",
   height = 20,
@@ -39,7 +43,7 @@ function Skeleton({
     return { opacity };
   });
 
-  const circleSize = typeof width === "number" ? width : height;
+  const circleSize = isNumericSkeletonWidth(width) ? width : height;
 
   return (
     <Animated.View

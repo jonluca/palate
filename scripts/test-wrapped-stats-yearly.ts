@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { assertBenchmarkOutputDoesNotAliasDatabase } from "./benchmark-wrapped-stats-yearly.ts";
 import {
   parseWrappedStatsYearlyRows,
@@ -60,6 +60,98 @@ interface RankedRestaurantRow {
   readonly visits: number;
 }
 
+interface RankedRestaurantWithoutIdRow {
+  readonly year: number | string;
+  readonly name: string;
+  readonly visits: number;
+}
+
+type SQLiteRow = ReturnType<StatementSync["all"]>[number];
+
+function isSQLiteString(value: SQLOutputValue | undefined): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLOutputValue | undefined): value is number {
+  return typeof value === "number";
+}
+
+function requiredString(value: SQLOutputValue | undefined, column: string): string {
+  assert.ok(isSQLiteString(value), `${column} must be a SQLite TEXT value`);
+  return value;
+}
+
+function requiredNumber(value: SQLOutputValue | undefined, column: string): number {
+  assert.ok(isSQLiteNumber(value), `${column} must be a SQLite numeric value`);
+  return value;
+}
+
+function nullableString(value: SQLOutputValue | undefined, column: string): string | null {
+  return value === null ? null : requiredString(value, column);
+}
+
+function nullableNumber(value: SQLOutputValue | undefined, column: string): number | null {
+  return value === null ? null : requiredNumber(value, column);
+}
+
+function sqliteYear(value: SQLOutputValue | undefined, column: string): number | string | null {
+  assert.ok(
+    value === null || isSQLiteString(value) || isSQLiteNumber(value),
+    `${column} must be text, numeric, or null`,
+  );
+  return value;
+}
+
+function requiredYear(value: SQLOutputValue | undefined, column: string): number | string {
+  const year = sqliteYear(value, column);
+  if (year === null) {
+    throw new TypeError(`${column} must not be null`);
+  }
+  return year;
+}
+
+function parseLegacyYearlyRow(row: SQLiteRow): LegacyYearlyRow {
+  return {
+    year: sqliteYear(row.year, "yearly.year"),
+    totalVisits: requiredNumber(row.totalVisits, "yearly.totalVisits"),
+    uniqueRestaurants: requiredNumber(row.uniqueRestaurants, "yearly.uniqueRestaurants"),
+  };
+}
+
+function parseLegacyTopRestaurantRow(row: SQLiteRow): LegacyTopRestaurantRow {
+  return {
+    name: requiredString(row.name, "top restaurant.name"),
+    visits: requiredNumber(row.visits, "top restaurant.visits"),
+  };
+}
+
+function parseWrappedStatsYearlyQueryRow(row: SQLiteRow): WrappedStatsYearlyQueryRow {
+  return {
+    year: sqliteYear(row.year, "yearly.year"),
+    totalVisits: requiredNumber(row.totalVisits, "yearly.totalVisits"),
+    uniqueRestaurants: requiredNumber(row.uniqueRestaurants, "yearly.uniqueRestaurants"),
+    topRestaurantName: nullableString(row.topRestaurantName, "yearly.topRestaurantName"),
+    topRestaurantVisits: nullableNumber(row.topRestaurantVisits, "yearly.topRestaurantVisits"),
+  };
+}
+
+function parseRankedRestaurantRow(row: SQLiteRow): RankedRestaurantRow {
+  return {
+    year: requiredYear(row.year, "ranked.year"),
+    restaurantId: requiredString(row.restaurantId, "ranked.restaurantId"),
+    name: requiredString(row.name, "ranked.name"),
+    visits: requiredNumber(row.visits, "ranked.visits"),
+  };
+}
+
+function parseRankedRestaurantWithoutIdRow(row: SQLiteRow): RankedRestaurantWithoutIdRow {
+  return {
+    year: requiredYear(row.year, "ranked.year"),
+    name: requiredString(row.name, "ranked.name"),
+    visits: requiredNumber(row.visits, "ranked.visits"),
+  };
+}
+
 // Independent local-calendar oracle. Keep
 // this separate from the candidate core so changes to the optimized SQL cannot
 // silently change both sides of the parity check.
@@ -83,11 +175,15 @@ LIMIT 1`;
 
 function executeLegacy(database: DatabaseSync): Execution<WrappedStatsYearlyStat[]> {
   let sqliteCalls = 1;
-  const yearlyRows = database.prepare(LEGACY_YEARLY_SUMMARY_SQL).all() as unknown as LegacyYearlyRow[];
+  const yearlyRows = database.prepare(LEGACY_YEARLY_SUMMARY_SQL).all().map(parseLegacyYearlyRow);
   const topRestaurantStatement = database.prepare(LEGACY_TOP_RESTAURANT_SQL);
   const value = yearlyRows.map((row) => {
     sqliteCalls += 1;
-    const topRestaurant = topRestaurantStatement.get(row.year!.toString()) as LegacyTopRestaurantRow | undefined;
+    if (row.year === null) {
+      throw new TypeError("Legacy yearly query returned a null year");
+    }
+    const rawTopRestaurant = topRestaurantStatement.get(row.year.toString());
+    const topRestaurant = rawTopRestaurant ? parseLegacyTopRestaurantRow(rawTopRestaurant) : undefined;
     return {
       year: Number(row.year),
       totalVisits: Number(row.totalVisits),
@@ -105,12 +201,12 @@ function executeLegacy(database: DatabaseSync): Execution<WrappedStatsYearlyStat
 }
 
 function executeCandidate(database: DatabaseSync): Execution<WrappedStatsYearlyStat[]> {
-  const rows = database.prepare(WRAPPED_STATS_YEARLY_SQL).all() as unknown as WrappedStatsYearlyQueryRow[];
+  const rows = database.prepare(WRAPPED_STATS_YEARLY_SQL).all().map(parseWrappedStatsYearlyQueryRow);
   return { value: parseWrappedStatsYearlyRows(rows), sqliteCalls: 1 };
 }
 
 function executeDeterministicTieOracle(database: DatabaseSync): WrappedStatsYearlyStat[] {
-  const yearly = database.prepare(LEGACY_YEARLY_SUMMARY_SQL).all() as unknown as LegacyYearlyRow[];
+  const yearly = database.prepare(LEGACY_YEARLY_SUMMARY_SQL).all().map(parseLegacyYearlyRow);
   const ranked = database
     .prepare(`SELECT
       strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) AS year,
@@ -122,7 +218,8 @@ function executeDeterministicTieOracle(database: DatabaseSync): WrappedStatsYear
     WHERE v.status = 'confirmed'
     GROUP BY year, v.restaurantId
     ORDER BY year DESC, visits DESC, restaurantId ASC`)
-    .all() as unknown as RankedRestaurantRow[];
+    .all()
+    .map(parseRankedRestaurantRow);
   const topByYear = new Map<string, RankedRestaurantRow>();
   for (const row of ranked) {
     const year = String(row.year);
@@ -156,7 +253,8 @@ function assertLegacyEquivalentModuloUndefinedTies(
     JOIN restaurants r ON v.restaurantId = r.id
     WHERE v.status = 'confirmed'
     GROUP BY year, v.restaurantId`)
-    .all() as unknown as Array<Omit<RankedRestaurantRow, "restaurantId">>;
+    .all()
+    .map(parseRankedRestaurantWithoutIdRow);
   let tieOnlyDifferences = 0;
   for (let index = 0; index < candidate.length; index++) {
     const candidateYear = candidate[index]!;
@@ -386,7 +484,8 @@ try {
     .run("invalid-time", "invalid", "confirmed", 8_640_000_000_000_000);
   const invalidYear = invalidTimestampDatabase
     .prepare("SELECT strftime('%Y', datetime(startTime/1000, 'unixepoch', 'localtime')) AS year FROM visits")
-    .get() as { year: unknown };
+    .get();
+  assert.ok(invalidYear, "invalid timestamp fixture must return one row");
   assert.equal(invalidYear.year, null);
   assert.throws(() => executeLegacy(invalidTimestampDatabase), TypeError);
   assert.throws(() => executeCandidate(invalidTimestampDatabase), /returned a null year/);

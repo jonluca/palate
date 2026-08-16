@@ -5,7 +5,7 @@ export interface MichelinSuggestionLocation {
 }
 
 export interface MichelinSuggestionLocationReader {
-  getAllAsync<Row>(source: string): Promise<Row[]>;
+  getAllAsync(source: string): Promise<MichelinSuggestionLocation[]>;
 }
 
 /** Maximum distance for the primary Michelin suggestion. */
@@ -26,5 +26,5 @@ export const ACTIVE_MICHELIN_SUGGESTION_LOCATIONS_SQL = `SELECT m.id, m.latitude
 export function loadActiveMichelinSuggestionLocations(
   database: MichelinSuggestionLocationReader,
 ): Promise<MichelinSuggestionLocation[]> {
-  return database.getAllAsync<MichelinSuggestionLocation>(ACTIVE_MICHELIN_SUGGESTION_LOCATIONS_SQL);
+  return database.getAllAsync(ACTIVE_MICHELIN_SUGGESTION_LOCATIONS_SQL);
 }
