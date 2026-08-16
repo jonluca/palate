@@ -24,12 +24,12 @@ export interface PreparedVisitPhotoDistanceThreshold {
   readonly ordinaryLongitudeRejectDegrees: number | null;
 }
 
-function isValidCoordinateValues(latitude: number, longitude: number): latitude is number {
+function isValidCoordinateValues(latitude: number, longitude: number): boolean {
   return (
-    typeof latitude === "number" &&
+    Number.isFinite(latitude) &&
     latitude >= -90 &&
     latitude <= 90 &&
-    typeof longitude === "number" &&
+    Number.isFinite(longitude) &&
     longitude >= -180 &&
     longitude <= 180
   );

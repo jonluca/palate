@@ -1,8 +1,10 @@
+type SQLiteColumnValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
+
 export interface FoodDetectionVisitSampleRow {
-  readonly visitId: string;
-  readonly photoId: string;
-  readonly sampleRank: number;
-  readonly totalVisits: number;
+  readonly visitId: SQLiteColumnValue;
+  readonly photoId: SQLiteColumnValue;
+  readonly sampleRank: SQLiteColumnValue;
+  readonly totalVisits: SQLiteColumnValue;
 }
 
 export interface FoodDetectionVisitSample {
@@ -120,55 +122,63 @@ export const FOOD_DETECTION_VISIT_SAMPLES_SQL = `WITH photo_counts AS MATERIALIZ
   WHERE ranked.sampleRank <= MAX(1, CAST(eligible.totalPhotos * ? AS INTEGER))
   ORDER BY eligible.startTime DESC, eligible.visitId ASC, ranked.sampleRank ASC`;
 
+function isSQLiteText(value: SQLiteColumnValue): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteNumber(value: SQLiteColumnValue): value is number {
+  return typeof value === "number";
+}
+
+function requireNonEmptySQLiteText(value: SQLiteColumnValue, context: string): string {
+  if (!isSQLiteText(value) || value.length === 0) {
+    throw new TypeError(`${context} must be a non-empty SQLite text value.`);
+  }
+  return value;
+}
+
+function requirePositiveSafeInteger(value: SQLiteColumnValue, context: string): number {
+  if (!isSQLiteNumber(value) || !Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`${context} must be a positive safe integer.`);
+  }
+  return value;
+}
+
 export function parseFoodDetectionVisitSampleRows(
   rows: readonly FoodDetectionVisitSampleRow[],
 ): FoodDetectionVisitSamplePlan {
-  if (!Array.isArray(rows)) {
-    throw new TypeError("Food-detection sample rows must be an array.");
-  }
   if (rows.length === 0) {
     return { totalVisits: 0, samples: [] };
   }
 
-  const firstTotalVisits = rows[0]?.totalVisits;
-  if (!Number.isSafeInteger(firstTotalVisits) || firstTotalVisits < 1) {
-    throw new TypeError("Food-detection sample rows must report a positive safe-integer totalVisits value.");
-  }
+  const firstTotalVisits = requirePositiveSafeInteger(rows[0].totalVisits, "Food-detection sample rows totalVisits");
 
   const visitNextRanks = new Map<string, number>();
   const photoIds = new Set<string>();
   const samples: FoodDetectionVisitSample[] = [];
 
   for (const [index, row] of rows.entries()) {
-    if (!isFoodDetectionVisitSampleRow(row)) {
-      throw new TypeError(`Food-detection sample row ${index} must be an object.`);
-    }
-    if (!hasFoodDetectionVisitId(row)) {
-      throw new TypeError(`Food-detection sample row ${index} has an invalid visitId.`);
-    }
-    if (!hasFoodDetectionPhotoId(row)) {
-      throw new TypeError(`Food-detection sample row ${index} has an invalid photoId.`);
-    }
-    if (!Number.isSafeInteger(row.sampleRank) || row.sampleRank < 1) {
-      throw new TypeError(`Food-detection sample row ${index} has an invalid sampleRank.`);
-    }
-    if (row.totalVisits !== firstTotalVisits) {
+    const visitId = requireNonEmptySQLiteText(row.visitId, `Food-detection sample row ${index} visitId`);
+    const photoId = requireNonEmptySQLiteText(row.photoId, `Food-detection sample row ${index} photoId`);
+    const sampleRank = requirePositiveSafeInteger(row.sampleRank, `Food-detection sample row ${index} sampleRank`);
+    const totalVisits = requirePositiveSafeInteger(row.totalVisits, `Food-detection sample row ${index} totalVisits`);
+    if (totalVisits !== firstTotalVisits) {
       throw new TypeError(`Food-detection sample row ${index} has an inconsistent totalVisits value.`);
     }
-    if (photoIds.has(row.photoId)) {
-      throw new TypeError(`Food-detection sample rows contain duplicate photoId ${JSON.stringify(row.photoId)}.`);
+    if (photoIds.has(photoId)) {
+      throw new TypeError(`Food-detection sample rows contain duplicate photoId ${JSON.stringify(photoId)}.`);
     }
 
-    const expectedRank = visitNextRanks.get(row.visitId) ?? 1;
-    if (row.sampleRank !== expectedRank) {
+    const expectedRank = visitNextRanks.get(visitId) ?? 1;
+    if (sampleRank !== expectedRank) {
       throw new TypeError(
-        `Food-detection sample row ${index} has sampleRank ${row.sampleRank}; expected ${expectedRank} for visit ${JSON.stringify(row.visitId)}.`,
+        `Food-detection sample row ${index} has sampleRank ${sampleRank}; expected ${expectedRank} for visit ${JSON.stringify(visitId)}.`,
       );
     }
 
-    photoIds.add(row.photoId);
-    visitNextRanks.set(row.visitId, expectedRank + 1);
-    samples.push({ visitId: row.visitId, photoId: row.photoId, sampleRank: row.sampleRank });
+    photoIds.add(photoId);
+    visitNextRanks.set(visitId, expectedRank + 1);
+    samples.push({ visitId, photoId, sampleRank });
   }
 
   if (visitNextRanks.size !== firstTotalVisits) {
@@ -181,16 +191,4 @@ export function parseFoodDetectionVisitSampleRows(
     totalVisits: firstTotalVisits,
     samples,
   };
-}
-
-function isFoodDetectionVisitSampleRow(row: FoodDetectionVisitSampleRow): row is FoodDetectionVisitSampleRow {
-  return row !== null && typeof row === "object";
-}
-
-function hasFoodDetectionVisitId(row: FoodDetectionVisitSampleRow): row is FoodDetectionVisitSampleRow {
-  return typeof row.visitId === "string" && row.visitId.length > 0;
-}
-
-function hasFoodDetectionPhotoId(row: FoodDetectionVisitSampleRow): row is FoodDetectionVisitSampleRow {
-  return typeof row.photoId === "string" && row.photoId.length > 0;
 }

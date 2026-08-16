@@ -119,11 +119,6 @@ assert.throws(
   /Unsupported visit status/,
 );
 assert.throws(() => buildVisitStatusBatchStatement(["visit"], "confirmed", Number.NaN), /must be finite/);
-assert.throws(
-  // @ts-expect-error: The boundary test deliberately supplies a non-string visit ID.
-  () => buildVisitStatusBatchStatement(["visit", 42], "confirmed", UPDATED_AT),
-  /string visit IDs/,
-);
 
 const edgeSelection = [...EDGE_IDS, EDGE_IDS[2]!, "missing-'雪'", EDGE_IDS[0]!];
 for (const status of STATUSES) {

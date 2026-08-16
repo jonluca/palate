@@ -436,6 +436,10 @@ function assertValidationAndParsing(): void {
     previewPhotos: [],
   });
   assert.throws(() => parseVisitListPageRows([{ ...row, status: "unknown" }], 1), /unsupported status/);
+  assert.throws(() => parseVisitListPageRows([{ ...row, id: 42 }], 1), /id must be SQLite text/);
+  assert.throws(() => parseVisitListPageRows([{ ...row, startTime: Number.POSITIVE_INFINITY }], 1), /startTime/);
+  assert.throws(() => parseVisitListPageRows([{ ...row, photoCount: 1.5 }], 1), /photoCount/);
+  assert.throws(() => parseVisitListPageRows([{ ...row, foodProbable: 2 }], 1), /foodProbable/);
 }
 
 async function assertInfiniteResetContract(): Promise<void> {

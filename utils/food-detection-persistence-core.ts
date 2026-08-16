@@ -90,26 +90,6 @@ function createAggregateFailure(cause: unknown, additionalErrors: readonly unkno
   );
 }
 
-function assertBufferedResultPersistenceOptions<T, Result>(
-  options: BufferedResultPersistenceOptions<T, Result>,
-): asserts options is BufferedResultPersistenceOptions<T, Result> {
-  if (options === null || typeof options !== "object") {
-    throw new TypeError("Buffered result persistence options must be an object.");
-  }
-  if (typeof options.process !== "function") {
-    throw new TypeError("Buffered result processing must be a function.");
-  }
-  if (typeof options.persist !== "function") {
-    throw new TypeError("Buffered result persistence must be a function.");
-  }
-  if (options.synchronize !== undefined && typeof options.synchronize !== "function") {
-    throw new TypeError("Buffered result synchronization must be a function when provided.");
-  }
-  if (options.onComplete !== undefined && typeof options.onComplete !== "function") {
-    throw new TypeError("Buffered result completion must be a function when provided.");
-  }
-}
-
 /**
  * Runs an ordered producer with bounded persistence and derived-state recovery.
  * A processing failure force-flushes its successful pending prefix. A persistence
@@ -123,8 +103,6 @@ function assertBufferedResultPersistenceOptions<T, Result>(
 export async function runBufferedResultPersistence<T, Result>(
   options: BufferedResultPersistenceOptions<T, Result>,
 ): Promise<Result> {
-  assertBufferedResultPersistenceOptions(options);
-
   let didPersistenceFail = false;
   let persistenceFailure: unknown;
   let successfulPersistenceOperations = 0;

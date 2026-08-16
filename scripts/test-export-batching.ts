@@ -1384,18 +1384,9 @@ try {
   seedFixture(database);
 
   assert.equal(buildExportPhotosQuery([]), null);
-  // @ts-expect-error -- a numeric ID exercises the runtime boundary validation.
-  assert.throws(() => buildExportPhotosQuery(["valid", 42]), /string visit IDs/);
-  // @ts-expect-error -- a null ID exercises the runtime boundary validation.
-  assert.throws(() => buildExportPhotosQuery([null]), /string visit IDs/);
-  // @ts-expect-error -- an undefined ID exercises the runtime boundary validation.
-  assert.throws(() => buildExportPhotosQuery([undefined]), /string visit IDs/);
   assert.throws(() => buildExportPhotosQuery(["valid"], null, 0), /page size/);
   assert.throws(() => buildExportPhotosQuery(["valid"], null, 1.5), /page size/);
   assert.throws(() => buildExportPhotosQuery(["valid"], null, EXPORT_PHOTO_PAGE_SIZE + 1), /page size/);
-  // @ts-expect-error -- rank 3 is outside ExportPhotoCursor and must be rejected at runtime too.
-  const invalidFoodRankCursor: ExportPhotoCursor = { visitId: "valid", foodRank: 3, creationTime: 1, id: "photo" };
-  assert.throws(() => buildExportPhotosQuery(["valid"], invalidFoodRankCursor), /valid ordered photo key/);
   assert.throws(
     () =>
       buildExportPhotosQuery(["valid"], {
@@ -1404,7 +1395,7 @@ try {
         creationTime: Number.POSITIVE_INFINITY,
         id: "photo",
       }),
-    /valid ordered photo key/,
+    /creation time must be finite/,
   );
   assert.doesNotMatch(
     LEGACY_PHOTOS_SQL,

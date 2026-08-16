@@ -1356,7 +1356,7 @@ function loadAndValidate(path: string, expectedStrategy: Strategy): LoadedRun {
   };
 }
 
-function isErrnoException(error: Error): error is NodeJS.ErrnoException {
+function hasErrorCode(error: Error): error is Error & { readonly code: unknown } {
   return "code" in error;
 }
 
@@ -1365,7 +1365,7 @@ function pathExistsIncludingDanglingSymlink(path: string): boolean {
     lstatSync(path);
     return true;
   } catch (error) {
-    if (error instanceof Error && isErrnoException(error) && error.code === "ENOENT") {
+    if (error instanceof Error && hasErrorCode(error) && error.code === "ENOENT") {
       return false;
     }
     throw error;

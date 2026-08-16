@@ -89,13 +89,6 @@ export class AsyncResultBuffer<T> {
 
   /** Creates an empty result buffer. */
   constructor(options: AsyncResultBufferOptions<T>) {
-    if (!isAsyncResultBufferOptions(options)) {
-      throw new TypeError("Async result buffer options must be an object.");
-    }
-    if (!hasAsyncResultBufferPersistence(options)) {
-      throw new TypeError("Async result buffer persistence must be a function.");
-    }
-
     const persistenceFlushSize = options.persistenceFlushSize ?? DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE;
     const maximumPageSize = options.maximumPageSize ?? DEFAULT_VISION_NATIVE_PAGE_SIZE;
     assertPositiveSafeInteger(persistenceFlushSize, "Persistence flush size");
@@ -190,14 +183,4 @@ export class AsyncResultBuffer<T> {
       this.operationInProgress = false;
     }
   }
-}
-
-function isAsyncResultBufferOptions<T>(options: AsyncResultBufferOptions<T>): options is AsyncResultBufferOptions<T> {
-  return options !== null && typeof options === "object";
-}
-
-function hasAsyncResultBufferPersistence<T>(
-  options: AsyncResultBufferOptions<T>,
-): options is AsyncResultBufferOptions<T> {
-  return typeof options.persist === "function";
 }

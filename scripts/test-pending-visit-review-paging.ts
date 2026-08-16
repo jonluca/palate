@@ -17,7 +17,9 @@ import {
   getNextPendingVisitReviewPageRequest,
   hydratePendingVisitReviewPages,
   parsePendingVisitReviewManifest,
+  parsePendingVisitReviewManifestQueryRow,
   parsePendingVisitReviewOrderedKeys,
+  parsePendingVisitReviewOrderedKeysQueryRow,
   partitionPendingVisitReviewKeys,
   serializePendingVisitReviewPageKeys,
   validatePendingVisitReviewPageSize,
@@ -687,6 +689,10 @@ assert.throws(
 );
 assert.throws(() => parsePendingVisitReviewOrderedKeys({ keysJson: '[{"id":"visit","priority":5}]' }), /priority/);
 assert.throws(() => parsePendingVisitReviewOrderedKeys({ keysJson: "not-json" }), /not valid JSON/);
+assert.deepEqual(parsePendingVisitReviewOrderedKeysQueryRow({ keysJson: "[]" }), { keysJson: "[]" });
+assert.throws(() => parsePendingVisitReviewOrderedKeysQueryRow({ keysJson: 0 }), /SQLite text/);
+assert.deepEqual(parsePendingVisitReviewManifestQueryRow({ manifestJson: "[]" }), { manifestJson: "[]" });
+assert.throws(() => parsePendingVisitReviewManifestQueryRow({ manifestJson: null }), /SQLite text/);
 const calendarTitleSourceContract = assertCalendarTitleMatchingSourceContract();
 assert.equal(calendarTitleSourceContract.sourceContractMatched, true);
 assert.equal(

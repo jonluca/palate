@@ -11,6 +11,7 @@
     "mobile:dev": "expo run:ios --device",
     "mobile:submit": "pnpm dlx eas-cli@21.5.0 build --platform ios --profile production --auto-submit --non-interactive",
     "test:native": "zsh scripts/test-native-core.sh",
+    "test:anti-slop-no-runtime-typeof": "node --no-warnings --experimental-strip-types scripts/test-anti-slop-no-runtime-typeof.ts",
     "test:photos": "zsh scripts/test-photos-core.sh",
     "test:photos-profiler-wrapper": "zsh scripts/test-photos-profiler-wrapper.sh",
     "test:initial-image-preheat-planner": "zsh scripts/test-initial-image-preheat-planner-benchmark.sh",

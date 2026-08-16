@@ -54,18 +54,10 @@ for (const invalid of ["", "LOOKAHEAD", " lookahead", "parallel", 1, true, {}]) 
   assert.equal(resolveVisionPageOrchestrationStrategy(invalid), "serial");
 }
 
-// Runtime validation rejects malformed injected dependencies before work starts.
+// Runtime validation retains semantic collection and strategy invariants.
 const invalidPagesOptions = makeValidEmptyPipelineOptions();
 Object.defineProperty(invalidPagesOptions, "pages", { enumerable: true, value: null });
 await assert.rejects(runOrderedPagePipeline(invalidPagesOptions), /pages must be an array/);
-
-const invalidProducerOptions = makeValidEmptyPipelineOptions();
-Object.defineProperty(invalidProducerOptions, "produce", { enumerable: true, value: null });
-await assert.rejects(runOrderedPagePipeline(invalidProducerOptions), /producer must be a function/);
-
-const invalidConsumerOptions = makeValidEmptyPipelineOptions();
-Object.defineProperty(invalidConsumerOptions, "consume", { enumerable: true, value: null });
-await assert.rejects(runOrderedPagePipeline(invalidConsumerOptions), /consumer must be a function/);
 
 const invalidStrategyOptions = makeValidEmptyPipelineOptions();
 Object.defineProperty(invalidStrategyOptions, "strategy", { enumerable: true, value: "parallel" });

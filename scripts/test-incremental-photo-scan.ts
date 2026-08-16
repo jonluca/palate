@@ -636,7 +636,8 @@ function testProductionSourceWiring(): void {
   const queryEnd = photoDatabaseSource.indexOf("export async function getVisitablePhotoCounts", queryStart);
   assert.ok(queryStart >= 0 && queryEnd > queryStart);
   const querySource = photoDatabaseSource.slice(queryStart, queryEnd);
-  assert.match(querySource, /getAllAsync<\{ id: string \}>\(INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL\)/);
+  assert.match(querySource, /getAllAsync<PhotoAssetIdQueryRow>\(INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL\)/);
+  assert.match(querySource, /return rows\.map\(parsePhotoAssetId\)/);
   assert.equal((querySource.match(/getAllAsync/g) ?? []).length, 1, "production helper performs one ID query");
   assert.doesNotMatch(querySource, /getFirstAsync|COUNT\s*\(/i);
 

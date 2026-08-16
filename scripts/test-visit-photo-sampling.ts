@@ -220,6 +220,14 @@ try {
   assert.deepEqual(combinedSamplePlan(database, 0.2), { totalVisits: 0, samples: [] });
   assert.deepEqual(parseFoodDetectionVisitSampleRows([]), { totalVisits: 0, samples: [] });
   assert.throws(
+    () => parseFoodDetectionVisitSampleRows([{ visitId: 42, photoId: "photo", sampleRank: 1, totalVisits: 1 }]),
+    /visitId/,
+  );
+  assert.throws(
+    () => parseFoodDetectionVisitSampleRows([{ visitId: "visit", photoId: null, sampleRank: 1, totalVisits: 1 }]),
+    /photoId/,
+  );
+  assert.throws(
     () => parseFoodDetectionVisitSampleRows([{ visitId: "visit", photoId: "photo", sampleRank: 0, totalVisits: 1 }]),
     /sampleRank/,
   );

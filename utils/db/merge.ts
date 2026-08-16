@@ -1,6 +1,7 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
 import {
   buildVisitMergePlan,
+  parseVisitMergePreflightQueryRow,
   VISIT_MERGE_COPY_SUGGESTIONS_SQL,
   VISIT_MERGE_DELETE_SOURCE_SUGGESTIONS_SQL,
   VISIT_MERGE_DELETE_SOURCE_VISITS_SQL,
@@ -8,7 +9,7 @@ import {
   VISIT_MERGE_MOVE_RESERVATION_SOURCES_SQL,
   VISIT_MERGE_PREFLIGHT_SQL,
   VISIT_MERGE_UPDATE_TARGETS_SQL,
-  type VisitMergePreflightRow,
+  type VisitMergePreflightQueryRow,
 } from "./visit-merge-core";
 import { runVisitMergeWithBusyRetry } from "./visit-merge-retry-core";
 import type { MergeableVisitGroup, VisitRecord, VisitWithDetails } from "./types";
@@ -311,10 +312,11 @@ export async function batchMergeSameRestaurantVisits(groups: MergeableVisitGroup
   await runVisitMergeWithBusyRetry(
     async (updatedAt) => {
       await database.withExclusiveTransactionAsync(async (transaction) => {
-        const preflight = await transaction.getFirstAsync<VisitMergePreflightRow>(
+        const preflightQueryRow = await transaction.getFirstAsync<VisitMergePreflightQueryRow>(
           VISIT_MERGE_PREFLIGHT_SQL,
           plan.payload,
         );
+        const preflight = preflightQueryRow ? parseVisitMergePreflightQueryRow(preflightQueryRow) : null;
         if (
           !preflight ||
           preflight.plannedVisitCount !== plan.referencedVisitCount ||

@@ -58,9 +58,6 @@ export class ExportJsonStreamWriter {
   private hasPhotosInCurrentVisit = false;
 
   constructor(sink: TextFragmentSink, document: ExportStreamDocument) {
-    if (!isTextFragmentSink(sink)) {
-      throw new TypeError("Export stream sink must be a function.");
-    }
     this.sink = sink;
     this.documentPrefix = `{
   "exportedAt": ${stringifyJson(document.exportedAt)},
@@ -144,10 +141,6 @@ export class ExportJsonStreamWriter {
   }
 }
 
-function isTextFragmentSink(sink: TextFragmentSink): sink is TextFragmentSink {
-  return typeof sink === "function";
-}
-
 /**
  * Buffers complete text fragments and writes UTF-8 chunks synchronously.
  * Normal fragments never push the buffer past `maxBufferedCodeUnits`. A single
@@ -166,9 +159,6 @@ export class BoundedUtf8BufferingSink {
   private closed = false;
 
   constructor(sink: Utf8ChunkSink, maxBufferedCodeUnits: number = 64 * 1024) {
-    if (!isUtf8ChunkSink(sink)) {
-      throw new TypeError("UTF-8 chunk sink must be a function.");
-    }
     if (!Number.isSafeInteger(maxBufferedCodeUnits) || maxBufferedCodeUnits <= 0) {
       throw new RangeError("Maximum buffered code units must be a positive safe integer.");
     }
@@ -214,9 +204,6 @@ export class BoundedUtf8BufferingSink {
     if (this.closed) {
       throw new ExportStreamStateError("Cannot write to a closed UTF-8 buffer.");
     }
-    if (!isTextFragment(fragment)) {
-      throw new TypeError("UTF-8 buffer fragments must be strings.");
-    }
     if (fragment.length === 0) {
       return;
     }
@@ -239,12 +226,4 @@ export class BoundedUtf8BufferingSink {
     this.codeUnits += fragment.length;
     this.maximumCodeUnits = Math.max(this.maximumCodeUnits, this.codeUnits);
   }
-}
-
-function isUtf8ChunkSink(sink: Utf8ChunkSink): sink is Utf8ChunkSink {
-  return typeof sink === "function";
-}
-
-function isTextFragment(fragment: string): fragment is string {
-  return typeof fragment === "string";
 }

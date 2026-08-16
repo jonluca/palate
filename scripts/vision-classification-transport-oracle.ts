@@ -3,7 +3,6 @@ import {
   PACKED_VISION_CLASSIFICATION_MAGIC,
   PACKED_VISION_CLASSIFICATION_SCHEMA_VERSION,
   PACKED_VISION_CLASSIFICATION_SLOT_STATUS,
-  assertVisionClassificationAssetIds,
   type VisionClassificationLabel,
   type VisionClassificationResult,
 } from "../utils/vision-classification-transport-core.ts";
@@ -69,7 +68,6 @@ export function encodePackedVisionClassificationResults(
   assetIds: readonly string[],
   results: readonly VisionClassificationResult[],
 ): Uint8Array {
-  assertVisionClassificationAssetIds(assetIds);
   if (assetIds.length > MAX_UINT32) {
     throw new RangeError("Packed Vision payload contains too many asset slots");
   }

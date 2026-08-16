@@ -20,12 +20,13 @@ import {
   PENDING_VISIT_REVIEW_PAGE_SQL,
   createPendingVisitReviewGeneration,
   parsePendingVisitReviewManifest,
+  parsePendingVisitReviewManifestQueryRow,
   serializePendingVisitReviewPageKeys,
   validatePendingVisitReviewPageSize,
   type PendingVisitReviewFilters,
   type PendingVisitReviewGeneration,
   type PendingVisitReviewManifestItem,
-  type PendingVisitReviewManifestRow,
+  type PendingVisitReviewManifestQueryRow,
   type PendingVisitReviewPage,
   type PendingVisitReviewPageKey,
   type PendingVisitReviewPageRequest,
@@ -249,10 +250,13 @@ export async function getPendingVisitReviewFirstPage(
   validatePendingVisitReviewPageSize(pageSize);
   try {
     const database = await getDatabase();
-    const row = await database.getFirstAsync<PendingVisitReviewManifestRow>(PENDING_VISIT_REVIEW_MANIFEST_SQL);
-    if (!row) {
+    const queryRow = await database.getFirstAsync<PendingVisitReviewManifestQueryRow>(
+      PENDING_VISIT_REVIEW_MANIFEST_SQL,
+    );
+    if (!queryRow) {
       throw new Error("Pending-review manifest query returned no row");
     }
+    const row = parsePendingVisitReviewManifestQueryRow(queryRow);
     const items = parsePendingVisitReviewManifest(row);
     const manifest = createPendingVisitReviewGeneration(
       items,

@@ -1,5 +1,7 @@
 import type { MergeableVisitGroup } from "./types";
 
+type SQLiteColumnValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
+
 export interface VisitMergePlanEntry {
   readonly targetVisitId: string;
   readonly sourceVisitId: string;
@@ -20,10 +22,27 @@ export interface VisitMergePreflightRow {
   readonly existingVisitCount: number;
 }
 
-function hasValidMergeVisitId(
-  visit: MergeableVisitGroup["visits"][number],
-): visit is MergeableVisitGroup["visits"][number] {
-  return typeof visit.id === "string";
+export interface VisitMergePreflightQueryRow {
+  readonly plannedVisitCount: SQLiteColumnValue;
+  readonly existingVisitCount: SQLiteColumnValue;
+}
+
+function isSQLiteNumber(value: SQLiteColumnValue): value is number {
+  return typeof value === "number";
+}
+
+function requireSQLiteCount(value: SQLiteColumnValue, column: string): number {
+  if (!isSQLiteNumber(value) || !Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`Visit merge preflight ${column} must be a non-negative safe integer.`);
+  }
+  return value;
+}
+
+export function parseVisitMergePreflightQueryRow(row: VisitMergePreflightQueryRow): VisitMergePreflightRow {
+  return {
+    plannedVisitCount: requireSQLiteCount(row.plannedVisitCount, "plannedVisitCount"),
+    existingVisitCount: requireSQLiteCount(row.existingVisitCount, "existingVisitCount"),
+  };
 }
 
 /**
@@ -39,20 +58,14 @@ export function buildVisitMergePlan(groups: readonly MergeableVisitGroup[]): Vis
   const sourceVisitIds: string[] = [];
   const claimedVisitIds = new Set<string>();
 
-  for (const [groupIndex, group] of groups.entries()) {
-    if (!Array.isArray(group.visits)) {
-      throw new Error(`Invalid visit merge group at index ${groupIndex}`);
-    }
+  for (const group of groups) {
     // Preserve the previous batch API: empty/singleton groups are no-ops and
     // therefore do not participate in actionable-plan overlap validation.
     if (group.visits.length < 2) {
       continue;
     }
 
-    for (const [visitIndex, visit] of group.visits.entries()) {
-      if (!hasValidMergeVisitId(visit)) {
-        throw new Error(`Invalid visit ID at group ${groupIndex}, visit ${visitIndex}`);
-      }
+    for (const visit of group.visits) {
       if (claimedVisitIds.has(visit.id)) {
         throw new Error(`Visit merge groups overlap at ID ${JSON.stringify(visit.id)}`);
       }

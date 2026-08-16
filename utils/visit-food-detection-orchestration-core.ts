@@ -71,13 +71,8 @@ export interface Rank3BulkTailVisitFoodDetectionSummary {
   readonly skippedAfterPositive: readonly AdaptiveVisitFoodSample[];
 }
 
-function assertBatchProgress(
-  progress: VisitFoodDetectionBatchProgress,
-  batchSize: number,
-): asserts progress is VisitFoodDetectionBatchProgress {
+function assertBatchProgress(progress: VisitFoodDetectionBatchProgress, batchSize: number): void {
   if (
-    progress === null ||
-    typeof progress !== "object" ||
     !Number.isSafeInteger(progress.processedSamples) ||
     progress.processedSamples < 0 ||
     progress.processedSamples > batchSize ||
@@ -120,32 +115,6 @@ function summarizeAttempts(attempts: readonly AdaptiveVisitFoodAttempt[]): Visit
   return { foodFoundSamples, retryableFailures };
 }
 
-function assertRank3BulkTailOptions<PersistedResult>(
-  options: Rank3BulkTailVisitFoodDetectionOptions<PersistedResult>,
-): asserts options is Rank3BulkTailVisitFoodDetectionOptions<PersistedResult> {
-  if (options === null || typeof options !== "object") {
-    throw new TypeError("Rank3 bulk-tail visit food-detection options must be an object.");
-  }
-  if (typeof options.processBatch !== "function") {
-    throw new TypeError("Rank3 bulk-tail batch processing must be a function.");
-  }
-  if (typeof options.persist !== "function") {
-    throw new TypeError("Rank3 bulk-tail persistence must be a function.");
-  }
-  if (typeof options.synchronize !== "function") {
-    throw new TypeError("Rank3 bulk-tail synchronization must be a function.");
-  }
-  if (options.onProgress !== undefined && typeof options.onProgress !== "function") {
-    throw new TypeError("Rank3 bulk-tail progress must be a function when provided.");
-  }
-}
-
-function isVisitFoodDetectionBatchExecution(
-  execution: VisitFoodDetectionBatchExecution,
-): execution is VisitFoodDetectionBatchExecution {
-  return execution !== null && typeof execution === "object";
-}
-
 /**
  * Runs three adaptive rank waves followed by one stable visit-major bulk tail.
  * One shared persistence lifecycle owns every wave, and each adaptive transition
@@ -154,8 +123,6 @@ function isVisitFoodDetectionBatchExecution(
 export async function runRank3BulkTailVisitFoodDetection<PersistedResult>(
   options: Rank3BulkTailVisitFoodDetectionOptions<PersistedResult>,
 ): Promise<Rank3BulkTailVisitFoodDetectionSummary> {
-  assertRank3BulkTailOptions(options);
-
   let state = createAdaptiveVisitFoodState(options.samples);
   let tailAttempts: readonly AdaptiveVisitFoodAttempt[] = [];
   let completedSamples = 0;
@@ -191,9 +158,6 @@ export async function runRank3BulkTailVisitFoodDetection<PersistedResult>(
               });
             },
           });
-          if (!isVisitFoodDetectionBatchExecution(execution)) {
-            throw new TypeError("Visit food-detection batch execution must return an object.");
-          }
           return execution.outcomes;
         };
 

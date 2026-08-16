@@ -61,22 +61,10 @@ export async function classifyWithVisionResultTransport(
   return methods.classifyLegacy();
 }
 
-export function assertVisionClassificationAssetIds(assetIds: readonly string[]): void {
-  for (const [index, assetId] of assetIds.entries()) {
-    if (!isVisionAssetId(assetId)) {
-      throw new TypeError(`Vision asset ID ${index} must be a string`);
-    }
-  }
-}
-
 function hasPackedVisionMethod(
   method: VisionClassificationTransportMethods["classifyPackedV1"],
 ): method is () => Promise<PackedVisionClassificationPayload> {
   return typeof method === "function";
-}
-
-function isVisionAssetId(assetId: string): assetId is string {
-  return typeof assetId === "string";
 }
 
 class PackedVisionReader {
@@ -144,7 +132,6 @@ export function decodePackedVisionClassificationResults(
   assetIds: readonly string[],
   payload: PackedVisionClassificationPayload,
 ): VisionClassificationResult[] {
-  assertVisionClassificationAssetIds(assetIds);
   const bytes =
     payload instanceof Uint8Array ? payload : payload instanceof ArrayBuffer ? new Uint8Array(payload) : undefined;
   if (!bytes) {

@@ -1,6 +1,8 @@
 import { PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL, type PendingVisitReviewQueryRow } from "./visit-review-core.ts";
 import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from "../runtime-json.ts";
 
+type SQLiteColumnValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
+
 export const DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE = 128;
 export const MAX_PENDING_VISIT_REVIEW_PAGE_SIZE = 1_024;
 
@@ -34,6 +36,10 @@ export interface PendingVisitReviewManifestItem {
 
 export interface PendingVisitReviewManifestRow {
   readonly manifestJson: string;
+}
+
+export interface PendingVisitReviewManifestQueryRow {
+  readonly manifestJson: SQLiteColumnValue;
 }
 
 export interface PendingVisitReviewExactConfirmation {
@@ -98,6 +104,10 @@ export interface PendingVisitReviewPageKey {
 
 export interface PendingVisitReviewOrderedKeysRow {
   readonly keysJson: string;
+}
+
+export interface PendingVisitReviewOrderedKeysQueryRow {
+  readonly keysJson: SQLiteColumnValue;
 }
 
 /**
@@ -323,10 +333,34 @@ function assertUniquePageKeys(keys: readonly PendingVisitReviewPageKey[], contex
   }
 }
 
-export function parsePendingVisitReviewOrderedKeys(row: PendingVisitReviewOrderedKeysRow): PendingVisitReviewPageKey[] {
-  if (!hasPendingVisitReviewOrderedKeysJson(row)) {
-    throw new TypeError("Pending-review ordered-key query must return keysJson as a string");
+function isSQLiteText(value: SQLiteColumnValue): value is string {
+  return typeof value === "string";
+}
+
+function requireSQLiteText(value: SQLiteColumnValue, context: string): string {
+  if (!isSQLiteText(value)) {
+    throw new TypeError(`${context} must be SQLite text`);
   }
+  return value;
+}
+
+export function parsePendingVisitReviewOrderedKeysQueryRow(
+  row: PendingVisitReviewOrderedKeysQueryRow,
+): PendingVisitReviewOrderedKeysRow {
+  return {
+    keysJson: requireSQLiteText(row.keysJson, "Pending-review ordered-key query keysJson"),
+  };
+}
+
+export function parsePendingVisitReviewManifestQueryRow(
+  row: PendingVisitReviewManifestQueryRow,
+): PendingVisitReviewManifestRow {
+  return {
+    manifestJson: requireSQLiteText(row.manifestJson, "Pending-review manifest query manifestJson"),
+  };
+}
+
+export function parsePendingVisitReviewOrderedKeys(row: PendingVisitReviewOrderedKeysRow): PendingVisitReviewPageKey[] {
   let decoded: JsonValue;
   try {
     decoded = parseJsonValue(row.keysJson);
@@ -394,9 +428,6 @@ function requireManifestItem(value: JsonValue, context: string): PendingVisitRev
 }
 
 export function parsePendingVisitReviewManifest(row: PendingVisitReviewManifestRow): PendingVisitReviewManifestItem[] {
-  if (!hasPendingVisitReviewManifestJson(row)) {
-    throw new TypeError("Pending-review manifest query must return manifestJson as a string");
-  }
   let decoded: JsonValue;
   try {
     decoded = parseJsonValue(row.manifestJson);
@@ -409,16 +440,6 @@ export function parsePendingVisitReviewManifest(row: PendingVisitReviewManifestR
   const items = decoded.map((value, index) => requireManifestItem(value, `manifest[${index}]`));
   assertUniquePageKeys(items, "manifest");
   return items;
-}
-
-function hasPendingVisitReviewOrderedKeysJson(
-  row: PendingVisitReviewOrderedKeysRow,
-): row is PendingVisitReviewOrderedKeysRow {
-  return typeof row?.keysJson === "string";
-}
-
-function hasPendingVisitReviewManifestJson(row: PendingVisitReviewManifestRow): row is PendingVisitReviewManifestRow {
-  return typeof row?.manifestJson === "string";
 }
 
 function hashGenerationSeed(seed: string): string {
@@ -620,9 +641,6 @@ export async function hydratePendingVisitReviewPages(
 
   for (const pageKeys of pages) {
     const rows = await fetchPage(serializePendingVisitReviewPageKeys(pageKeys), pageKeys);
-    if (!Array.isArray(rows)) {
-      throw new TypeError("Pending-review page fetch must return an array");
-    }
     if (rows.length !== pageKeys.length) {
       throw new Error(`Pending-review page returned ${rows.length} rows for ${pageKeys.length} keys`);
     }

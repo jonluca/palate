@@ -23,19 +23,6 @@ export interface ExportPhotoCountsQuery {
 
 const FOOD_RANK_SQL = "CASE WHEN p.foodDetected = 1 THEN 0 WHEN p.foodDetected = 0 THEN 1 ELSE 2 END";
 
-function isExportVisitId(value: string): value is string {
-  return typeof value === "string";
-}
-
-function isValidExportPhotoCursor(cursor: ExportPhotoCursor): cursor is ExportPhotoCursor {
-  return (
-    typeof cursor.visitId === "string" &&
-    (cursor.foodRank === 0 || cursor.foodRank === 1 || cursor.foodRank === 2) &&
-    Number.isFinite(cursor.creationTime) &&
-    typeof cursor.id === "string"
-  );
-}
-
 /**
  * Build one exact photo-count lookup for arbitrary visit IDs.
  *
@@ -44,16 +31,10 @@ function isValidExportPhotoCursor(cursor: ExportPhotoCursor): cursor is ExportPh
  * not constrain the request.
  *
  * @returns `null` when no visit IDs are requested.
- * @throws {TypeError} When any visit ID is not a string.
  */
 export function buildExportPhotoCountsQuery(visitIds: readonly string[]): ExportPhotoCountsQuery | null {
   if (visitIds.length === 0) {
     return null;
-  }
-  for (const visitId of visitIds) {
-    if (!isExportVisitId(visitId)) {
-      throw new TypeError("Export photo count queries require string visit IDs.");
-    }
   }
 
   return {
@@ -85,16 +66,11 @@ export function buildExportPhotosQuery(
   if (visitIds.length === 0) {
     return null;
   }
-  for (const visitId of visitIds) {
-    if (!isExportVisitId(visitId)) {
-      throw new TypeError("Export photo queries require string visit IDs.");
-    }
-  }
   if (!Number.isSafeInteger(pageSize) || pageSize <= 0 || pageSize > EXPORT_PHOTO_PAGE_SIZE) {
     throw new RangeError(`Export photo page size must be between 1 and ${EXPORT_PHOTO_PAGE_SIZE}.`);
   }
-  if (cursor !== null && !isValidExportPhotoCursor(cursor)) {
-    throw new TypeError("Export photo cursors must contain a valid ordered photo key.");
+  if (cursor !== null && !Number.isFinite(cursor.creationTime)) {
+    throw new RangeError("Export photo cursor creation time must be finite.");
   }
 
   const cursorClause = cursor ? `AND (p.visitId, ${FOOD_RANK_SQL}, p.creationTime, p.id) > (?, ?, ?, ?)` : "";

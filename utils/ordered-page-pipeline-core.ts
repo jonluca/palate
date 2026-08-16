@@ -61,20 +61,9 @@ function startSettled<Value>(operation: () => Value | PromiseLike<Value>): Start
   };
 }
 
-function assertOptions<Page, Produced>(
-  options: OrderedPagePipelineOptions<Page, Produced>,
-): asserts options is OrderedPagePipelineOptions<Page, Produced> {
-  if (options === null || typeof options !== "object") {
-    throw new TypeError("Ordered page pipeline options must be an object.");
-  }
+function assertOptions<Page, Produced>(options: OrderedPagePipelineOptions<Page, Produced>): void {
   if (!Array.isArray(options.pages)) {
     throw new TypeError("Ordered page pipeline pages must be an array.");
-  }
-  if (typeof options.produce !== "function") {
-    throw new TypeError("Ordered page pipeline producer must be a function.");
-  }
-  if (typeof options.consume !== "function") {
-    throw new TypeError("Ordered page pipeline consumer must be a function.");
   }
   if (options.strategy !== "serial" && options.strategy !== "lookahead") {
     throw new RangeError(`Unsupported ordered page pipeline strategy: ${String(options.strategy)}.`);

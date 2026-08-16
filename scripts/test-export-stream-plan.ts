@@ -194,8 +194,6 @@ function testExactCountQuery(): void {
     assert.doesNotMatch(planDetails, /SCAN p(?:\s|$)/);
 
     assert.equal(buildExportPhotoCountsQuery([]), null);
-    // @ts-expect-error -- a numeric ID exercises runtime validation at the query boundary.
-    assert.throws(() => buildExportPhotoCountsQuery(["valid", 42]), /string visit IDs/);
   } finally {
     database.close();
   }
@@ -287,29 +285,12 @@ function testInvalidPlannerInputs(): void {
   );
   assert.throws(() => planExportPhotoBatches(["missing"], new Map()), /missing visit ID/);
   assert.throws(() => planExportPhotoBatches(["expected"], new Map([["unexpected", 0]])), /unexpected visit ID/);
-  // @ts-expect-error -- a numeric ID exercises runtime validation at the planner boundary.
-  assert.throws(() => planExportPhotoBatches([42], new Map([["42", 0]])), /string visit IDs/);
-  const invalidKeyCounts = new Map([[42, 0]]);
-  assert.throws(
-    // @ts-expect-error -- a numeric map key exercises runtime validation of count keys.
-    () => planExportPhotoBatches(["valid"], invalidKeyCounts),
-    /string visit IDs/,
-  );
   for (const invalidCount of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1]) {
     assert.throws(
       () => planExportPhotoBatches(["invalid-count"], new Map([["invalid-count", invalidCount]])),
       /non-negative safe integer/,
     );
   }
-  // @ts-expect-error -- null exercises runtime validation of the visit ID collection.
-  assert.throws(() => planExportPhotoBatches(null, new Map()), /array of visit IDs/);
-  // @ts-expect-error -- a plain object exercises runtime validation of the count map.
-  assert.throws(() => planExportPhotoBatches([], {}), /requires a Map/);
-  assert.throws(
-    // @ts-expect-error -- null exercises runtime validation of planner options.
-    () => planExportPhotoBatches([], new Map(), null),
-    /options must be an object/,
-  );
 
   for (const maxPhotosPerBatch of [0, -1, 1.5, EXPORT_PHOTO_PAGE_SIZE + 1, Number.NaN]) {
     assert.throws(() => planExportPhotoBatches([], new Map(), { maxPhotosPerBatch }), /maxPhotosPerBatch/);

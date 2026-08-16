@@ -1,5 +1,7 @@
 import { isJsonString, parseJsonValue } from "../runtime-json.ts";
 
+type SQLiteColumnValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
+
 export type VisitListFilter = "pending" | "confirmed" | "rejected" | "food";
 
 export const DEFAULT_VISIT_LIST_PAGE_SIZE = 128;
@@ -35,16 +37,16 @@ export interface VisitListPageQuery {
 }
 
 export interface VisitListPageRow {
-  readonly id: string;
-  readonly status: string;
-  readonly startTime: number;
-  readonly photoCount: number;
-  readonly foodProbable: number | boolean;
-  readonly calendarEventTitle: string | null;
-  readonly calendarEventIsAllDay: number | boolean | null;
-  readonly restaurantName: string | null;
-  readonly suggestedRestaurantName: string | null;
-  readonly previewPhotosJson: string | null;
+  readonly id: SQLiteColumnValue;
+  readonly status: SQLiteColumnValue;
+  readonly startTime: SQLiteColumnValue;
+  readonly photoCount: SQLiteColumnValue;
+  readonly foodProbable: SQLiteColumnValue;
+  readonly calendarEventTitle: SQLiteColumnValue;
+  readonly calendarEventIsAllDay: SQLiteColumnValue;
+  readonly restaurantName: SQLiteColumnValue;
+  readonly suggestedRestaurantName: SQLiteColumnValue;
+  readonly previewPhotosJson: SQLiteColumnValue;
 }
 
 const PREVIEW_PHOTO_PRIORITY_SQL =
@@ -58,13 +60,9 @@ function normalizePageSize(pageSize: number): number {
 }
 
 function validateCursor(cursor: VisitListCursor): void {
-  if (!isValidVisitListCursor(cursor)) {
-    throw new TypeError("Visit-list cursor must contain a finite startTime and string id.");
+  if (!Number.isFinite(cursor.startTime)) {
+    throw new TypeError("Visit-list cursor must contain a finite startTime.");
   }
-}
-
-function isValidVisitListCursor(cursor: VisitListCursor): cursor is VisitListCursor {
-  return Number.isFinite(cursor.startTime) && typeof cursor.id === "string";
 }
 
 /**
@@ -138,22 +136,71 @@ function parsePreviewPhotos(value: string | null): string[] {
   }
 }
 
-function parseVisitListItem(row: VisitListPageRow): VisitListItem {
-  if (row.status !== "pending" && row.status !== "confirmed" && row.status !== "rejected") {
-    throw new Error(`Visit-list query returned unsupported status: ${row.status}.`);
+function isSQLiteText(value: SQLiteColumnValue): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteFiniteNumber(value: SQLiteColumnValue): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function requireSQLiteText(value: SQLiteColumnValue, column: string): string {
+  if (!isSQLiteText(value)) {
+    throw new TypeError(`Visit-list query ${column} must be SQLite text.`);
   }
+  return value;
+}
+
+function nullableSQLiteText(value: SQLiteColumnValue, column: string): string | null {
+  return value === null ? null : requireSQLiteText(value, column);
+}
+
+function requireSQLiteNumber(value: SQLiteColumnValue, column: string): number {
+  if (!isSQLiteFiniteNumber(value)) {
+    throw new TypeError(`Visit-list query ${column} must be a finite SQLite number.`);
+  }
+  return value;
+}
+
+function requireSQLiteCount(value: SQLiteColumnValue): number {
+  const count = requireSQLiteNumber(value, "photoCount");
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new TypeError("Visit-list query photoCount must be a non-negative safe integer.");
+  }
+  return count;
+}
+
+function requireSQLiteBoolean(value: SQLiteColumnValue, column: string): boolean {
+  if (value === true || value === 1) {
+    return true;
+  }
+  if (value === false || value === 0) {
+    return false;
+  }
+  throw new TypeError(`Visit-list query ${column} must be a SQLite boolean.`);
+}
+
+function nullableSQLiteBoolean(value: SQLiteColumnValue, column: string): boolean | null {
+  return value === null ? null : requireSQLiteBoolean(value, column);
+}
+
+function parseVisitListItem(row: VisitListPageRow): VisitListItem {
+  const status = requireSQLiteText(row.status, "status");
+  if (status !== "pending" && status !== "confirmed" && status !== "rejected") {
+    throw new Error(`Visit-list query returned unsupported status: ${status}.`);
+  }
+  const previewPhotosJson = nullableSQLiteText(row.previewPhotosJson, "previewPhotosJson");
   return {
-    id: row.id,
-    status: row.status,
-    startTime: row.startTime,
-    photoCount: row.photoCount,
-    foodProbable: row.foodProbable === true || row.foodProbable === 1,
-    calendarEventTitle: row.calendarEventTitle,
-    calendarEventIsAllDay:
-      row.calendarEventIsAllDay === null ? null : row.calendarEventIsAllDay === true || row.calendarEventIsAllDay === 1,
-    restaurantName: row.restaurantName,
-    suggestedRestaurantName: row.suggestedRestaurantName,
-    previewPhotos: parsePreviewPhotos(row.previewPhotosJson),
+    id: requireSQLiteText(row.id, "id"),
+    status,
+    startTime: requireSQLiteNumber(row.startTime, "startTime"),
+    photoCount: requireSQLiteCount(row.photoCount),
+    foodProbable: requireSQLiteBoolean(row.foodProbable, "foodProbable"),
+    calendarEventTitle: nullableSQLiteText(row.calendarEventTitle, "calendarEventTitle"),
+    calendarEventIsAllDay: nullableSQLiteBoolean(row.calendarEventIsAllDay, "calendarEventIsAllDay"),
+    restaurantName: nullableSQLiteText(row.restaurantName, "restaurantName"),
+    suggestedRestaurantName: nullableSQLiteText(row.suggestedRestaurantName, "suggestedRestaurantName"),
+    previewPhotos: parsePreviewPhotos(previewPhotosJson),
   };
 }
 

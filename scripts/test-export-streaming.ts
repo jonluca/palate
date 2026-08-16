@@ -566,11 +566,6 @@ function testUtf8Buffering(data: ExportData): void {
 }
 
 assert.throws(() => new BoundedUtf8BufferingSink(() => {}, 0), /positive safe integer/);
-assert.throws(
-  // @ts-expect-error: The boundary test deliberately supplies a null sink.
-  () => new ExportJsonStreamWriter(null, documentFor(createEmptyExport())),
-  /must be a function/,
-);
 
 const emptyExport = createEmptyExport();
 assertExactStreaming(emptyExport);

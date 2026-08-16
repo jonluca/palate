@@ -10,6 +10,7 @@ import { pathToFileURL } from "node:url";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import {
   buildVisitMergePlan,
+  parseVisitMergePreflightQueryRow,
   VISIT_MERGE_COPY_SUGGESTIONS_SQL,
   VISIT_MERGE_DELETE_SOURCE_SUGGESTIONS_SQL,
   VISIT_MERGE_DELETE_SOURCE_VISITS_SQL,
@@ -833,6 +834,16 @@ function getVisit(database: DatabaseSync, id: string): Row {
 
 function runPlannerTests(): number {
   let scenarios = 0;
+  assert.deepEqual(parseVisitMergePreflightQueryRow({ plannedVisitCount: 4, existingVisitCount: 4 }), {
+    plannedVisitCount: 4,
+    existingVisitCount: 4,
+  });
+  assert.throws(
+    () => parseVisitMergePreflightQueryRow({ plannedVisitCount: "4", existingVisitCount: 4 }),
+    /plannedVisitCount/,
+  );
+  scenarios += 2;
+
   const empty = buildVisitMergePlan([]);
   assert.deepEqual(empty, {
     entries: [],
@@ -862,16 +873,10 @@ function runPlannerTests(): number {
   assert.deepEqual(JSON.parse(ordered.payload), ordered.entries);
   scenarios += 1;
 
-  const groupWithMissingVisits = createGroup("r", ["a", "b"]);
-  Object.defineProperty(groupWithMissingVisits, "visits", { value: null });
-  assert.throws(() => buildVisitMergePlan([groupWithMissingVisits]), /Invalid visit merge group/);
-  const groupWithInvalidVisitId = createGroup("r", ["invalid", "valid"]);
-  Object.defineProperty(groupWithInvalidVisitId.visits[0], "id", { value: 42 });
-  assert.throws(() => buildVisitMergePlan([groupWithInvalidVisitId]), /Invalid visit ID/);
   assert.throws(() => buildVisitMergePlan([createGroup("r", ["same", "same"])]), /overlap/);
   assert.throws(() => buildVisitMergePlan([createGroup("r1", ["a", "b"]), createGroup("r2", ["c", "b"])]), /overlap/);
   assert.throws(() => buildVisitMergePlan([createGroup("r1", ["a", "b"]), createGroup("r2", ["b", "c"])]), /overlap/);
-  scenarios += 5;
+  scenarios += 3;
   return scenarios;
 }
 

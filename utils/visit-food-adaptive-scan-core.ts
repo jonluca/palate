@@ -57,14 +57,14 @@ export interface AdaptiveVisitFoodTransition {
   readonly nextState: AdaptiveVisitFoodState;
 }
 
-function assertIdentifier(value: string, description: string): asserts value is string {
-  if (typeof value !== "string" || value.length === 0) {
+function assertIdentifier(value: string, description: string): void {
+  if (value.length === 0) {
     throw new TypeError(`${description} must be a non-empty string.`);
   }
 }
 
-function assertSampleRank(value: number, description: string): asserts value is number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+function assertSampleRank(value: number, description: string): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
     throw new TypeError(`${description} must be a positive safe integer.`);
   }
 }
@@ -83,9 +83,6 @@ export function createAdaptiveVisitFoodPlan(samples: readonly AdaptiveVisitFoodS
   const photoIds = new Set<string>();
 
   for (const [index, sample] of samples.entries()) {
-    if (!isAdaptiveVisitFoodSample(sample)) {
-      throw new TypeError(`Adaptive visit food sample ${index} must be an object.`);
-    }
     assertIdentifier(sample.visitId, `Adaptive visit food sample ${index} visitId`);
     assertIdentifier(sample.photoId, `Adaptive visit food sample ${index} photoId`);
     assertSampleRank(sample.sampleRank, `Adaptive visit food sample ${index} sampleRank`);
@@ -133,10 +130,6 @@ export function createAdaptiveVisitFoodPlan(samples: readonly AdaptiveVisitFoodS
   });
 
   return { visits, totalSamples: samples.length, maximumRank };
-}
-
-function isAdaptiveVisitFoodSample(sample: AdaptiveVisitFoodSample): sample is AdaptiveVisitFoodSample {
-  return sample !== null && typeof sample === "object";
 }
 
 function buildWave(
@@ -200,9 +193,6 @@ function indexOutcomes(
   const outcomesByPhotoId = new Map<string, AdaptiveVisitFoodOutcome>();
 
   for (const [index, outcome] of outcomes.entries()) {
-    if (!isAdaptiveVisitFoodOutcome(outcome)) {
-      throw new TypeError(`Adaptive visit food outcome ${index} must be an object.`);
-    }
     assertIdentifier(outcome.photoId, `Adaptive visit food outcome ${index} photoId`);
     if (!wavePhotoIds.has(outcome.photoId)) {
       throw new TypeError(
@@ -226,10 +216,6 @@ function indexOutcomes(
     outcomesByPhotoId.set(outcome.photoId, outcome);
   }
   return outcomesByPhotoId;
-}
-
-function isAdaptiveVisitFoodOutcome(outcome: AdaptiveVisitFoodOutcome): outcome is AdaptiveVisitFoodOutcome {
-  return outcome !== null && typeof outcome === "object";
 }
 
 function hasAdaptiveVisitFoodBoolean(value: boolean | undefined): value is boolean {

@@ -411,6 +411,6 @@ function isValidCalendarMutationInputIndex(value: NativeCalendarMutationValue, r
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value < requestCount;
 }
 
-function isNonEmptyCalendarEventId(value: string): value is string {
-  return typeof value === "string" && value.length > 0;
+function isNonEmptyCalendarEventId(value: string): boolean {
+  return value.length > 0;
 }

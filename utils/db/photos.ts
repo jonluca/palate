@@ -17,35 +17,143 @@ import {
 import type { FoodLabel, PhotoRecord, UnvisitedPhotoRecord } from "./types";
 import { parseFoodLabelArrayJson } from "./food-label-json.ts";
 
-// Raw photo record as stored in database (foodLabels and allLabels are JSON strings)
-interface RawPhotoRecord extends Omit<PhotoRecord, "foodLabels" | "foodDetected" | "allLabels" | "mediaType"> {
-  foodLabels: string | null;
-  foodDetected: number | null;
-  allLabels: string | null;
-  mediaType: string | null;
+type SQLiteColumnValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
+
+interface PhotoQueryRow {
+  readonly id: SQLiteColumnValue;
+  readonly uri: SQLiteColumnValue;
+  readonly creationTime: SQLiteColumnValue;
+  readonly latitude: SQLiteColumnValue;
+  readonly longitude: SQLiteColumnValue;
+  readonly visitId: SQLiteColumnValue;
+  readonly foodDetected: SQLiteColumnValue;
+  readonly foodLabels: SQLiteColumnValue;
+  readonly foodConfidence: SQLiteColumnValue;
+  readonly allLabels: SQLiteColumnValue;
+  readonly mediaType: SQLiteColumnValue;
+  readonly duration: SQLiteColumnValue;
 }
 
-interface ExportPhotoCountRow {
-  readonly visitId: string;
-  readonly photoCount: number;
+interface StoredPhotoRecord {
+  readonly id: string;
+  readonly uri: string;
+  readonly creationTime: number;
+  readonly latitude: number | null;
+  readonly longitude: number | null;
+  readonly visitId: string | null;
+  readonly foodDetected: 0 | 1 | null;
+  readonly foodLabels: string | null;
+  readonly foodConfidence: number | null;
+  readonly allLabels: string | null;
+  readonly mediaType: "photo" | "video" | null;
+  readonly duration: number | null;
 }
 
-function isValidExportPhotoCountRow(row: ExportPhotoCountRow): row is ExportPhotoCountRow {
-  return typeof row.visitId === "string" && Number.isSafeInteger(row.photoCount) && row.photoCount >= 0;
+interface ExportPhotoCountQueryRow {
+  readonly visitId: SQLiteColumnValue;
+  readonly photoCount: SQLiteColumnValue;
 }
 
-function hasValidPhotoAssetId(row: { readonly id: string }): row is { readonly id: string } {
-  return typeof row.id === "string" && row.id.length > 0;
+interface PhotoAssetIdQueryRow {
+  readonly id: SQLiteColumnValue;
 }
 
-function hasUsablePhotoDatabasePath(
-  database: Awaited<ReturnType<typeof getDatabase>>,
-): database is Awaited<ReturnType<typeof getDatabase>> & { readonly databasePath: string } {
-  return typeof database.databasePath === "string" && database.databasePath.trim().length > 0;
+interface UnvisitedPhotoQueryRow {
+  readonly id: SQLiteColumnValue;
+  readonly creationTime: SQLiteColumnValue;
+  readonly latitude: SQLiteColumnValue;
+  readonly longitude: SQLiteColumnValue;
 }
 
-// Helper to parse raw database photo record into proper PhotoRecord
-function parsePhotoRecord(raw: RawPhotoRecord): PhotoRecord {
+function isSQLiteText(value: SQLiteColumnValue): value is string {
+  return typeof value === "string";
+}
+
+function isSQLiteFiniteNumber(value: SQLiteColumnValue): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function requiredSQLiteText(value: SQLiteColumnValue, column: string, rowIndex: number): string {
+  if (!isSQLiteText(value)) {
+    throw new Error(`Photo query row ${rowIndex} returned a non-text ${column}.`);
+  }
+  return value;
+}
+
+function nullableSQLiteText(value: SQLiteColumnValue, column: string, rowIndex: number): string | null {
+  return value === null ? null : requiredSQLiteText(value, column, rowIndex);
+}
+
+function requiredSQLiteNumber(value: SQLiteColumnValue, column: string, rowIndex: number): number {
+  if (!isSQLiteFiniteNumber(value)) {
+    throw new Error(`Photo query row ${rowIndex} returned a non-finite numeric ${column}.`);
+  }
+  return value;
+}
+
+function nullableSQLiteNumber(value: SQLiteColumnValue, column: string, rowIndex: number): number | null {
+  return value === null ? null : requiredSQLiteNumber(value, column, rowIndex);
+}
+
+function nullableSQLiteBoolean(value: SQLiteColumnValue, column: string, rowIndex: number): 0 | 1 | null {
+  if (value === null || value === 0 || value === 1) {
+    return value;
+  }
+  throw new Error(`Photo query row ${rowIndex} returned an invalid SQLite boolean ${column}.`);
+}
+
+function nullableSQLiteMediaType(value: SQLiteColumnValue, column: string, rowIndex: number): "photo" | "video" | null {
+  if (value === null || value === "photo" || value === "video") {
+    return value;
+  }
+  throw new Error(`Photo query row ${rowIndex} returned an invalid ${column}.`);
+}
+
+function parsePhotoQueryRow(row: PhotoQueryRow, rowIndex: number): StoredPhotoRecord {
+  return {
+    id: requiredSQLiteText(row.id, "id", rowIndex),
+    uri: requiredSQLiteText(row.uri, "uri", rowIndex),
+    creationTime: requiredSQLiteNumber(row.creationTime, "creationTime", rowIndex),
+    latitude: nullableSQLiteNumber(row.latitude, "latitude", rowIndex),
+    longitude: nullableSQLiteNumber(row.longitude, "longitude", rowIndex),
+    visitId: nullableSQLiteText(row.visitId, "visitId", rowIndex),
+    foodDetected: nullableSQLiteBoolean(row.foodDetected, "foodDetected", rowIndex),
+    foodLabels: nullableSQLiteText(row.foodLabels, "foodLabels", rowIndex),
+    foodConfidence: nullableSQLiteNumber(row.foodConfidence, "foodConfidence", rowIndex),
+    allLabels: nullableSQLiteText(row.allLabels, "allLabels", rowIndex),
+    mediaType: nullableSQLiteMediaType(row.mediaType, "mediaType", rowIndex),
+    duration: nullableSQLiteNumber(row.duration, "duration", rowIndex),
+  };
+}
+
+function parseExportPhotoCountRow(row: ExportPhotoCountQueryRow, rowIndex: number): readonly [string, number] {
+  const visitId = requiredSQLiteText(row.visitId, "visitId", rowIndex);
+  const photoCount = requiredSQLiteNumber(row.photoCount, "photoCount", rowIndex);
+  if (!Number.isSafeInteger(photoCount) || photoCount < 0) {
+    throw new Error(`Photo query row ${rowIndex} returned an invalid photoCount.`);
+  }
+  return [visitId, photoCount];
+}
+
+function parsePhotoAssetId(row: PhotoAssetIdQueryRow, rowIndex: number): string {
+  const id = requiredSQLiteText(row.id, "id", rowIndex);
+  if (id.length === 0) {
+    throw new Error(`Photo asset ID query returned an empty ID at row ${rowIndex}.`);
+  }
+  return id;
+}
+
+function parseUnvisitedPhotoQueryRow(row: UnvisitedPhotoQueryRow, rowIndex: number): UnvisitedPhotoRecord {
+  return {
+    id: requiredSQLiteText(row.id, "id", rowIndex),
+    creationTime: requiredSQLiteNumber(row.creationTime, "creationTime", rowIndex),
+    latitude: requiredSQLiteNumber(row.latitude, "latitude", rowIndex),
+    longitude: requiredSQLiteNumber(row.longitude, "longitude", rowIndex),
+  };
+}
+
+// Helper to parse stored JSON and SQLite booleans into a proper PhotoRecord.
+function parsePhotoRecord(raw: StoredPhotoRecord): PhotoRecord {
   let foodLabels: FoodLabel[] | null = null;
   if (raw.foodLabels) {
     foodLabels = parseFoodLabelArrayJson(raw.foodLabels);
@@ -57,11 +165,18 @@ function parsePhotoRecord(raw: RawPhotoRecord): PhotoRecord {
   }
 
   return {
-    ...raw,
+    id: raw.id,
+    uri: raw.uri,
+    creationTime: raw.creationTime,
+    latitude: raw.latitude,
+    longitude: raw.longitude,
+    visitId: raw.visitId,
     foodDetected: raw.foodDetected === null ? null : raw.foodDetected === 1,
     foodLabels,
+    foodConfidence: raw.foodConfidence,
     allLabels,
     mediaType: raw.mediaType === "video" ? "video" : "photo",
+    duration: raw.duration,
   };
 }
 
@@ -102,14 +217,14 @@ export async function insertPhotosForAutomaticDeepScan(
       if (!statement) {
         continue;
       }
-      const insertedRows = await transaction.getAllAsync<{ id: string }>(
+      const insertedRows = await transaction.getAllAsync<PhotoAssetIdQueryRow>(
         `${statement.sql} RETURNING id`,
         statement.parameters,
       );
       if (insertedRows.length > 0) {
         await transaction.runAsync(
           ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL,
-          JSON.stringify(insertedRows.map((row) => row.id)),
+          JSON.stringify(insertedRows.map(parsePhotoAssetId)),
         );
         await transaction.runAsync(MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL);
         insertedCount += insertedRows.length;
@@ -121,24 +236,25 @@ export async function insertPhotosForAutomaticDeepScan(
 
 export async function getUnvisitedPhotos(): Promise<UnvisitedPhotoRecord[]> {
   const database = await getDatabase();
-  return database.getAllAsync<UnvisitedPhotoRecord>(
+  const rows = await database.getAllAsync<UnvisitedPhotoQueryRow>(
     `SELECT id, creationTime, latitude, longitude
      FROM photos
      WHERE visitId IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL
      ORDER BY creationTime ASC, id ASC`,
   );
+  return rows.map(parseUnvisitedPhotoQueryRow);
 }
 
 export async function getPhotosByVisitId(visitId: string): Promise<PhotoRecord[]> {
   const database = await getDatabase();
   // Preserve the existing per-visit ordering contract for non-export consumers.
-  const rawPhotos = await database.getAllAsync<RawPhotoRecord>(
+  const queryRows = await database.getAllAsync<PhotoQueryRow>(
     `SELECT * FROM photos WHERE visitId = ? ORDER BY 
       CASE WHEN foodDetected = 1 THEN 0 WHEN foodDetected = 0 THEN 1 ELSE 2 END ASC,
       creationTime ASC`,
     [visitId],
   );
-  return rawPhotos.map(parsePhotoRecord);
+  return queryRows.map((row, rowIndex) => parsePhotoRecord(parsePhotoQueryRow(row, rowIndex)));
 }
 
 export interface ExportPhotosPage {
@@ -157,13 +273,11 @@ export async function getExportPhotoCountsByVisitIds(
   }
 
   const database = databaseOverride ?? (await getDatabase());
-  const rows = await database.getAllAsync<ExportPhotoCountRow>(query.sql, query.parameters);
+  const rows = await database.getAllAsync<ExportPhotoCountQueryRow>(query.sql, query.parameters);
   const counts = new Map<string, number>();
-  for (const row of rows) {
-    if (!isValidExportPhotoCountRow(row)) {
-      throw new Error("Export photo count query returned an invalid row.");
-    }
-    counts.set(row.visitId, row.photoCount);
+  for (const [rowIndex, row] of rows.entries()) {
+    const [visitId, photoCount] = parseExportPhotoCountRow(row, rowIndex);
+    counts.set(visitId, photoCount);
   }
   return counts;
 }
@@ -181,7 +295,8 @@ export async function getPhotosByVisitIdsPage(
   }
 
   const database = databaseOverride ?? (await getDatabase());
-  const rawPhotos = await database.getAllAsync<RawPhotoRecord>(query.sql, query.parameters);
+  const queryRows = await database.getAllAsync<PhotoQueryRow>(query.sql, query.parameters);
+  const rawPhotos = queryRows.map(parsePhotoQueryRow);
   const hasNextPage = rawPhotos.length > query.pageSize;
   const pageRows = hasNextPage ? rawPhotos.slice(0, query.pageSize) : rawPhotos;
   let nextCursor: ExportPhotoCursor | null = null;
@@ -240,20 +355,14 @@ export async function getTotalPhotoCount(): Promise<number> {
  */
 export async function getExistingPhotoAssetIdsForIncrementalScan(): Promise<string[]> {
   const database = await getDatabase();
-  const rows = await database.getAllAsync<{ id: string }>(INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL);
-  const ids = rows.map((row, index) => {
-    if (!hasValidPhotoAssetId(row)) {
-      throw new Error(`Photo asset ID query returned an invalid ID at row ${index}`);
-    }
-    return row.id;
-  });
-  return ids;
+  const rows = await database.getAllAsync<PhotoAssetIdQueryRow>(INCREMENTAL_PHOTO_SCAN_EXISTING_IDS_SQL);
+  return rows.map(parsePhotoAssetId);
 }
 
 /** Return the exact SQLite path for native database-backed PhotoKit exclusion. */
 export async function getPhotoDatabasePathForIncrementalScan(): Promise<string> {
   const database = await getDatabase();
-  if (!hasUsablePhotoDatabasePath(database)) {
+  if (database.databasePath.trim().length === 0) {
     throw new Error("Expo SQLite did not expose a usable photo database path");
   }
   return database.databasePath;
@@ -336,9 +445,9 @@ export async function getPhotosByAssetIds(assetIds: string[]): Promise<PhotoReco
 
   const database = await getDatabase();
   const placeholders = assetIds.map(() => "?").join(", ");
-  const rawPhotos = await database.getAllAsync<RawPhotoRecord>(
+  const queryRows = await database.getAllAsync<PhotoQueryRow>(
     `SELECT * FROM photos WHERE id IN (${placeholders})`,
     assetIds,
   );
-  return rawPhotos.map(parsePhotoRecord);
+  return queryRows.map((row, rowIndex) => parsePhotoRecord(parsePhotoQueryRow(row, rowIndex)));
 }
