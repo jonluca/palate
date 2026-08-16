@@ -34,21 +34,6 @@ interface PhotoQueryRow {
   readonly duration: SQLiteColumnValue;
 }
 
-interface StoredPhotoRecord {
-  readonly id: string;
-  readonly uri: string;
-  readonly creationTime: number;
-  readonly latitude: number | null;
-  readonly longitude: number | null;
-  readonly visitId: string | null;
-  readonly foodDetected: 0 | 1 | null;
-  readonly foodLabels: string | null;
-  readonly foodConfidence: number | null;
-  readonly allLabels: string | null;
-  readonly mediaType: "photo" | "video" | null;
-  readonly duration: number | null;
-}
-
 interface ExportPhotoCountQueryRow {
   readonly visitId: SQLiteColumnValue;
   readonly photoCount: SQLiteColumnValue;
@@ -109,32 +94,6 @@ function nullableSQLiteMediaType(value: SQLiteColumnValue, column: string, rowIn
   throw new Error(`Photo query row ${rowIndex} returned an invalid ${column}.`);
 }
 
-function parsePhotoQueryRow(row: PhotoQueryRow, rowIndex: number): StoredPhotoRecord {
-  return {
-    id: requiredSQLiteText(row.id, "id", rowIndex),
-    uri: requiredSQLiteText(row.uri, "uri", rowIndex),
-    creationTime: requiredSQLiteNumber(row.creationTime, "creationTime", rowIndex),
-    latitude: nullableSQLiteNumber(row.latitude, "latitude", rowIndex),
-    longitude: nullableSQLiteNumber(row.longitude, "longitude", rowIndex),
-    visitId: nullableSQLiteText(row.visitId, "visitId", rowIndex),
-    foodDetected: nullableSQLiteBoolean(row.foodDetected, "foodDetected", rowIndex),
-    foodLabels: nullableSQLiteText(row.foodLabels, "foodLabels", rowIndex),
-    foodConfidence: nullableSQLiteNumber(row.foodConfidence, "foodConfidence", rowIndex),
-    allLabels: nullableSQLiteText(row.allLabels, "allLabels", rowIndex),
-    mediaType: nullableSQLiteMediaType(row.mediaType, "mediaType", rowIndex),
-    duration: nullableSQLiteNumber(row.duration, "duration", rowIndex),
-  };
-}
-
-function parseExportPhotoCountRow(row: ExportPhotoCountQueryRow, rowIndex: number): readonly [string, number] {
-  const visitId = requiredSQLiteText(row.visitId, "visitId", rowIndex);
-  const photoCount = requiredSQLiteNumber(row.photoCount, "photoCount", rowIndex);
-  if (!Number.isSafeInteger(photoCount) || photoCount < 0) {
-    throw new Error(`Photo query row ${rowIndex} returned an invalid photoCount.`);
-  }
-  return [visitId, photoCount];
-}
-
 function parsePhotoAssetId(row: PhotoAssetIdQueryRow, rowIndex: number): string {
   const id = requiredSQLiteText(row.id, "id", rowIndex);
   if (id.length === 0) {
@@ -143,40 +102,55 @@ function parsePhotoAssetId(row: PhotoAssetIdQueryRow, rowIndex: number): string 
   return id;
 }
 
-function parseUnvisitedPhotoQueryRow(row: UnvisitedPhotoQueryRow, rowIndex: number): UnvisitedPhotoRecord {
-  return {
-    id: requiredSQLiteText(row.id, "id", rowIndex),
-    creationTime: requiredSQLiteNumber(row.creationTime, "creationTime", rowIndex),
-    latitude: requiredSQLiteNumber(row.latitude, "latitude", rowIndex),
-    longitude: requiredSQLiteNumber(row.longitude, "longitude", rowIndex),
-  };
+function assertUnvisitedPhotoQueryRows(rows: UnvisitedPhotoQueryRow[]): asserts rows is UnvisitedPhotoRecord[] {
+  let rowIndex = 0;
+  for (const row of rows) {
+    requiredSQLiteText(row.id, "id", rowIndex);
+    requiredSQLiteNumber(row.creationTime, "creationTime", rowIndex);
+    requiredSQLiteNumber(row.latitude, "latitude", rowIndex);
+    requiredSQLiteNumber(row.longitude, "longitude", rowIndex);
+    rowIndex += 1;
+  }
 }
 
-// Helper to parse stored JSON and SQLite booleans into a proper PhotoRecord.
-function parsePhotoRecord(raw: StoredPhotoRecord): PhotoRecord {
+// Validate the SQLite boundary and construct the final domain object in one pass.
+function parsePhotoQueryRow(row: PhotoQueryRow, rowIndex: number): PhotoRecord {
+  const id = requiredSQLiteText(row.id, "id", rowIndex);
+  const uri = requiredSQLiteText(row.uri, "uri", rowIndex);
+  const creationTime = requiredSQLiteNumber(row.creationTime, "creationTime", rowIndex);
+  const latitude = nullableSQLiteNumber(row.latitude, "latitude", rowIndex);
+  const longitude = nullableSQLiteNumber(row.longitude, "longitude", rowIndex);
+  const visitId = nullableSQLiteText(row.visitId, "visitId", rowIndex);
+  const foodDetected = nullableSQLiteBoolean(row.foodDetected, "foodDetected", rowIndex);
+  const foodLabelsJson = nullableSQLiteText(row.foodLabels, "foodLabels", rowIndex);
+  const foodConfidence = nullableSQLiteNumber(row.foodConfidence, "foodConfidence", rowIndex);
+  const allLabelsJson = nullableSQLiteText(row.allLabels, "allLabels", rowIndex);
+  const mediaType = nullableSQLiteMediaType(row.mediaType, "mediaType", rowIndex);
+  const duration = nullableSQLiteNumber(row.duration, "duration", rowIndex);
+
   let foodLabels: FoodLabel[] | null = null;
-  if (raw.foodLabels) {
-    foodLabels = parseFoodLabelArrayJson(raw.foodLabels);
+  if (foodLabelsJson) {
+    foodLabels = parseFoodLabelArrayJson(foodLabelsJson);
   }
 
   let allLabels: FoodLabel[] | null = null;
-  if (raw.allLabels) {
-    allLabels = parseFoodLabelArrayJson(raw.allLabels);
+  if (allLabelsJson) {
+    allLabels = parseFoodLabelArrayJson(allLabelsJson);
   }
 
   return {
-    id: raw.id,
-    uri: raw.uri,
-    creationTime: raw.creationTime,
-    latitude: raw.latitude,
-    longitude: raw.longitude,
-    visitId: raw.visitId,
-    foodDetected: raw.foodDetected === null ? null : raw.foodDetected === 1,
+    id,
+    uri,
+    creationTime,
+    latitude,
+    longitude,
+    visitId,
+    foodDetected: foodDetected === null ? null : foodDetected === 1,
     foodLabels,
-    foodConfidence: raw.foodConfidence,
+    foodConfidence,
     allLabels,
-    mediaType: raw.mediaType === "video" ? "video" : "photo",
-    duration: raw.duration,
+    mediaType: mediaType === "video" ? "video" : "photo",
+    duration,
   };
 }
 
@@ -242,7 +216,8 @@ export async function getUnvisitedPhotos(): Promise<UnvisitedPhotoRecord[]> {
      WHERE visitId IS NULL AND latitude IS NOT NULL AND longitude IS NOT NULL
      ORDER BY creationTime ASC, id ASC`,
   );
-  return rows.map(parseUnvisitedPhotoQueryRow);
+  assertUnvisitedPhotoQueryRows(rows);
+  return rows;
 }
 
 export async function getPhotosByVisitId(visitId: string): Promise<PhotoRecord[]> {
@@ -254,7 +229,7 @@ export async function getPhotosByVisitId(visitId: string): Promise<PhotoRecord[]
       creationTime ASC`,
     [visitId],
   );
-  return queryRows.map((row, rowIndex) => parsePhotoRecord(parsePhotoQueryRow(row, rowIndex)));
+  return queryRows.map(parsePhotoQueryRow);
 }
 
 export interface ExportPhotosPage {
@@ -275,9 +250,15 @@ export async function getExportPhotoCountsByVisitIds(
   const database = databaseOverride ?? (await getDatabase());
   const rows = await database.getAllAsync<ExportPhotoCountQueryRow>(query.sql, query.parameters);
   const counts = new Map<string, number>();
-  for (const [rowIndex, row] of rows.entries()) {
-    const [visitId, photoCount] = parseExportPhotoCountRow(row, rowIndex);
+  let rowIndex = 0;
+  for (const row of rows) {
+    const visitId = requiredSQLiteText(row.visitId, "visitId", rowIndex);
+    const photoCount = requiredSQLiteNumber(row.photoCount, "photoCount", rowIndex);
+    if (!Number.isSafeInteger(photoCount) || photoCount < 0) {
+      throw new Error(`Photo query row ${rowIndex} returned an invalid photoCount.`);
+    }
     counts.set(visitId, photoCount);
+    rowIndex += 1;
   }
   return counts;
 }
@@ -296,26 +277,28 @@ export async function getPhotosByVisitIdsPage(
 
   const database = databaseOverride ?? (await getDatabase());
   const queryRows = await database.getAllAsync<PhotoQueryRow>(query.sql, query.parameters);
-  const rawPhotos = queryRows.map(parsePhotoQueryRow);
-  const hasNextPage = rawPhotos.length > query.pageSize;
-  const pageRows = hasNextPage ? rawPhotos.slice(0, query.pageSize) : rawPhotos;
+  const hasNextPage = queryRows.length > query.pageSize;
+  if (hasNextPage) {
+    queryRows.length = query.pageSize;
+  }
+  const photos = queryRows.map(parsePhotoQueryRow);
   let nextCursor: ExportPhotoCursor | null = null;
 
   if (hasNextPage) {
-    const lastPhoto = pageRows[pageRows.length - 1];
+    const lastPhoto = photos[photos.length - 1];
     if (!lastPhoto || lastPhoto.visitId === null) {
       throw new Error("Export photo paging returned an invalid continuation row.");
     }
     nextCursor = {
       visitId: lastPhoto.visitId,
-      foodRank: lastPhoto.foodDetected === 1 ? 0 : lastPhoto.foodDetected === 0 ? 1 : 2,
+      foodRank: lastPhoto.foodDetected === true ? 0 : lastPhoto.foodDetected === false ? 1 : 2,
       creationTime: lastPhoto.creationTime,
       id: lastPhoto.id,
     };
   }
 
   return {
-    photos: pageRows.map(parsePhotoRecord),
+    photos,
     nextCursor,
   };
 }
@@ -449,5 +432,5 @@ export async function getPhotosByAssetIds(assetIds: string[]): Promise<PhotoReco
     `SELECT * FROM photos WHERE id IN (${placeholders})`,
     assetIds,
   );
-  return queryRows.map((row, rowIndex) => parsePhotoRecord(parsePhotoQueryRow(row, rowIndex)));
+  return queryRows.map(parsePhotoQueryRow);
 }

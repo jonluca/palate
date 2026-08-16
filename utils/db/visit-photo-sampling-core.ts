@@ -130,16 +130,31 @@ function isSQLiteNumber(value: SQLiteColumnValue): value is number {
   return typeof value === "number";
 }
 
-function requireNonEmptySQLiteText(value: SQLiteColumnValue, context: string): string {
-  if (!isSQLiteText(value) || value.length === 0) {
-    throw new TypeError(`${context} must be a non-empty SQLite text value.`);
+function requirePositiveSafeInteger(value: SQLiteColumnValue, context: string): number {
+  if (!isSQLiteNumber(value) || !Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`${context} must be a positive safe integer.`);
   }
   return value;
 }
 
-function requirePositiveSafeInteger(value: SQLiteColumnValue, context: string): number {
+function requireNonEmptySampleRowText(
+  value: SQLiteColumnValue,
+  rowIndex: number,
+  column: "visitId" | "photoId",
+): string {
+  if (!isSQLiteText(value) || value.length === 0) {
+    throw new TypeError(`Food-detection sample row ${rowIndex} ${column} must be a non-empty SQLite text value.`);
+  }
+  return value;
+}
+
+function requirePositiveSampleRowInteger(
+  value: SQLiteColumnValue,
+  rowIndex: number,
+  column: "sampleRank" | "totalVisits",
+): number {
   if (!isSQLiteNumber(value) || !Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError(`${context} must be a positive safe integer.`);
+    throw new TypeError(`Food-detection sample row ${rowIndex} ${column} must be a positive safe integer.`);
   }
   return value;
 }
@@ -157,11 +172,12 @@ export function parseFoodDetectionVisitSampleRows(
   const photoIds = new Set<string>();
   const samples: FoodDetectionVisitSample[] = [];
 
-  for (const [index, row] of rows.entries()) {
-    const visitId = requireNonEmptySQLiteText(row.visitId, `Food-detection sample row ${index} visitId`);
-    const photoId = requireNonEmptySQLiteText(row.photoId, `Food-detection sample row ${index} photoId`);
-    const sampleRank = requirePositiveSafeInteger(row.sampleRank, `Food-detection sample row ${index} sampleRank`);
-    const totalVisits = requirePositiveSafeInteger(row.totalVisits, `Food-detection sample row ${index} totalVisits`);
+  let index = 0;
+  for (const row of rows) {
+    const visitId = requireNonEmptySampleRowText(row.visitId, index, "visitId");
+    const photoId = requireNonEmptySampleRowText(row.photoId, index, "photoId");
+    const sampleRank = requirePositiveSampleRowInteger(row.sampleRank, index, "sampleRank");
+    const totalVisits = requirePositiveSampleRowInteger(row.totalVisits, index, "totalVisits");
     if (totalVisits !== firstTotalVisits) {
       throw new TypeError(`Food-detection sample row ${index} has an inconsistent totalVisits value.`);
     }
@@ -179,6 +195,7 @@ export function parseFoodDetectionVisitSampleRows(
     photoIds.add(photoId);
     visitNextRanks.set(visitId, expectedRank + 1);
     samples.push({ visitId, photoId, sampleRank });
+    index += 1;
   }
 
   if (visitNextRanks.size !== firstTotalVisits) {
