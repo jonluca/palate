@@ -7,5 +7,12 @@
   "trailingComma": "all",
   "singleQuote": false,
   "sortPackageJson": false,
-  "ignorePatterns": ["uniwind.d.ts", "uniwind-types.d.ts", ".agents/skills/**", ".codex/skills/**", ".cursor/skills/**"]
+  "ignorePatterns": [
+    "uniwind.d.ts",
+    "uniwind-types.d.ts",
+    ".agents/skills/**",
+    ".codex/skills/**",
+    ".cursor/skills/**",
+    "tools/oxlint/anti-slop/**"
+  ]
 }

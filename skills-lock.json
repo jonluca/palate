@@ -115,6 +115,13 @@
       "skillPath": "skills/frontend-design/SKILL.md",
       "computedHash": "4eabc66183767153e404b39d1b839b1c37f2d82d86f0a0d7e880a579d8d62336"
     },
+    "install-anti-slop": {
+      "source": "dmmulroy/anti-slop",
+      "sourceType": "github",
+      "ref": "446268e5d15baa968eaec669ff65358d36ae6259",
+      "skillPath": "skills/install-anti-slop/SKILL.md",
+      "computedHash": "db4820744019a20281c3b1776dfe42f5d491df97e255aa2c2da965a2f0b848bc"
+    },
     "kotlin": {
       "source": "margelo/react-native-skills",
       "sourceType": "github",

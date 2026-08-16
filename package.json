@@ -245,6 +245,7 @@
     "node": ">=22.13.0 <26"
   },
   "devDependencies": {
+    "@oxlint/plugins": "1.78.0",
     "@types/lodash-es": "^4.17.12",
     "@types/node": "^26.1.2",
     "@types/react": "~19.2.18",
@@ -253,7 +254,7 @@
     "eslint-plugin-react-compiler": "19.1.0-rc.2",
     "knip": "^6.31.0",
     "oxfmt": "^0.62.0",
-    "oxlint": "^1.77.0",
+    "oxlint": "1.78.0",
     "typescript": "~6.0.3"
   }
 }
