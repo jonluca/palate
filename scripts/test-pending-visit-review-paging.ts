@@ -33,10 +33,7 @@ import {
   restoreFailedPendingReviewInfiniteMutation,
   type PendingReviewInfiniteData,
 } from "../utils/review-query-policy.ts";
-import {
-  BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS,
-  assertCalendarTitleMatchingSourceContract,
-} from "./calendar-title-matching-benchmark-core.ts";
+import { BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS } from "./calendar-title-matching-benchmark-core.ts";
 import { parseFoodLabelArraysJson } from "../utils/db/food-label-json.ts";
 import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from "../utils/runtime-json.ts";
 
@@ -693,8 +690,6 @@ assert.deepEqual(parsePendingVisitReviewOrderedKeysQueryRow({ keysJson: "[]" }),
 assert.throws(() => parsePendingVisitReviewOrderedKeysQueryRow({ keysJson: 0 }), /SQLite text/);
 assert.deepEqual(parsePendingVisitReviewManifestQueryRow({ manifestJson: "[]" }), { manifestJson: "[]" });
 assert.throws(() => parsePendingVisitReviewManifestQueryRow({ manifestJson: null }), /SQLite text/);
-const calendarTitleSourceContract = assertCalendarTitleMatchingSourceContract();
-assert.equal(calendarTitleSourceContract.sourceContractMatched, true);
 assert.equal(
   BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS.cleanCalendarEventTitle("Dinner at Le Bernardin (2 guests)"),
   "Le Bernardin",

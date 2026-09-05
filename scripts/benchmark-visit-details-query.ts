@@ -14,6 +14,7 @@ import {
   type VisitDetailsQueryRow,
 } from "../utils/db/visit-details-core.ts";
 import type { VisitWithDetails } from "../utils/db/types.ts";
+import { isVisitStatus } from "../utils/visit-status.ts";
 
 type SQLiteValue = SQLOutputValue;
 type BenchmarkSQLiteRow<Row> = Row & Record<string, SQLiteValue>;
@@ -39,7 +40,7 @@ interface QueryPlanRow {
   readonly detail: string;
 }
 
-type LegacyVisitRow = Omit<VisitWithDetails, "previewPhotos">;
+type LegacyVisitRow = Omit<VisitDetailsQueryRow, "previewPhotosJson">;
 
 interface LegacyPreviewRow {
   readonly visitId: string;
@@ -416,10 +417,17 @@ function executeLegacy(database: DatabaseSync, filter?: VisitDetailsFilter): Exe
       previewsByVisit.set(preview.visitId, [preview.uri]);
     }
   }
-  const results = visits.map((visit): VisitWithDetails => ({
-    ...visit,
-    previewPhotos: previewsByVisit.get(visit.id) ?? [],
-  }));
+  const results = visits.map((visit): VisitWithDetails => {
+    assert.ok(isVisitStatus(visit.status));
+    return {
+      ...visit,
+      // Compare both SQL strategies using the application's boolean domain contract.
+      status: visit.status,
+      foodProbable: visit.foodProbable === 1,
+      calendarEventIsAllDay: visit.calendarEventIsAllDay === null ? null : visit.calendarEventIsAllDay === 1,
+      previewPhotos: previewsByVisit.get(visit.id) ?? [],
+    };
+  });
   return {
     results,
     databaseCalls: 2,
@@ -465,7 +473,8 @@ function assertEveryFilterParity(configuration: Configuration): string[] {
 function resultChecksum(results: readonly VisitWithDetails[]): string {
   const hash = createHash("sha256");
   for (const result of results) {
-    const serialized = JSON.stringify(result);
+    // Object insertion order is not part of the visit record contract.
+    const serialized = JSON.stringify(result, Object.keys(result).sort());
     hash.update(String(Buffer.byteLength(serialized)));
     hash.update(":");
     hash.update(serialized);

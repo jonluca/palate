@@ -1,4 +1,4 @@
-import type { VisitStatus } from "@/hooks/queries";
+import type { VisitStatus } from "@/utils/visit-status";
 
 export const formatDate = (timestamp: number, timeZone?: string | null) => {
   const options: Intl.DateTimeFormatOptions = {

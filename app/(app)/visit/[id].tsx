@@ -33,7 +33,6 @@ import {
   useUnifiedNearbyRestaurants,
   useAddPhotosToVisit,
   useRemovePhotosFromVisit,
-  type VisitStatus,
   type VisitFoodScanProgress,
   type NearbyRestaurant,
 } from "@/hooks";
@@ -42,7 +41,8 @@ import * as ImagePicker from "expo-image-picker";
 import { router, useLocalSearchParams } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { FoodLabel, PhotoRecord } from "@/utils/db";
-import { cleanCalendarEventTitle } from "@/services/calendar";
+import { cleanCalendarEventTitle } from "@/utils/restaurant-name-matching";
+import type { VisitStatus } from "@/utils/visit-status";
 import { logVisitViewed } from "@/services/analytics";
 import { createAlbumWithPhotos } from "@/services/scanner";
 import { ActivityIndicator, View, Alert, Pressable, LayoutAnimation } from "react-native";

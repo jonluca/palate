@@ -1,4 +1,5 @@
 import { DEBUG_TIMING, getDatabase } from "./core";
+import { parseVisitQueryRow, type VisitQueryRow } from "./visit-record-core";
 import {
   FOOD_DETECTION_VISIT_SAMPLES_SQL,
   parseFoodDetectionVisitSampleRows,
@@ -10,11 +11,11 @@ import {
   buildVisitListPageQuery,
   parseVisitListPageRows,
   type VisitListCursor,
-  type VisitListFilter,
   type VisitListPage,
   type VisitListPageRow,
 } from "./visit-list-paging-core";
-import { buildVisitStatusBatchStatement, type VisitStatus } from "./visit-status-batch-core";
+import { buildVisitStatusBatchStatement } from "./visit-status-batch-core";
+import type { VisitListFilter, VisitStatus } from "../visit-status.ts";
 import type { RestaurantVisitWithPreview, VisitPreviewPhoto, VisitRecord, VisitWithDetails } from "./types";
 import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from "../runtime-json.ts";
 
@@ -84,22 +85,23 @@ export async function syncAllVisitsFoodProbable(
 }
 
 export async function getVisits(
-  filter?: "pending" | "confirmed" | "rejected" | "food",
+  filter?: VisitListFilter,
   databaseOverride?: Awaited<ReturnType<typeof getDatabase>>,
 ): Promise<VisitRecord[]> {
   const database = databaseOverride ?? (await getDatabase());
+  let sql = `SELECT * FROM visits`;
+  const parameters: string[] = [];
   if (filter === "food") {
-    return database.getAllAsync<VisitRecord>(`SELECT * FROM visits WHERE foodProbable = 1 ORDER BY startTime DESC`);
+    sql += ` WHERE foodProbable = 1`;
+  } else if (filter) {
+    sql += ` WHERE status = ?`;
+    parameters.push(filter);
   }
-  if (filter) {
-    return database.getAllAsync<VisitRecord>(`SELECT * FROM visits WHERE status = ? ORDER BY startTime DESC`, [filter]);
-  }
-  return database.getAllAsync<VisitRecord>(`SELECT * FROM visits ORDER BY startTime DESC`);
+  const rows = await database.getAllAsync<VisitQueryRow>(`${sql} ORDER BY startTime DESC`, parameters);
+  return rows.map(parseVisitQueryRow);
 }
 
-export async function getVisitsWithDetails(
-  filter?: "pending" | "confirmed" | "rejected" | "food",
-): Promise<VisitWithDetails[]> {
+export async function getVisitsWithDetails(filter?: VisitListFilter): Promise<VisitWithDetails[]> {
   const start = DEBUG_TIMING ? performance.now() : 0;
   const database = await getDatabase();
   const query = buildVisitsWithDetailsQuery(filter);
@@ -135,10 +137,11 @@ export async function getVisitListPage(
 
 export async function getVisitById(id: string): Promise<VisitRecord | null> {
   const database = await getDatabase();
-  return database.getFirstAsync<VisitRecord>(`SELECT * FROM visits WHERE id = ?`, [id]);
+  const row = await database.getFirstAsync<VisitQueryRow>(`SELECT * FROM visits WHERE id = ?`, [id]);
+  return row ? parseVisitQueryRow(row) : null;
 }
 
-export async function updateVisitStatus(id: string, status: "pending" | "confirmed" | "rejected"): Promise<void> {
+export async function updateVisitStatus(id: string, status: VisitStatus): Promise<void> {
   const database = await getDatabase();
   const now = Date.now();
   await database.runAsync(`UPDATE visits SET status = ?, updatedAt = ? WHERE id = ?`, [status, now, id]);
@@ -177,15 +180,16 @@ export async function getFoodDetectionVisitSamplePlan(
 
 export async function getVisitsByRestaurantId(restaurantId: string): Promise<VisitRecord[]> {
   const database = await getDatabase();
-  return database.getAllAsync<VisitRecord>(
+  const rows = await database.getAllAsync<VisitQueryRow>(
     `SELECT * FROM visits WHERE restaurantId = ? AND status = 'confirmed' ORDER BY startTime DESC`,
     [restaurantId],
   );
+  return rows.map(parseVisitQueryRow);
 }
 
 export async function getRestaurantVisitsWithPreviews(restaurantId: string): Promise<RestaurantVisitWithPreview[]> {
   const database = await getDatabase();
-  const rows = await database.getAllAsync<VisitRecord & { previewPhotosJson: string | null }>(
+  const rows = await database.getAllAsync<VisitQueryRow & { previewPhotosJson: string | null }>(
     `WITH ranked_photos AS (
        SELECT
          p.visitId,
@@ -246,7 +250,7 @@ export async function getRestaurantVisitsWithPreviews(restaurantId: string): Pro
     }
 
     return {
-      ...visit,
+      ...parseVisitQueryRow(visit),
       previewPhotos,
     };
   });

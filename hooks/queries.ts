@@ -8,6 +8,8 @@ import {
   type UseQueryOptions,
 } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/query-core";
+import { mutationKeys, queryKeys, type FilterType } from "@/utils/query-keys";
+import type { VisitStatus } from "@/utils/visit-status";
 import * as Location from "expo-location";
 import { useEffect, useMemo, useRef } from "react";
 import { useAppStore } from "@/store";
@@ -127,15 +129,10 @@ import {
   invalidateVisitListPageQueries,
   invalidateVisitStatusQueries,
   invalidateWrappedStatsQueries,
-  VISIT_LIST_PAGE_QUERY_ROOT,
   VISIT_LIST_QUERY_POLICY,
 } from "@/utils/query-cache-policy";
 import { getNextPendingVisitReviewPageRequest } from "@/utils/db/visit-review-paging-core";
-import {
-  CONFIRMED_RESTAURANTS_QUERY_KEY,
-  CONFIRMED_RESTAURANT_SEARCH_QUERY_KEY,
-  shouldLoadConfirmedRestaurantSearch,
-} from "@/utils/db/confirmed-restaurant-search-core";
+import { shouldLoadConfirmedRestaurantSearch } from "@/utils/db/confirmed-restaurant-search-core";
 import {
   assertMichelinNameSearchNotAborted,
   createMichelinUnicodeNameIndex,
@@ -151,9 +148,6 @@ import { ensureMichelinDataInitialized, MICHELIN_STATIC_QUERY_CACHE_POLICY } fro
 // ============================================================================
 
 const PHOTO_ANALYSIS_MUTATION_SCOPE = { id: "photo-analysis" } as const;
-export const mutationKeys = {
-  photoAnalysis: ["photoAnalysis"] as const,
-};
 
 interface PhotoAnalysisMutationOptions {
   invalidateQueriesOnSettled?: boolean;
@@ -324,7 +318,8 @@ function optimisticallyRemoveImportableCalendarEvents(queryClient: QueryClient, 
   );
 }
 
-// Re-export types for external use with visit naming
+// Preserve the query facade for screens that consume hooks and their contracts.
+export { mutationKeys, queryKeys, type FilterType } from "@/utils/query-keys";
 export type RestaurantWithVisits = RestaurantWithVisitsDB;
 export type ConfirmedRestaurantSearchRow = ConfirmedRestaurantSearchRowDB;
 export type PendingVisitForReview = PendingVisitForReviewDB;
@@ -390,8 +385,6 @@ export interface Stats {
   foodProbableVisits: number;
 }
 
-export type FilterType = "all" | "pending" | "confirmed" | "rejected" | "food";
-
 function isValidCoordinatePair(latitude: number, longitude: number): boolean {
   return (
     Number.isFinite(latitude) &&
@@ -402,72 +395,6 @@ function isValidCoordinatePair(latitude: number, longitude: number): boolean {
     longitude <= 180
   );
 }
-
-// Query Keys
-export const queryKeys = {
-  stats: ["stats"] as const,
-  visits: (filter?: FilterType) => ["visits", filter] as const,
-  visitPages: (filter: FilterType) => [...VISIT_LIST_PAGE_QUERY_ROOT, filter] as const,
-  visitDetail: (id: string) => ["visits", "visit", id] as const,
-  visitPhotos: (id: string) => ["visitPhotos", id] as const,
-  unmatchedVisits: ["unmatchedVisits"] as const,
-  permissions: ["permissions"] as const,
-  calendarPermissions: ["calendarPermissions"] as const,
-  photoCount: ["photoCount"] as const,
-  unscannedPhotoCount: ["photoCount", "unscanned"] as const,
-  unanalyzedPhotoCount: reviewQueryKeys.unanalyzedPhotoCount,
-  placesConfigured: ["static", "placesConfigured"] as const,
-  // Restaurant-centric keys
-  confirmedRestaurants: CONFIRMED_RESTAURANTS_QUERY_KEY,
-  confirmedRestaurantSearch: CONFIRMED_RESTAURANT_SEARCH_QUERY_KEY,
-  restaurantVisits: (restaurantId: string) => ["visits", "restaurantVisits", restaurantId] as const,
-  restaurantDetail: (restaurantId: string) => ["restaurants", "detail", restaurantId] as const,
-  pendingReview: reviewQueryKeys.pendingReview,
-  michelinRestaurants: ["static", "michelinRestaurants"] as const,
-  michelinMapViewport: (request: MichelinMapViewportRequest) =>
-    [
-      "michelinMapViewport",
-      request.minimumAwardYear,
-      request.visitStatusFilter,
-      request.awardFilter,
-      request.maximumResults ?? 500,
-      request.camera.latitude,
-      request.camera.longitude,
-      request.camera.zoom,
-      request.width,
-      request.height,
-    ] as const,
-  michelinRestaurantSearch: (query: string) => ["michelinRestaurantSearch", query] as const,
-  michelinUnicodeNameIndex: (datasetVersion: string | null) =>
-    ["static", "michelinUnicodeNameIndex", datasetVersion ?? "unversioned"] as const,
-  michelinRestaurantDetail: (michelinId: string) => ["static", "michelinRestaurants", "detail", michelinId] as const,
-  nearbyMichelin: (lat: number, lon: number) => ["static", "nearbyMichelin", lat, lon] as const,
-  mapKitNearby: (lat: number, lon: number, radius: number) =>
-    ["static", "mapKitNearby", lat.toFixed(4), lon.toFixed(4), radius] as const,
-  wrapped: (year?: number | null) => {
-    if (year) {
-      return ["wrapped", year] as const;
-    }
-    return ["wrapped"] as const;
-  },
-  wrappedMichelinBucketRestaurants: (year: number | null | undefined, bucket: MichelinStatsBucket) =>
-    ["wrapped", "michelinAwardRestaurants", year ?? "all", bucket] as const,
-  mergeableVisits: (visitId: string) => ["visits", "mergeableVisits", visitId] as const,
-  mergeableSameRestaurantVisits: ["visits", "mergeableSameRestaurantVisits"] as const,
-  ignoredLocations: ["ignoredLocations"] as const,
-  importableCalendarEvents: ["importableCalendarEvents"] as const,
-  visitsAtLocation: (lat: number, lon: number, radius: number) =>
-    ["visits", "visitsAtLocation", lat, lon, radius] as const,
-  reverseGeocode: (lat: number, lon: number) => ["reverseGeocode", lat.toFixed(4), lon.toFixed(4)] as const,
-  writableCalendars: ["writableCalendars"] as const,
-  syncableCalendars: ["syncableCalendars"] as const,
-  visitsWithoutCalendarEvents: ["visitsWithoutCalendarEvents"] as const,
-  exportedCalendarEvents: ["exportedCalendarEvents"] as const,
-  foodKeywords: ["foodKeywords"] as const,
-  photosWithLabelsCount: ["photosWithLabelsCount"] as const,
-  placeTextSearch: (query: string, lat?: number, lon?: number) =>
-    ["placeTextSearch", query, lat?.toFixed(4), lon?.toFixed(4)] as const,
-};
 
 const INITIAL_VISIT_LIST_PAGE_PARAM: VisitListCursor | null = null;
 const INITIAL_PENDING_REVIEW_PAGE_PARAM: PendingVisitReviewPageRequest | null = null;
@@ -1544,7 +1471,7 @@ export function useExportData() {
   });
 }
 
-export type VisitStatus = "pending" | "confirmed" | "rejected";
+export type { VisitStatus } from "@/utils/visit-status";
 
 /**
  * Update visit status

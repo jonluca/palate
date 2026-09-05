@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
 import { buildVisitStatusBatchStatement, type VisitStatus } from "../utils/db/visit-status-batch-core.ts";
+import { isVisitStatus, VISIT_STATUSES } from "../utils/visit-status.ts";
 
 interface VisitRow {
   readonly id: string;
@@ -112,12 +113,37 @@ function assertParity(visitIds: readonly string[], status: VisitStatus, allIds: 
   }
 }
 
+assert.deepEqual(VISIT_STATUSES, ["pending", "confirmed", "rejected"], "persisted status literals stay stable");
+for (const status of STATUSES) {
+  assert.equal(isVisitStatus(status), true);
+}
+const invalidStatuses: unknown[] = [
+  "",
+  "Pending",
+  "confirmed ",
+  "invalid",
+  "all",
+  "food",
+  null,
+  undefined,
+  0,
+  true,
+  {},
+  ["pending"],
+  Object("pending"),
+];
+for (const status of invalidStatuses) {
+  // @ts-expect-error: Exercise malformed JavaScript callers as well as unsupported status text.
+  assert.equal(isVisitStatus(status), false, "visit status validation must not coerce external values");
+  assert.throws(
+    // @ts-expect-error: The boundary test deliberately supplies an unsupported status.
+    () => buildVisitStatusBatchStatement(["visit"], status, UPDATED_AT),
+    { name: "RangeError", message: `Unsupported visit status: ${String(status)}.` },
+  );
+  // @ts-expect-error: Empty selections remain a no-op before validating unsupported inputs.
+  assert.equal(buildVisitStatusBatchStatement([], status, Number.NaN), null);
+}
 assert.equal(buildVisitStatusBatchStatement([], "confirmed", UPDATED_AT), null);
-assert.throws(
-  // @ts-expect-error: The boundary test deliberately supplies an unsupported status.
-  () => buildVisitStatusBatchStatement(["visit"], "invalid", UPDATED_AT),
-  /Unsupported visit status/,
-);
 assert.throws(() => buildVisitStatusBatchStatement(["visit"], "confirmed", Number.NaN), /must be finite/);
 
 const edgeSelection = [...EDGE_IDS, EDGE_IDS[2]!, "missing-'雪'", EDGE_IDS[0]!];

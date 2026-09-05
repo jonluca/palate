@@ -33,7 +33,7 @@ import {
 } from "../utils/db/visit-review-paging-core.ts";
 import {
   BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS,
-  assertCalendarTitleMatchingSourceContract,
+  getCalendarTitleMatchingSourceAttestation,
 } from "./calendar-title-matching-benchmark-core.ts";
 
 function isStringValue<Value>(value: Value): value is Value & string {
@@ -994,7 +994,7 @@ function verifyPromotedBootstrapFullHydration(database: DatabaseSync, pageSizes:
 }
 
 async function run(configuration: Configuration): Promise<void> {
-  const calendarTitleMatchingSourceAttestation = assertCalendarTitleMatchingSourceContract();
+  const calendarTitleMatchingSourceAttestation = getCalendarTitleMatchingSourceAttestation();
   let sourceBefore: SourceSnapshot | null = null;
   let database: DatabaseSync;
   let mode: "synthetic" | "immutable-real";

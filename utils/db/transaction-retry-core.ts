@@ -1,22 +1,28 @@
-export interface VisitMergeRetryPolicy {
+export interface TransactionRetryPolicy {
   readonly retryWindowMs: number;
   readonly baseDelayMs: number;
   readonly maxDelayMs: number;
 }
 
-export interface VisitMergeRetryRuntime {
+export interface TransactionRetryRuntime {
   readonly monotonicNow: () => number;
   readonly wallNow: () => number;
   readonly sleep: (milliseconds: number) => Promise<void>;
 }
 
-export const VISIT_MERGE_RETRY_POLICY = {
+const DEFAULT_TRANSACTION_RETRY_RUNTIME: TransactionRetryRuntime = {
+  monotonicNow: () => performance.now(),
+  wallNow: () => Date.now(),
+  sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+};
+
+export const TRANSACTION_RETRY_POLICY = {
   retryWindowMs: 5_000,
   baseDelayMs: 50,
   maxDelayMs: 1_000,
-} as const satisfies VisitMergeRetryPolicy;
+} as const satisfies TransactionRetryPolicy;
 
-export function isVisitMergeDatabaseBusyError(cause: unknown): boolean {
+export function isSQLiteBusyError(cause: unknown): boolean {
   if (!(cause instanceof Error)) {
     return false;
   }
@@ -25,15 +31,17 @@ export function isVisitMergeDatabaseBusyError(cause: unknown): boolean {
 }
 
 /**
- * Retry one atomic visit-merge operation across SQLite writer contention.
+ * Retry one complete atomic transaction across SQLite writer contention.
  *
+ * Expo exclusive connections do not inherit the main connection busy timeout.
+ * Retry after rollback with a fresh read snapshot, including SQLITE_BUSY_SNAPSHOT.
  * The deadline uses a monotonic clock while `updatedAt` uses wall time. Runtime
  * injection keeps the production policy deterministic and instant in tests.
  */
-export async function runVisitMergeWithBusyRetry<T>(
+export async function runTransactionWithBusyRetry<T>(
   operation: (updatedAt: number) => Promise<T>,
-  runtime: VisitMergeRetryRuntime,
-  policy: VisitMergeRetryPolicy = VISIT_MERGE_RETRY_POLICY,
+  runtime: TransactionRetryRuntime = DEFAULT_TRANSACTION_RETRY_RUNTIME,
+  policy: TransactionRetryPolicy = TRANSACTION_RETRY_POLICY,
 ): Promise<T> {
   const retryDeadline = runtime.monotonicNow() + policy.retryWindowMs;
   let retryDelayMs = policy.baseDelayMs;
@@ -45,7 +53,7 @@ export async function runVisitMergeWithBusyRetry<T>(
     try {
       return await operation(updatedAt);
     } catch (error) {
-      if (!isVisitMergeDatabaseBusyError(error)) {
+      if (!isSQLiteBusyError(error)) {
         throw error;
       }
       const remainingRetryMs = retryDeadline - runtime.monotonicNow();

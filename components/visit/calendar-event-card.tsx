@@ -3,7 +3,8 @@ import { ScrollView, View } from "react-native";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { Card } from "@/components/ui";
-import { cleanCalendarEventTitle } from "@/services/calendar";
+import { cleanCalendarEventTitle } from "@/utils/restaurant-name-matching";
+import type { VisitStatus } from "@/utils/visit-status";
 
 interface CalendarEventEntry {
   id: string;
@@ -14,7 +15,7 @@ interface CalendarEventEntry {
 interface CalendarEventCardProps {
   visit: {
     id: number | string;
-    status: "pending" | "confirmed" | "rejected";
+    status: VisitStatus;
     calendarEventTitle?: string | null;
     calendarEventId?: string | null;
     calendarEventLocation?: string | null;

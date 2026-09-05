@@ -1,4 +1,4 @@
-import { normalizeForComparison } from "@/services/calendar";
+import { normalizeForComparison } from "./restaurant-name-matching";
 
 type RestaurantSource = "michelin" | "mapkit" | "google";
 

@@ -4,7 +4,7 @@ import {
   cleanCalendarEventTitle,
   compareRestaurantAndCalendarTitle,
   isFuzzyRestaurantMatch,
-} from "@/services/calendar";
+} from "@/utils/restaurant-name-matching";
 import { compareSameNameMichelinFirst } from "@/utils/restaurant-priority";
 
 interface AutoRestaurantSelectorRenderArgs {

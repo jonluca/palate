@@ -1,4 +1,5 @@
 import type { WrappedStats } from "./types";
+import { buildWrappedStatsYearFilter } from "./wrapped-stats-year-filter-core.ts";
 
 export interface WrappedStatsMichelinQueryRow {
   readonly award: string | null;
@@ -11,7 +12,7 @@ export interface WrappedStatsMichelinQueryRow {
 
 export interface WrappedStatsMichelinQuery {
   readonly sql: string;
-  readonly parameters: string[];
+  readonly parameters: (number | string)[];
 }
 
 /**
@@ -23,7 +24,7 @@ export interface WrappedStatsMichelinQuery {
  * metrics retain their separate restaurant-level deduplication rules.
  */
 export function buildWrappedStatsMichelinQuery(year?: number | null): WrappedStatsMichelinQuery {
-  const yearFilter = year ? "AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = ?" : "";
+  const yearFilter = buildWrappedStatsYearFilter(year, "v.startTime");
 
   return {
     sql: `WITH
@@ -34,7 +35,7 @@ export function buildWrappedStatsMichelinQuery(year?: number | null): WrappedSta
           COALESCE(v.awardAtVisit, m.award) AS award
         FROM visits v
         JOIN michelin_restaurants m ON v.restaurantId = m.id
-        WHERE v.status = 'confirmed' ${yearFilter}
+        WHERE v.status = 'confirmed' ${yearFilter.sql}
       ),
       award_counts AS (
         SELECT
@@ -78,7 +79,7 @@ export function buildWrappedStatsMichelinQuery(year?: number | null): WrappedSta
     CROSS JOIN green_stats
     LEFT JOIN award_counts ON 1 = 1
     ORDER BY award_counts.award`,
-    parameters: year ? [String(year)] : [],
+    parameters: yearFilter.parameters,
   };
 }
 

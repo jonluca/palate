@@ -4,7 +4,7 @@ import { ThemedText } from "@/components/themed-text";
 import { Badge } from "@/components/ui";
 import { getMichelinBadge } from "@/components/restaurant-search-modal";
 import { formatDate, formatTime, statusVariant } from "./utils";
-import type { VisitStatus } from "@/hooks/queries";
+import type { VisitStatus } from "@/utils/visit-status";
 
 interface VisitHeaderProps {
   displayName: string;

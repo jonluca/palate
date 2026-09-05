@@ -133,7 +133,47 @@ Users review pending visits in the **Review** tab — confirm the suggested rest
     └── michelin.csv          # 15k+ Michelin restaurants
 ```
 
+## Shared Module Boundaries
+
+- `utils/restaurant-name-matching.ts` owns pure, memoized restaurant/title matching.
+  Database queries, services, UI, and benchmarks import it directly; Calendar
+  permissions and native operations stay in `services/calendar.ts`.
+- `utils/query-keys.ts` owns shared cache identities and re-exports the visit filter type.
+  Store and cache-only consumers can use these contracts without importing React hooks.
+  `pnpm test:query-keys` checks cache identities and invalidation behavior.
+- Manual and automatic visit merges share one validated transaction executor in
+  `utils/db/merge.ts`. The plan accepts ordered visit IDs; the selected target's
+  metadata stays intact, failed merges roll back, and self-merges are rejected.
+  `pnpm test:visit-merge` covers both entry points.
+
+## Data Ownership
+
+- `utils/visit-status.ts` defines persisted visit statuses and their filter types.
+  Database readers, mutations, exports, and UI share that contract.
+- `utils/db/visit-record-core.ts` separates raw SQLite visit rows from application
+  records. Full-record readers decode integer flags to booleans, preserve nullable
+  calendar values, and reject invalid flags or statuses. `pnpm test:visit-record`
+  exercises the six public readers against SQLite and checks exported JSON types.
+- `store/app-preferences.ts` owns the persisted preference fields, their defaults,
+  and their storage projection. First launch and reset share the same defaults;
+  transient scan and UI state stay outside that projection.
+- Photo ownership is stored in `photos.visitId`. Manual photo moves and removals
+  update that ownership and the affected visit summaries in one transaction,
+  using `utils/db/visit-photo-summary-core.ts`. Visit metadata and the existing
+  target-only timestamp policy are preserved. Moves, removals, and merges share
+  bounded transaction retries that reread state after database contention.
+  `pnpm test:photo-association` checks summary parity, large selections, rollback,
+  and concurrent SQLite writers.
+
 ## Scripts
+
+Scan progress and other transient state updates reuse unchanged persisted
+preference snapshots. `pnpm test:app-store-persistence` covers write ordering,
+resets, rehydration, and retry after storage failure.
+`pnpm profile:app-store-persistence` uses real Zustand persistence with host SQLite:
+10,000 transient updates plus three preference changes perform 4 writes instead
+of 10,003, with identical saved preferences. JSON serialization still runs per
+update; this measures avoided storage work, not device frame timing.
 
 ```bash
 pnpm start        # Start Expo dev server
@@ -228,6 +268,13 @@ pnpm clean        # Remove generated mobile directories, Expo state, and node_mo
 ```
 
 ## Calendar Matching Correctness and Performance
+
+Native name normalization skips regex work for plain ASCII words, and title
+cleaning skips its second affix pass when spacing is unchanged. The existing
+`pnpm profile:calendar` synthetic benchmark (1,000 visits / 10,000 events) measured
+484.3 ms to 344.6 ms median with the same match checksum. All 261 Swift tests and
+a 64,217-case comparison with the original cleaning/normalization behavior
+passed. The benchmark excludes EventKit and React Native.
 
 Calendar matching now sorts native candidates by start time, end time, and event ID before ranking. The event-ID tie-break removes the previous dependence on EventKit input order when otherwise equal events compete for a visit. The isolated Calendar suite passes **36/36 tests**, including all input permutations for equal-score/equal-time ties, sparse-window coverage, runtime configuration, and native validation attestation.
 
@@ -356,6 +403,18 @@ pnpm profile:provider-reservation-location
 ```
 
 The isolated suite includes a literal sequential oracle, transient reject/empty recovery, query-collision and address cases, concurrency bounds, review-to-approval reuse, replay generations, and an executed VM harness for the production Tock bridge. At 139 inputs with roughly 50% duplicate queries, place requests fell from **111 to 60** and deterministic latency units from **780 to 114 (6.842×)**. At 256/50%, requests fell from **204 to 108** with **7.186×** modeled critical-path speedup. At 1,000/90%, they fell from **800 to 125** with **23.278×** modeled speedup. Three complete Tock deliveries require **6 to 2 GraphQL requests (-66.667%)**; a short-first recovery needs **6 to 4** and never exposes the partial payload. These are deterministic request/latency models with fake lookups, not real network timing. Aggregate report SHA-256: `4e438efaa936bb582a596654291a52b2d94b471c66ace691a2d48ff76ea13530`.
+
+## Provider Reservation Deduplication
+
+Provider import deduplication indexes retained visits by restaurant key instead of
+scanning every earlier reservation. It preserves inclusive time boundaries,
+first-match replacement order, empty keys, and stable output ordering. Run
+`pnpm test:provider-reservation-dedupe` for regression coverage and
+`pnpm profile:provider-reservation-dedupe` for counterbalanced comparisons with the
+previous algorithm. A synthetic 5,000-reservation history reduced key evaluations
+from 24,042,134 to 5,000 and median deduplication time from 171.7 ms to 1.4 ms on
+Node 24. These timings exclude networking, SQLite, React Native, and rendering;
+names are already normalized in both benchmark paths.
 
 ## Provider Review Snapshot Prefilter
 
@@ -537,6 +596,14 @@ On this Mac's immutable **6,511-visit / 68,028-photo** database, the All filter 
 The profiler holds one immutable read transaction for deterministic full-traversal parity; production pages are independent snapshots and rely on the tested mutation resets. Timings exclude Expo scheduling and serialization, the React Native bridge, Hermes, rendering, Photos, and Calendar. All five aggregate reports are private mode `0600`; SHA-256: All `5403818fdc1b82898d631a080c9ffc906baf733ba61e916bd422f0ba61b5fac0`, Pending `4accdc41c737b58dc08f1e367259486139b14a9a19a12fe5a7d24a8d5d2623bd`, Confirmed `e04f3843013e214eabef59e38d20588d63839f648c73dbc087724c8b7a276e08`, Rejected `377ea807b83e5724e88322f6e3eb3dad4bbd0eb0892cfda9958c20d8364b3f09`, and Food `b513b359121bf524a4563a1d5f98106a368ba711ebaff3dd2d91973bf27d5353`.
 
 ## Wrapped Stats Query Performance
+
+Selected-year statistics use the existing `(status, startTime)` index to bound
+all 19 queries while retaining SQLite's local-year predicate for exact timezone
+and fractional timestamp behavior. `pnpm test:wrapped-stats-year-filter` compares
+complete production results and Michelin bucket details in six timezones.
+`pnpm profile:wrapped-stats-year-filter` measured 293.8 ms to 25.8 ms median on a
+synthetic 40,000-visit, 20-year history using host Node SQLite. All-time queries
+are unchanged; these measurements exclude Expo and rendering.
 
 The all-time Wrapped Stats path now computes every yearly total and each year's top restaurant in one CTE/window query instead of issuing one follow-up query per year. The five Michelin-award queries are likewise one materialized-CTE query, with JavaScript retaining the legacy award classification rules. On the current 15-year data shape, the yearly phase falls from **16 SQLite calls to 1**, the Michelin phase from **5 calls to 1**, and the complete all-time request from **39 calls to 20**. A selected-year request falls from **23 calls to 19**. Equal-count yearly winners now use `restaurantId ASC` as a stable final key rather than depending on SQLite's chosen query plan.
 

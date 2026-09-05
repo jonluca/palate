@@ -775,7 +775,7 @@ function strategyOrder(iteration: number): readonly Strategy[] {
   return iteration % 2 === 0 ? ["legacyFiveQueries", "consolidatedQuery"] : ["consolidatedQuery", "legacyFiveQueries"];
 }
 
-function explain(database: DatabaseSync, sql: string, parameters: readonly string[]): string[] {
+function explain(database: DatabaseSync, sql: string, parameters: readonly (number | string)[]): string[] {
   // SAFETY: The benchmark controls the row projection and pairs it with the named SQLite result contract.
   return (database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as BenchmarkSQLiteRow<QueryPlanRow>[]).map(
     ({ detail }) => detail,

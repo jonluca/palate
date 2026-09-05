@@ -1,6 +1,9 @@
-import type { MergeableVisitGroup } from "./types";
-
 type SQLiteColumnValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
+
+export interface VisitMergeGroup {
+  /** The first visit is the caller-selected target; later visits are sources. */
+  readonly visits: readonly { readonly id: string }[];
+}
 
 export interface VisitMergePlanEntry {
   readonly targetVisitId: string;
@@ -52,7 +55,7 @@ export function parseVisitMergePreflightQueryRow(row: VisitMergePreflightQueryRo
  * sources, target/source overlap, and cycles before any database write begins.
  * Empty and Unicode IDs remain valid SQLite text identifiers.
  */
-export function buildVisitMergePlan(groups: readonly MergeableVisitGroup[]): VisitMergePlan {
+export function buildVisitMergePlan(groups: readonly VisitMergeGroup[]): VisitMergePlan {
   const entries: VisitMergePlanEntry[] = [];
   const targetVisitIds: string[] = [];
   const sourceVisitIds: string[] = [];

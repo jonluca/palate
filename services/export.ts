@@ -20,6 +20,7 @@ import {
 } from "@/utils/export-core";
 import { BoundedUtf8BufferingSink } from "@/utils/export-stream-core";
 import { writeExportJsonSnapshot } from "@/utils/export-stream-snapshot";
+import type { VisitStatusFilter } from "@/utils/visit-status";
 
 export type ExportFormat = "json" | "csv";
 
@@ -86,7 +87,7 @@ function downloadWebExport(data: string, format: ExportFormat): ExportShareResul
   return { fileUri: null, fileName, savedToFile: true, shared: false };
 }
 
-type ExportStatusFilter = "all" | "confirmed" | "pending" | "rejected";
+type ExportStatusFilter = VisitStatusFilter;
 type ExportDatabaseConnection = Awaited<ReturnType<typeof getDatabase>>;
 
 async function assembleExportData(
@@ -158,7 +159,7 @@ async function generateExportData(
 async function generateJSONString(
   options: {
     includePhotos?: boolean;
-    statusFilter?: "all" | "confirmed" | "pending" | "rejected";
+    statusFilter?: ExportStatusFilter;
   } = {},
 ): Promise<string> {
   const data = await generateExportData(options);
@@ -167,7 +168,7 @@ async function generateJSONString(
 
 async function generateCSVString(
   options: {
-    statusFilter?: "all" | "confirmed" | "pending" | "rejected";
+    statusFilter?: ExportStatusFilter;
   } = {},
 ): Promise<string> {
   const data = await generateExportData({ ...options, includePhotos: false });
@@ -177,7 +178,7 @@ async function generateCSVString(
 export async function exportToJSON(
   options: {
     includePhotos?: boolean;
-    statusFilter?: "all" | "confirmed" | "pending" | "rejected";
+    statusFilter?: ExportStatusFilter;
   } = {},
 ): Promise<string> {
   return generateJSONString(options);
@@ -185,7 +186,7 @@ export async function exportToJSON(
 
 export async function exportToCSV(
   options: {
-    statusFilter?: "all" | "confirmed" | "pending" | "rejected";
+    statusFilter?: ExportStatusFilter;
   } = {},
 ): Promise<string> {
   return generateCSVString(options);

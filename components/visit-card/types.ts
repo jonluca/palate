@@ -1,6 +1,7 @@
 import type { ExactCalendarMatch, PendingVisitForReview } from "@/hooks/queries";
+import type { VisitStatus } from "@/utils/visit-status";
 
-export type VisitStatus = "pending" | "confirmed" | "rejected";
+export type { VisitStatus } from "@/utils/visit-status";
 
 interface BaseVisitCardProps {
   id: string;

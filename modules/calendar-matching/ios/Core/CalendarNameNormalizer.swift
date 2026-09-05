@@ -78,6 +78,10 @@ internal enum CalendarNameNormalizer {
   }()
 
   internal static func normalize(_ value: String) -> String {
+    if hasNormalizedASCIIWords(value) {
+      return value.lowercased()
+    }
+
     var result = deburr(value).lowercased()
     result = emojiPattern.replacingMatches(in: result)
     result = apostropheStylePattern.replacingMatches(in: result, with: "'")
@@ -88,6 +92,26 @@ internal enum CalendarNameNormalizer {
     result = nonASCIIWordPattern.replacingMatches(in: result, with: " ")
     result = whitespacePattern.replacingMatches(in: result, with: " ")
     return CalendarJavaScriptWhitespace.trim(result)
+  }
+
+  /// Plain words with single interior spaces only need case folding. Keep punctuation,
+  /// Unicode, and whitespace cleanup on the full normalization path.
+  private static func hasNormalizedASCIIWords(_ value: String) -> Bool {
+    var previousWasSpace = true
+    for byte in value.utf8 {
+      switch byte {
+      case 65...90, 97...122, 48...57, 95:
+        previousWasSpace = false
+      case 32:
+        guard !previousWasSpace else {
+          return false
+        }
+        previousWasSpace = true
+      default:
+        return false
+      }
+    }
+    return !previousWasSpace
   }
 
   private static func deburr(_ value: String) -> String {

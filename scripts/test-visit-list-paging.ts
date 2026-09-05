@@ -435,7 +435,18 @@ function assertValidationAndParsing(): void {
     suggestedRestaurantName: null,
     previewPhotos: [],
   });
-  assert.throws(() => parseVisitListPageRows([{ ...row, status: "unknown" }], 1), /unsupported status/);
+  for (const status of ["unknown", "", "Pending", "confirmed ", "all", "food"]) {
+    assert.throws(() => parseVisitListPageRows([{ ...row, status }], 1), {
+      name: "Error",
+      message: `Visit-list query returned unsupported status: ${status}.`,
+    });
+  }
+  for (const status of [null, 0, false, new Uint8Array([112])]) {
+    assert.throws(() => parseVisitListPageRows([{ ...row, status }], 1), {
+      name: "TypeError",
+      message: "Visit-list query status must be SQLite text.",
+    });
+  }
   assert.throws(() => parseVisitListPageRows([{ ...row, id: 42 }], 1), /id must be SQLite text/);
   assert.throws(() => parseVisitListPageRows([{ ...row, startTime: Number.POSITIVE_INFINITY }], 1), /startTime/);
   assert.throws(() => parseVisitListPageRows([{ ...row, photoCount: 1.5 }], 1), /photoCount/);

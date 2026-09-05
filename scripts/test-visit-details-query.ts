@@ -96,6 +96,8 @@ function parseLegacyVisitRow(row: SQLiteRow): LegacyVisitRow {
 function parseVisitDetailsQueryRow(row: SQLiteRow): VisitDetailsQueryRow {
   return {
     ...parseLegacyVisitRow(row),
+    foodProbable: requiredNumber(row.foodProbable, "visits.foodProbable"),
+    calendarEventIsAllDay: nullableNumber(row.calendarEventIsAllDay, "visits.calendarEventIsAllDay"),
     previewPhotosJson: nullableString(row.previewPhotosJson, "previewPhotosJson"),
   };
 }
@@ -487,7 +489,15 @@ try {
 
   const { previewPhotos: _, ...malformedPreviewRow } = all[0];
   assert.deepEqual(
-    parseVisitDetailsRows([{ ...malformedPreviewRow, previewPhotosJson: "not-json" }])[0].previewPhotos,
+    parseVisitDetailsRows([
+      {
+        ...malformedPreviewRow,
+        foodProbable: malformedPreviewRow.foodProbable ? 1 : 0,
+        calendarEventIsAllDay:
+          malformedPreviewRow.calendarEventIsAllDay === null ? null : malformedPreviewRow.calendarEventIsAllDay ? 1 : 0,
+        previewPhotosJson: "not-json",
+      },
+    ])[0].previewPhotos,
     [],
   );
 

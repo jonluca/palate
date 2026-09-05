@@ -1,14 +1,16 @@
-import type { VisitRecord, VisitWithDetails } from "./types";
+import type { VisitWithDetails } from "./types";
+import { parseVisitQueryRow, type VisitQueryRow } from "./visit-record-core.ts";
 import { isJsonString, parseJsonValue } from "../runtime-json.ts";
+import type { VisitListFilter } from "../visit-status.ts";
 
-export type VisitDetailsFilter = "pending" | "confirmed" | "rejected" | "food";
+export type VisitDetailsFilter = VisitListFilter;
 
 export interface VisitDetailsQuery {
   readonly sql: string;
   readonly parameters: (string | number)[];
 }
 
-export type VisitDetailsQueryRow = VisitRecord & {
+export type VisitDetailsQueryRow = VisitQueryRow & {
   restaurantName: string | null;
   suggestedRestaurantName: string | null;
   suggestedRestaurantAward: string | null;
@@ -75,7 +77,7 @@ export function parseVisitDetailsRows(rows: readonly VisitDetailsQueryRow[]): Vi
   return rows.map((row) => {
     const { previewPhotosJson, ...visit } = row;
     return {
-      ...visit,
+      ...parseVisitQueryRow(visit),
       previewPhotos: parsePreviewPhotos(previewPhotosJson),
     };
   });

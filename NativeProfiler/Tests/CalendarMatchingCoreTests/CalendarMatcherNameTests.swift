@@ -10,6 +10,31 @@ struct CalendarMatcherNameTests {
     #expect(CalendarNameNormalizer.normalize("Foo\u{FEFF}Bar") == "foo bar")
   }
 
+  @Test("Plain ASCII names retain case, spacing, and punctuation normalization")
+  func asciiNormalization() {
+    #expect(CalendarNameNormalizer.normalize("Le Bernardin") == "le bernardin")
+    #expect(CalendarNameNormalizer.normalize("SUSHI_42") == "sushi_42")
+    #expect(CalendarNameNormalizer.normalize("  Eleven  Madison Park  ") == "eleven madison park")
+    #expect(CalendarNameNormalizer.normalize("") == "")
+    #expect(CalendarNameNormalizer.normalize("   ") == "")
+
+    for value in UInt8(0)...UInt8(127) {
+      let character = String(UnicodeScalar(value))
+      let expected: String
+      switch value {
+      case 65...90, 97...122, 48...57, 95:
+        expected = "foo" + character.lowercased() + "bar"
+      case 38:
+        expected = "foo and bar"
+      case 39, 96:
+        expected = "foobar"
+      default:
+        expected = "foo bar"
+      }
+      #expect(CalendarNameNormalizer.normalize("FoO" + character + "BaR") == expected)
+    }
+  }
+
   @Test("Normalized calendar titles match equivalent restaurant spelling")
   func normalizedExactMatch() {
     let restaurant = CalendarMatchingRestaurant(
@@ -56,6 +81,12 @@ struct CalendarMatcherNameTests {
         restaurantName: "Le Bernardin"
       )
     )
+  }
+
+  @Test("Dash normalization can expose reservation wrappers for the second cleaning pass")
+  func dashSeparatedTitleWrappers() {
+    #expect(CalendarTitleCleaner.cleanEventTitle("Dinner—at Lilia") == "Lilia")
+    #expect(CalendarTitleCleaner.cleanEventTitle("— Dinner at Lilia —") == "Lilia")
   }
 
   @Test("Comparison stripping repeatedly removes prefixes and descriptor suffixes")

@@ -17,7 +17,7 @@ import React, { useEffect, useState, useRef, useMemo } from "react";
 import { View, Pressable, Modal, ScrollView, TextInput } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
-import { cleanCalendarEventTitle } from "@/services/calendar";
+import { cleanCalendarEventTitle } from "@/utils/restaurant-name-matching";
 import {
   compareSameNameMichelinFirst,
   isMichelinRestaurantCandidate,

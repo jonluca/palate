@@ -560,7 +560,7 @@ const selectedYearQuery = buildWrappedStatsMichelinQuery(2025);
 assert.deepEqual(allTimeQuery.parameters, []);
 assert.deepEqual(nullYearQuery.parameters, []);
 assert.deepEqual(zeroYearQuery.parameters, []);
-assert.deepEqual(selectedYearQuery.parameters, ["2025"]);
+assert.deepEqual(selectedYearQuery.parameters, [Date.UTC(2025, 0, -1), Date.UTC(2026, 0, 3), "2025"]);
 assert.ok(!allTimeQuery.sql.includes("strftime('%Y'"));
 assert.ok(selectedYearQuery.sql.includes("strftime('%Y'"));
 

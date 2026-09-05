@@ -9,10 +9,12 @@ import {
   VISIT_MERGE_MOVE_RESERVATION_SOURCES_SQL,
   VISIT_MERGE_PREFLIGHT_SQL,
   VISIT_MERGE_UPDATE_TARGETS_SQL,
+  type VisitMergePlan,
   type VisitMergePreflightQueryRow,
 } from "./visit-merge-core";
-import { runVisitMergeWithBusyRetry } from "./visit-merge-retry-core";
-import type { MergeableVisitGroup, VisitRecord, VisitWithDetails } from "./types";
+import { runTransactionWithBusyRetry } from "./transaction-retry-core";
+import type { MergeableVisitGroup, VisitWithDetails } from "./types";
+import { parseVisitQueryRow, type VisitQueryRow } from "./visit-record-core";
 
 /**
  * Get visits that can be merged with the given visit.
@@ -28,7 +30,7 @@ export async function getMergeableVisits(
   // Get visits excluding the current one, ordered by time proximity
   // Use awardAtVisit (historical) if available, otherwise fall back to current award
   const visits = await database.getAllAsync<
-    VisitRecord & {
+    VisitQueryRow & {
       restaurantName: string | null;
       suggestedRestaurantName: string | null;
       suggestedRestaurantAward: string | null;
@@ -84,7 +86,7 @@ export async function getMergeableVisits(
   }
 
   return visits.map((visit) => ({
-    ...visit,
+    ...parseVisitQueryRow(visit),
     previewPhotos: photosByVisit.get(visit.id) ?? [],
   }));
 }
@@ -95,80 +97,8 @@ export async function getMergeableVisits(
  * The target visit's time range and center coordinates are updated.
  */
 export async function mergeVisits(targetVisitId: string, sourceVisitId: string): Promise<void> {
-  const database = await getDatabase();
-
-  // Get both visits
-  const [targetVisit, sourceVisit] = await Promise.all([
-    database.getFirstAsync<VisitRecord>(`SELECT * FROM visits WHERE id = ?`, [targetVisitId]),
-    database.getFirstAsync<VisitRecord>(`SELECT * FROM visits WHERE id = ?`, [sourceVisitId]),
-  ]);
-
-  if (!targetVisit || !sourceVisit) {
-    throw new Error("One or both visits not found");
-  }
-
-  // Move all photos from source to target
-  await database.runAsync(`UPDATE photos SET visitId = ? WHERE visitId = ?`, [targetVisitId, sourceVisitId]);
-
-  // Calculate new time range
-  const newStartTime = Math.min(targetVisit.startTime, sourceVisit.startTime);
-  const newEndTime = Math.max(targetVisit.endTime, sourceVisit.endTime);
-
-  // Calculate new centroid from all photos
-  const photos = await database.getAllAsync<{ latitude: number; longitude: number }>(
-    `SELECT latitude, longitude FROM photos WHERE visitId = ? AND latitude IS NOT NULL AND longitude IS NOT NULL`,
-    [targetVisitId],
-  );
-
-  let newCenterLat = targetVisit.centerLat;
-  let newCenterLon = targetVisit.centerLon;
-
-  if (photos.length > 0) {
-    const sumLat = photos.reduce((sum, p) => sum + p.latitude, 0);
-    const sumLon = photos.reduce((sum, p) => sum + p.longitude, 0);
-    newCenterLat = sumLat / photos.length;
-    newCenterLon = sumLon / photos.length;
-  }
-
-  // Get new photo count
-  const photoCountResult = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) as count FROM photos WHERE visitId = ?`,
-    [targetVisitId],
-  );
-  const newPhotoCount = photoCountResult?.count ?? 0;
-
-  // Check if any photos have food detected
-  const foodResult = await database.getFirstAsync<{ hasFood: number }>(
-    `SELECT MAX(CASE WHEN foodDetected = 1 THEN 1 ELSE 0 END) as hasFood FROM photos WHERE visitId = ?`,
-    [targetVisitId],
-  );
-  const foodProbable = (foodResult?.hasFood ?? 0) === 1 || targetVisit.foodProbable || sourceVisit.foodProbable;
-
-  // Update target visit
-  const now = Date.now();
-  await database.runAsync(
-    `UPDATE visits SET startTime = ?, endTime = ?, centerLat = ?, centerLon = ?, photoCount = ?, foodProbable = ?, updatedAt = ? WHERE id = ?`,
-    [newStartTime, newEndTime, newCenterLat, newCenterLon, newPhotoCount, foodProbable ? 1 : 0, now, targetVisitId],
-  );
-
-  // Move suggested restaurants from source to target (if not already present)
-  await database.runAsync(
-    `INSERT OR IGNORE INTO visit_suggested_restaurants (visitId, restaurantId, distance)
-     SELECT ?, restaurantId, distance FROM visit_suggested_restaurants WHERE visitId = ?`,
-    [targetVisitId, sourceVisitId],
-  );
-
-  // Preserve provider import mappings when a reservation-only visit is merged into another visit.
-  await database.runAsync(`UPDATE reservation_import_sources SET visitId = ? WHERE visitId = ?`, [
-    targetVisitId,
-    sourceVisitId,
-  ]);
-
-  // Delete source visit's suggested restaurants
-  await database.runAsync(`DELETE FROM visit_suggested_restaurants WHERE visitId = ?`, [sourceVisitId]);
-
-  // Delete source visit
-  await database.runAsync(`DELETE FROM visits WHERE id = ?`, [sourceVisitId]);
+  const plan = buildVisitMergePlan([{ visits: [{ id: targetVisitId }, { id: sourceVisitId }] }]);
+  await executeVisitMergePlan(plan);
 }
 
 // ============================================================================
@@ -308,46 +238,7 @@ export async function batchMergeSameRestaurantVisits(groups: MergeableVisitGroup
     return 0;
   }
 
-  const database = await getDatabase();
-  await runVisitMergeWithBusyRetry(
-    async (updatedAt) => {
-      await database.withExclusiveTransactionAsync(async (transaction) => {
-        const preflightQueryRow = await transaction.getFirstAsync<VisitMergePreflightQueryRow>(
-          VISIT_MERGE_PREFLIGHT_SQL,
-          plan.payload,
-        );
-        const preflight = preflightQueryRow ? parseVisitMergePreflightQueryRow(preflightQueryRow) : null;
-        if (
-          !preflight ||
-          preflight.plannedVisitCount !== plan.referencedVisitCount ||
-          preflight.existingVisitCount !== plan.referencedVisitCount
-        ) {
-          throw new Error("One or more visits in the merge plan were not found");
-        }
-
-        await transaction.runAsync(VISIT_MERGE_MOVE_PHOTOS_SQL, plan.payload);
-        const targetUpdate = await transaction.runAsync(VISIT_MERGE_UPDATE_TARGETS_SQL, [plan.payload, updatedAt]);
-        if (targetUpdate.changes !== plan.targetVisitIds.length) {
-          throw new Error(
-            `Visit merge updated ${targetUpdate.changes} targets; expected ${plan.targetVisitIds.length}`,
-          );
-        }
-
-        await transaction.runAsync(VISIT_MERGE_COPY_SUGGESTIONS_SQL, plan.payload);
-        await transaction.runAsync(VISIT_MERGE_MOVE_RESERVATION_SOURCES_SQL, plan.payload);
-        await transaction.runAsync(VISIT_MERGE_DELETE_SOURCE_SUGGESTIONS_SQL, plan.payload);
-        const sourceDelete = await transaction.runAsync(VISIT_MERGE_DELETE_SOURCE_VISITS_SQL, plan.payload);
-        if (sourceDelete.changes !== plan.mergeCount) {
-          throw new Error(`Visit merge deleted ${sourceDelete.changes} sources; expected ${plan.mergeCount}`);
-        }
-      });
-    },
-    {
-      monotonicNow: () => performance.now(),
-      wallNow: () => Date.now(),
-      sleep: delayVisitMergeRetry,
-    },
-  );
+  await executeVisitMergePlan(plan);
 
   if (DEBUG_TIMING) {
     console.log(
@@ -358,8 +249,37 @@ export async function batchMergeSameRestaurantVisits(groups: MergeableVisitGroup
   return plan.mergeCount;
 }
 
-// withExclusiveTransactionAsync opens a fresh Expo SQLite connection, so it
-// does not inherit the main connection's PRAGMA busy_timeout = 5000.
-async function delayVisitMergeRetry(milliseconds: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+/** One atomic mutation path for manual and same-restaurant batch merges. */
+async function executeVisitMergePlan(plan: VisitMergePlan): Promise<void> {
+  const database = await getDatabase();
+  await runTransactionWithBusyRetry(async (updatedAt) => {
+    await database.withExclusiveTransactionAsync(async (transaction) => {
+      const preflightQueryRow = await transaction.getFirstAsync<VisitMergePreflightQueryRow>(
+        VISIT_MERGE_PREFLIGHT_SQL,
+        plan.payload,
+      );
+      const preflight = preflightQueryRow ? parseVisitMergePreflightQueryRow(preflightQueryRow) : null;
+      if (
+        !preflight ||
+        preflight.plannedVisitCount !== plan.referencedVisitCount ||
+        preflight.existingVisitCount !== plan.referencedVisitCount
+      ) {
+        throw new Error("One or more visits in the merge plan were not found");
+      }
+
+      await transaction.runAsync(VISIT_MERGE_MOVE_PHOTOS_SQL, plan.payload);
+      const targetUpdate = await transaction.runAsync(VISIT_MERGE_UPDATE_TARGETS_SQL, [plan.payload, updatedAt]);
+      if (targetUpdate.changes !== plan.targetVisitIds.length) {
+        throw new Error(`Visit merge updated ${targetUpdate.changes} targets; expected ${plan.targetVisitIds.length}`);
+      }
+
+      await transaction.runAsync(VISIT_MERGE_COPY_SUGGESTIONS_SQL, plan.payload);
+      await transaction.runAsync(VISIT_MERGE_MOVE_RESERVATION_SOURCES_SQL, plan.payload);
+      await transaction.runAsync(VISIT_MERGE_DELETE_SOURCE_SUGGESTIONS_SQL, plan.payload);
+      const sourceDelete = await transaction.runAsync(VISIT_MERGE_DELETE_SOURCE_VISITS_SQL, plan.payload);
+      if (sourceDelete.changes !== plan.mergeCount) {
+        throw new Error(`Visit merge deleted ${sourceDelete.changes} sources; expected ${plan.mergeCount}`);
+      }
+    });
+  });
 }

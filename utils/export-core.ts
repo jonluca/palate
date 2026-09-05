@@ -1,5 +1,6 @@
 import type { PhotoRecord, RestaurantRecord, VisitRecord } from "./db/types";
 import { getLocalDateKey } from "./local-date.ts";
+import type { VisitStatus } from "./visit-status.ts";
 
 export interface ExportData {
   exportedAt: string;
@@ -11,7 +12,7 @@ export interface ExportData {
   };
   visits: Array<{
     visitId: string;
-    status: string;
+    status: VisitStatus;
     suggestedRestaurantId: string | null;
     restaurant: {
       id: string;

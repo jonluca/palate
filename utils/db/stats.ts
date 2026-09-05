@@ -11,6 +11,7 @@ import {
   type WrappedStatsYearlyQueryRow,
 } from "./wrapped-stats-yearly-core";
 import { calculateLongestDiningStreak } from "./wrapped-stats-streak-core";
+import { buildWrappedStatsYearFilter } from "./wrapped-stats-year-filter-core";
 
 const MICHELIN_STATS_BUCKET_WHERE = {
   "three-stars": "LOWER(COALESCE(v.awardAtVisit, m.award)) LIKE '%3 star%'",
@@ -67,8 +68,7 @@ export async function getMichelinRestaurantsForStatsBucket(
   bucket: MichelinStatsBucket,
 ): Promise<MichelinStatsRestaurantSummary[]> {
   const database = await getDatabase();
-  const yearFilter = year ? `AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = ?` : "";
-  const params = year ? [String(year)] : [];
+  const yearFilter = buildWrappedStatsYearFilter(year, "v.startTime");
 
   const rows = await database.getAllAsync<MichelinStatsRestaurantSummary>(
     `SELECT
@@ -81,11 +81,11 @@ export async function getMichelinRestaurantsForStatsBucket(
     FROM visits v
     JOIN michelin_restaurants m ON v.restaurantId = m.id
     WHERE v.status = 'confirmed'
-      ${yearFilter}
+      ${yearFilter.sql}
       AND ${MICHELIN_STATS_BUCKET_WHERE[bucket]}
     GROUP BY m.id, m.name, m.location, m.cuisine
     ORDER BY visitCount DESC, latestVisit DESC, m.name COLLATE NOCASE ASC`,
-    params,
+    yearFilter.parameters,
   );
 
   return rows.map((row) => ({
@@ -101,11 +101,8 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
   const start = DEBUG_TIMING ? performance.now() : 0;
   const database = await getDatabase();
 
-  // Build year filter clause
-  const yearFilter = year ? `AND strftime('%Y', datetime(startTime/1000, 'unixepoch', 'localtime')) = '${year}'` : "";
-  const yearFilterForV = year
-    ? `AND strftime('%Y', datetime(v.startTime/1000, 'unixepoch', 'localtime')) = '${year}'`
-    : "";
+  const { sql: yearFilter, parameters: yearParameters } = buildWrappedStatsYearFilter(year);
+  const { sql: yearFilterForV } = buildWrappedStatsYearFilter(year, "v.startTime");
   const michelinQuery = buildWrappedStatsMichelinQuery(year);
 
   // Run all independent queries in parallel
@@ -144,6 +141,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       WHERE status = 'confirmed' ${yearFilter}
       GROUP BY year, month
       ORDER BY year ASC, month ASC`,
+      yearParameters,
     ),
     // Michelin award stats share one filtered native query while preserving
     // the historical-award fallback and legacy JavaScript categorization.
@@ -157,6 +155,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       GROUP BY m.cuisine
       ORDER BY count DESC
       LIMIT 5`,
+      yearParameters,
     ),
     // Busiest month
     database.getFirstAsync<{ month: number; year: number; visits: number }>(
@@ -169,6 +168,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       GROUP BY year, month
       ORDER BY visits DESC
       LIMIT 1`,
+      yearParameters,
     ),
     // Busiest day of week
     database.getFirstAsync<{ day: number; visits: number }>(
@@ -180,18 +180,22 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       GROUP BY day
       ORDER BY visits DESC
       LIMIT 1`,
+      yearParameters,
     ),
     // Total unique restaurants
     database.getFirstAsync<{ count: number }>(
       `SELECT COUNT(DISTINCT restaurantId) as count FROM visits WHERE status = 'confirmed' AND restaurantId IS NOT NULL ${yearFilter}`,
+      yearParameters,
     ),
     // Total confirmed visits
     database.getFirstAsync<{ count: number }>(
       `SELECT COUNT(*) as count FROM visits WHERE status = 'confirmed' ${yearFilter}`,
+      yearParameters,
     ),
     // First visit date
     database.getFirstAsync<{ startTime: number }>(
       `SELECT startTime FROM visits WHERE status = 'confirmed' ${yearFilter} ORDER BY startTime ASC LIMIT 1`,
+      yearParameters,
     ),
     // Most revisited restaurant
     database.getFirstAsync<{ name: string; visits: number }>(
@@ -203,6 +207,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       HAVING visits > 1
       ORDER BY visits DESC
       LIMIT 1`,
+      yearParameters,
     ),
     // Visit dates for streak calculation
     database.getAllAsync<{ date: string }>(
@@ -210,6 +215,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       FROM visits 
       WHERE status = 'confirmed' ${yearFilter}
       ORDER BY date ASC`,
+      yearParameters,
     ),
     // All distinct locations for accurate country/city counts
     database.getAllAsync<{ location: string }>(
@@ -219,6 +225,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       WHERE v.status = 'confirmed'
         AND TRIM(COALESCE(m.location, '')) != ''
         ${yearFilterForV}`,
+      yearParameters,
     ),
     // Top locations (cities/countries from michelin_restaurants.location)
     // Normalize locations by trimming whitespace and using case-insensitive grouping
@@ -234,6 +241,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       GROUP BY LOWER(TRIM(m.location))
       ORDER BY visits DESC
       LIMIT 10`,
+      yearParameters,
     ),
     // Top restaurant coordinates for map markers
     database.getAllAsync<{ id: string; name: string; latitude: number; longitude: number; visits: number }>(
@@ -252,6 +260,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
         ${yearFilterForV}
       GROUP BY r.id
       ORDER BY visits DESC, r.name ASC`,
+      yearParameters,
     ),
     // Meal time breakdown (using local time approximation)
     database.getAllAsync<{ mealTime: string; count: number }>(
@@ -267,6 +276,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       FROM visits 
       WHERE status = 'confirmed' ${yearFilter}
       GROUP BY mealTime`,
+      yearParameters,
     ),
     // Weekend vs weekday breakdown
     database.getAllAsync<{ dayType: string; count: number }>(
@@ -279,6 +289,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       FROM visits 
       WHERE status = 'confirmed' ${yearFilter}
       GROUP BY dayType`,
+      yearParameters,
     ),
     // Peak dining hour
     database.getFirstAsync<{ hour: number; visits: number }>(
@@ -290,6 +301,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       GROUP BY hour
       ORDER BY visits DESC
       LIMIT 1`,
+      yearParameters,
     ),
     // Photo stats (total and average)
     database.getFirstAsync<{ totalPhotos: number; avgPhotos: number }>(
@@ -298,6 +310,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
         COALESCE(AVG(photoCount), 0) as avgPhotos
       FROM visits 
       WHERE status = 'confirmed' ${yearFilter}`,
+      yearParameters,
     ),
     // Most photographed visit
     database.getFirstAsync<{ restaurantName: string; photoCount: number }>(
@@ -307,6 +320,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
       WHERE v.status = 'confirmed' AND v.photoCount > 0 ${yearFilterForV}
       ORDER BY v.photoCount DESC
       LIMIT 1`,
+      yearParameters,
     ),
     // Dining style: count restaurants visited only once vs more than once
     database.getFirstAsync<{
@@ -324,6 +338,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
         WHERE status = 'confirmed' AND restaurantId IS NOT NULL ${yearFilter}
         GROUP BY restaurantId
       )`,
+      yearParameters,
     ),
   ]);
 

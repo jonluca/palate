@@ -2,7 +2,7 @@ import {
   cleanCalendarEventTitle,
   compareRestaurantAndCalendarTitle,
   isFuzzyRestaurantMatch,
-} from "@/services/calendar";
+} from "../restaurant-name-matching";
 import { DEBUG_TIMING, getDatabase } from "./core";
 import type { PendingVisitForReview, SuggestedRestaurantDetail } from "./types";
 import {

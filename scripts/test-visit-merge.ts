@@ -21,11 +21,11 @@ import {
   type VisitMergePreflightRow,
 } from "../utils/db/visit-merge-core.ts";
 import {
-  isVisitMergeDatabaseBusyError,
-  runVisitMergeWithBusyRetry,
-  VISIT_MERGE_RETRY_POLICY,
-  type VisitMergeRetryRuntime,
-} from "../utils/db/visit-merge-retry-core.ts";
+  isSQLiteBusyError,
+  runTransactionWithBusyRetry,
+  TRANSACTION_RETRY_POLICY,
+  type TransactionRetryRuntime,
+} from "../utils/db/transaction-retry-core.ts";
 import type { MergeableVisitGroup } from "../utils/db/types.ts";
 
 export const FIXED_UPDATED_AT = 1_789_456_123_000;
@@ -42,7 +42,7 @@ interface VirtualRetryClock {
 
 interface VirtualRetryRuntimeFixture {
   readonly clock: VirtualRetryClock;
-  readonly runtime: VisitMergeRetryRuntime;
+  readonly runtime: TransactionRetryRuntime;
 }
 
 interface SnapshotComparison {
@@ -1158,21 +1158,21 @@ async function runRetryPolicyTests(): Promise<number> {
     `Call to function 'NativeStatement.runAsync' has been rejected: Error code ${String.fromCharCode(5)}: database is locked`,
   );
 
-  assert.equal(isVisitMergeDatabaseBusyError(iosBusyError), true);
-  assert.equal(isVisitMergeDatabaseBusyError(androidBusyError), true);
-  assert.equal(isVisitMergeDatabaseBusyError(new Error("SQLite error: SQLITE_BUSY")), true);
-  assert.equal(isVisitMergeDatabaseBusyError(new Error("constraint failed")), false);
-  assert.equal(isVisitMergeDatabaseBusyError("database is locked"), false);
+  assert.equal(isSQLiteBusyError(iosBusyError), true);
+  assert.equal(isSQLiteBusyError(androidBusyError), true);
+  assert.equal(isSQLiteBusyError(new Error("SQLite error: SQLITE_BUSY")), true);
+  assert.equal(isSQLiteBusyError(new Error("constraint failed")), false);
+  assert.equal(isSQLiteBusyError("database is locked"), false);
   scenarios += 1;
 
   {
     const { clock, runtime } = createVirtualRetryRuntime();
     const attemptOffsets: number[] = [];
     const attemptTimestamps: number[] = [];
-    const result = await runVisitMergeWithBusyRetry(async (updatedAt) => {
+    const result = await runTransactionWithBusyRetry(async (updatedAt) => {
       attemptOffsets.push(clock.monotonicTimeMs);
       attemptTimestamps.push(updatedAt);
-      if (clock.monotonicTimeMs < VISIT_MERGE_RETRY_POLICY.retryWindowMs) {
+      if (clock.monotonicTimeMs < TRANSACTION_RETRY_POLICY.retryWindowMs) {
         throw iosBusyError;
       }
       return "merged";
@@ -1193,7 +1193,7 @@ async function runRetryPolicyTests(): Promise<number> {
     let attempts = 0;
     let finalBusyError: Error | null = null;
     await assert.rejects(
-      runVisitMergeWithBusyRetry(async () => {
+      runTransactionWithBusyRetry(async () => {
         attempts += 1;
         finalBusyError = new Error(`Error code 5: database is locked (attempt ${attempts})`);
         throw finalBusyError;
@@ -1201,7 +1201,7 @@ async function runRetryPolicyTests(): Promise<number> {
       (cause: unknown) => cause === finalBusyError,
     );
     assert.equal(attempts, expectedAttemptOffsets.length);
-    assert.equal(clock.monotonicTimeMs, VISIT_MERGE_RETRY_POLICY.retryWindowMs);
+    assert.equal(clock.monotonicTimeMs, TRANSACTION_RETRY_POLICY.retryWindowMs);
     assert.deepEqual(clock.requestedSleeps, expectedSleeps);
     scenarios += 1;
   }
@@ -1211,7 +1211,7 @@ async function runRetryPolicyTests(): Promise<number> {
     const nonBusyError = new Error("constraint failed");
     let attempts = 0;
     await assert.rejects(
-      runVisitMergeWithBusyRetry(async () => {
+      runTransactionWithBusyRetry(async () => {
         attempts += 1;
         throw nonBusyError;
       }, runtime),
@@ -1226,14 +1226,14 @@ async function runRetryPolicyTests(): Promise<number> {
     const { clock, runtime } = createVirtualRetryRuntime({ sleepOvershootMs: 25 });
     let attempts = 0;
     await assert.rejects(
-      runVisitMergeWithBusyRetry(async () => {
+      runTransactionWithBusyRetry(async () => {
         attempts += 1;
         throw androidBusyError;
       }, runtime),
       (cause: unknown) => cause === androidBusyError,
     );
     assert.equal(attempts, 10);
-    assert.equal(clock.monotonicTimeMs, VISIT_MERGE_RETRY_POLICY.retryWindowMs + 25);
+    assert.equal(clock.monotonicTimeMs, TRANSACTION_RETRY_POLICY.retryWindowMs + 25);
     assert.deepEqual(clock.requestedSleeps, [50, 100, 200, 400, 800, 1_000, 1_000, 1_000, 250]);
     scenarios += 1;
   }
@@ -1314,7 +1314,7 @@ async function runRealSQLiteContentionTests(): Promise<number> {
       },
     });
     let belowDeadlineAttempts = 0;
-    const successfulUpdatedAt = await runVisitMergeWithBusyRetry(async (updatedAt) => {
+    const successfulUpdatedAt = await runTransactionWithBusyRetry(async (updatedAt) => {
       belowDeadlineAttempts += 1;
       return executeMergeAttempt(updatedAt);
     }, belowDeadline.runtime);
@@ -1332,7 +1332,7 @@ async function runRealSQLiteContentionTests(): Promise<number> {
     const exhausted = createVirtualRetryRuntime();
     let exhaustedAttempts = 0;
     await assert.rejects(
-      runVisitMergeWithBusyRetry(async (updatedAt) => {
+      runTransactionWithBusyRetry(async (updatedAt) => {
         exhaustedAttempts += 1;
         return executeMergeAttempt(updatedAt);
       }, exhausted.runtime),
@@ -1346,7 +1346,7 @@ async function runRealSQLiteContentionTests(): Promise<number> {
 
     releaseWriterLock();
     const recovered = createVirtualRetryRuntime({ initialWallTimeMs: FIXED_UPDATED_AT + 10_000 });
-    const recoveredUpdatedAt = await runVisitMergeWithBusyRetry(executeMergeAttempt, recovered.runtime);
+    const recoveredUpdatedAt = await runTransactionWithBusyRetry(executeMergeAttempt, recovered.runtime);
     assert.equal(recoveredUpdatedAt, FIXED_UPDATED_AT + 10_000);
     assert.deepEqual(recovered.clock.requestedSleeps, []);
     assert.deepEqual(readRows(), [{ id: "target", updatedAt: recoveredUpdatedAt, marker: "target-original" }]);

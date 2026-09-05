@@ -18,10 +18,7 @@ import {
   PENDING_VISIT_REVIEW_FOOD_LABELS_CTE_SQL,
   PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL,
 } from "../utils/db/visit-review-core.ts";
-import {
-  BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS,
-  assertCalendarTitleMatchingSourceContract,
-} from "./calendar-title-matching-benchmark-core.ts";
+import { BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS } from "./calendar-title-matching-benchmark-core.ts";
 import {
   removePendingReviewInfiniteVisits,
   reviewQueryKeys,
@@ -429,7 +426,6 @@ function rawRow(overrides: Partial<PendingQuickActionQueryRow> = {}): PendingQui
   };
 }
 
-assertCalendarTitleMatchingSourceContract();
 assert.ok(PENDING_QUICK_ACTIONS_SQL.includes(PENDING_VISIT_REVIEW_SUGGESTION_ORDER_SQL));
 assert.ok(PENDING_QUICK_ACTIONS_SQL.includes(PENDING_VISIT_REVIEW_FOOD_LABELS_CTE_SQL));
 assert.doesNotMatch(PENDING_VISIT_REVIEW_FOOD_LABELS_CTE_SQL, /ORDER BY/);

@@ -1,8 +1,9 @@
 import { isJsonString, parseJsonValue } from "../runtime-json.ts";
+import { isVisitStatus, type VisitListFilter, type VisitStatus } from "../visit-status.ts";
 
 type SQLiteColumnValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
 
-export type VisitListFilter = "pending" | "confirmed" | "rejected" | "food";
+export type { VisitListFilter } from "../visit-status.ts";
 
 export const DEFAULT_VISIT_LIST_PAGE_SIZE = 128;
 export const MAX_VISIT_LIST_PAGE_SIZE = 1_000;
@@ -14,7 +15,7 @@ export interface VisitListCursor {
 
 export interface VisitListItem {
   readonly id: string;
-  readonly status: "pending" | "confirmed" | "rejected";
+  readonly status: VisitStatus;
   readonly startTime: number;
   readonly photoCount: number;
   readonly foodProbable: boolean;
@@ -186,7 +187,7 @@ function nullableSQLiteBoolean(value: SQLiteColumnValue, column: string): boolea
 
 function parseVisitListItem(row: VisitListPageRow): VisitListItem {
   const status = requireSQLiteText(row.status, "status");
-  if (status !== "pending" && status !== "confirmed" && status !== "rejected") {
+  if (!isVisitStatus(status)) {
     throw new Error(`Visit-list query returned unsupported status: ${status}.`);
   }
   const previewPhotosJson = nullableSQLiteText(row.previewPhotosJson, "previewPhotosJson");

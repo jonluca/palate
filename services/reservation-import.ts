@@ -3,7 +3,7 @@ import {
   isFuzzyRestaurantMatch,
   normalizeForComparison,
   stripComparisonAffixes,
-} from "@/services/calendar";
+} from "@/utils/restaurant-name-matching";
 import { getAwardForDate, readAwardsForProviderImportOrThrow } from "@/services/michelin";
 import { searchPlaceByText } from "@/services/places";
 import {
@@ -32,6 +32,7 @@ import {
   type LocatedProviderReservation,
 } from "@/utils/provider-reservation-location-core";
 import { resolveReservationAwardsInBatches } from "@/utils/reservation-award-batch-core";
+import { dedupeReservationOnlyVisits } from "@/utils/provider-reservation-dedupe-core";
 
 const DEFAULT_VISIT_DURATION_MS = 2 * 60 * 60 * 1000;
 const RESERVATION_DEDUPE_BUFFER_MS = 2 * 60 * 60 * 1000;
@@ -356,50 +357,6 @@ function getReservationDedupeKey(visit: ReservationOnlyVisitInput): string {
   return visit.suggestedRestaurantId ?? normalizeForComparison(stripComparisonAffixes(visit.restaurant.name));
 }
 
-function areReservationVisitsDuplicate(
-  a: ReservationOnlyVisitInput,
-  b: ReservationOnlyVisitInput,
-  timeBufferMs: number = RESERVATION_DEDUPE_BUFFER_MS,
-): boolean {
-  const keyA = getReservationDedupeKey(a);
-  const keyB = getReservationDedupeKey(b);
-  if (!keyA || keyA !== keyB) {
-    return false;
-  }
-
-  return a.startTime <= b.endTime + timeBufferMs && a.endTime >= b.startTime - timeBufferMs;
-}
-
-interface ReservationOnlyVisitDedupeResult {
-  visits: ReservationOnlyVisitInput[];
-  duplicateCount: number;
-}
-
-function dedupeReservationOnlyVisits(visits: ReservationOnlyVisitInput[]): ReservationOnlyVisitDedupeResult {
-  const sorted = [...visits].sort((a, b) => a.startTime - b.startTime);
-  const deduped: ReservationOnlyVisitInput[] = [];
-  let duplicateCount = 0;
-
-  for (const visit of sorted) {
-    const duplicateIndex = deduped.findIndex((existing) => areReservationVisitsDuplicate(existing, visit));
-    if (duplicateIndex === -1) {
-      deduped.push(visit);
-      continue;
-    }
-
-    duplicateCount += 1;
-    const existing = deduped[duplicateIndex];
-    const shouldReplace =
-      (visit.suggestedRestaurantId ? 1 : 0) > (existing.suggestedRestaurantId ? 1 : 0) ||
-      (visit.sourceLocation ? 1 : 0) > (existing.sourceLocation ? 1 : 0);
-    if (shouldReplace) {
-      deduped[duplicateIndex] = visit;
-    }
-  }
-
-  return { visits: deduped.sort((a, b) => b.startTime - a.startTime), duplicateCount };
-}
-
 function getRestaurantInputForReservation(
   reservation: LocatedImportableReservation,
   match: ProviderMichelinMatch | null,
@@ -611,7 +568,7 @@ export async function importReservationVisitHistory(
     matchesBySourceEventId,
     options.sourceDisplayName,
   );
-  const deduped = dedupeReservationOnlyVisits(visits);
+  const deduped = dedupeReservationOnlyVisits(visits, getReservationDedupeKey, RESERVATION_DEDUPE_BUFFER_MS);
   logReservationImport(options.sourceDisplayName, "Prepared visits for database insert", {
     visitsBeforeDedupe: visits.length,
     visitsAfterDedupe: deduped.visits.length,

@@ -51,14 +51,16 @@ import {
   batchFindCandidateEventsForVisits,
   isNativeCalendarMatchingAvailable,
   matchCalendarEventsForVisitsNatively,
+  getReservationEvents,
+  type CalendarEventInfo,
+} from "./calendar";
+import {
   cleanCalendarEventTitle,
   compareRestaurantAndCalendarTitle,
   isFuzzyRestaurantMatch,
-  getReservationEvents,
   normalizeForComparison,
-  type CalendarEventInfo,
   stripComparisonAffixes,
-} from "./calendar";
+} from "@/utils/restaurant-name-matching";
 import { getMichelinDatasetVersion, loadMichelinRestaurants, prepareMichelinImportSource } from "./michelin";
 import { searchNearbyRestaurants, isGoogleMapsConfigured, type PlaceResult } from "./places";
 import {

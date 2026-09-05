@@ -1,13 +1,8 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "expo-sqlite/kv-store";
-import type { FilterType } from "@/hooks/queries";
-
-// Review filter types
-type ReviewFoodFilter = "on" | "off";
-type ReviewCalendarMatchesFilter = "on" | "off";
-type ReviewRestaurantMatchesFilter = "on" | "off";
-type ReviewStarFilter = "any" | "1plus" | "2plus" | "3";
+import { createDefaultAppPreferences, selectAppPreferences, type AppPreferences } from "./app-preferences";
+import { createDeduplicatingStorage } from "./deduplicating-storage";
 
 // Scan progress state
 interface ScanProgress {
@@ -47,46 +42,35 @@ export interface BackgroundPhotoScanProgress {
 }
 
 // App store state
-interface AppState {
+interface AppState extends AppPreferences {
   // Hydration state (not persisted)
   hasHydrated: boolean;
   setHasHydrated: (hydrated: boolean) => void;
 
   // Visits filter
-  visitsFilter: FilterType;
-  setVisitsFilter: (filter: FilterType) => void;
+  setVisitsFilter: (filter: AppPreferences["visitsFilter"]) => void;
 
   // Review filters
-  reviewFoodFilter: ReviewFoodFilter;
-  setReviewFoodFilter: (filter: ReviewFoodFilter) => void;
-  reviewCalendarMatchesFilter: ReviewCalendarMatchesFilter;
-  setReviewCalendarMatchesFilter: (filter: ReviewCalendarMatchesFilter) => void;
-  reviewRestaurantMatchesFilter: ReviewRestaurantMatchesFilter;
-  setReviewRestaurantMatchesFilter: (filter: ReviewRestaurantMatchesFilter) => void;
-  reviewStarFilter: ReviewStarFilter;
-  setReviewStarFilter: (filter: ReviewStarFilter) => void;
-  reviewFiltersCollapsed: boolean;
-  setReviewFiltersCollapsed: (collapsed: boolean) => void;
+  setReviewFoodFilter: (filter: AppPreferences["reviewFoodFilter"]) => void;
+  setReviewCalendarMatchesFilter: (filter: AppPreferences["reviewCalendarMatchesFilter"]) => void;
+  setReviewRestaurantMatchesFilter: (filter: AppPreferences["reviewRestaurantMatchesFilter"]) => void;
+  setReviewStarFilter: (filter: AppPreferences["reviewStarFilter"]) => void;
+  setReviewFiltersCollapsed: (collapsed: AppPreferences["reviewFiltersCollapsed"]) => void;
 
   // Onboarding state (persisted)
-  hasCompletedOnboarding: boolean;
-  setHasCompletedOnboarding: (completed: boolean) => void;
+  setHasCompletedOnboarding: (completed: AppPreferences["hasCompletedOnboarding"]) => void;
 
   // Scan completed state (persisted)
-  hasCompletedInitialScan: boolean;
-  setHasCompletedInitialScan: (completed: boolean) => void;
+  setHasCompletedInitialScan: (completed: AppPreferences["hasCompletedInitialScan"]) => void;
 
   // Google Maps API key (persisted)
-  googleMapsApiKey: string | null;
-  setGoogleMapsApiKey: (key: string | null) => void;
+  setGoogleMapsApiKey: (key: AppPreferences["googleMapsApiKey"]) => void;
 
   // Selected calendars for syncing (persisted) - null means sync all
-  selectedCalendarIds: string[] | null;
-  setSelectedCalendarIds: (ids: string[] | null) => void;
+  setSelectedCalendarIds: (ids: AppPreferences["selectedCalendarIds"]) => void;
 
   // Add photos alert seen state (persisted)
-  hasSeenAddPhotosAlert: boolean;
-  setHasSeenAddPhotosAlert: (seen: boolean) => void;
+  setHasSeenAddPhotosAlert: (seen: AppPreferences["hasSeenAddPhotosAlert"]) => void;
 
   // Scan state
   isScanning: boolean;
@@ -107,10 +91,8 @@ interface AppState {
   setSelectedVisitId: (id: string | null) => void;
 
   // UI preferences
-  hideUndoBar: boolean;
-  setHideUndoBar: (hide: boolean) => void;
-  fastAnimations: boolean;
-  setFastAnimations: (enabled: boolean) => void;
+  setHideUndoBar: (hide: AppPreferences["hideUndoBar"]) => void;
+  setFastAnimations: (enabled: AppPreferences["fastAnimations"]) => void;
 
   // Restaurant search modal
   isRestaurantSearchOpen: boolean;
@@ -131,45 +113,36 @@ const initialScanProgress: ScanProgress = {
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set, get) => ({
+    (set, get): AppState => ({
+      ...createDefaultAppPreferences(),
+
       // Hydration state (not persisted)
       hasHydrated: false,
       setHasHydrated: (hydrated) => set({ hasHydrated: hydrated }),
 
       // Visits filter
-      visitsFilter: "all",
       setVisitsFilter: (filter) => set({ visitsFilter: filter }),
 
       // Review filters
-      reviewFoodFilter: "on",
       setReviewFoodFilter: (filter) => set({ reviewFoodFilter: filter }),
-      reviewCalendarMatchesFilter: "on",
       setReviewCalendarMatchesFilter: (filter) => set({ reviewCalendarMatchesFilter: filter }),
-      reviewRestaurantMatchesFilter: "on",
       setReviewRestaurantMatchesFilter: (filter) => set({ reviewRestaurantMatchesFilter: filter }),
-      reviewStarFilter: "any",
       setReviewStarFilter: (filter) => set({ reviewStarFilter: filter }),
-      reviewFiltersCollapsed: true,
       setReviewFiltersCollapsed: (collapsed) => set({ reviewFiltersCollapsed: collapsed }),
 
       // Onboarding state (persisted)
-      hasCompletedOnboarding: false,
       setHasCompletedOnboarding: (completed) => set({ hasCompletedOnboarding: completed }),
 
       // Scan completed state (persisted)
-      hasCompletedInitialScan: false,
       setHasCompletedInitialScan: (completed) => set({ hasCompletedInitialScan: completed }),
 
       // Google Maps API key (persisted)
-      googleMapsApiKey: null,
       setGoogleMapsApiKey: (key) => set({ googleMapsApiKey: key }),
 
       // Selected calendars for syncing (persisted) - null means sync all
-      selectedCalendarIds: null,
       setSelectedCalendarIds: (ids) => set({ selectedCalendarIds: ids }),
 
       // Add photos alert seen state (persisted)
-      hasSeenAddPhotosAlert: false,
       setHasSeenAddPhotosAlert: (seen) => set({ hasSeenAddPhotosAlert: seen }),
 
       // Scan state
@@ -264,9 +237,7 @@ export const useAppStore = create<AppState>()(
       setSelectedVisitId: (id: string | null) => set({ selectedVisitId: id }),
 
       // UI preferences
-      hideUndoBar: false,
       setHideUndoBar: (hide) => set({ hideUndoBar: hide }),
-      fastAnimations: false,
       setFastAnimations: (enabled) => set({ fastAnimations: enabled }),
 
       // Restaurant search modal
@@ -288,47 +259,21 @@ export const useAppStore = create<AppState>()(
       // Reset all state to initial values
       resetAllState: () =>
         set({
-          visitsFilter: "all",
-          reviewFoodFilter: "on",
-          reviewCalendarMatchesFilter: "on",
-          reviewRestaurantMatchesFilter: "on",
-          reviewStarFilter: "any",
-          reviewFiltersCollapsed: true,
-          hasCompletedOnboarding: false,
-          hasCompletedInitialScan: false,
-          googleMapsApiKey: null,
-          selectedCalendarIds: null,
-          hasSeenAddPhotosAlert: false,
+          ...createDefaultAppPreferences(),
           isScanning: false,
           isBackgroundPhotoScanRunning: false,
           backgroundPhotoScanProgress: null,
           scanProgress: initialScanProgress,
           selectedVisitId: null,
-          hideUndoBar: false,
-          fastAnimations: false,
           isRestaurantSearchOpen: false,
           restaurantSearchVisitId: null,
         }),
     }),
     {
       name: __DEV__ ? "app-store-dev" : "app-store", // unique name for the storage key
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => createDeduplicatingStorage(AsyncStorage)),
       // Only persist user preferences, not transient UI state
-      partialize: (state): Partial<AppState> => ({
-        visitsFilter: state.visitsFilter,
-        reviewFoodFilter: state.reviewFoodFilter,
-        reviewCalendarMatchesFilter: state.reviewCalendarMatchesFilter,
-        reviewRestaurantMatchesFilter: state.reviewRestaurantMatchesFilter,
-        reviewStarFilter: state.reviewStarFilter,
-        reviewFiltersCollapsed: state.reviewFiltersCollapsed,
-        hasCompletedOnboarding: state.hasCompletedOnboarding,
-        hasCompletedInitialScan: state.hasCompletedInitialScan,
-        googleMapsApiKey: state.googleMapsApiKey,
-        selectedCalendarIds: state.selectedCalendarIds,
-        hasSeenAddPhotosAlert: state.hasSeenAddPhotosAlert,
-        hideUndoBar: state.hideUndoBar,
-        fastAnimations: state.fastAnimations,
-      }),
+      partialize: selectAppPreferences,
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);
       },

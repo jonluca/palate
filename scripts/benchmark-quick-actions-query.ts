@@ -16,7 +16,7 @@ import {
 import { PENDING_VISITS_FOR_REVIEW_SQL, type PendingVisitReviewQueryRow } from "../utils/db/visit-review-core.ts";
 import {
   BENCHMARK_CALENDAR_TITLE_MATCH_TOOLS,
-  assertCalendarTitleMatchingSourceContract,
+  getCalendarTitleMatchingSourceAttestation,
 } from "./calendar-title-matching-benchmark-core.ts";
 
 type SQLiteValue = SQLOutputValue;
@@ -613,7 +613,7 @@ const report = (() => {
       createSchema(database);
       seedSyntheticDatabase(database, configuration);
     }
-    const calendarTitleMatchingSource = assertCalendarTitleMatchingSourceContract();
+    const calendarTitleMatchingSource = getCalendarTitleMatchingSourceAttestation();
     const quickActionsCoreSource = readFileSync(new URL("../utils/db/quick-actions-core.ts", import.meta.url));
     const visitReviewRuntimeSource = readFileSync(new URL("../utils/db/visit-review.ts", import.meta.url));
     const legacyBefore = execute(database, "legacy-card-hydration");

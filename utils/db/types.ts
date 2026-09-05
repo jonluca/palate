@@ -1,3 +1,5 @@
+import type { VisitStatus } from "../visit-status.ts";
+
 export interface FoodLabel {
   label: string;
   confidence: number;
@@ -33,7 +35,7 @@ export interface VisitRecord {
   id: string;
   restaurantId: string | null;
   suggestedRestaurantId: string | null;
-  status: "pending" | "confirmed" | "rejected";
+  status: VisitStatus;
   startTime: number;
   endTime: number;
   centerLat: number;

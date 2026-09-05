@@ -154,7 +154,8 @@ internal enum CalendarTitleCleaner {
 
     let withOriginalSeparators = normalizeWhitespace(title)
     let stripped = stripTitleAffixes(withOriginalSeparators)
-    return stripTitleAffixes(normalizeSpacing(stripped))
+    let normalized = normalizeSpacing(stripped)
+    return normalized == stripped ? stripped : stripTitleAffixes(normalized)
   }
 
   private static func stripTitleAffixes(_ value: String) -> String {

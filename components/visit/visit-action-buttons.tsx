@@ -3,7 +3,8 @@ import { Pressable, ActivityIndicator, View } from "react-native";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
 import { VisitActions, type LoadingAction } from "@/components/visit-card";
-import type { VisitStatus, NearbyRestaurant } from "@/hooks/queries";
+import type { NearbyRestaurant } from "@/hooks/queries";
+import type { VisitStatus } from "@/utils/visit-status";
 
 /** Minimal restaurant shape needed for confirmation */
 type ConfirmableRestaurant = Pick<NearbyRestaurant, "id" | "name" | "latitude" | "longitude">;

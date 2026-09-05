@@ -1,7 +1,7 @@
 import { View } from "react-native";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ThemedText } from "@/components/themed-text";
-import { cleanCalendarEventTitle } from "@/services/calendar";
+import { cleanCalendarEventTitle } from "@/utils/restaurant-name-matching";
 
 export function FoodBadge() {
   return (

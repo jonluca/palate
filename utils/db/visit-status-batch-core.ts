@@ -1,12 +1,12 @@
-export type VisitStatus = "pending" | "confirmed" | "rejected";
+import { isVisitStatus, type VisitStatus } from "../visit-status.ts";
+
+export type { VisitStatus } from "../visit-status.ts";
 
 export interface VisitStatusBatchStatement {
   readonly sql: string;
   readonly parameters: [status: VisitStatus, updatedAt: number, visitIdsJson: string];
   readonly requestedCount: number;
 }
-
-const VALID_VISIT_STATUSES = new Set<VisitStatus>(["pending", "confirmed", "rejected"]);
 
 /**
  * Build one set-based update for a bulk status action. A JSON parameter avoids
@@ -20,7 +20,7 @@ export function buildVisitStatusBatchStatement(
   if (visitIds.length === 0) {
     return null;
   }
-  if (!VALID_VISIT_STATUSES.has(status)) {
+  if (!isVisitStatus(status)) {
     throw new RangeError(`Unsupported visit status: ${String(status)}.`);
   }
   if (!Number.isFinite(updatedAt)) {

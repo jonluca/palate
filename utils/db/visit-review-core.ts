@@ -1,9 +1,11 @@
+import type { VisitStatus } from "../visit-status.ts";
+
 /** Raw row returned by the pending-visit review query before JSON parsing. */
 export interface PendingVisitReviewQueryRow {
   readonly id: string;
   readonly restaurantId: string | null;
   readonly suggestedRestaurantId: string | null;
-  readonly status: "pending" | "confirmed" | "rejected";
+  readonly status: VisitStatus;
   readonly startTime: number;
   readonly endTime: number;
   readonly centerLat: number;
