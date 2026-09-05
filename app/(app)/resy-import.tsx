@@ -18,6 +18,7 @@ import type { ResyImportProgress } from "@/services/resy";
 import { asRecord, ReservationApiError, type JsonValue } from "@/services/reservation-import";
 
 const RESY_ACCOUNT_URL = "https://resy.com/account/reservations";
+const RESY_WEBVIEW_SOURCE = { uri: RESY_ACCOUNT_URL };
 const RESY_BRAND_COLOR = "#ff462d";
 
 const RESY_AUTH_BRIDGE_SCRIPT = `
@@ -102,11 +103,6 @@ interface ResyBridgeMessage {
   token?: string | null;
 }
 
-interface FetchHistoryToast {
-  type: "success" | "error";
-  message: string;
-}
-
 function isJsonString(value: JsonValue | undefined): value is string {
   return typeof value === "string";
 }
@@ -124,21 +120,6 @@ function parseResyBridgeMessage(serializedMessage: string): ResyBridgeMessage | 
   };
 }
 
-function getFetchHistoryToast(reservationCount: number): FetchHistoryToast {
-  if (reservationCount === 0) {
-    return { type: "error", message: "No importable Resy reservations were found." };
-  }
-
-  return {
-    type: "success",
-    message: `Found ${reservationCount.toLocaleString()} Resy reservation${reservationCount === 1 ? "" : "s"} to review.`,
-  };
-}
-
-function getErrorStatus(cause: unknown): number | null {
-  return cause instanceof ReservationApiError ? cause.status : null;
-}
-
 export default function ResyImportScreen() {
   const insets = useSafeAreaInsets();
   const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
@@ -149,13 +130,7 @@ export default function ResyImportScreen() {
   const [skippedExistingConfirmedCount, setSkippedExistingConfirmedCount] = useState(0);
   const [skippedDismissedCount, setSkippedDismissedCount] = useState(0);
   const [reviewPrepared, setReviewPrepared] = useState(false);
-  const webViewSource = useMemo(() => ({ uri: RESY_ACCOUNT_URL }), []);
-
-  const fetchMutation = useFetchResyVisitHistory(
-    useCallback((nextProgress: ResyImportProgress) => {
-      setProgress(nextProgress);
-    }, []),
-  );
+  const fetchMutation = useFetchResyVisitHistory(setProgress);
   const filterReviewMutation = useFilterProviderReservationReviewCandidates("Resy");
   const dismissMutation = useDismissProviderReservations();
   const importMutation = useImportProviderReservations("Resy");
@@ -218,7 +193,7 @@ export default function ResyImportScreen() {
     }
 
     if (message.hasToken && message.token) {
-      setAuthToken((previousToken) => (previousToken === message.token ? previousToken : (message.token ?? null)));
+      setAuthToken(message.token);
     }
   }, []);
 
@@ -256,11 +231,17 @@ export default function ResyImportScreen() {
       setSkippedDismissedCount(filterResult.skippedDismissedCount);
       setReviewPrepared(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showToast(getFetchHistoryToast(reservationCount));
+      showToast({
+        type: reservationCount > 0 ? "success" : "error",
+        message:
+          reservationCount > 0
+            ? `Found ${reservationCount.toLocaleString()} Resy reservation${reservationCount === 1 ? "" : "s"} to review.`
+            : "No importable Resy reservations were found.",
+      });
     } catch (error) {
       console.error("Error fetching Resy history:", error);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      const status = getErrorStatus(error);
+      const status = error instanceof ReservationApiError ? error.status : null;
       showToast({
         type: "error",
         message:
@@ -425,7 +406,7 @@ export default function ResyImportScreen() {
           <View className={"flex-1 rounded-2xl overflow-hidden bg-card border border-white/10"}>
             <WebView
               ref={webViewRef}
-              source={webViewSource}
+              source={RESY_WEBVIEW_SOURCE}
               onMessage={handleMessage}
               injectedJavaScriptBeforeContentLoaded={RESY_AUTH_BRIDGE_SCRIPT}
               injectedJavaScript={RESY_AUTH_BRIDGE_SCRIPT}

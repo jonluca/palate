@@ -360,51 +360,35 @@ function StatCard({
   const accentStyles = {
     amber: {
       cardBorder: "rgba(251, 191, 36, 0.14)",
-      topTint: "rgba(251, 191, 36, 0.08)",
-      halo: "rgba(251, 191, 36, 0.14)",
       iconBg: "rgba(251, 191, 36, 0.12)",
       iconBorder: "rgba(251, 191, 36, 0.2)",
       chipBg: "rgba(251, 191, 36, 0.1)",
       chipBorder: "rgba(251, 191, 36, 0.16)",
       accentText: "rgb(245, 158, 11)",
-      dot: "rgb(245, 158, 11)",
-      iconShadow: "rgba(245, 158, 11, 0.12)",
     },
     emerald: {
       cardBorder: "rgba(52, 211, 153, 0.14)",
-      topTint: "rgba(52, 211, 153, 0.08)",
-      halo: "rgba(52, 211, 153, 0.14)",
       iconBg: "rgba(52, 211, 153, 0.12)",
       iconBorder: "rgba(52, 211, 153, 0.2)",
       chipBg: "rgba(52, 211, 153, 0.1)",
       chipBorder: "rgba(52, 211, 153, 0.16)",
       accentText: "rgb(16, 185, 129)",
-      dot: "rgb(16, 185, 129)",
-      iconShadow: "rgba(16, 185, 129, 0.12)",
     },
     violet: {
       cardBorder: "rgba(167, 139, 250, 0.14)",
-      topTint: "rgba(167, 139, 250, 0.08)",
-      halo: "rgba(167, 139, 250, 0.14)",
       iconBg: "rgba(167, 139, 250, 0.12)",
       iconBorder: "rgba(167, 139, 250, 0.2)",
       chipBg: "rgba(167, 139, 250, 0.1)",
       chipBorder: "rgba(167, 139, 250, 0.16)",
       accentText: "rgb(139, 92, 246)",
-      dot: "rgb(139, 92, 246)",
-      iconShadow: "rgba(139, 92, 246, 0.12)",
     },
     rose: {
       cardBorder: "rgba(251, 113, 133, 0.14)",
-      topTint: "rgba(251, 113, 133, 0.08)",
-      halo: "rgba(251, 113, 133, 0.14)",
       iconBg: "rgba(251, 113, 133, 0.12)",
       iconBorder: "rgba(251, 113, 133, 0.2)",
       chipBg: "rgba(251, 113, 133, 0.1)",
       chipBorder: "rgba(251, 113, 133, 0.16)",
       accentText: "rgb(244, 63, 94)",
-      dot: "rgb(244, 63, 94)",
-      iconShadow: "rgba(244, 63, 94, 0.12)",
     },
   };
   const accent = accentStyles[accentColor];
@@ -442,7 +426,7 @@ function StatCard({
               borderColor: accent.chipBorder,
             }}
           >
-            <View className={"w-1.5 h-1.5 rounded-full"} style={{ backgroundColor: accent.dot }} />
+            <View className={"w-1.5 h-1.5 rounded-full"} style={{ backgroundColor: accent.accentText }} />
             <ThemedText
               variant={"caption2"}
               className={"font-semibold"}
@@ -1862,13 +1846,7 @@ function StatsStoriesModal({
         content: <DeepDiveSection stats={stats} selectedYear={selectedYear} />,
       },
     ] satisfies Array<StatsStory | null>;
-    const availableStories = new Array<StatsStory>();
-    for (const candidate of candidates) {
-      if (candidate !== null) {
-        availableStories.push(candidate);
-      }
-    }
-    return availableStories;
+    return candidates.filter((candidate) => candidate !== null);
   }, [
     fourthStat.icon,
     fourthStat.label,
@@ -2291,26 +2269,19 @@ function YearSelector({
   );
 }
 
-interface StatsScreenLayoutProps {
-  readonly availableYears: readonly number[];
-  readonly hasData: boolean;
-  readonly insetsBottom: number;
-  readonly isLoading: boolean;
-  readonly isStoriesOpen: boolean;
-  readonly onCloseStories: () => void;
-  readonly onOpenStories: () => void;
-  readonly onSelectYear: (year: number | null) => void;
-  readonly selectedYear: number | null;
-  readonly stats: WrappedStats | undefined;
-}
-
 function StatsScreenHeader({
   availableYears,
   hasData,
   onOpenStories,
   onSelectYear,
   selectedYear,
-}: Pick<StatsScreenLayoutProps, "availableYears" | "hasData" | "onOpenStories" | "onSelectYear" | "selectedYear">) {
+}: {
+  availableYears: readonly number[];
+  hasData: boolean;
+  onOpenStories: () => void;
+  onSelectYear: (year: number | null) => void;
+  selectedYear: number | null;
+}) {
   const headerSubtitle = selectedYear
     ? `Your ${selectedYear} culinary journey`
     : "A look back at your culinary adventures";
@@ -2369,52 +2340,6 @@ function StatsScreenEmptyContent({ isLoading }: { isLoading: boolean }) {
   );
 }
 
-function EagerStatsScreenLayout(props: StatsScreenLayoutProps) {
-  const {
-    availableYears,
-    hasData,
-    insetsBottom,
-    isLoading,
-    isStoriesOpen,
-    onCloseStories,
-    onOpenStories,
-    onSelectYear,
-    selectedYear,
-    stats,
-  } = props;
-
-  return (
-    <ScrollView
-      testID={"wrapped-stats-eager-v1"}
-      className={"flex-1 bg-background"}
-      contentInsetAdjustmentBehavior={"automatic"}
-      keyboardDismissMode={"interactive"}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{
-        paddingTop: 0,
-        paddingBottom: insetsBottom + 24,
-        paddingHorizontal: 16,
-      }}
-    >
-      <StatsScreenHeader
-        availableYears={availableYears}
-        hasData={hasData}
-        onOpenStories={onOpenStories}
-        onSelectYear={onSelectYear}
-        selectedYear={selectedYear}
-      />
-      {hasData && stats ? (
-        <WrappedContent stats={stats} selectedYear={selectedYear} />
-      ) : (
-        <StatsScreenEmptyContent isLoading={isLoading} />
-      )}
-      {hasData && stats && (
-        <StatsStoriesModal visible={isStoriesOpen} onClose={onCloseStories} stats={stats} selectedYear={selectedYear} />
-      )}
-    </ScrollView>
-  );
-}
-
 export default function StatsScreen() {
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
@@ -2442,11 +2367,10 @@ export default function StatsScreen() {
   const availableYears = allTimeStats?.availableYears ?? [];
 
   const hasData = Boolean(stats && stats.totalConfirmedVisits > 0);
-  const showConfetti = Boolean(hasData && !isLoading);
 
   // Haptic feedback when wrapped loads
   useEffect(() => {
-    if (!isFocused || !showConfetti) {
+    if (!isFocused || !hasData || isLoading) {
       return;
     }
     const statsKey = selectedYear === null ? "all-time" : String(selectedYear);
@@ -2454,7 +2378,7 @@ export default function StatsScreen() {
       celebratedStatsKeyRef.current = statsKey;
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-  }, [isFocused, selectedYear, showConfetti]);
+  }, [hasData, isFocused, isLoading, selectedYear]);
 
   // Track wrapped view
   useEffect(() => {
@@ -2468,18 +2392,34 @@ export default function StatsScreen() {
     setIsStoriesOpen(true);
   }, []);
   const closeStories = useCallback(() => setIsStoriesOpen(false), []);
-  const layoutProps: StatsScreenLayoutProps = {
-    availableYears,
-    hasData,
-    insetsBottom: insets.bottom,
-    isLoading,
-    isStoriesOpen,
-    onCloseStories: closeStories,
-    onOpenStories: openStories,
-    onSelectYear: setSelectedYear,
-    selectedYear,
-    stats,
-  };
-
-  return <EagerStatsScreenLayout {...layoutProps} />;
+  return (
+    <ScrollView
+      testID={"wrapped-stats-eager-v1"}
+      className={"flex-1 bg-background"}
+      contentInsetAdjustmentBehavior={"automatic"}
+      keyboardDismissMode={"interactive"}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={{
+        paddingTop: 0,
+        paddingBottom: insets.bottom + 24,
+        paddingHorizontal: 16,
+      }}
+    >
+      <StatsScreenHeader
+        availableYears={availableYears}
+        hasData={hasData}
+        onOpenStories={openStories}
+        onSelectYear={setSelectedYear}
+        selectedYear={selectedYear}
+      />
+      {hasData && stats ? (
+        <WrappedContent stats={stats} selectedYear={selectedYear} />
+      ) : (
+        <StatsScreenEmptyContent isLoading={isLoading} />
+      )}
+      {hasData && stats && (
+        <StatsStoriesModal visible={isStoriesOpen} onClose={closeStories} stats={stats} selectedYear={selectedYear} />
+      )}
+    </ScrollView>
+  );
 }

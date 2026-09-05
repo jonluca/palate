@@ -6,15 +6,14 @@ import {
   getPath,
   getString,
   hashString,
-  importReservationVisitHistory,
   parseTimestamp,
   sanitizeIdPart,
   ReservationApiError,
   type ImportableReservation,
   type JsonRecord,
   type JsonValue,
+  type NormalizedReservationHistory,
   type ReservationImportProgress,
-  type ReservationImportResult,
 } from "@/services/reservation-import";
 
 const RESY_API_KEY = "VbWk7s3L4KiK5fzlO7JD3Q5EYolJI7n5";
@@ -27,16 +26,7 @@ interface ResyReservationsPage {
   total: number | null;
 }
 
-export type ResyImportableReservation = ImportableReservation;
 export type ResyImportProgress = ReservationImportProgress;
-export type ResyImportResult = ReservationImportResult;
-
-export class ResyApiError extends ReservationApiError {
-  constructor(message: string, status: number) {
-    super(message, status);
-    this.name = "ResyApiError";
-  }
-}
 
 function isJsonNumber(value: JsonValue | undefined): value is number {
   return typeof value === "number";
@@ -93,7 +83,7 @@ function parseReservationEndTime(reservation: JsonRecord, startTime: number): nu
   );
 }
 
-function normalizeReservation(reservation: JsonValue, venues: JsonRecord): ResyImportableReservation | null {
+function normalizeReservation(reservation: JsonValue, venues: JsonRecord): ImportableReservation | null {
   const record = asRecord(reservation);
   if (!record) {
     return null;
@@ -182,17 +172,17 @@ async function fetchReservationsPage(authToken: string, offset: number): Promise
 
   if (!response.ok) {
     const message = getString(payloadRecord?.message) ?? `Resy request failed with ${response.status}`;
-    throw new ResyApiError(message, response.status);
+    throw new ReservationApiError(message, response.status);
   }
 
   return parseResyReservationsPage(payload);
 }
 
-async function fetchPastResyReservationHistory(
+export async function fetchResyVisitHistory(
   authToken: string,
   options: { onProgress?: (progress: ResyImportProgress) => void } = {},
-): Promise<{ reservations: ResyImportableReservation[]; fetchedCount: number; invalidCount: number }> {
-  const reservations: ResyImportableReservation[] = [];
+): Promise<NormalizedReservationHistory> {
+  const reservations: ImportableReservation[] = [];
   let offset = 1;
   let total: number | null = null;
   let invalidCount = 0;
@@ -231,31 +221,4 @@ async function fetchPastResyReservationHistory(
     fetchedCount: reservations.length + invalidCount,
     invalidCount,
   };
-}
-
-export async function fetchResyVisitHistory(
-  authToken: string,
-  options: { onProgress?: (progress: ResyImportProgress) => void } = {},
-): Promise<{ reservations: ResyImportableReservation[]; fetchedCount: number; invalidCount: number }> {
-  return fetchPastResyReservationHistory(authToken, options);
-}
-
-export async function fetchAllPastResyReservations(
-  authToken: string,
-  options: { onProgress?: (progress: ResyImportProgress) => void } = {},
-): Promise<ResyImportableReservation[]> {
-  const history = await fetchPastResyReservationHistory(authToken, options);
-  return history.reservations;
-}
-
-export async function importResyVisitHistory(
-  authToken: string,
-  options: { onProgress?: (progress: ResyImportProgress) => void } = {},
-): Promise<ResyImportResult> {
-  const history = await fetchPastResyReservationHistory(authToken, options);
-  return importReservationVisitHistory(history.reservations, {
-    sourceDisplayName: "Resy",
-    fetchedCount: history.fetchedCount,
-    invalidCount: history.invalidCount,
-  });
 }

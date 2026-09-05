@@ -182,11 +182,7 @@ export function CalendarSection() {
   // Calendar Export state
   const [isExportModalVisible, setIsExportModalVisible] = useState(false);
   const [selectedExportCalendar, setSelectedExportCalendar] = useState<WritableCalendar | null>(null);
-  const {
-    data: writableCalendars = [],
-    isLoading: _isLoadingWritable,
-    refetch: refetchWritable,
-  } = useWritableCalendars();
+  const { data: writableCalendars = [], refetch: refetchWritable } = useWritableCalendars();
   const { data: visitsWithoutEvents = [], isLoading: isLoadingVisits } = useVisitsWithoutCalendarEvents();
   const createEventsMutation = useCreateCalendarEventsForVisits();
 
@@ -747,43 +743,10 @@ export function ProviderImportsCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Resy Import Card
+// Reservation Import Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function ResyImportCard() {
-  return (
-    <ReservationImportCard
-      href={"/resy-import"}
-      title={"Import from Resy"}
-      color={"#ff462d"}
-      bgColor={"bg-red-500/15"}
-    />
-  );
-}
-
-export function TockImportCard() {
-  return (
-    <ReservationImportCard
-      href={"/tock-import"}
-      title={"Import from Tock"}
-      color={"#111827"}
-      bgColor={"bg-zinc-500/15"}
-    />
-  );
-}
-
-export function OpenTableImportCard() {
-  return (
-    <ReservationImportCard
-      href={"/opentable-import"}
-      title={"Import from OpenTable"}
-      color={"#da3743"}
-      bgColor={"bg-red-500/15"}
-    />
-  );
-}
-
-function ReservationImportCard({
+export function ReservationImportCard({
   href,
   title,
   color,
@@ -908,7 +871,6 @@ export function MergeDuplicatesSection() {
   const { showToast } = useToast();
   const { data: mergeableGroups = [] } = useMergeableSameRestaurantVisits();
   const batchMergeMutation = useBatchMergeSameRestaurantVisits();
-  const [isProcessing, setIsProcessing] = useState(false);
 
   const totalMergeableVisits = useMemo(() => {
     return mergeableGroups.reduce((sum: number, group) => sum + group.visits.length, 0);
@@ -931,7 +893,6 @@ export function MergeDuplicatesSection() {
           text: "Merge All",
           style: "default",
           onPress: async () => {
-            setIsProcessing(true);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             try {
               const { mergeCount } = await batchMergeMutation.mutateAsync(mergeableGroups);
@@ -943,8 +904,6 @@ export function MergeDuplicatesSection() {
             } catch (error) {
               console.error("Error merging visits:", error);
               showToast({ type: "error", message: "Failed to merge visits. Please try again." });
-            } finally {
-              setIsProcessing(false);
             }
           },
         },
@@ -1010,8 +969,8 @@ export function MergeDuplicatesSection() {
                 variant={"default"}
                 size={"sm"}
                 onPress={handleMergeSameRestaurantVisits}
-                loading={isProcessing}
-                disabled={isProcessing}
+                loading={batchMergeMutation.isPending}
+                disabled={batchMergeMutation.isPending}
               >
                 <ButtonText>Merge All</ButtonText>
               </Button>
@@ -1246,9 +1205,7 @@ export function FoodKeywordsCard() {
   const [newKeyword, setNewKeyword] = useState("");
   const [reclassifyProgress, setReclassifyProgress] = useState<ReclassifyProgress | null>(null);
 
-  const reclassifyMutation = useReclassifyPhotos((progress) => {
-    setReclassifyProgress(progress);
-  });
+  const reclassifyMutation = useReclassifyPhotos(setReclassifyProgress);
 
   const enabledCount = keywords.filter((k) => k.enabled).length;
   const userAddedCount = keywords.filter((k) => !k.isBuiltIn).length;

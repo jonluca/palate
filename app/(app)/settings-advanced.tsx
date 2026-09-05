@@ -16,18 +16,11 @@ import {
   IgnoredLocationsCard,
   MergeDuplicatesSection,
   RecomputeSuggestionsCard,
+  SectionHeader,
   UndoBarCard,
 } from "@/components/settings";
 import { ScreenLayout } from "@/components/screen-layout";
 import { useAppStore, useResetScan } from "@/store";
-
-function SectionHeader({ children }: { children: string }) {
-  return (
-    <ThemedText variant={"footnote"} color={"tertiary"} className={"uppercase font-semibold tracking-wide px-1 mb-3"}>
-      {children}
-    </ThemedText>
-  );
-}
 
 function AdvancedIntroCard() {
   return (

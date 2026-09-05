@@ -516,16 +516,18 @@ export async function importReservationVisitHistory(
     invalidCount?: number;
   },
 ): Promise<ReservationImportResult> {
-  logReservationImport(options.sourceDisplayName, "Starting import", {
-    receivedReservations: reservations.length,
-    fetchedCount: options.fetchedCount ?? null,
-    upstreamInvalidCount: options.invalidCount ?? 0,
-    reservationsWithCoordinates: reservations.filter(
-      (reservation) => reservation.latitude !== null && reservation.longitude !== null,
-    ).length,
-    reservationsWithAddress: reservations.filter((reservation) => Boolean(reservation.address)).length,
-    sample: reservations.slice(0, RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE).map(summarizeImportableReservationForLog),
-  });
+  if (__DEV__) {
+    logReservationImport(options.sourceDisplayName, "Starting import", {
+      receivedReservations: reservations.length,
+      fetchedCount: options.fetchedCount ?? null,
+      upstreamInvalidCount: options.invalidCount ?? 0,
+      reservationsWithCoordinates: reservations.filter(
+        (reservation) => reservation.latitude !== null && reservation.longitude !== null,
+      ).length,
+      reservationsWithAddress: reservations.filter((reservation) => Boolean(reservation.address)).length,
+      sample: reservations.slice(0, RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE).map(summarizeImportableReservationForLog),
+    });
+  }
 
   const restaurantsByName = await loadProviderMichelinFallbackRestaurantsByName(reservations);
   const locatedReservations: LocatedImportableReservation[] = [];
@@ -540,28 +542,31 @@ export async function importReservationVisitHistory(
       locatedReservations.push(located);
     } else {
       missingLocationCount += 1;
-      if (missingLocationSamples.length < RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE) {
+      if (__DEV__ && missingLocationSamples.length < RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE) {
         missingLocationSamples.push(summarizeImportableReservationForLog(reservation));
       }
     }
   }
 
-  logReservationImport(options.sourceDisplayName, "Location resolution complete", {
-    receivedReservations: reservations.length,
-    locatedReservations: locatedReservations.length,
-    missingLocationCount,
-    missingLocationSamples,
-    locatedSample: locatedReservations
-      .slice(0, RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE)
-      .map(summarizeLocatedReservationForLog),
-  });
+  if (__DEV__) {
+    logReservationImport(options.sourceDisplayName, "Location resolution complete", {
+      receivedReservations: reservations.length,
+      locatedReservations: locatedReservations.length,
+      missingLocationCount,
+      missingLocationSamples,
+      locatedSample: locatedReservations
+        .slice(0, RESERVATION_IMPORT_DEBUG_SAMPLE_SIZE)
+        .map(summarizeLocatedReservationForLog),
+    });
+  }
 
   const matchesBySourceEventId = await matchLocatedReservationsToMichelin(locatedReservations);
-  const preDedupeMichelinMatchCount = Array.from(matchesBySourceEventId.values()).filter(Boolean).length;
-  logReservationImport(options.sourceDisplayName, "Michelin matching complete", {
-    locatedReservations: locatedReservations.length,
-    matchedMichelinCount: preDedupeMichelinMatchCount,
-  });
+  if (__DEV__) {
+    logReservationImport(options.sourceDisplayName, "Michelin matching complete", {
+      locatedReservations: locatedReservations.length,
+      matchedMichelinCount: Array.from(matchesBySourceEventId.values()).filter(Boolean).length,
+    });
+  }
 
   const visits = await buildReservationOnlyVisits(
     locatedReservations,

@@ -6,17 +6,15 @@ import {
   getPath,
   getString,
   hashString,
-  importReservationVisitHistory,
   sanitizeIdPart,
   type ImportableReservation,
   type JsonNode,
   type JsonRecord,
   type JsonValue,
-  type ReservationImportResult,
+  type NormalizedReservationHistory,
 } from "@/services/reservation-import";
 
 const OPENTABLE_SOURCE = "opentable";
-const OPENTABLE_IMPORT_LOG_PREFIX = "[OpenTableImport]";
 const OPENTABLE_DEBUG_SAMPLE_SIZE = 5;
 const MONTH_PATTERN =
   "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
@@ -46,27 +44,6 @@ const OPENTABLE_MONTHS = new Map<string, number>([
   ["dec", 11],
   ["december", 11],
 ]);
-
-export type OpenTableImportableReservation = ImportableReservation;
-export type OpenTableImportResult = ReservationImportResult;
-
-interface NormalizedOpenTableHistory {
-  reservations: OpenTableImportableReservation[];
-  fetchedCount: number;
-  invalidCount: number;
-}
-
-function logOpenTableImport<Details>(message: string, details?: Details): void {
-  if (!__DEV__) {
-    return;
-  }
-
-  if (details === undefined) {
-    console.info(`${OPENTABLE_IMPORT_LOG_PREFIX} ${message}`);
-  } else {
-    console.info(`${OPENTABLE_IMPORT_LOG_PREFIX} ${message}`, details);
-  }
-}
 
 function isCanceledReservation(record: JsonRecord): boolean {
   const status = getString(
@@ -609,7 +586,7 @@ function summarizeOpenTableTopLevelReservationsForLog(payload: JsonValue) {
   };
 }
 
-function summarizeOpenTableReservationForLog(reservation: OpenTableImportableReservation) {
+function summarizeOpenTableReservationForLog(reservation: ImportableReservation) {
   return {
     restaurantName: reservation.restaurantName,
     sourceName: reservation.sourceName,
@@ -621,7 +598,7 @@ function summarizeOpenTableReservationForLog(reservation: OpenTableImportableRes
   };
 }
 
-function normalizeOpenTableCandidate(rawReservation: JsonValue): OpenTableImportableReservation | null {
+function normalizeOpenTableCandidate(rawReservation: JsonValue): ImportableReservation | null {
   const record = asRecord(rawReservation);
   if (!record || isCanceledReservation(record)) {
     return null;
@@ -808,9 +785,9 @@ function collectReservationCandidates(payload: JsonValue): JsonValue[] {
   return candidates;
 }
 
-export function normalizeOpenTableVisitHistory(payload: JsonValue): NormalizedOpenTableHistory {
+export function normalizeOpenTableVisitHistory(payload: JsonValue): NormalizedReservationHistory {
   const rawReservations = collectReservationCandidates(payload);
-  const reservationsBySourceEventId = new Map<string, OpenTableImportableReservation>();
+  const reservationsBySourceEventId = new Map<string, ImportableReservation>();
   let invalidCount = 0;
 
   for (const rawReservation of rawReservations) {
@@ -824,30 +801,21 @@ export function normalizeOpenTableVisitHistory(payload: JsonValue): NormalizedOp
 
   const reservations = Array.from(reservationsBySourceEventId.values()).sort((a, b) => b.startTime - a.startTime);
 
-  logOpenTableImport("Normalized history", {
-    payload: describeOpenTablePayloadForLog(payload),
-    topLevelReservations: summarizeOpenTableTopLevelReservationsForLog(payload),
-    rawCandidateCount: rawReservations.length,
-    normalizedCount: reservations.length,
-    invalidCandidateCount: invalidCount,
-    duplicateCandidateCount: Math.max(0, rawReservations.length - invalidCount - reservations.length),
-    normalizedSample: reservations.slice(0, OPENTABLE_DEBUG_SAMPLE_SIZE).map(summarizeOpenTableReservationForLog),
-  });
+  if (__DEV__) {
+    console.info("[OpenTableImport] Normalized history", {
+      payload: describeOpenTablePayloadForLog(payload),
+      topLevelReservations: summarizeOpenTableTopLevelReservationsForLog(payload),
+      rawCandidateCount: rawReservations.length,
+      normalizedCount: reservations.length,
+      invalidCandidateCount: invalidCount,
+      duplicateCandidateCount: Math.max(0, rawReservations.length - invalidCount - reservations.length),
+      normalizedSample: reservations.slice(0, OPENTABLE_DEBUG_SAMPLE_SIZE).map(summarizeOpenTableReservationForLog),
+    });
+  }
 
   return {
     reservations,
     fetchedCount: rawReservations.length,
     invalidCount,
   };
-}
-
-export async function importOpenTableVisitHistory(payload: JsonValue): Promise<OpenTableImportResult> {
-  const history = normalizeOpenTableVisitHistory(payload);
-  const result = await importReservationVisitHistory(history.reservations, {
-    sourceDisplayName: "OpenTable",
-    fetchedCount: history.fetchedCount,
-    invalidCount: history.invalidCount,
-  });
-  logOpenTableImport("Import complete", result);
-  return result;
 }

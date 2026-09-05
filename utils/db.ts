@@ -124,7 +124,6 @@ export {
 
 export {
   getActiveMichelinUnicodeNameRows,
-  getAllMichelinRestaurants,
   getMichelinMapViewport,
   getMichelinImportResolution,
   getImportedMichelinDatasetVersion,

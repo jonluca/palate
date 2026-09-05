@@ -30,7 +30,6 @@ import {
   batchUpdateVisitStatuses,
   batchConfirmVisits,
   confirmVisit,
-  getAllMichelinRestaurants,
   getActiveMichelinUnicodeNameRows,
   getImportedMichelinDatasetVersion,
   getMichelinMapViewport,
@@ -164,7 +163,6 @@ export function invalidateFoodDetectionQueries(queryClient: QueryClient): Promis
   return Promise.all([
     invalidateVisitStatusQueries(queryClient),
     invalidatePendingReviewQuery(queryClient),
-    queryClient.invalidateQueries({ queryKey: ["visitPhotos"] }),
     queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount }),
     queryClient.invalidateQueries({ queryKey: queryKeys.photosWithLabelsCount }),
   ]).then(() => undefined);
@@ -350,14 +348,11 @@ import {
   type ExportFormat,
   type ExportShareResult,
 } from "@/services/export";
-import { importOpenTableVisitHistory } from "@/services/opentable";
-import { fetchResyVisitHistory, importResyVisitHistory, type ResyImportProgress } from "@/services/resy";
-import { importTockVisitHistory } from "@/services/tock";
+import { fetchResyVisitHistory, type ResyImportProgress } from "@/services/resy";
 import {
   filterProviderReservationReviewCandidates,
   importReservationVisitHistory,
   type ImportableReservation,
-  type JsonValue,
   type ReservationReviewFilterResult,
   type ReservationImportResult,
 } from "@/services/reservation-import";
@@ -374,16 +369,6 @@ import {
   type MichelinRestaurantDetails,
 } from "@/services/michelin";
 import { searchPlaceByText, type PlaceResult } from "@/services/places";
-
-// Types
-export interface Stats {
-  totalPhotos: number;
-  photosWithLocation: number;
-  totalVisits: number;
-  pendingVisits: number;
-  confirmedVisits: number;
-  foodProbableVisits: number;
-}
 
 function isValidCoordinatePair(latitude: number, longitude: number): boolean {
   return (
@@ -650,24 +635,6 @@ export function usePendingReviewPages(filters: PendingVisitReviewFilters) {
   });
 }
 
-/**
- * Fetch all Michelin restaurants (for searching)
- */
-export function useMichelinRestaurants() {
-  const queryClient = useQueryClient();
-
-  return useQuery({
-    queryKey: queryKeys.michelinRestaurants,
-    queryFn: async () => {
-      // The version check is cheap after the first import and prevents an app
-      // update from caching the previous bundled guide for this whole process.
-      await initializeMichelinDataForQuery(queryClient);
-      return getAllMichelinRestaurants();
-    },
-    staleTime: Infinity, // This data doesn't change
-  });
-}
-
 /** Fetch only the active Michelin rows that can be rendered in one map viewport. */
 export function useMichelinMapViewport(request: MichelinMapViewportRequest, enabled: boolean = true) {
   const queryClient = useQueryClient();
@@ -814,9 +781,12 @@ interface MichelinRestaurantInput {
   latitude: number;
   longitude: number;
   distance: number;
-  award: string;
-  cuisine: string;
+  award?: string | null;
+  cuisine?: string;
 }
+
+const EMPTY_MICHELIN_RESTAURANTS: MichelinRestaurantInput[] = [];
+const EMPTY_MAPKIT_RESULTS: MapKitSearchResult[] = [];
 
 /**
  * Merge Michelin and MapKit restaurant results, deduplicating and sorting by distance.
@@ -835,7 +805,7 @@ function mergeNearbyRestaurants(
     longitude: r.longitude,
     distance: r.distance,
     award: r.award || null,
-    cuisine: r.cuisine,
+    cuisine: r.cuisine ?? "",
     source: "michelin" as const,
   }));
 
@@ -878,16 +848,7 @@ const MAPKIT_RADIUS_METERS = 200;
 interface VisitWithSuggestedRestaurants {
   centerLat?: number;
   centerLon?: number;
-  suggestedRestaurants?: Array<{
-    id: string;
-    name: string;
-    latitude: number;
-    longitude: number;
-    distance: number;
-    award?: string | null;
-    cuisine?: string;
-    address?: string;
-  }>;
+  suggestedRestaurants?: MichelinRestaurantInput[];
 }
 
 /**
@@ -909,27 +870,14 @@ export function useUnifiedNearbyRestaurants(visit: VisitWithSuggestedRestaurants
   const shouldFetchMapKit = enabled && lat !== undefined && lon !== undefined && isValidCoordinatePair(lat, lon);
 
   // Fetch MapKit restaurants
-  const { data: mapKitResults = [], isLoading: mapKitLoading } = useMapKitNearbyRestaurants(
+  const { data: mapKitResults = EMPTY_MAPKIT_RESULTS, isLoading: mapKitLoading } = useMapKitNearbyRestaurants(
     lat,
     lon,
     MAPKIT_RADIUS_METERS,
     shouldFetchMapKit,
   );
 
-  // Convert visit's suggestedRestaurants to MichelinRestaurantInput format for merging
-  // Use visit?.suggestedRestaurants directly in dependency to avoid creating new array reference
-  const michelinRestaurants: MichelinRestaurantInput[] = useMemo(() => {
-    const suggestedRestaurants = visit?.suggestedRestaurants ?? [];
-    return suggestedRestaurants.map((r) => ({
-      id: r.id,
-      name: r.name,
-      latitude: r.latitude,
-      longitude: r.longitude,
-      distance: r.distance,
-      award: r.award ?? "",
-      cuisine: r.cuisine ?? "",
-    }));
-  }, [visit?.suggestedRestaurants]);
+  const michelinRestaurants = visit?.suggestedRestaurants ?? EMPTY_MICHELIN_RESTAURANTS;
 
   // Merge results: Michelin + MapKit, deduplicated and sorted by distance
   const mergedRestaurants = useMemo(() => {
@@ -939,21 +887,7 @@ export function useUnifiedNearbyRestaurants(visit: VisitWithSuggestedRestaurants
   return {
     data: mergedRestaurants,
     isLoading: shouldFetchMapKit && mapKitLoading,
-    mapKitResults,
-    michelinCount: michelinRestaurants.length,
-    mapKitCount: mapKitResults.length,
   };
-}
-
-/**
- * Fetch photos for a specific visit
- */
-export function useVisitPhotos(id: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.visitPhotos(id ?? ""),
-    queryFn: () => getPhotosByVisitId(id!),
-    enabled: !!id,
-  });
 }
 
 // Mutations
@@ -1406,48 +1340,6 @@ export function useImportProviderReservations(sourceDisplayName: string) {
       await excludeReservationImportReviews(reservations, "approved");
       return result;
     },
-    onSuccess: () => {
-      invalidateReservationImportQueries(queryClient);
-    },
-  });
-}
-
-/**
- * Import the user's full past Resy reservation history as confirmed visits.
- */
-export function useImportResyVisitHistory(onProgress?: (progress: ResyImportProgress) => void) {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (authToken: string) => importResyVisitHistory(authToken, { onProgress }),
-    onSuccess: () => {
-      invalidateReservationImportQueries(queryClient);
-    },
-  });
-}
-
-/**
- * Import the user's full past Tock reservation history as confirmed visits.
- */
-export function useImportTockVisitHistory() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (payload: JsonValue) => importTockVisitHistory(payload),
-    onSuccess: () => {
-      invalidateReservationImportQueries(queryClient);
-    },
-  });
-}
-
-/**
- * Import the user's full past OpenTable reservation history as confirmed visits.
- */
-export function useImportOpenTableVisitHistory() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (payload: JsonValue) => importOpenTableVisitHistory(payload),
     onSuccess: () => {
       invalidateReservationImportQueries(queryClient);
     },
@@ -1981,7 +1873,6 @@ export function useScanVisitForFood(
     onSettled: () => {
       void invalidateFoodDetectionQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId ?? "") });
-      queryClient.invalidateQueries({ queryKey: queryKeys.visitPhotos(visitId ?? "") });
     },
   });
 }

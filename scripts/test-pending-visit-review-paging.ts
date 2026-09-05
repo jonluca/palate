@@ -1062,7 +1062,7 @@ const hooksSource = readFileSync(new URL("../hooks/queries.ts", import.meta.url)
 const reviewScreenSource = readFileSync(new URL("../app/(app)/(tabs)/review.tsx", import.meta.url), "utf8");
 const reviewHookSource = hooksSource.slice(
   hooksSource.indexOf("export function usePendingReviewPages"),
-  hooksSource.indexOf("export function useMichelinRestaurants"),
+  hooksSource.indexOf("export function useMichelinMapViewport"),
 );
 assert.match(reviewHookSource, /placeholderData:\s*keepPreviousData/);
 assert.match(reviewScreenSource, /displayedFoodFilter = isPlaceholderData \? \(manifest\?\.filters\.food/);

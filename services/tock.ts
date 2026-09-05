@@ -6,25 +6,15 @@ import {
   getPath,
   getString,
   hashString,
-  importReservationVisitHistory,
   parseTimestamp,
   sanitizeIdPart,
   type ImportableReservation,
   type JsonRecord,
   type JsonValue,
-  type ReservationImportResult,
+  type NormalizedReservationHistory,
 } from "@/services/reservation-import";
 
 const TOCK_SOURCE = "tock";
-
-export type TockImportableReservation = ImportableReservation;
-export type TockImportResult = ReservationImportResult;
-
-interface NormalizedTockHistory {
-  reservations: TockImportableReservation[];
-  fetchedCount: number;
-  invalidCount: number;
-}
 
 function getTockResultArray(payload: JsonValue): JsonValue[] {
   if (Array.isArray(payload)) {
@@ -61,7 +51,7 @@ function isCanceledPurchase(record: JsonRecord): boolean {
   );
 }
 
-function normalizeTockPurchase(rawPurchase: JsonValue): TockImportableReservation | null {
+function normalizeTockPurchase(rawPurchase: JsonValue): ImportableReservation | null {
   const purchase = asRecord(rawPurchase);
   if (!purchase || isCanceledPurchase(purchase)) {
     return null;
@@ -126,9 +116,9 @@ function normalizeTockPurchase(rawPurchase: JsonValue): TockImportableReservatio
   };
 }
 
-export function normalizeTockVisitHistory(payload: JsonValue): NormalizedTockHistory {
+export function normalizeTockVisitHistory(payload: JsonValue): NormalizedReservationHistory {
   const rawPurchases = getTockResultArray(payload);
-  const reservations: TockImportableReservation[] = [];
+  const reservations: ImportableReservation[] = [];
   let invalidCount = 0;
 
   for (const rawPurchase of rawPurchases) {
@@ -145,13 +135,4 @@ export function normalizeTockVisitHistory(payload: JsonValue): NormalizedTockHis
     fetchedCount: rawPurchases.length,
     invalidCount,
   };
-}
-
-export async function importTockVisitHistory(payload: JsonValue): Promise<TockImportResult> {
-  const history = normalizeTockVisitHistory(payload);
-  return importReservationVisitHistory(history.reservations, {
-    sourceDisplayName: "Tock",
-    fetchedCount: history.fetchedCount,
-    invalidCount: history.invalidCount,
-  });
 }

@@ -87,13 +87,12 @@ function downloadWebExport(data: string, format: ExportFormat): ExportShareResul
   return { fileUri: null, fileName, savedToFile: true, shared: false };
 }
 
-type ExportStatusFilter = VisitStatusFilter;
 type ExportDatabaseConnection = Awaited<ReturnType<typeof getDatabase>>;
 
 async function assembleExportData(
   database: ExportDatabaseConnection,
   includePhotos: boolean,
-  statusFilter: ExportStatusFilter,
+  statusFilter: VisitStatusFilter,
 ): Promise<ExportData> {
   const visits = await getVisits(statusFilter === "all" ? undefined : statusFilter, database);
   const restaurants = await getAllRestaurants(database);
@@ -130,7 +129,7 @@ async function assembleExportData(
 async function generateExportData(
   options: {
     includePhotos?: boolean;
-    statusFilter?: ExportStatusFilter;
+    statusFilter?: VisitStatusFilter;
   } = {},
 ): Promise<ExportData> {
   const { includePhotos = true, statusFilter = "confirmed" } = options;
@@ -156,40 +155,23 @@ async function generateExportData(
   return result;
 }
 
-async function generateJSONString(
+async function exportToJSON(
   options: {
     includePhotos?: boolean;
-    statusFilter?: ExportStatusFilter;
+    statusFilter?: VisitStatusFilter;
   } = {},
 ): Promise<string> {
   const data = await generateExportData(options);
   return exportDataToJSONString(data);
 }
 
-async function generateCSVString(
+export async function exportToCSV(
   options: {
-    statusFilter?: ExportStatusFilter;
+    statusFilter?: VisitStatusFilter;
   } = {},
 ): Promise<string> {
   const data = await generateExportData({ ...options, includePhotos: false });
   return exportDataToCSVString(data);
-}
-
-export async function exportToJSON(
-  options: {
-    includePhotos?: boolean;
-    statusFilter?: ExportStatusFilter;
-  } = {},
-): Promise<string> {
-  return generateJSONString(options);
-}
-
-export async function exportToCSV(
-  options: {
-    statusFilter?: ExportStatusFilter;
-  } = {},
-): Promise<string> {
-  return generateCSVString(options);
 }
 
 async function shareExportFile(file: File, fileName: string, format: ExportFormat): Promise<ExportShareResult> {
@@ -215,7 +197,7 @@ async function shareExportFile(file: File, fileName: string, format: ExportForma
 }
 
 async function writeStreamedJSONExport(
-  options: { statusFilter?: ExportStatusFilter } = {},
+  options: { statusFilter?: VisitStatusFilter } = {},
 ): Promise<{ file: File; fileName: string }> {
   const { statusFilter = "confirmed" } = options;
   const exportDir = ensureExportDirectory(Paths.document ?? Paths.cache);
@@ -269,7 +251,7 @@ async function writeStreamedJSONExport(
 
 /** Stream the app's JSON share path without materializing the full export string. */
 export async function exportAndShareJSON(
-  options: { statusFilter?: ExportStatusFilter } = {},
+  options: { statusFilter?: VisitStatusFilter } = {},
 ): Promise<ExportShareResult> {
   // Expo's dedicated SQLite connection and native FileHandle are unavailable on web.
   if (Platform.OS === "web") {

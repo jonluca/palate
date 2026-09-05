@@ -336,24 +336,6 @@ export async function batchFindCandidateEventsForVisits(
 }
 
 /**
- * Batch find the single best calendar event for multiple visits efficiently.
- * Uses the same ranked candidates as batchFindCandidateEventsForVisits and returns the top one.
- */
-export async function batchFindEventsForVisits(
-  visits: VisitTimeRange[],
-  bufferMinutes: number = 30,
-): Promise<Map<string, CalendarEventInfo | null>> {
-  const candidateMap = await batchFindCandidateEventsForVisits(visits, bufferMinutes);
-  const results = new Map<string, CalendarEventInfo | null>();
-
-  for (const visit of visits) {
-    results.set(visit.id, candidateMap.get(visit.id)?.[0] ?? null);
-  }
-
-  return results;
-}
-
-/**
  * Get all calendar events that overlap a visit time range.
  */
 export async function getEventsOverlappingRange(

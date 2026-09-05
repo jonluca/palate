@@ -21,7 +21,6 @@ export const queryKeys = {
   visits: (filter?: FilterType) => ["visits", filter] as const,
   visitPages: (filter: FilterType) => [...VISIT_LIST_PAGE_QUERY_ROOT, filter] as const,
   visitDetail: (id: string) => ["visits", "visit", id] as const,
-  visitPhotos: (id: string) => ["visitPhotos", id] as const,
   unmatchedVisits: ["unmatchedVisits"] as const,
   permissions: ["permissions"] as const,
   calendarPermissions: ["calendarPermissions"] as const,
@@ -35,7 +34,6 @@ export const queryKeys = {
   restaurantVisits: (restaurantId: string) => ["visits", "restaurantVisits", restaurantId] as const,
   restaurantDetail: (restaurantId: string) => ["restaurants", "detail", restaurantId] as const,
   pendingReview: reviewQueryKeys.pendingReview,
-  michelinRestaurants: ["static", "michelinRestaurants"] as const,
   michelinMapViewport: (request: MichelinMapViewportRequest) =>
     [
       "michelinMapViewport",

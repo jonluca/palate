@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, View } from "react-native";
 import * as Haptics from "expo-haptics";
-import type { SymbolViewProps } from "expo-symbols";
 import { useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/icon-symbol";
@@ -66,21 +65,13 @@ async function runDeepScan({
   }
 }
 
-function CardIcon({ name, color, bgColor }: { name: SymbolViewProps["name"]; color: string; bgColor: string }) {
-  return (
-    <View className={`w-10 h-10 rounded-full items-center justify-center ${bgColor}`}>
-      <IconSymbol name={name} size={20} color={color} />
-    </View>
-  );
-}
-
 export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
   const { data: unanalyzedPhotoCount } = useUnanalyzedPhotoCount();
   const isPhotoScanBusy = useAppStore((state) => state.isScanning || state.isBackgroundPhotoScanRunning);
   const [progress, setProgress] = useState<DeepScanProgress | null>(null);
-  const { isPending: isScanning, mutateAsync: mutateDeepScan } = useDeepScan((p) => setProgress(p));
+  const { isPending: isScanning, mutateAsync: mutateDeepScan } = useDeepScan(setProgress);
   const [isPreparing, setIsPreparing] = useState(false);
   const [hasAutoStartFinished, setHasAutoStartFinished] = useState(false);
   const isWorking = isPreparing || isScanning;
@@ -140,6 +131,7 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
         }
       })();
 
+      // Promise.finally keeps this handler compatible with React Compiler.
       await scanAttempt.finally(() => {
         setIsPreparing(false);
         isStartingRef.current = false;
@@ -194,7 +186,9 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
     <Card animated={false}>
       <View className={"p-4 gap-4"}>
         <View className={"flex-row items-center gap-3"}>
-          <CardIcon name={"eye.fill"} color={"#ec4899"} bgColor={"bg-pink-500/15"} />
+          <View className={"w-10 h-10 rounded-full items-center justify-center bg-pink-500/15"}>
+            <IconSymbol name={"eye.fill"} size={20} color={"#ec4899"} />
+          </View>
           <View className={"flex-1"}>
             <ThemedText variant={"subhead"} className={"font-medium"}>
               Deep Scan Photos

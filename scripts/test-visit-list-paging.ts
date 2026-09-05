@@ -17,7 +17,6 @@ import {
 import {
   invalidateVisitListPageQueries,
   refreshAllQueriesWithVisitListPageReset,
-  resetVisitListPageQueries,
   VISIT_LIST_PAGE_QUERY_ROOT,
   VISIT_LIST_QUERY_POLICY,
 } from "../utils/query-cache-policy.ts";
@@ -484,7 +483,7 @@ async function assertInfiniteResetContract(): Promise<void> {
     const unrelatedKey = ["visits", "visit", "detail-id"] as const;
     queryClient.setQueryData(unrelatedKey, { marker: true });
     const callsBeforeReset = calls.length;
-    await resetVisitListPageQueries(queryClient);
+    await invalidateVisitListPageQueries(queryClient);
     const reset = queryClient.getQueryData<InfiniteData<{ index: number }, number>>(queryKey);
     assert.deepEqual(reset?.pages, [{ index: 0 }], "active list reset must refetch only page one");
     assert.deepEqual(reset?.pageParams, [0]);
@@ -528,7 +527,7 @@ async function assertInactiveFocusResetContract(): Promise<void> {
 
     observer.setOptions({ ...options, enabled: false });
     const callsBeforeReset = calls.length;
-    await resetVisitListPageQueries(queryClient);
+    await invalidateVisitListPageQueries(queryClient);
     const retained = queryClient.getQueryData<InfiniteData<{ index: number }, number>>(queryKey);
     assert.deepEqual(retained?.pages, [{ index: 0 }], "inactive refresh must retain one populated first page");
     assert.deepEqual(retained?.pageParams, [0]);
@@ -684,7 +683,7 @@ async function assertInFlightContinuationResetContract(): Promise<void> {
     );
     const continuationResult = observer.fetchNextPage().catch((cause: Error) => cause);
     await continuationDidStart;
-    await resetVisitListPageQueries(queryClient);
+    await invalidateVisitListPageQueries(queryClient);
     await continuationResult;
 
     assert.equal(continuationWasAborted, true, "reset must cancel an in-flight continuation");

@@ -60,7 +60,6 @@ class PlacesAPIError extends Error {
   constructor(
     message: string,
     public readonly status: string,
-    public readonly isRetryable: boolean = false,
   ) {
     super(message);
     this.name = "PlacesAPIError";
@@ -80,7 +79,7 @@ function isCacheValid<T>(cached: { data: T; timestamp: number } | undefined): ca
 const getCacheKey = (lat: number, lon: number, radius: number) => `${lat.toFixed(4)},${lon.toFixed(4)},${radius}`;
 
 /** Fetch from Google Places API with timeout and error handling */
-async function fetchPlacesAPI<T extends PlacesAPIResponse>(url: URL): Promise<T> {
+async function fetchPlacesAPI(url: URL): Promise<PlacesAPIResponse> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
@@ -89,14 +88,13 @@ async function fetchPlacesAPI<T extends PlacesAPIResponse>(url: URL): Promise<T>
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      throw new PlacesAPIError(`HTTP error: ${response.status}`, `HTTP_${response.status}`, response.status >= 500);
+      throw new PlacesAPIError(`HTTP error: ${response.status}`, `HTTP_${response.status}`);
     }
 
-    const data: T = await response.json();
+    const data: PlacesAPIResponse = await response.json();
 
     if (data.status !== "OK" && data.status !== "ZERO_RESULTS") {
-      const isRetryable = ["OVER_QUERY_LIMIT", "UNKNOWN_ERROR"].includes(data.status);
-      throw new PlacesAPIError(data.error_message ?? `API error: ${data.status}`, data.status, isRetryable);
+      throw new PlacesAPIError(data.error_message ?? `API error: ${data.status}`, data.status);
     }
 
     return data;
@@ -106,7 +104,7 @@ async function fetchPlacesAPI<T extends PlacesAPIResponse>(url: URL): Promise<T>
       throw error;
     }
     if (error instanceof Error && error.name === "AbortError") {
-      throw new PlacesAPIError("Request timeout", "TIMEOUT", true);
+      throw new PlacesAPIError("Request timeout", "TIMEOUT");
     }
     throw error;
   }
@@ -152,7 +150,7 @@ export async function searchNearbyRestaurants(
   url.searchParams.set("key", apiKey);
 
   try {
-    const data = await fetchPlacesAPI<PlacesAPIResponse>(url);
+    const data = await fetchPlacesAPI(url);
     const results = toPlaceResults(data.results);
     placesCache.set(cacheKey, { data: results, timestamp: Date.now() });
     return results;
@@ -188,7 +186,7 @@ export async function getPlaceDetails(placeId: string): Promise<PlaceDetails | n
   url.searchParams.set("key", apiKey);
 
   try {
-    const data = await fetchPlacesAPI<PlacesAPIResponse>(url);
+    const data = await fetchPlacesAPI(url);
 
     if (!data.result || data.status === "NOT_FOUND") {
       return null;
@@ -235,7 +233,7 @@ export async function searchPlaceByText(query: string, latitude?: number, longit
   }
 
   try {
-    const data = await fetchPlacesAPI<PlacesAPIResponse>(url);
+    const data = await fetchPlacesAPI(url);
     return toPlaceResults(data.results);
   } catch (error) {
     console.error("Failed to search place by text:", error);

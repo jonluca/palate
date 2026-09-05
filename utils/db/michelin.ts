@@ -357,20 +357,6 @@ export async function getMichelinRestaurantCount(datasetVersion?: string): Promi
   return result?.count ?? 0;
 }
 
-export async function getAllMichelinRestaurants(): Promise<MichelinRestaurantRecord[]> {
-  const database = await getDatabase();
-  return database.getAllAsync<MichelinRestaurantRecord>(
-    `SELECT m.*
-     FROM michelin_restaurants m
-     WHERE NOT EXISTS (
-       SELECT 1 FROM app_metadata WHERE key = ?
-     ) OR m.datasetVersion = (
-       SELECT value FROM app_metadata WHERE key = ?
-     )`,
-    [MICHELIN_DATASET_VERSION_KEY, MICHELIN_DATASET_VERSION_KEY],
-  );
-}
-
 /**
  * Select only the active guide rows that can be rendered in the current map
  * viewport. Filtering and the bounded ranking prefix run inside SQLite over

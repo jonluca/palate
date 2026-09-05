@@ -27,7 +27,6 @@ for (const filter of filters) {
 }
 assert.deepEqual(queryKeys.visits(), ["visits", undefined]);
 assert.deepEqual(queryKeys.visitDetail("visit-1"), ["visits", "visit", "visit-1"]);
-assert.deepEqual(queryKeys.visitPhotos("visit-1"), ["visitPhotos", "visit-1"]);
 assert.deepEqual(queryKeys.restaurantVisits("restaurant-1"), ["visits", "restaurantVisits", "restaurant-1"]);
 assert.deepEqual(queryKeys.restaurantDetail("restaurant-1"), ["restaurants", "detail", "restaurant-1"]);
 assert.deepEqual(queryKeys.mergeableVisits("visit-1"), ["visits", "mergeableVisits", "visit-1"]);
@@ -50,7 +49,6 @@ assert.deepEqual(queryKeys.wrappedMichelinBucketRestaurants(2026, "selected"), [
   2026,
   "selected",
 ]);
-assert.deepEqual(queryKeys.michelinRestaurants, ["static", "michelinRestaurants"]);
 assert.deepEqual(queryKeys.michelinRestaurantDetail("michelin-1"), [
   "static",
   "michelinRestaurants",
@@ -125,7 +123,11 @@ const invalidatedKeys = [
   queryKeys.michelinRestaurantSearch("café"),
   queryKeys.michelinMapViewport(viewport),
 ];
-const preservedKeys = [queryKeys.pendingReview, queryKeys.michelinRestaurants, queryKeys.permissions];
+const preservedKeys = [
+  queryKeys.pendingReview,
+  queryKeys.michelinRestaurantDetail("michelin-1"),
+  queryKeys.permissions,
+];
 try {
   for (const key of [...invalidatedKeys, ...preservedKeys]) {
     client.setQueryData(key, { pages: [{ visits: [] }], pageParams: [null] });

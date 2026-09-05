@@ -149,9 +149,6 @@ export interface FoodDetectionOptions extends ClassificationOptions {
   foodKeywords?: string[];
 }
 
-type ClassificationLabel = VisionClassificationLabel;
-type ClassificationResult = VisionClassificationResult;
-
 export type { VisionResultTransport } from "../../../utils/vision-classification-transport-core";
 
 interface NativeBatchAssetInfoModule {
@@ -165,7 +162,10 @@ interface NativeBatchAssetInfoModule {
   readonly resolvedVisitFoodDetectionStrategy?: string;
   isVisionVisitFoodValidationModeEnabled?(): boolean;
   getAssetInfoBatch(assetIds: string[]): Promise<BatchAssetInfo[]>;
-  classifyImageBatch(assetIds: string[], options: Required<ClassificationOptions>): Promise<ClassificationResult[]>;
+  classifyImageBatch(
+    assetIds: string[],
+    options: Required<ClassificationOptions>,
+  ): Promise<VisionClassificationResult[]>;
   classifyImageBatchPackedV1?(
     assetIds: string[],
     options: Required<ClassificationOptions>,
@@ -176,7 +176,12 @@ interface NativeBatchAssetInfoModule {
   getAssetScanPage(sessionId: string, offset: number, limit: number): Promise<AssetScanPage>;
   endAssetScan(sessionId: string): Promise<void>;
   clearPhotoAssetThumbnailCache?(): Promise<void>;
-  updatePhotoAssetThumbnailPreheat?(scopeID: string, uris: string[], pixelWidth: number, pixelHeight: number): boolean;
+  updatePhotoAssetThumbnailPreheat?(
+    scopeID: string,
+    uris: readonly string[],
+    pixelWidth: number,
+    pixelHeight: number,
+  ): boolean;
   endPhotoAssetThumbnailPreheat?(scopeID: string): boolean;
 }
 
@@ -193,9 +198,9 @@ export interface FoodDetectionResult {
   /** Highest confidence score among food-related labels */
   foodConfidence: number;
   /** Food-related labels found in the image */
-  foodLabels: ClassificationLabel[];
+  foodLabels: VisionClassificationLabel[];
   /** All classification labels */
-  labels: ClassificationLabel[];
+  labels: VisionClassificationLabel[];
   error?: string;
 }
 
@@ -266,7 +271,7 @@ function isFoodLabel(label: string, foodKeywords: Set<string>): boolean {
  * Process classification results to detect food
  */
 function processForFoodDetection(
-  result: ClassificationResult,
+  result: VisionClassificationResult,
   foodConfidenceThreshold: number,
   foodKeywords: Set<string>,
 ): FoodDetectionResult {
@@ -424,7 +429,7 @@ export function updatePhotoAssetThumbnailPreheat(
   }
   return BatchAssetInfoModule.updatePhotoAssetThumbnailPreheat(
     request.scopeID,
-    [...request.uris],
+    request.uris,
     request.target.pixelWidth,
     request.target.pixelHeight,
   );
@@ -537,41 +542,6 @@ export async function getAssetInfoBatch(assetIds: string[]): Promise<BatchAssetI
 }
 
 /**
- * Classify multiple images in a batch using Apple Vision.
- * Returns all classification labels above the confidence threshold.
- *
- * @param assetIds Array of asset local identifiers
- * @param options Optional classification options
- * @returns Array of classification results
- */
-async function classifyImageBatch(
-  assetIds: string[],
-  options: ClassificationOptions = {},
-): Promise<ClassificationResult[]> {
-  const nativeModule = BatchAssetInfoModule;
-  if (!nativeModule) {
-    throw new Error("BatchAssetInfo module is only available on iOS");
-  }
-
-  if (assetIds.length === 0) {
-    return [];
-  }
-
-  const opts = {
-    confidenceThreshold: options.confidenceThreshold ?? 0.1,
-    maxLabels: options.maxLabels ?? 50,
-  };
-
-  return classifyWithVisionResultTransport(assetIds, {
-    resolvedTransport: nativeModule.resolvedVisionResultTransport,
-    classifyLegacy: () => nativeModule.classifyImageBatch(assetIds, opts),
-    classifyPackedV1: hasNativeMethod(nativeModule, "classifyImageBatchPackedV1")
-      ? () => nativeModule.classifyImageBatchPackedV1(assetIds, opts)
-      : undefined,
-  });
-}
-
-/**
  * Detect food in multiple images in a batch.
  * Uses image classification and filters for food-related labels.
  *
@@ -583,9 +553,7 @@ export async function detectFoodInImageBatch(
   assetIds: string[],
   options: FoodDetectionOptions = {},
 ): Promise<FoodDetectionResult[]> {
-  if (!BatchAssetInfoModule) {
-    throw new Error("BatchAssetInfo module is only available on iOS");
-  }
+  const nativeModule = requireBatchAssetInfoModule();
 
   if (assetIds.length === 0) {
     return [];
@@ -593,9 +561,16 @@ export async function detectFoodInImageBatch(
 
   // Use lower threshold for classification to capture all potential labels
   // Food filtering uses its own threshold
-  const classificationResults = await classifyImageBatch(assetIds, {
+  const classificationOptions = {
     confidenceThreshold: options.confidenceThreshold ?? 0.1,
     maxLabels: options.maxLabels ?? 50,
+  };
+  const classificationResults = await classifyWithVisionResultTransport(assetIds, {
+    resolvedTransport: nativeModule.resolvedVisionResultTransport,
+    classifyLegacy: () => nativeModule.classifyImageBatch(assetIds, classificationOptions),
+    classifyPackedV1: hasNativeMethod(nativeModule, "classifyImageBatchPackedV1")
+      ? () => nativeModule.classifyImageBatchPackedV1(assetIds, classificationOptions)
+      : undefined,
   });
 
   const foodConfidenceThreshold = options.foodConfidenceThreshold ?? 0.3;

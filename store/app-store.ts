@@ -86,19 +86,9 @@ interface AppState extends AppPreferences {
   failScan: (message: string) => void;
   resetScan: () => void;
 
-  // UI state
-  selectedVisitId: string | null;
-  setSelectedVisitId: (id: string | null) => void;
-
   // UI preferences
   setHideUndoBar: (hide: AppPreferences["hideUndoBar"]) => void;
   setFastAnimations: (enabled: AppPreferences["fastAnimations"]) => void;
-
-  // Restaurant search modal
-  isRestaurantSearchOpen: boolean;
-  restaurantSearchVisitId: string | null;
-  openRestaurantSearch: (visitId: string) => void;
-  closeRestaurantSearch: () => void;
 
   // Full reset
   resetAllState: () => void;
@@ -232,29 +222,9 @@ export const useAppStore = create<AppState>()(
           scanProgress: initialScanProgress,
         }),
 
-      // UI state
-      selectedVisitId: null,
-      setSelectedVisitId: (id: string | null) => set({ selectedVisitId: id }),
-
       // UI preferences
       setHideUndoBar: (hide) => set({ hideUndoBar: hide }),
       setFastAnimations: (enabled) => set({ fastAnimations: enabled }),
-
-      // Restaurant search modal
-      isRestaurantSearchOpen: false,
-      restaurantSearchVisitId: null,
-
-      openRestaurantSearch: (visitId: string) =>
-        set({
-          isRestaurantSearchOpen: true,
-          restaurantSearchVisitId: visitId,
-        }),
-
-      closeRestaurantSearch: () =>
-        set({
-          isRestaurantSearchOpen: false,
-          restaurantSearchVisitId: null,
-        }),
 
       // Reset all state to initial values
       resetAllState: () =>
@@ -264,9 +234,6 @@ export const useAppStore = create<AppState>()(
           isBackgroundPhotoScanRunning: false,
           backgroundPhotoScanProgress: null,
           scanProgress: initialScanProgress,
-          selectedVisitId: null,
-          isRestaurantSearchOpen: false,
-          restaurantSearchVisitId: null,
         }),
     }),
     {

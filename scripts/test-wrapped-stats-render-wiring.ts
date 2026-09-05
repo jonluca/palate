@@ -9,9 +9,9 @@ const renderCore = readFileSync(new URL("../utils/wrapped-stats-render-core.ts",
 
 assert.doesNotMatch(statsScreen, /process\.env\.EXPO_PUBLIC_PALATE_STATS_RENDER_STRATEGY/);
 assert.doesNotMatch(statsScreen, /WRAPPED_STATS_RENDER_STRATEGY === VIRTUALIZED_WRAPPED_STATS_RENDER_STRATEGY/);
-assert.match(statsScreen, /return <EagerStatsScreenLayout \{\.\.\.layoutProps\} \/>/);
+assert.match(statsScreen, /export default function StatsScreen\(\)[\s\S]*return \(\s*<ScrollView/);
 assert.match(statsScreen, /enabled: isFocused \|\| !hasCachedAllTimeStats/);
-assert.match(statsScreen, /if \(!isFocused \|\| !showConfetti\)/);
+assert.match(statsScreen, /if \(!isFocused \|\| !hasData \|\| isLoading\)/);
 assert.match(statsScreen, /if \(isFocused && hasData\)/);
 assert.match(renderCore, /DEFAULT_WRAPPED_STATS_RENDER_STRATEGY = EAGER_WRAPPED_STATS_RENDER_STRATEGY/);
 assert.match(statsScreen, /testID=\{"wrapped-stats-eager-v1"\}/);

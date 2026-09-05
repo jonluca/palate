@@ -101,7 +101,7 @@ function getJsonNodeType(value: JsonNode): "array" | "boolean" | "null" | "numbe
 }
 
 function getPayloadCount(payload: JsonNode, fallbackCount?: number): number {
-  if (fallbackCount !== undefined && Number.isFinite(fallbackCount)) {
+  if (fallbackCount !== undefined) {
     return fallbackCount;
   }
   if (Array.isArray(payload)) {
@@ -238,13 +238,15 @@ export function ReservationImportBrowserScreen({
 
       const payload = message.payload ?? message.reservations ?? null;
       const count = getPayloadCount(payload, message.count);
-      logImportDebug(displayName, "Bridge message", {
-        hasSession: Boolean(message.hasSession || count > 0),
-        count,
-        hasPayload: payload !== null,
-        error: message.error ?? null,
-        payload: describePayloadForLog(payload),
-      });
+      if (__DEV__) {
+        logImportDebug(displayName, "Bridge message", {
+          hasSession: Boolean(message.hasSession || count > 0),
+          count,
+          hasPayload: payload !== null,
+          error: message.error ?? null,
+          payload: describePayloadForLog(payload),
+        });
+      }
       setHasSession(Boolean(message.hasSession || count > 0));
       setLastError(message.error ?? null);
 

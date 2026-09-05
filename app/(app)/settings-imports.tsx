@@ -5,7 +5,7 @@ import { ThemedText } from "@/components/themed-text";
 import { Card } from "@/components/ui";
 import { IconSymbol } from "@/components/icon-symbol";
 import { ScreenLayout } from "@/components/screen-layout";
-import { OpenTableImportCard, ResyImportCard, SectionHeader, TockImportCard } from "@/components/settings";
+import { ReservationImportCard, SectionHeader } from "@/components/settings";
 
 function ProviderImportsIntroCard() {
   return (
@@ -42,9 +42,24 @@ export default function SettingsImportsScreen() {
 
         <SectionHeader>Providers</SectionHeader>
         <View className={"gap-3"}>
-          <ResyImportCard />
-          <TockImportCard />
-          <OpenTableImportCard />
+          <ReservationImportCard
+            href={"/resy-import"}
+            title={"Import from Resy"}
+            color={"#ff462d"}
+            bgColor={"bg-red-500/15"}
+          />
+          <ReservationImportCard
+            href={"/tock-import"}
+            title={"Import from Tock"}
+            color={"#111827"}
+            bgColor={"bg-zinc-500/15"}
+          />
+          <ReservationImportCard
+            href={"/opentable-import"}
+            title={"Import from OpenTable"}
+            color={"#da3743"}
+            bgColor={"bg-red-500/15"}
+          />
         </View>
       </ScreenLayout>
     </>

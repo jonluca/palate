@@ -6,7 +6,7 @@ export const WRAPPED_QUERY_KEY = ["wrapped"] as const;
 export const VISIT_LIST_PAGE_QUERY_ROOT = ["visits", "pages"] as const;
 export const VISIT_LIST_QUERY_POLICY = { staleTime: Infinity } as const;
 
-export function isVisitListPageQueryKey(queryKey: QueryKey): boolean {
+function isVisitListPageQueryKey(queryKey: QueryKey): boolean {
   return queryKey[0] === VISIT_LIST_PAGE_QUERY_ROOT[0] && queryKey[1] === VISIT_LIST_PAGE_QUERY_ROOT[1];
 }
 
@@ -37,17 +37,13 @@ export async function invalidateVisitListPageQueries(queryClient: QueryInvalidat
   await queryClient.invalidateQueries({ queryKey: VISIT_LIST_PAGE_QUERY_ROOT });
 }
 
-export function resetVisitListPageQueries(queryClient: QueryInvalidator): Promise<void> {
-  return invalidateVisitListPageQueries(queryClient);
-}
-
 /**
  * Refresh the whole query cache without refetching every loaded active page.
  * Every page query stays populated with its first page, while an active query
  * refetches only that page before the remaining non-page queries are invalidated.
  */
 export async function refreshAllQueriesWithVisitListPageReset(queryClient: QueryInvalidator): Promise<void> {
-  await resetVisitListPageQueries(queryClient);
+  await invalidateVisitListPageQueries(queryClient);
   await queryClient.invalidateQueries({ predicate: (query) => !isVisitListPageQueryKey(query.queryKey) });
 }
 
