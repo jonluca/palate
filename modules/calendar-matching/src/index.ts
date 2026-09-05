@@ -27,7 +27,7 @@ export interface CalendarVisit {
   id: string;
   startTime: number;
   endTime: number;
-  suggestedRestaurants: CalendarSuggestedRestaurant[];
+  suggestedRestaurants: readonly CalendarSuggestedRestaurant[];
 }
 
 export interface CalendarVisitMatch extends CalendarEvent {
@@ -38,18 +38,20 @@ export interface CalendarVisitMatch extends CalendarEvent {
 interface NativeCalendarMatchingModule {
   readonly calendarQueryStrategy?: string;
   readonly calendarQueryGapDays?: number;
-  getEvents(startMs: number, endMs: number, selectedCalendarIds: string[] | null): Promise<CalendarEvent[]>;
+  getEvents(startMs: number, endMs: number, selectedCalendarIds: readonly string[] | null): Promise<CalendarEvent[]>;
   matchVisits(
     visits: readonly CalendarVisit[],
-    selectedCalendarIds: string[] | null,
+    selectedCalendarIds: readonly string[] | null,
     bufferMinutes: number,
   ): Promise<CalendarVisitMatch[]>;
   batchCreateExportEvents?: (
     calendarId: string,
     timeZone: string,
-    requests: NativeCalendarExportEventMutationRequest[],
+    requests: readonly NativeCalendarExportEventMutationRequest[],
   ) => Promise<NativeCalendarMutationResult[]>;
-  batchDeleteEvents?: (requests: NativeCalendarDeleteEventMutationRequest[]) => Promise<NativeCalendarMutationResult[]>;
+  batchDeleteEvents?: (
+    requests: readonly NativeCalendarDeleteEventMutationRequest[],
+  ) => Promise<NativeCalendarMutationResult[]>;
 }
 
 const CalendarMatchingModule =
@@ -67,10 +69,6 @@ function requireCalendarMatchingModule(): NativeCalendarMatchingModule {
     throw new Error("CalendarMatching native module is unavailable on this platform or binary.");
   }
   return CalendarMatchingModule;
-}
-
-function copySelectedCalendarIds(selectedCalendarIds: readonly string[] | null): string[] | null {
-  return selectedCalendarIds === null ? null : [...selectedCalendarIds];
 }
 
 /** Whether this binary contains the Apple-native calendar matching module. */
@@ -98,11 +96,9 @@ export async function batchCreateExportEvents(
   if (!hasNativeMethod(module, "batchCreateExportEvents")) {
     throw new Error("Native calendar batch creation is unavailable on this platform or binary.");
   }
-  return module.batchCreateExportEvents(
-    calendarId,
-    timeZone,
-    requests.map((request) => ({ ...request })),
-  );
+  // Expo converts arrays and scalar Records before dispatching async Swift work.
+  // Pass the readonly values directly; a JS clone adds no isolation here.
+  return module.batchCreateExportEvents(calendarId, timeZone, requests);
 }
 
 /** Invoke native batch deletion. Call only after checking its independent capability. */
@@ -113,7 +109,7 @@ export async function batchDeleteEvents(
   if (!hasNativeMethod(module, "batchDeleteEvents")) {
     throw new Error("Native calendar batch deletion is unavailable on this platform or binary.");
   }
-  return module.batchDeleteEvents(requests.map((request) => ({ ...request })));
+  return module.batchDeleteEvents(requests);
 }
 
 /**
@@ -131,7 +127,7 @@ export async function getEvents(
     throw new RangeError("endMs must be greater than or equal to startMs.");
   }
 
-  return requireCalendarMatchingModule().getEvents(startMs, endMs, copySelectedCalendarIds(selectedCalendarIds));
+  return requireCalendarMatchingModule().getEvents(startMs, endMs, selectedCalendarIds);
 }
 
 /**
@@ -153,9 +149,5 @@ export async function matchVisits(
     return [];
   }
 
-  return requireCalendarMatchingModule().matchVisits(
-    nativeVisits,
-    copySelectedCalendarIds(selectedCalendarIds),
-    bufferMinutes,
-  );
+  return requireCalendarMatchingModule().matchVisits(nativeVisits, selectedCalendarIds, bufferMinutes);
 }

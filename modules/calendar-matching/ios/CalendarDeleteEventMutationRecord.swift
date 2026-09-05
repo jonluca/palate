@@ -4,11 +4,12 @@ import ExpoModulesCore
   import CalendarBatchMutationCore
 #endif
 
-struct CalendarDeleteEventMutationRecord: Record {
-  @Field var requestId: String = ""
-  @Field var eventId: String = ""
-  @Field var instanceStartMs: Double?
-  @Field var futureEvents: Bool = false
+@Record
+struct CalendarDeleteEventMutationRecord {
+  var requestId: String = ""
+  var eventId: String = ""
+  var instanceStartMs: Double?
+  var futureEvents: Bool = false
 
   var coreMutation: CalendarDeleteMutation {
     CalendarDeleteMutation(

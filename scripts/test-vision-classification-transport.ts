@@ -359,6 +359,19 @@ assert.deepEqual(
   [STATUS_SUCCESS, STATUS_MISSING, STATUS_DUPLICATE, STATUS_SUCCESS],
 );
 
+// An identifier can first appear as a label or error in the shared string
+// table. Only an earlier request slot makes that identifier a duplicate asset.
+const sharedRoleAssetIds = ["first", "shared-label", "shared-error", "shared-label"];
+const sharedRoleResults: VisionClassificationResult[] = [
+  { assetId: "first", labels: [{ label: "shared-label", confidence: 0.5 }] },
+  { assetId: "shared-label", labels: [], error: "shared-error" },
+  { assetId: "shared-error", labels: [{ label: "first", confidence: 1 }] },
+];
+assert.deepEqual(
+  decodePackedVisionClassificationResults(sharedRoleAssetIds, encoded(sharedRoleAssetIds, sharedRoleResults)),
+  sharedRoleResults,
+);
+
 // Failure is a distinct state even when its message is empty.
 const emptyErrorPayload = encoded(["failed"], [{ assetId: "failed", labels: [], error: "" }]);
 const [emptyErrorResult] = decodePackedVisionClassificationResults(["failed"], emptyErrorPayload);
@@ -657,6 +670,22 @@ for (let endOffset = 0; endOffset < goldenPayload.byteLength; endOffset++) {
     goldenPayload.slice(0, endOffset),
     /truncated|inconsistent byte length|string count exceeds|slot count does not match|invalid magic/,
     `truncation at byte ${endOffset}`,
+  );
+}
+// Adjust the header as well, forcing every inner record/label bounds check to
+// reject truncation independently of the declared total byte length guard.
+for (
+  let endOffset = PACKED_VISION_CLASSIFICATION_HEADER_BYTE_LENGTH;
+  endOffset < goldenPayload.byteLength;
+  endOffset++
+) {
+  const payload = goldenPayload.slice(0, endOffset);
+  setUint32(payload, 8, payload.byteLength);
+  expectDecodeFailure(
+    goldenAssetIds,
+    payload,
+    /truncated|count exceeds the remaining payload/,
+    `inner truncation at byte ${endOffset}`,
   );
 }
 {

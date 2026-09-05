@@ -162,35 +162,54 @@ public struct PhotoAssetClassificationPackedResultV1Encoder: Sendable {
       throw EncodingError.payloadTooLarge
     }
 
-    var data = Data(capacity: totalByteLength)
-    data.append(contentsOf: magic)
-    appendUInt16(schemaVersion, to: &data)
-    appendUInt16(0, to: &data)
-    appendUInt32(totalByteLengthV1, to: &data)
-    appendUInt32(slotCount, to: &data)
-    appendUInt32(stringCount, to: &data)
-    for bytes in stringTable.values {
-      appendUInt32(UInt32(bytes.count), to: &data)
-      data.append(bytes)
-    }
-    for slot in encodedSlots {
-      appendUInt32(slot.assetStringIndex, to: &data)
-      data.append(slot.body.status)
-      switch slot.body {
-      case .missing, .duplicate:
-        break
-      case .failure(let errorStringIndex):
-        appendUInt32(errorStringIndex, to: &data)
-      case .success(let labels):
-        appendUInt16(UInt16(labels.count), to: &data)
-        for label in labels {
-          appendUInt32(label.stringIndex, to: &data)
-          appendUInt32(label.confidenceBits, to: &data)
+    // All lengths are validated before allocating. Fill once without Data.append
+    // repeatedly checking capacity and uniqueness for every scalar field.
+    var data = Data(count: totalByteLength)
+    data.withUnsafeMutableBytes { (buffer: UnsafeMutableRawBufferPointer) in
+      var offset = 0
+      func append<T>(_ value: T) {
+        var value = value
+        withUnsafeBytes(of: &value) { bytes in
+          buffer.baseAddress!.advanced(by: offset).copyMemory(
+            from: bytes.baseAddress!, byteCount: bytes.count)
+          offset += bytes.count
         }
       }
-    }
-    guard data.count == totalByteLength else {
-      throw EncodingError.payloadTooLarge
+      func appendBytes(_ bytes: Data) {
+        guard !bytes.isEmpty else { return }
+        bytes.withUnsafeBytes { source in
+          buffer.baseAddress!.advanced(by: offset).copyMemory(
+            from: source.baseAddress!, byteCount: source.count)
+          offset += source.count
+        }
+      }
+      for byte in magic { append(byte) }
+      append(schemaVersion.littleEndian)
+      append(UInt16(0))
+      append(totalByteLengthV1.littleEndian)
+      append(slotCount.littleEndian)
+      append(stringCount.littleEndian)
+      for bytes in stringTable.values {
+        append(UInt32(bytes.count).littleEndian)
+        appendBytes(bytes)
+      }
+      for slot in encodedSlots {
+        append(slot.assetStringIndex.littleEndian)
+        append(slot.body.status)
+        switch slot.body {
+        case .missing, .duplicate:
+          break
+        case .failure(let errorStringIndex):
+          append(errorStringIndex.littleEndian)
+        case .success(let labels):
+          append(UInt16(labels.count).littleEndian)
+          for label in labels {
+            append(label.stringIndex.littleEndian)
+            append(label.confidenceBits.littleEndian)
+          }
+        }
+      }
+      precondition(offset == totalByteLength)
     }
     return data
   }
@@ -201,19 +220,5 @@ public struct PhotoAssetClassificationPackedResultV1Encoder: Sendable {
       throw EncodingError.payloadTooLarge
     }
     byteLength = nextByteLength
-  }
-
-  private static func appendUInt16(_ value: UInt16, to data: inout Data) {
-    var littleEndianValue = value.littleEndian
-    withUnsafeBytes(of: &littleEndianValue) { bytes in
-      data.append(contentsOf: bytes)
-    }
-  }
-
-  private static func appendUInt32(_ value: UInt32, to data: inout Data) {
-    var littleEndianValue = value.littleEndian
-    withUnsafeBytes(of: &littleEndianValue) { bytes in
-      data.append(contentsOf: bytes)
-    }
   }
 }

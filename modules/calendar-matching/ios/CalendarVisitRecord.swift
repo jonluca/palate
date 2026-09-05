@@ -1,10 +1,11 @@
 import ExpoModulesCore
 
-struct CalendarVisitRecord: Record {
-  @Field var id: String = ""
-  @Field var startTime: Double = 0
-  @Field var endTime: Double = 0
-  @Field var suggestedRestaurants: [CalendarSuggestedRestaurantRecord] = []
+@Record
+struct CalendarVisitRecord {
+  var id: String = ""
+  var startTime: Double = 0
+  var endTime: Double = 0
+  var suggestedRestaurants: [CalendarSuggestedRestaurantRecord] = []
 
   func validatedCoreVisit() throws -> CalendarMatchingVisit {
     guard CalendarMatchingTimestamp.isSupported(startTime),

@@ -27,13 +27,19 @@ A mobile app that automatically discovers your restaurant visits by analyzing yo
 
 ## Prerequisites
 
-- Node.js 24+
-- pnpm 11.10.0 (set via `packageManager` in package.json)
-- Xcode 26.4+ (for iOS)
+- Node.js 24.20.0 (set in `.nvmrc` and the EAS production profile)
+- pnpm 12.3.4 (set via `packageManager` in package.json)
+- Xcode 26.6+ (for iOS)
 - Android Studio (for Android)
 - A physical device recommended (iOS Simulator lacks photo library with location data)
 
 > **Note:** Expo Go is not supported due to native module dependencies.
+
+Keep React and React Native aligned with Expo's supported versions when updating
+dependencies. Type checking uses the native TypeScript 7 compiler. The
+`typescript` dependency is Microsoft's TypeScript 6 compatibility package so Expo
+and test scripts can still use the JavaScript compiler API; its package version
+differs from the compiler it exposes, so Expo's version check excludes that alias.
 
 ## Getting Started
 
@@ -657,11 +663,15 @@ The previous July report at `.build/preview-cards-profile-commits-20260711T05243
 
 ## Vision Result-Page Performance Validation
 
+See [Native data transfer and parsing](NATIVE_DATA_TRANSFER.md) for the installed Expo SDK's buffer ownership, copy behavior, typed record conversion, and benchmark limits. Calendar requests now pass readonly arrays directly into Expo's eager native argument conversion, and its seven record types use generated `@Record` conversions instead of reflection.
+
 Vision classification results cross the native/JavaScript boundary in bounded pages. The production default is **1,000 results per page**, tunable from 1 through 2,000 with `PALATE_VISION_RESULT_PAGE_SIZE`; JavaScript falls back to the legacy 50-result behavior when a binary does not advertise a valid page size. A 1,000-result page aligns with the 1,000-row durable SQLite flush boundary and reduces native calls for the 13,059-photo fixture from 66 at 200 results per page to 14.
 
 Result encoding is independently selectable. The production default remains `legacy`; `PALATE_VISION_RESULT_TRANSPORT=packed-v1` opts a compatible binary into the experimental binary path. JavaScript uses packed V1 only when the native module both resolves that exact value and exposes `classifyImageBatchPackedV1`; an older binary, a missing method, or an absent/invalid value safely selects the legacy method. Once packed dispatch begins, a native rejection or malformed payload fails that page instead of silently rerunning the same Vision work through legacy transport.
 
 Packed V1 is a little-endian, versioned format with a fixed header, canonical first-use UTF-8 string table, one status record per requested asset, and bit-exact `Float32` confidences. Swift sizes and writes one final `Data` buffer and hands it to Expo with `NativeArrayBuffer.wrap(dataWithoutCopy:)`. The TypeScript decoder accepts `ArrayBuffer` or `Uint8Array` views without first cloning the page and strictly checks the magic, version, flags, declared length, slot/request identity, duplicate rules, canonical string use, UTF-8 (including a leading BOM scalar), finite confidences, and trailing bytes before returning results.
+
+The encoder now fills that pre-sized buffer in one mutable-byte access, and the decoder checks fixed-width blocks once and allocates error context only on failure. Local optimized Swift encoding fell from **0.932 to 0.681 ms** for 1,000 results with 10 labels each; Node decoding fell from **5.251 to 3.806 ms** for a synthetic 13,059-result, 107,166-label fixture over 14 pages. Exact encoded bytes and decoded semantics were preserved. These are codec measurements, excluding Expo/JSI, Hermes, and device runtime; they do not change the transport default.
 
 The production `lookahead` orchestration starts classification for page N+1 after page N is produced and overlaps it with N's ordered transform/persistence work. Consumption never overlaps, ordering is exact, failures stop later writes, a pending speculative page cannot delay a known persistence failure, concurrent producer/consumer failures are flattened without duplicate identities, and at most two produced pages are resident. `PALATE_VISION_PAGE_ORCHESTRATION_STRATEGY=serial` remains available as a strict fallback. `test:vision-page-orchestration` exercises ordering, rejection, aggregation, and residency invariants. Sequential isolated timer datasets measured **1.28×**, **1.86×**, and **1.26×** median speedups for classification-dominant, balanced, and persistence-dominant delays, respectively; they exclude PhotoKit, Vision, the native bridge, SQLite, and UI work.
 

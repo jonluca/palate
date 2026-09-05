@@ -376,6 +376,33 @@ struct PhotoAssetClassificationPackedResultV1Tests {
     }
   }
 
+  @Test("Maximum label count fills the complete buffer and rejects the next label")
+  func maximumLabelCount() throws {
+    let label = PhotoAssetClassificationLabel(identifier: "odd", confidence: 0.75)
+    var labels = [PhotoAssetClassificationLabel](repeating: label, count: Int(UInt16.max))
+    let data = try PhotoAssetClassificationPackedResultV1Encoder.encode([
+      .success(PhotoAssetClassification(assetId: "x", labels: labels)),
+      .failure(assetId: "after", message: ""),
+    ])
+    let parsed = parse(data)
+    #expect(parsed.consumedByteLength == data.count)
+    #expect(parsed.declaredByteLength == UInt32(data.count))
+    #expect(parsed.slots[0].labelStringIndices.count == Int(UInt16.max))
+    #expect(parsed.slots[0].confidenceBits.allSatisfy { $0 == label.confidence.bitPattern })
+    #expect(parsed.slots[1].status == 2)
+    #expect(parsed.stringBytes[Int(parsed.slots[1].errorStringIndex!)].isEmpty)
+
+    labels.append(label)
+    #expect(
+      throws: PhotoAssetClassificationPackedResultV1Encoder.EncodingError.tooManyLabels(
+        assetId: "x", count: Int(UInt16.max) + 1)
+    ) {
+      try PhotoAssetClassificationPackedResultV1Encoder.encode([
+        .success(PhotoAssetClassification(assetId: "x", labels: labels))
+      ])
+    }
+  }
+
   @Test(
     "Non-finite confidences are rejected with exact slot context",
     arguments: [

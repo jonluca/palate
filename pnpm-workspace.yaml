@@ -1,7 +1,7 @@
 nodeLinker: hoisted
 
 overrides:
-  postcss: 8.5.25
+  postcss: 8.5.28
   xcode>uuid: 11.1.1
 
 allowedDeprecatedVersions:
@@ -20,11 +20,5 @@ packageExtensions:
         optional: true
 
 minimumReleaseAgeExclude:
-  - "@typescript/native-preview-darwin-arm64@7.0.0-dev.20260705.1"
-  - "@typescript/native-preview-darwin-x64@7.0.0-dev.20260705.1"
-  - "@typescript/native-preview-linux-arm64@7.0.0-dev.20260705.1"
-  - "@typescript/native-preview-linux-arm@7.0.0-dev.20260705.1"
-  - "@typescript/native-preview-linux-x64@7.0.0-dev.20260705.1"
-  - "@typescript/native-preview-win32-arm64@7.0.0-dev.20260705.1"
-  - "@typescript/native-preview-win32-x64@7.0.0-dev.20260705.1"
-  - "@typescript/native-preview@7.0.0-dev.20260705.1"
+  - "@react-native-firebase/analytics@26.4.0"
+  - "@react-native-firebase/app@26.4.0"

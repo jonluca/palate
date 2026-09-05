@@ -1,16 +1,17 @@
 import ExpoModulesCore
 
-struct CalendarVisitMatchRecord: Record {
-  @Field var visitId: String = ""
-  @Field var id: String = ""
-  @Field var title: String = ""
-  @Field var notes: String?
-  @Field var location: String?
-  @Field var startDate: Double = 0
-  @Field var endDate: Double = 0
-  @Field var isAllDay: Bool = false
-  @Field var calendarTitle: String?
-  @Field var suggestedRestaurantId: String?
+@Record
+struct CalendarVisitMatchRecord {
+  var visitId: String = ""
+  var id: String = ""
+  var title: String = ""
+  var notes: String?
+  var location: String?
+  var startDate: Double = 0
+  var endDate: Double = 0
+  var isAllDay: Bool = false
+  var calendarTitle: String?
+  var suggestedRestaurantId: String?
 
   init() {}
 

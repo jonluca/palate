@@ -6,7 +6,7 @@ import process from 'node:process';
 
 import Ajv2020 from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
-import yaml from 'js-yaml';
+import { load } from 'js-yaml';
 
 import { fetchCached } from './fetch.js';
 
@@ -19,7 +19,7 @@ async function fetchSchema() {
 }
 
 function createValidator(schema) {
-  const ajv = new Ajv2020({ allErrors: true, strict: true });
+  const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
   addFormats(ajv);
   return ajv.compile(schema);
 }
@@ -29,7 +29,7 @@ async function validateFile(validator, filePath) {
 
   let doc;
   try {
-    doc = yaml.load(content);
+    doc = load(content);
   } catch (e) {
     return { valid: false, error: `YAML parse error: ${e.message}` };
   }

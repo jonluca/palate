@@ -4,13 +4,14 @@ import ExpoModulesCore
   import CalendarBatchMutationCore
 #endif
 
-struct CalendarMutationResultRecord: Record {
-  @Field var inputIndex: Int = 0
-  @Field var requestId: String = ""
-  @Field var status: String = CalendarMutationStatus.failed.rawValue
-  @Field var eventId: String?
-  @Field var errorCode: String?
-  @Field var errorMessage: String?
+@Record
+struct CalendarMutationResultRecord {
+  var inputIndex: Int = 0
+  var requestId: String = ""
+  var status: String = CalendarMutationStatus.failed.rawValue
+  var eventId: String?
+  var errorCode: String?
+  var errorMessage: String?
 
   init() {}
 

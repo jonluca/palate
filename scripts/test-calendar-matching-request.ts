@@ -3,6 +3,10 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+import type * as calendarApi from "../modules/calendar-matching/src/index.ts";
+import * as requestCore from "../modules/calendar-matching/src/request-core.ts";
 import {
   assertValidCalendarTimestamp,
   validateCalendarVisitsForNativeMatching,
@@ -91,18 +95,98 @@ function testVisitValidationErrorsAndOrder(): void {
   assert.deepEqual(validateCalendarVisitsForNativeMatching([]), []);
 }
 
-function testProductionWiring(): void {
-  const source = readFileSync(new URL("../modules/calendar-matching/src/index.ts", import.meta.url), "utf8");
+const compiledModule = ts.transpileModule(
+  readFileSync(new URL("../modules/calendar-matching/src/index.ts", import.meta.url), "utf8"),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText;
 
-  assert.match(source, /const nativeVisits = validateCalendarVisitsForNativeMatching\(visits\);/);
-  assert.match(source, /matchVisits\(\s*nativeVisits,\s*copySelectedCalendarIds/);
-  assert.doesNotMatch(source, /suggestedRestaurants\.map/);
-  assert.doesNotMatch(source, /visits\.map/);
+type NativeCalendarMethods = Partial<
+  Pick<typeof calendarApi, "getEvents" | "matchVisits" | "batchCreateExportEvents" | "batchDeleteEvents">
+>;
+
+function loadProductionApi(nativeModule: NativeCalendarMethods | null, platform = "ios") {
+  const exports: Partial<typeof calendarApi> = {};
+  const dependencies = new Map<string, object>([
+    ["expo", { requireOptionalNativeModule: () => nativeModule }],
+    ["react-native", { Platform: { OS: platform } }],
+    ["./request-core", requestCore],
+  ]);
+  runInNewContext(compiledModule, {
+    exports,
+    require: (name: string) => {
+      const dependency = dependencies.get(name);
+      assert.ok(dependency, `Unexpected Calendar dependency: ${name}`);
+      return dependency;
+    },
+  });
+  const { getEvents, matchVisits, batchCreateExportEvents, batchDeleteEvents } = exports;
+  assert.ok(getEvents && matchVisits && batchCreateExportEvents && batchDeleteEvents);
+  return { getEvents, matchVisits, batchCreateExportEvents, batchDeleteEvents };
+}
+
+async function testProductionBoundary(): Promise<void> {
+  const calls: { method: string; args: unknown[] }[] = [];
+  const capture =
+    (method: string) =>
+    (...args: unknown[]) => {
+      calls.push({ method, args });
+      return Promise.resolve([]);
+    };
+  const api = loadProductionApi({
+    getEvents: capture("getEvents"),
+    matchVisits: capture("matchVisits"),
+    batchCreateExportEvents: capture("batchCreateExportEvents"),
+    batchDeleteEvents: capture("batchDeleteEvents"),
+  });
+  const ids = Object.freeze(["calendar-雪"]);
+  const visits = Object.freeze([Object.freeze(validVisit())]);
+  const creates = Object.freeze([
+    Object.freeze({ requestId: "create-1", title: "Café 🍣", startMs: 0, endMs: 1, location: null, notes: "" }),
+  ]);
+  const deletes = Object.freeze([
+    Object.freeze({ requestId: "delete-1", eventId: "event-1", instanceStartMs: null, futureEvents: false }),
+  ]);
+
+  await api.getEvents(0, 1, ids);
+  await api.matchVisits(visits, ids);
+  await api.batchCreateExportEvents("calendar-雪", "UTC", creates);
+  await api.batchDeleteEvents(deletes);
+  assert.deepEqual(
+    calls.map(({ method }) => method),
+    ["getEvents", "matchVisits", "batchCreateExportEvents", "batchDeleteEvents"],
+  );
+  assert.strictEqual(calls[0].args[2], ids);
+  assert.strictEqual(calls[1].args[0], visits);
+  assert.strictEqual(calls[1].args[1], ids);
+  assert.strictEqual(calls[2].args[2], creates);
+  assert.strictEqual(calls[3].args[0], deletes);
+
+  await api.getEvents(0, 1);
+  const noCalendars = Object.freeze([]);
+  await api.getEvents(0, 1, noCalendars);
+  assert.strictEqual(calls[4].args[2], null);
+  assert.strictEqual(calls[5].args[2], noCalendars);
+  const previousCalls = calls.length;
+  assert.equal((await api.matchVisits([])).length, 0);
+  await assert.rejects(api.getEvents(Number.NaN, 1), /valid ECMAScript Date timestamp/);
+  await assert.rejects(api.getEvents(1, 0), /greater than or equal/);
+  await assert.rejects(api.matchVisits(visits, ids, -1), /finite non-negative/);
+  await assert.rejects(api.matchVisits([validVisit({ endTime: 0 })]), /endTime before its startTime/);
+  assert.equal(calls.length, previousCalls, "invalid and empty requests must not reach native code");
+
+  for (const unavailable of [loadProductionApi(null), loadProductionApi({}, "android")]) {
+    await assert.rejects(unavailable.getEvents(0, 1), /unavailable/);
+    await assert.rejects(unavailable.batchCreateExportEvents("calendar", "UTC", creates), /unavailable/);
+    await assert.rejects(unavailable.batchDeleteEvents(deletes), /unavailable/);
+  }
+  const failure = new Error("native mutation failed");
+  const failingApi = loadProductionApi({ batchDeleteEvents: () => Promise.reject(failure) });
+  await assert.rejects(failingApi.batchDeleteEvents(deletes), (error) => error === failure);
 }
 
 testValidInputsRetainIdentity();
 testTimestampValidation();
 testVisitValidationErrorsAndOrder();
-testProductionWiring();
+await testProductionBoundary();
 
 console.log("Calendar native matching request tests passed.");

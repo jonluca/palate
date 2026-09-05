@@ -50,12 +50,11 @@ function ThemedText({
 }: React.ComponentProps<typeof RNText> & VariantProps<typeof textVariants> & { animated?: boolean }) {
   const textClassName = React.useContext(TextClassContext);
 
-  const Comp = animated ? Animated.Text : RNText;
-
   const classNames = cn(textVariants({ variant, color, invert }), textClassName, className);
-  return (
-    <Comp className={classNames} layout={animated ? LinearTransition : undefined} allowFontScaling={false} {...props} />
-  );
+  if (animated) {
+    return <Animated.Text className={classNames} layout={LinearTransition} allowFontScaling={false} {...props} />;
+  }
+  return <RNText className={classNames} allowFontScaling={false} {...props} />;
 }
 
 export { ThemedText };

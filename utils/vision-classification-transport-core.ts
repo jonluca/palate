@@ -67,66 +67,6 @@ function hasPackedVisionMethod(
   return typeof method === "function";
 }
 
-class PackedVisionReader {
-  private readonly bytes: Uint8Array;
-  private readonly view: DataView;
-  private offset = 0;
-
-  constructor(bytes: Uint8Array) {
-    this.bytes = bytes;
-    this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  }
-
-  get remaining(): number {
-    return this.bytes.byteLength - this.offset;
-  }
-
-  get position(): number {
-    return this.offset;
-  }
-
-  readUint8(context: string): number {
-    this.requireBytes(1, context);
-    const value = this.view.getUint8(this.offset);
-    this.offset += 1;
-    return value;
-  }
-
-  readUint16(context: string): number {
-    this.requireBytes(2, context);
-    const value = this.view.getUint16(this.offset, true);
-    this.offset += 2;
-    return value;
-  }
-
-  readUint32(context: string): number {
-    this.requireBytes(4, context);
-    const value = this.view.getUint32(this.offset, true);
-    this.offset += 4;
-    return value;
-  }
-
-  readFloat32(context: string): number {
-    this.requireBytes(4, context);
-    const value = this.view.getFloat32(this.offset, true);
-    this.offset += 4;
-    return value;
-  }
-
-  readBytes(byteLength: number, context: string): Uint8Array {
-    this.requireBytes(byteLength, context);
-    const value = this.bytes.subarray(this.offset, this.offset + byteLength);
-    this.offset += byteLength;
-    return value;
-  }
-
-  private requireBytes(byteLength: number, context: string): void {
-    if (!Number.isSafeInteger(byteLength) || byteLength < 0 || byteLength > this.remaining) {
-      throw new RangeError(`Packed Vision payload is truncated while reading ${context}`);
-    }
-  }
-}
-
 /** Decode and strictly validate one native binary V1 result page. */
 export function decodePackedVisionClassificationResults(
   assetIds: readonly string[],
@@ -137,28 +77,33 @@ export function decodePackedVisionClassificationResults(
   if (!bytes) {
     throw new TypeError("Packed Vision payload must be an ArrayBuffer or Uint8Array");
   }
-  const reader = new PackedVisionReader(bytes);
-  for (const [index, expectedByte] of PACKED_VISION_CLASSIFICATION_MAGIC.entries()) {
-    if (reader.readUint8("magic") !== expectedByte) {
+  const byteLength = bytes.byteLength;
+  if (byteLength < PACKED_VISION_CLASSIFICATION_HEADER_BYTE_LENGTH) {
+    throw new RangeError("Packed Vision payload is truncated while reading the header");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, byteLength);
+  for (let index = 0; index < PACKED_VISION_CLASSIFICATION_MAGIC.length; index++) {
+    if (bytes[index] !== PACKED_VISION_CLASSIFICATION_MAGIC[index]) {
       throw new TypeError(`Packed Vision payload has invalid magic at byte ${index}`);
     }
   }
-  const version = reader.readUint16("schema version");
+  const version = view.getUint16(4, true);
   if (version !== PACKED_VISION_CLASSIFICATION_SCHEMA_VERSION) {
     throw new RangeError(`Unsupported packed Vision schema version: ${version}`);
   }
-  if (reader.readUint16("flags") !== 0) {
+  if (view.getUint16(6, true) !== 0) {
     throw new RangeError("Packed Vision payload uses unsupported flags");
   }
-  if (reader.readUint32("total byte length") !== bytes.byteLength) {
+  if (view.getUint32(8, true) !== byteLength) {
     throw new RangeError("Packed Vision payload declares an inconsistent byte length");
   }
-  const slotCount = reader.readUint32("slot count");
+  const slotCount = view.getUint32(12, true);
   if (slotCount !== assetIds.length) {
     throw new RangeError("Packed Vision slot count does not match the request");
   }
-  const stringCount = reader.readUint32("string count");
-  if (stringCount > Math.floor(reader.remaining / 4)) {
+  const stringCount = view.getUint32(16, true);
+  let offset = PACKED_VISION_CLASSIFICATION_HEADER_BYTE_LENGTH;
+  if (stringCount > Math.floor((byteLength - offset) / 4)) {
     throw new RangeError("Packed Vision string count exceeds the remaining payload");
   }
 
@@ -166,13 +111,21 @@ export function decodePackedVisionClassificationResults(
   const strings: string[] = [];
   const uniqueStrings = new Set<string>();
   for (let index = 0; index < stringCount; index++) {
-    const byteLength = reader.readUint32(`string ${index} byte length`);
+    if (offset + 4 > byteLength) {
+      throw new RangeError(`Packed Vision payload is truncated while reading string ${index} byte length`);
+    }
+    const stringByteLength = view.getUint32(offset, true);
+    offset += 4;
+    if (stringByteLength > byteLength - offset) {
+      throw new RangeError(`Packed Vision payload is truncated while reading string ${index}`);
+    }
     let value: string;
     try {
-      value = decoder.decode(reader.readBytes(byteLength, `string ${index}`));
+      value = decoder.decode(bytes.subarray(offset, offset + stringByteLength));
     } catch {
       throw new TypeError(`Packed Vision string ${index} is not valid UTF-8`);
     }
+    offset += stringByteLength;
     if (uniqueStrings.has(value)) {
       throw new Error("Packed Vision string table contains duplicate values");
     }
@@ -184,7 +137,8 @@ export function decodePackedVisionClassificationResults(
   // been encountered. Tracking the cursor avoids a per-page string-keyed map.
   let nextStringIndex = 0;
   const resolveString = (index: number, context: string): string => {
-    if (index < 0 || index >= strings.length) {
+    // Every reference comes from getUint32, so it is already a nonnegative integer.
+    if (index >= strings.length) {
       throw new RangeError(`Packed Vision ${context} has an invalid string index`);
     }
     if (index > nextStringIndex) {
@@ -197,15 +151,22 @@ export function decodePackedVisionClassificationResults(
   };
 
   const results: VisionClassificationResult[] = [];
-  const encounteredAssetIds = new Set<string>();
+  // String-table uniqueness was checked above: its integer indices identify
+  // assets exactly, without hashing the same native identifier for every slot.
+  const encounteredAssets = new Uint8Array(stringCount);
   for (let slotIndex = 0; slotIndex < slotCount; slotIndex++) {
-    const assetId = resolveString(reader.readUint32(`slot ${slotIndex} asset`), `slot ${slotIndex} asset`);
+    if (offset + 5 > byteLength) {
+      throw new RangeError(`Packed Vision payload is truncated while reading slot ${slotIndex}`);
+    }
+    const assetStringIndex = view.getUint32(offset, true);
+    const assetId = resolveString(assetStringIndex, "asset");
     if (assetId !== assetIds[slotIndex]) {
       throw new Error(`Packed Vision slot ${slotIndex} does not match the requested asset`);
     }
-    const isDuplicate = encounteredAssetIds.has(assetId);
-    encounteredAssetIds.add(assetId);
-    const status = reader.readUint8(`slot ${slotIndex} status`);
+    const isDuplicate = encounteredAssets[assetStringIndex] !== 0;
+    encounteredAssets[assetStringIndex] = 1;
+    const status = view.getUint8(offset + 4);
+    offset += 5;
 
     if (status === PACKED_VISION_CLASSIFICATION_SLOT_STATUS.duplicate) {
       if (!isDuplicate) {
@@ -220,7 +181,11 @@ export function decodePackedVisionClassificationResults(
       continue;
     }
     if (status === PACKED_VISION_CLASSIFICATION_SLOT_STATUS.failure) {
-      const error = resolveString(reader.readUint32(`slot ${slotIndex} error`), `slot ${slotIndex} error`);
+      if (offset + 4 > byteLength) {
+        throw new RangeError(`Packed Vision payload is truncated while reading slot ${slotIndex} error`);
+      }
+      const error = resolveString(view.getUint32(offset, true), "error");
+      offset += 4;
       results.push({ assetId, labels: [], error });
       continue;
     }
@@ -228,14 +193,21 @@ export function decodePackedVisionClassificationResults(
       throw new RangeError(`Packed Vision slot ${slotIndex} has an unsupported status`);
     }
 
-    const labelCount = reader.readUint16(`slot ${slotIndex} label count`);
-    if (labelCount > Math.floor(reader.remaining / 8)) {
+    if (offset + 2 > byteLength) {
+      throw new RangeError(`Packed Vision payload is truncated while reading slot ${slotIndex} label count`);
+    }
+    const labelCount = view.getUint16(offset, true);
+    offset += 2;
+    // Validate the complete fixed-width label block once before reading any
+    // of its scalars. Error-context strings are only allocated on failure.
+    if (labelCount * 8 > byteLength - offset) {
       throw new RangeError(`Packed Vision slot ${slotIndex} label count exceeds the remaining payload`);
     }
     const labels: VisionClassificationLabel[] = [];
     for (let labelIndex = 0; labelIndex < labelCount; labelIndex++) {
-      const label = resolveString(reader.readUint32("label string index"), "label");
-      const confidence = reader.readFloat32("label confidence");
+      const label = resolveString(view.getUint32(offset, true), "label");
+      const confidence = view.getFloat32(offset + 4, true);
+      offset += 8;
       if (!Number.isFinite(confidence)) {
         throw new TypeError(`Packed Vision slot ${slotIndex} label ${labelIndex} has non-finite confidence`);
       }
@@ -244,8 +216,8 @@ export function decodePackedVisionClassificationResults(
     results.push({ assetId, labels });
   }
 
-  if (reader.remaining !== 0) {
-    throw new RangeError(`Packed Vision payload has ${reader.remaining} trailing bytes at offset ${reader.position}`);
+  if (offset !== byteLength) {
+    throw new RangeError(`Packed Vision payload has ${byteLength - offset} trailing bytes at offset ${offset}`);
   }
   if (nextStringIndex !== strings.length) {
     throw new Error("Packed Vision string table contains unused values");

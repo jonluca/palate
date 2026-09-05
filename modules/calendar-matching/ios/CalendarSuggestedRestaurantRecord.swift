@@ -1,8 +1,9 @@
 import ExpoModulesCore
 
-struct CalendarSuggestedRestaurantRecord: Record {
-  @Field var id: String = ""
-  @Field var name: String = ""
+@Record
+struct CalendarSuggestedRestaurantRecord {
+  var id: String = ""
+  var name: String = ""
 
   var coreRestaurant: CalendarMatchingRestaurant {
     CalendarMatchingRestaurant(id: id, name: name)
