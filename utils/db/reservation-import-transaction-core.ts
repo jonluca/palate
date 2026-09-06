@@ -143,50 +143,6 @@ async function loadOverlapVisits(
   );
 }
 
-interface ReservationImportLocalDateRange {
-  readonly startTime: number;
-  readonly endTime: number;
-}
-
-function getLocalDateRange(timestamp: number): ReservationImportLocalDateRange {
-  const date = new Date(timestamp);
-  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
-  return { startTime: start.getTime(), endTime: end.getTime() };
-}
-
-async function loadSameDateConfirmedVisits(
-  transaction: ReservationImportTransactionBackend,
-  visits: readonly ReservationOnlyVisitInput[],
-): Promise<ReservationOverlapVisit[]> {
-  const ranges = visits.map((visit) => getLocalDateRange(visit.startTime));
-  const minimumStartTime = Math.min(...ranges.map((range) => range.startTime));
-  const maximumEndTime = Math.max(...ranges.map((range) => range.endTime));
-  return transaction.getAllAsync<ReservationOverlapVisit>(
-    `SELECT v.*,
-            r.name AS restaurantName,
-            m.name AS suggestedRestaurantName
-     FROM visits AS v
-     LEFT JOIN restaurants AS r ON v.restaurantId = r.id
-     LEFT JOIN michelin_restaurants AS m ON v.suggestedRestaurantId = m.id
-     WHERE v.status = 'confirmed'
-       AND v.startTime >= ?
-       AND v.startTime < ?
-     ORDER BY v.startTime ASC`,
-    [minimumStartTime, maximumEndTime],
-  );
-}
-
-function isSameLocalDate(first: number, second: number): boolean {
-  const firstDate = new Date(first);
-  const secondDate = new Date(second);
-  return (
-    firstDate.getFullYear() === secondDate.getFullYear() &&
-    firstDate.getMonth() === secondDate.getMonth() &&
-    firstDate.getDate() === secondDate.getDate()
-  );
-}
-
 function normalizeRestaurantName(value: string): string {
   return value
     .normalize("NFD")
@@ -338,20 +294,6 @@ function findBestReservationOverlap(
   return bestVisit;
 }
 
-function findSameDateRestaurantVisit(
-  reservation: ReservationOnlyVisitInput,
-  existingVisits: readonly ReservationOverlapVisit[],
-): ReservationOverlapVisit | null {
-  return (
-    existingVisits.find(
-      (visit) =>
-        visit.status === "confirmed" &&
-        isSameLocalDate(visit.startTime, reservation.startTime) &&
-        reservationMatchesExistingRestaurant(reservation, visit),
-    ) ?? null
-  );
-}
-
 function isExternalReservationRestaurantId(restaurantId: string | null): boolean {
   return (
     restaurantId?.startsWith("resy-") === true ||
@@ -417,7 +359,6 @@ function buildImportPlan(
   newVisits: ReservationOnlyVisitInput[],
   existingVisitIds: ReadonlySet<string>,
   initialOverlapVisits: readonly ReservationOverlapVisit[],
-  sameDateConfirmedVisits: readonly ReservationOverlapVisit[],
   updatedAt: number,
 ): ReservationImportPlan {
   const evolvingOverlapVisits = [...initialOverlapVisits];
@@ -431,9 +372,7 @@ function buildImportPlan(
 
   for (let ordinal = 0; ordinal < newVisits.length; ordinal++) {
     const visit = newVisits[ordinal]!;
-    const existingVisit =
-      findBestReservationOverlap(visit, evolvingOverlapVisits) ??
-      findSameDateRestaurantVisit(visit, sameDateConfirmedVisits);
+    const existingVisit = findBestReservationOverlap(visit, evolvingOverlapVisits);
     const targetVisitId = existingVisit?.id ?? visit.id;
 
     if (existingVisit) {
@@ -767,8 +706,7 @@ export async function executeSetBasedReservationImportTransaction(
   }
 
   const overlapVisits = await loadOverlapVisits(transaction, newVisits);
-  const sameDateConfirmedVisits = await loadSameDateConfirmedVisits(transaction, newVisits);
-  const plan = buildImportPlan(newVisits, existingVisitIds, overlapVisits, sameDateConfirmedVisits, updatedAt);
+  const plan = buildImportPlan(newVisits, existingVisitIds, overlapVisits, updatedAt);
 
   await upsertRestaurants(transaction, plan.newVisits);
   const returnedRows = await insertNewVisits(transaction, plan.inserts, updatedAt);

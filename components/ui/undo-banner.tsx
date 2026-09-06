@@ -16,6 +16,7 @@ import { ThemedText } from "@/components/themed-text";
 import { IconSymbol } from "@/components/icon-symbol";
 import * as Haptics from "expo-haptics";
 import { useHideUndoBar } from "@/store";
+import { useToast } from "./toast";
 
 type UndoActionType = "confirm" | "reject";
 
@@ -64,12 +65,13 @@ function UndoBanner({
 }: {
   action: UndoableAction;
   onUndo: () => void;
-  onDismiss: () => void;
+  onDismiss: (actionId: string) => void;
 }) {
   const translateY = useSharedValue(0);
   const progress = useSharedValue(1);
   const SWIPE_THRESHOLD = 20; // Lower threshold for easier dismissal
   const VELOCITY_THRESHOLD = 300; // Dismiss if swiping fast enough
+  const dismiss = useCallback(() => onDismiss(action.id), [action.id, onDismiss]);
 
   useEffect(() => {
     // Animate the progress bar
@@ -77,11 +79,11 @@ function UndoBanner({
 
     // Auto dismiss after duration
     const timeout = setTimeout(() => {
-      onDismiss();
+      dismiss();
     }, UNDO_DURATION_MS);
 
     return () => clearTimeout(timeout);
-  }, [onDismiss, progress]);
+  }, [dismiss, progress]);
 
   const panGesture = Gesture.Pan()
     .activeOffsetY([-10, 10]) // Start recognizing after small movement
@@ -95,7 +97,7 @@ function UndoBanner({
 
       if (shouldDismiss) {
         translateY.value = withTiming(200, { duration: 150 }, () => {
-          scheduleOnRN(onDismiss);
+          scheduleOnRN(dismiss);
         });
       } else {
         translateY.value = withSpring(0, { damping: 20, stiffness: 300 });
@@ -160,12 +162,13 @@ function UndoBanner({
 
 export function UndoProvider({ children }: { children: React.ReactNode }) {
   const [currentAction, setCurrentAction] = useState<UndoableAction | null>(null);
-  const [isUndoing, setIsUndoing] = useState(false);
+  const startedUndoActions = useRef(new WeakSet<UndoableAction>());
   const idCounter = useRef(0);
   const onUndoCompleteRef = useRef<((visitId: string) => void) | null>(null);
   const insets = useSafeAreaInsets();
   const segments = useSegments();
   const hideUndoBar = useHideUndoBar();
+  const { showToast } = useToast();
   const hasTabsSegment = segments.some((segment) => segment === "(tabs)");
   const tabBarOffset = hasTabsSegment ? TAB_BAR_HEIGHT + TAB_BAR_BANNER_GAP : 0;
 
@@ -184,26 +187,32 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
     setCurrentAction(null);
   }, []);
 
+  const dismissUndo = useCallback((actionId: string) => {
+    setCurrentAction((action) => (action?.id === actionId ? null : action));
+  }, []);
+
   const setOnUndoComplete = useCallback((callback: ((visitId: string) => void) | null) => {
     onUndoCompleteRef.current = callback;
   }, []);
 
   const handleUndo = useCallback(async () => {
-    if (!currentAction || isUndoing) {
+    if (!currentAction || startedUndoActions.current.has(currentAction)) {
       return;
     }
 
-    const visitId = currentAction.visitId;
-    setIsUndoing(true);
+    const { id, visitId } = currentAction;
+    startedUndoActions.current.add(currentAction);
     try {
       await currentAction.onUndo();
       // Call the completion callback after successful undo
       onUndoCompleteRef.current?.(visitId);
+    } catch (error) {
+      console.error("Failed to undo visit action:", error);
+      showToast({ type: "error", message: "Couldn’t undo this visit action. Please try again from the visit." });
     } finally {
-      setIsUndoing(false);
-      setCurrentAction(null);
+      dismissUndo(id);
     }
-  }, [currentAction, isUndoing]);
+  }, [currentAction, dismissUndo, showToast]);
 
   useEffect(() => {
     if (!hideUndoBar || !currentAction) {
@@ -221,7 +230,7 @@ export function UndoProvider({ children }: { children: React.ReactNode }) {
           style={{ paddingBottom: insets.bottom + tabBarOffset }}
           pointerEvents={"box-none"}
         >
-          <UndoBanner key={currentAction.id} action={currentAction} onUndo={handleUndo} onDismiss={clearUndo} />
+          <UndoBanner key={currentAction.id} action={currentAction} onUndo={handleUndo} onDismiss={dismissUndo} />
         </View>
       )}
     </UndoContext.Provider>

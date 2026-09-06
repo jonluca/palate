@@ -4,6 +4,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import {
   beginPreferredAssetScan,
   getIncrementalPhotoScanInitialProgress,
@@ -14,7 +16,7 @@ import {
   type PhotoScanAssetRecord,
 } from "../utils/incremental-photo-scan-core.ts";
 import { buildPhotoIngestionStatement } from "../utils/db/photo-ingestion-core.ts";
-import { getValidatedAssetScanNextOffset } from "../utils/photo-scan-core.ts";
+import { getValidatedAssetScanNextOffset, getValidatedMediaLibraryPageState } from "../utils/photo-scan-core.ts";
 
 interface PhotoRow {
   readonly id: string;
@@ -646,6 +648,66 @@ function testProductionSourceWiring(): void {
   assert.match(nativeBarrelSource, /isIncrementalAssetScanAvailable/);
 }
 
+async function testUnscannedPhotoCountPagination(): Promise<void> {
+  const source = readFileSync(new URL("../services/scanner.ts", import.meta.url), "utf8");
+  const start = source.indexOf("export async function getUnscannedPhotoCount(");
+  const end = source.indexOf("export interface CreateAlbumResult", start);
+  assert.ok(start >= 0 && end > start);
+  const compiled = ts.transpileModule(source.slice(start, end), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+
+  interface Page {
+    assets: Array<{ id: string }>;
+    endCursor: string | null;
+    totalCount: number;
+    hasNextPage: boolean;
+  }
+  interface LoadedCounter {
+    getUnscannedPhotoCount?: () => Promise<number>;
+  }
+  async function countPages(pages: Page[]): Promise<number> {
+    const loaded: LoadedCounter = {};
+    let pageIndex = 0;
+    runInNewContext(compiled, {
+      exports: loaded,
+      isDatabaseBackedIncrementalAssetScanAvailable: () => false,
+      isIncrementalAssetScanAvailable: () => false,
+      getExistingPhotoAssetIdsForIncrementalScan: async () => ["known"],
+      getValidatedMediaLibraryPageState,
+      MediaLibrary: {
+        MediaType: { photo: "photo", video: "video" },
+        getAssetsAsync: async () => {
+          assert.ok(pageIndex < pages.length, "the counter must stop before repeating a malformed page");
+          return pages[pageIndex++];
+        },
+      },
+    });
+    assert.ok(loaded.getUnscannedPhotoCount);
+    return loaded.getUnscannedPhotoCount();
+  }
+
+  const firstPage: Page = {
+    assets: [{ id: "known" }, { id: "new" }],
+    endCursor: "cursor-2",
+    totalCount: 1,
+    hasNextPage: true,
+  };
+  assert.equal(
+    await countPages([
+      firstPage,
+      { assets: [{ id: "another-new" }], endCursor: "cursor-3", totalCount: 9, hasNextPage: false },
+    ]),
+    2,
+    "changing total estimates must not truncate the fallback count",
+  );
+  assert.equal(await countPages([{ assets: [], endCursor: null, totalCount: 0, hasNextPage: false }]), 0);
+  await assert.rejects(countPages([firstPage, firstPage]), /cursor did not advance/);
+  await assert.rejects(countPages([{ ...firstPage, endCursor: null }]), /without a pagination cursor/);
+  await assert.rejects(countPages([{ ...firstPage, assets: [] }]), /nonterminal empty page/);
+}
+
+await testUnscannedPhotoCountPagination();
 const scenarioResults = {
   emptyDatabase: await runScenario("empty database", 0, false),
   zeroPercentKnownWithStaleId: await runScenario("0% known with stale ID", 0, true),

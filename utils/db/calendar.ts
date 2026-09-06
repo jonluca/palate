@@ -54,18 +54,11 @@ type ReservationOverlapVisit = VisitRecord & {
   suggestedRestaurantName?: string | null;
 };
 
-interface ReservationRestaurantDateMatchCandidate {
-  sourceEventId: string;
-  restaurantName: string;
-  startTime: number;
-  restaurantId?: string | null;
-  suggestedRestaurantId?: string | null;
-}
-
 interface ReservationImportReviewExclusionInput {
   sourceEventId: string;
   sourceName: string;
   restaurantName: string;
+  restaurantId?: string | null;
   startTime: number;
 }
 
@@ -86,11 +79,6 @@ interface ReservationImportDbVisitLogDetails {
   readonly existingHasRestaurant: boolean;
   readonly existingHasCalendarEvent: boolean;
   readonly overlapScore: number | null;
-}
-
-interface ReservationLocalDateRange {
-  readonly startTime: number;
-  readonly endTime: number;
 }
 
 function logReservationImportDb<Details>(message: string, details?: Details): void {
@@ -343,7 +331,7 @@ export async function getExcludedReservationImportReviewSourceEventIds(
 
 /**
  * Read every early provider-review exclusion/confirmation fact from one short,
- * dedicated deferred transaction. Fuzzy same-day matching runs only after the
+ * dedicated deferred transaction. Temporal restaurant matching runs only after the
  * transaction releases its WAL snapshot.
  */
 export async function getProviderReservationReviewPrefilterSnapshot(
@@ -662,23 +650,6 @@ async function insertReservationOnlyVisitsLegacy(
     existingOverlapCandidateCount: existingVisits.length,
   });
 
-  const dateRanges = newVisits.map((visit) => getLocalDateRange(visit.startTime));
-  const minDateStartTime = Math.min(...dateRanges.map((range) => range.startTime));
-  const maxDateEndTime = Math.max(...dateRanges.map((range) => range.endTime));
-  const existingSameDateConfirmedVisits = await database.getAllAsync<ReservationOverlapVisit>(
-    `SELECT v.*,
-            r.name as restaurantName,
-            m.name as suggestedRestaurantName
-     FROM visits v
-     LEFT JOIN restaurants r ON v.restaurantId = r.id
-     LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
-     WHERE v.status = 'confirmed'
-       AND v.startTime >= ?
-       AND v.startTime < ?
-     ORDER BY v.startTime ASC`,
-    [minDateStartTime, maxDateEndTime],
-  );
-
   let insertedCount = 0;
   let linkedExistingCount = 0;
   let confirmedExistingCount = 0;
@@ -716,9 +687,7 @@ async function insertReservationOnlyVisitsLegacy(
     }
 
     for (const visit of newVisits) {
-      const existingVisit =
-        findBestReservationOverlap(visit, existingVisits, overlapBufferMs) ??
-        findSameDateRestaurantConfirmedVisit(visit, existingSameDateConfirmedVisits);
+      const existingVisit = findBestReservationOverlap(visit, existingVisits, overlapBufferMs);
       const targetVisitId = existingVisit?.id ?? visit.id;
 
       if (existingVisit) {
@@ -1021,118 +990,7 @@ export async function getReservationOnlyVisitsMappedToConfirmedVisitSourceIds(
     }
   }
 
-  const visitsNeedingDateCheck = visitsNeedingOverlapCheck.filter(
-    (visit) => !mappedSourceEventIds.has(visit.sourceEventId),
-  );
-  if (visitsNeedingDateCheck.length === 0) {
-    return mappedSourceEventIds;
-  }
-
-  const sameDateRestaurantSourceEventIds =
-    await getReservationOnlyVisitsMappedToSameDateConfirmedRestaurantSourceIds(visitsNeedingDateCheck);
-  for (const sourceEventId of sameDateRestaurantSourceEventIds) {
-    mappedSourceEventIds.add(sourceEventId);
-  }
-
   return mappedSourceEventIds;
-}
-
-export async function getReservationImportCandidatesMappedToConfirmedRestaurantDateSourceIds(
-  candidates: ReservationRestaurantDateMatchCandidate[],
-): Promise<Set<string>> {
-  const mappedSourceEventIds = new Set<string>();
-  if (candidates.length === 0) {
-    return mappedSourceEventIds;
-  }
-
-  const dateRanges = candidates.map((candidate) => getLocalDateRange(candidate.startTime));
-  const minStartTime = Math.min(...dateRanges.map((range) => range.startTime));
-  const maxEndTime = Math.max(...dateRanges.map((range) => range.endTime));
-  const database = await getDatabase();
-  const existingConfirmedVisits = await database.getAllAsync<ReservationOverlapVisit>(
-    `SELECT v.*,
-            r.name as restaurantName,
-            m.name as suggestedRestaurantName
-     FROM visits v
-     LEFT JOIN restaurants r ON v.restaurantId = r.id
-     LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
-     WHERE v.status = 'confirmed'
-       AND v.startTime >= ?
-       AND v.startTime < ?
-     ORDER BY v.startTime ASC`,
-    [minStartTime, maxEndTime],
-  );
-
-  if (existingConfirmedVisits.length === 0) {
-    return mappedSourceEventIds;
-  }
-
-  for (const candidate of candidates) {
-    const existingVisit = existingConfirmedVisits.find(
-      (visit) =>
-        isSameLocalDate(visit.startTime, candidate.startTime) &&
-        doesReservationCandidateMatchExistingRestaurant(candidate, visit),
-    );
-    if (existingVisit) {
-      mappedSourceEventIds.add(candidate.sourceEventId);
-    }
-  }
-
-  return mappedSourceEventIds;
-}
-
-async function getReservationOnlyVisitsMappedToSameDateConfirmedRestaurantSourceIds(
-  visits: ReservationOnlyVisitInput[],
-): Promise<Set<string>> {
-  const mappedSourceEventIds = new Set<string>();
-  if (visits.length === 0) {
-    return mappedSourceEventIds;
-  }
-
-  const dateRanges = visits.map((visit) => getLocalDateRange(visit.startTime));
-  const minStartTime = Math.min(...dateRanges.map((range) => range.startTime));
-  const maxEndTime = Math.max(...dateRanges.map((range) => range.endTime));
-  const database = await getDatabase();
-  const existingConfirmedVisits = await database.getAllAsync<ReservationOverlapVisit>(
-    `SELECT v.*,
-            r.name as restaurantName,
-            m.name as suggestedRestaurantName
-     FROM visits v
-     LEFT JOIN restaurants r ON v.restaurantId = r.id
-     LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
-     WHERE v.status = 'confirmed'
-       AND v.startTime >= ?
-       AND v.startTime < ?
-     ORDER BY v.startTime ASC`,
-    [minStartTime, maxEndTime],
-  );
-
-  if (existingConfirmedVisits.length === 0) {
-    return mappedSourceEventIds;
-  }
-
-  for (const reservation of visits) {
-    const existingVisit = existingConfirmedVisits.find(
-      (visit) =>
-        isSameLocalDate(visit.startTime, reservation.startTime) &&
-        doesReservationMatchExistingRestaurant(reservation, visit),
-    );
-    if (existingVisit) {
-      mappedSourceEventIds.add(reservation.sourceEventId);
-    }
-  }
-
-  return mappedSourceEventIds;
-}
-
-function getLocalDateRange(timestamp: number): ReservationLocalDateRange {
-  const date = new Date(timestamp);
-  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const end = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
-  return {
-    startTime: start.getTime(),
-    endTime: end.getTime(),
-  };
 }
 
 function getLocalDateKey(timestamp: number): string {
@@ -1141,16 +999,6 @@ function getLocalDateKey(timestamp: number): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function isSameLocalDate(a: number, b: number): boolean {
-  const dateA = new Date(a);
-  const dateB = new Date(b);
-  return (
-    dateA.getFullYear() === dateB.getFullYear() &&
-    dateA.getMonth() === dateB.getMonth() &&
-    dateA.getDate() === dateB.getDate()
-  );
 }
 
 function findBestReservationOverlap(
@@ -1170,20 +1018,6 @@ function findBestReservationOverlap(
   }
 
   return bestVisit;
-}
-
-function findSameDateRestaurantConfirmedVisit(
-  reservation: ReservationOnlyVisitInput,
-  existingVisits: ReservationOverlapVisit[],
-): ReservationOverlapVisit | null {
-  return (
-    existingVisits.find(
-      (visit) =>
-        visit.status === "confirmed" &&
-        isSameLocalDate(visit.startTime, reservation.startTime) &&
-        doesReservationMatchExistingRestaurant(reservation, visit),
-    ) ?? null
-  );
 }
 
 function scoreReservationOverlap(
@@ -1258,22 +1092,6 @@ function doesReservationMatchExistingRestaurant(
       (visit.restaurantId === reservation.suggestedRestaurantId ||
         visit.suggestedRestaurantId === reservation.suggestedRestaurantId)) ||
     doesReservationMatchExistingRestaurantName(reservation, visit)
-  );
-}
-
-function doesReservationCandidateMatchExistingRestaurant(
-  candidate: ReservationRestaurantDateMatchCandidate,
-  visit: ReservationOverlapVisit,
-): boolean {
-  return (
-    (Boolean(candidate.restaurantId) &&
-      (visit.restaurantId === candidate.restaurantId || visit.suggestedRestaurantId === candidate.restaurantId)) ||
-    (Boolean(candidate.suggestedRestaurantId) &&
-      (visit.restaurantId === candidate.suggestedRestaurantId ||
-        visit.suggestedRestaurantId === candidate.suggestedRestaurantId)) ||
-    [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle]
-      .filter(isReservationDbRestaurantName)
-      .some((existingName) => areReservationRestaurantNamesSimilar(candidate.restaurantName, existingName))
   );
 }
 

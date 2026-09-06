@@ -3,6 +3,7 @@ export interface ReservationReviewPrefilterCandidate {
   readonly sourceName: string;
   readonly restaurantName: string;
   readonly startTime: number;
+  readonly endTime?: number;
   readonly restaurantId?: string | null;
   readonly suggestedRestaurantId?: string | null;
 }
@@ -11,6 +12,7 @@ export interface ReservationReviewPrefilterSnapshot {
   readonly dismissedSourceEventIds: Set<string>;
   readonly excludedSourceEventIds: Set<string>;
   readonly exactConfirmedSourceEventIds: Set<string>;
+  /** Day-indexed candidates that also overlap a confirmed visit in time. */
   readonly sameDateConfirmedSourceEventIds: Set<string>;
 }
 
@@ -21,6 +23,8 @@ export interface ReservationReviewPrefilterFactRow {
 
 export interface ReservationReviewPrefilterConfirmedVisitRow {
   readonly dayKey: string;
+  readonly startTime: number;
+  readonly endTime: number;
   readonly restaurantId: string | null;
   readonly suggestedRestaurantId: string | null;
   readonly restaurantName: string | null;
@@ -107,8 +111,14 @@ JOIN visits AS legacy_visit INDEXED BY idx_visits_calendar_event
 WHERE legacy_visit.status = 'confirmed'
 `;
 
+// Derive the lower index bound from stored durations, so even a visit spanning
+// several days can match without scanning all earlier visits for every day.
 export const RESERVATION_REVIEW_PREFILTER_CONFIRMED_DAYS_SQL = `
-WITH requested_days AS (
+WITH maximum_duration AS MATERIALIZED (
+  SELECT MAX(0, COALESCE(MAX(endTime - startTime), 0)) AS milliseconds
+  FROM visits
+  WHERE status = 'confirmed'
+), requested_days AS (
   SELECT
     CAST(json_extract(value, '$.dayKey') AS TEXT) AS dayKey,
     CAST(json_extract(value, '$.startTime') AS INTEGER) AS startTime,
@@ -117,6 +127,8 @@ WITH requested_days AS (
 )
 SELECT
   requested_days.dayKey,
+  visit.startTime,
+  visit.endTime,
   visit.restaurantId,
   visit.suggestedRestaurantId,
   restaurant.name AS restaurantName,
@@ -125,8 +137,9 @@ SELECT
 FROM requested_days
 CROSS JOIN visits AS visit INDEXED BY idx_visits_status_time
   ON visit.status = 'confirmed'
- AND visit.startTime >= requested_days.startTime
- AND visit.startTime < requested_days.endTime
+ AND visit.startTime > requested_days.startTime - (SELECT milliseconds FROM maximum_duration) - 1800000
+ AND visit.startTime < requested_days.endTime + 1800000
+ AND visit.endTime > requested_days.startTime - 1800000
 LEFT JOIN restaurants AS restaurant
   ON restaurant.id = visit.restaurantId
 LEFT JOIN michelin_restaurants AS suggested
@@ -208,14 +221,18 @@ export function areNormalizedReservationReviewRestaurantNamesSimilar(a: string, 
 }
 
 export function getReservationImportReviewFingerprint(
-  reservation: Pick<ReservationReviewPrefilterCandidate, "sourceName" | "restaurantName" | "startTime">,
+  reservation: Pick<
+    ReservationReviewPrefilterCandidate,
+    "sourceName" | "restaurantName" | "restaurantId" | "startTime"
+  >,
 ): string | null {
   const sourceName = reservation.sourceName.trim().toLowerCase();
   const restaurantName = normalizeReservationReviewRestaurantName(reservation.restaurantName);
-  if (!sourceName || restaurantName.length < 3) {
+  const restaurantIdentity = reservation.restaurantId?.trim() || restaurantName;
+  if (!sourceName || !restaurantIdentity || !Number.isFinite(reservation.startTime)) {
     return null;
   }
-  return `${sourceName}:${getReservationReviewLocalDateKey(reservation.startTime)}:${restaurantName}`;
+  return JSON.stringify([sourceName, restaurantIdentity, reservation.startTime]);
 }
 
 export function prepareReservationReviewPrefilter(
@@ -271,8 +288,11 @@ function buildRequestedDaysPayload(candidates: readonly PreparedReservationRevie
       days.set(candidate.dayKey, {
         dayKey: candidate.dayKey,
         startTime: candidate.dayStartTime,
-        endTime: candidate.dayEndTime,
+        endTime: Math.max(candidate.dayEndTime, candidate.endTime ?? candidate.startTime),
       });
+    } else if ((candidate.endTime ?? candidate.startTime) > days.get(candidate.dayKey)!.endTime) {
+      const day = days.get(candidate.dayKey)!;
+      days.set(candidate.dayKey, { ...day, endTime: candidate.endTime ?? candidate.startTime });
     }
   }
   return JSON.stringify([...days.values()]);
@@ -313,62 +333,69 @@ export async function readReservationReviewPrefilterSnapshotRows(
   return { ...facts, sameDateCandidates, confirmedVisitRows };
 }
 
-interface SameDateBucket {
-  readonly restaurantIds: Set<string>;
-  readonly normalizedNames: Set<string>;
+interface TimedRestaurantMatch {
+  readonly visit: ReservationReviewPrefilterConfirmedVisitRow;
+  readonly normalizedNames: readonly string[];
 }
 
+/** Day buckets bound the search; a restaurant match still requires temporal overlap. */
 export function matchReservationReviewCandidatesToSameDateConfirmedVisits(
   candidates: readonly ReservationReviewPrefilterCandidate[],
   confirmedVisits: readonly ReservationReviewPrefilterConfirmedVisitRow[],
 ): ReservationReviewSameDateMatchResult {
-  const buckets = new Map<string, SameDateBucket>();
+  const buckets = new Map<string, TimedRestaurantMatch[]>();
   let normalizedNameCount = 0;
   let fuzzyNameComparisonCount = 0;
 
   for (const visit of confirmedVisits) {
-    let bucket = buckets.get(visit.dayKey);
-    if (!bucket) {
-      bucket = { restaurantIds: new Set(), normalizedNames: new Set() };
-      buckets.set(visit.dayKey, bucket);
-    }
-    if (visit.restaurantId) {
-      bucket.restaurantIds.add(visit.restaurantId);
-    }
-    if (visit.suggestedRestaurantId) {
-      bucket.restaurantIds.add(visit.suggestedRestaurantId);
-    }
-    for (const name of [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle].filter(
-      isReservationReviewRestaurantName,
-    )) {
-      normalizedNameCount += 1;
-      bucket.normalizedNames.add(normalizeReservationReviewRestaurantName(name));
+    const normalizedNames = [visit.restaurantName, visit.suggestedRestaurantName, visit.calendarEventTitle]
+      .filter(isReservationReviewRestaurantName)
+      .map(normalizeReservationReviewRestaurantName);
+    normalizedNameCount += normalizedNames.length;
+    const match = { visit, normalizedNames };
+    const bucket = buckets.get(visit.dayKey);
+    if (bucket) {
+      bucket.push(match);
+    } else {
+      buckets.set(visit.dayKey, [match]);
     }
   }
 
   const sourceEventIds = new Set<string>();
+  const overlapBufferMs = 30 * 60 * 1_000;
   for (const candidate of candidates) {
     const bucket = buckets.get(getReservationReviewLocalDateKey(candidate.startTime));
     if (!bucket) {
       continue;
     }
-    if (
-      (Boolean(candidate.restaurantId) && bucket.restaurantIds.has(candidate.restaurantId!)) ||
-      (Boolean(candidate.suggestedRestaurantId) && bucket.restaurantIds.has(candidate.suggestedRestaurantId!))
-    ) {
-      sourceEventIds.add(candidate.sourceEventId);
-      continue;
-    }
-    if (bucket.normalizedNames.size === 0) {
-      continue;
-    }
-
-    normalizedNameCount += 1;
-    const normalizedCandidateName = normalizeReservationReviewRestaurantName(candidate.restaurantName);
-    for (const normalizedExistingName of bucket.normalizedNames) {
-      fuzzyNameComparisonCount += 1;
-      if (areNormalizedReservationReviewRestaurantNamesSimilar(normalizedCandidateName, normalizedExistingName)) {
+    let normalizedCandidateName: string | undefined;
+    for (const { visit, normalizedNames } of bucket) {
+      if (
+        visit.startTime >= (candidate.endTime ?? candidate.startTime) + overlapBufferMs ||
+        visit.endTime <= candidate.startTime - overlapBufferMs
+      ) {
+        continue;
+      }
+      const ids = [visit.restaurantId, visit.suggestedRestaurantId];
+      if (
+        (candidate.restaurantId && ids.includes(candidate.restaurantId)) ||
+        (candidate.suggestedRestaurantId && ids.includes(candidate.suggestedRestaurantId))
+      ) {
         sourceEventIds.add(candidate.sourceEventId);
+        break;
+      }
+      if (normalizedCandidateName === undefined) {
+        normalizedNameCount += 1;
+        normalizedCandidateName = normalizeReservationReviewRestaurantName(candidate.restaurantName);
+      }
+      for (const existingName of normalizedNames) {
+        fuzzyNameComparisonCount += 1;
+        if (areNormalizedReservationReviewRestaurantNamesSimilar(normalizedCandidateName, existingName)) {
+          sourceEventIds.add(candidate.sourceEventId);
+          break;
+        }
+      }
+      if (sourceEventIds.has(candidate.sourceEventId)) {
         break;
       }
     }

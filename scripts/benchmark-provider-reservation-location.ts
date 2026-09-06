@@ -284,23 +284,12 @@ async function runScenario(scale: number, requestedDuplicateRatio: number): Prom
   const initialQueries = [...new Set(legacyMetrics.calls)];
   const uniqueExactQueryCount = initialQueries.length;
   const initialEmptyQueries = new Set(initialQueries.filter((query) => !placeResults(query)[0]));
-  const seenQueryCounts = new Map<string, number>();
-  const retryQueries: string[] = [];
-  for (const query of legacyMetrics.calls) {
-    const occurrence = (seenQueryCounts.get(query) ?? 0) + 1;
-    seenQueryCounts.set(query, occurrence);
-    if (occurrence > 1 && initialEmptyQueries.has(query)) {
-      retryQueries.push(query);
-    }
-  }
   assert.equal(legacyMetrics.calls.length, missingCoordinateCount);
-  assert.deepEqual(plannedMetrics.calls, [...initialQueries, ...retryQueries]);
+  assert.deepEqual(plannedMetrics.calls, initialQueries);
   assert.ok(plannedMetrics.maxInFlight <= DEFAULT_PROVIDER_RESERVATION_LOCATION_CONCURRENCY);
 
   const legacyCriticalPath = legacyMetrics.calls.reduce((total, query) => total + queryLatencyUnits(query), 0);
-  const plannedCriticalPath =
-    concurrentCriticalPath(initialQueries, DEFAULT_PROVIDER_RESERVATION_LOCATION_CONCURRENCY) +
-    concurrentCriticalPath(retryQueries, DEFAULT_PROVIDER_RESERVATION_LOCATION_CONCURRENCY);
+  const plannedCriticalPath = concurrentCriticalPath(initialQueries, DEFAULT_PROVIDER_RESERVATION_LOCATION_CONCURRENCY);
   const legacyReplayRequests = legacyMetrics.calls.length * (MODELED_CAPTURE_DELIVERIES + 1);
   const plannedReplayRequests = plannedMetrics.calls.length;
   const legacyHash = outputHash(legacyOutput);
@@ -315,7 +304,7 @@ async function runScenario(scale: number, requestedDuplicateRatio: number): Prom
     missingCoordinateCount,
     uniqueExactQueryCount,
     initialEmptyExactQueryCount: initialEmptyQueries.size,
-    duplicateRetryRequestCount: retryQueries.length,
+    duplicateRetryRequestCount: 0,
     legacySequential: {
       requests: legacyMetrics.calls.length,
       maxInFlight: legacyMetrics.maxInFlight,
@@ -366,12 +355,12 @@ for (const scale of SCALES) {
 
 const report = {
   schemaVersion: 4,
-  strategy: "provider-location-preparation-v4",
+  strategy: "provider-location-preparation-v5",
   deterministicLatencyModel: {
     unitDefinition: "1 + ((queryOrdinal * 7 + 3) % 13)",
     plannedConcurrency: DEFAULT_PROVIDER_RESERVATION_LOCATION_CONCURRENCY,
     captureDeliveriesBeforeApproval: MODELED_CAPTURE_DELIVERIES,
-    note: "Latency units are deterministic fixture work, not wall-clock network measurements. Planned critical paths include the initial shared-query phase plus independent duplicate retries after empty results.",
+    note: "Latency units are deterministic fixture work, not wall-clock network measurements. Each exact query runs once per import, including empty results; later imports can retry.",
   },
   sourceSha256: {
     core: sourceSha256("../utils/provider-reservation-location-core.ts"),

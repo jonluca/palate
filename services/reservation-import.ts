@@ -7,8 +7,6 @@ import {
 import { getAwardForDate, readAwardsForProviderImportOrThrow } from "@/services/michelin";
 import { searchPlaceByText } from "@/services/places";
 import {
-  batchMergeSameRestaurantVisits,
-  getMergeableSameRestaurantVisitGroups,
   getMichelinRestaurantsForCalendarNormalizedNames,
   getProviderReservationReviewPrefilterSnapshot,
   getReservationOnlyVisitsMappedToConfirmedVisitSourceIds,
@@ -81,7 +79,6 @@ export interface ReservationImportResult {
   linkedExistingCount: number;
   confirmedExistingCount: number;
   matchedMichelinCount: number;
-  mergedDuplicateCount: number;
   skippedDuplicateCount: number;
   skippedConflictCount: number;
   skippedInvalidCount: number;
@@ -151,21 +148,6 @@ function summarizeLocatedReservationForLog(reservation: LocatedImportableReserva
   };
 }
 
-async function mergeDuplicateVisitsAfterProviderImport(sourceDisplayName: string): Promise<number> {
-  const mergeableGroups = await getMergeableSameRestaurantVisitGroups();
-  if (mergeableGroups.length === 0) {
-    logReservationImport(sourceDisplayName, "No duplicate visits found after provider import");
-    return 0;
-  }
-
-  const mergeCount = await batchMergeSameRestaurantVisits(mergeableGroups);
-  logReservationImport(sourceDisplayName, "Merged duplicate visits after provider import", {
-    mergeableGroupCount: mergeableGroups.length,
-    mergeCount,
-  });
-  return mergeCount;
-}
-
 interface ImportableReservationDedupeResult {
   reservations: ImportableReservation[];
   duplicateCount: number;
@@ -212,22 +194,14 @@ function dedupeImportableReservationsBySourceEventId(
   };
 }
 
-function getLocalDateKey(timestamp: number): string {
-  const date = new Date(timestamp);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function getImportableReservationReviewKey(reservation: ImportableReservation): string | null {
   const sourceName = reservation.sourceName.trim().toLowerCase();
-  const restaurantName = normalizeForComparison(stripComparisonAffixes(reservation.restaurantName));
-  if (!sourceName || restaurantName.length < 3) {
+  const restaurantId = reservation.restaurantId.trim();
+  if (!sourceName || !restaurantId || !Number.isFinite(reservation.startTime)) {
     return null;
   }
 
-  return `${sourceName}:${getLocalDateKey(reservation.startTime)}:${restaurantName}`;
+  return JSON.stringify([sourceName, restaurantId, reservation.startTime]);
 }
 
 function getImportableReservationCompletenessScore(reservation: ImportableReservation): number {
@@ -582,16 +556,6 @@ export async function importReservationVisitHistory(
   const importResult = await insertReservationOnlyVisits(deduped.visits);
   const matchedMichelinCount = deduped.visits.filter((visit) => Boolean(visit.suggestedRestaurantId)).length;
   const invalidCount = (options.invalidCount ?? 0) + missingLocationCount;
-  let mergedDuplicateCount = 0;
-  try {
-    mergedDuplicateCount = await mergeDuplicateVisitsAfterProviderImport(options.sourceDisplayName);
-  } catch (error) {
-    console.error(
-      `[ReservationImport] ${options.sourceDisplayName}: Error auto-merging duplicate visits after provider import:`,
-      error,
-    );
-  }
-
   const result = {
     fetchedCount: options.fetchedCount ?? reservations.length + invalidCount,
     importableCount: deduped.visits.length,
@@ -599,7 +563,6 @@ export async function importReservationVisitHistory(
     linkedExistingCount: importResult.linkedExistingCount,
     confirmedExistingCount: importResult.confirmedExistingCount,
     matchedMichelinCount,
-    mergedDuplicateCount,
     skippedDuplicateCount: importResult.skippedDuplicateCount + deduped.duplicateCount,
     skippedConflictCount: importResult.skippedConflictCount,
     skippedInvalidCount: invalidCount,

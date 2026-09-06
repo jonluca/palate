@@ -27,11 +27,6 @@ type Metrics = ReservationImportPersistenceMetrics;
 
 type Row = ReturnType<StatementSync["all"]>[number];
 
-interface LocalDateRange {
-  readonly startTime: number;
-  readonly endTime: number;
-}
-
 process.env.TZ = "America/Los_Angeles";
 
 export const RESERVATION_IMPORT_FIXED_NOW = 1_788_888_888_888;
@@ -427,31 +422,6 @@ function bestOverlap(reservation: ReservationOnlyVisitInput, visits: readonly Ro
   return best;
 }
 
-function sameLocalDate(first: number, second: number): boolean {
-  const a = new Date(first);
-  const b = new Date(second);
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-
-function localDateRange(timestamp: number): LocalDateRange {
-  const date = new Date(timestamp);
-  return {
-    startTime: new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime(),
-    endTime: new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime(),
-  };
-}
-
-function sameDateMatch(reservation: ReservationOnlyVisitInput, visits: readonly Row[]): Row | null {
-  return (
-    visits.find(
-      (visit) =>
-        visit.status === "confirmed" &&
-        sameLocalDate(Number(visit.startTime), reservation.startTime) &&
-        matchesRestaurant(reservation, visit),
-    ) ?? null
-  );
-}
-
 function externalRestaurant(id: SQLOutputValue): boolean {
   return isSQLiteString(id) && (id.startsWith("resy-") || id.startsWith("tock-") || id.startsWith("opentable-"));
 }
@@ -462,7 +432,7 @@ function countCall(metrics: Metrics, kind: "read" | "write", parameters: readonl
   metrics.parameterBytes += Buffer.byteLength(JSON.stringify(parameters), "utf8");
 }
 
-/** Independent literal transcription of the removed row-by-row behavior. */
+/** Independent row-by-row oracle for the production temporal matching policy. */
 export function executeLiteralReservationImportPersistence(
   database: DatabaseSync,
   visits: readonly ReservationOnlyVisitInput[],
@@ -531,21 +501,6 @@ export function executeLiteralReservationImportPersistence(
        ORDER BY v.startTime ASC`,
     )
     .all(maximumEnd, minimumStart);
-  const ranges = fresh.map((visit) => localDateRange(visit.startTime));
-  const minimumDate = Math.min(...ranges.map((range) => range.startTime));
-  const maximumDate = Math.max(...ranges.map((range) => range.endTime));
-  countCall(metrics, "read", [minimumDate, maximumDate]);
-  const sameDateVisits = database
-    .prepare(
-      `SELECT v.*, r.name AS restaurantName, m.name AS suggestedRestaurantName
-       FROM visits v
-       LEFT JOIN restaurants r ON v.restaurantId = r.id
-       LEFT JOIN michelin_restaurants m ON v.suggestedRestaurantId = m.id
-       WHERE v.status = 'confirmed' AND v.startTime >= ? AND v.startTime < ?
-       ORDER BY v.startTime ASC`,
-    )
-    .all(minimumDate, maximumDate);
-
   let insertedCount = 0;
   let linkedExistingCount = 0;
   let confirmedExistingCount = 0;
@@ -581,7 +536,7 @@ export function executeLiteralReservationImportPersistence(
     }
 
     for (const visit of fresh) {
-      const existing = bestOverlap(visit, overlapVisits) ?? sameDateMatch(visit, sameDateVisits);
+      const existing = bestOverlap(visit, overlapVisits);
       const targetVisitId = isSQLiteString(existing?.id) ? existing.id : visit.id;
       if (existing) {
         const wasConfirmed = existing.status === "confirmed" && Boolean(existing.restaurantId);
@@ -1127,15 +1082,15 @@ async function assertDstAndBoundaryParity(): Promise<void> {
         .prepare("SELECT visitId FROM reservation_import_sources WHERE sourceEventId = 'source-dst-spring'")
         .get(),
     ).visitId,
-    "dst-spring-existing",
-    "same-local-date fallback spans the 23-hour day",
+    "dst-spring-input",
+    "separate meals remain distinct on the 23-hour day",
   );
   assert.equal(
     assertDefined(
       candidate.prepare("SELECT visitId FROM reservation_import_sources WHERE sourceEventId = 'source-dst-fall'").get(),
     ).visitId,
-    "dst-fall-existing",
-    "same-local-date fallback spans the 25-hour day",
+    "dst-fall-input",
+    "separate meals remain distinct on the 25-hour day",
   );
   assert.equal(
     assertDefined(

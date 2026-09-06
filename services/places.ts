@@ -232,11 +232,6 @@ export async function searchPlaceByText(query: string, latitude?: number, longit
     url.searchParams.set("radius", "5000");
   }
 
-  try {
-    const data = await fetchPlacesAPI(url);
-    return toPlaceResults(data.results);
-  } catch (error) {
-    console.error("Failed to search place by text:", error);
-    return [];
-  }
+  const data = await fetchPlacesAPI(url);
+  return toPlaceResults(data.results);
 }

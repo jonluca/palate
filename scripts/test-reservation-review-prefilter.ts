@@ -36,6 +36,7 @@ interface ExistingVisitRow {
   readonly restaurantId: string | null;
   readonly suggestedRestaurantId: string | null;
   readonly startTime: number;
+  readonly endTime: number;
   readonly restaurantName: string | null;
   readonly suggestedRestaurantName: string | null;
   readonly calendarEventTitle: string | null;
@@ -148,6 +149,7 @@ function parseExistingVisitRow(row: Record<string, SQLOutputValue>, index: numbe
     restaurantId: nullableSqlString(row.restaurantId, `${label}.restaurantId`),
     suggestedRestaurantId: nullableSqlString(row.suggestedRestaurantId, `${label}.suggestedRestaurantId`),
     startTime: requiredSqlNumber(row.startTime, `${label}.startTime`),
+    endTime: requiredSqlNumber(row.endTime, `${label}.endTime`),
     restaurantName: nullableSqlString(row.restaurantName, `${label}.restaurantName`),
     suggestedRestaurantName: nullableSqlString(row.suggestedRestaurantName, `${label}.suggestedRestaurantName`),
     calendarEventTitle: nullableSqlString(row.calendarEventTitle, `${label}.calendarEventTitle`),
@@ -172,6 +174,8 @@ function parseConfirmedVisitRow(
   const label = `confirmed visit row ${index}`;
   return {
     dayKey: requiredSqlString(row.dayKey, `${label}.dayKey`),
+    startTime: requiredSqlNumber(row.startTime, `${label}.startTime`),
+    endTime: requiredSqlNumber(row.endTime, `${label}.endTime`),
     restaurantId: nullableSqlString(row.restaurantId, `${label}.restaurantId`),
     suggestedRestaurantId: nullableSqlString(row.suggestedRestaurantId, `${label}.suggestedRestaurantId`),
     restaurantName: nullableSqlString(row.restaurantName, `${label}.restaurantName`),
@@ -245,11 +249,6 @@ export function localTimestamp(year: number, month: number, day: number, hour = 
   return new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
 }
 
-function oracleLocalDateKey(timestamp: number): string {
-  const date = new Date(timestamp);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
 function oracleLocalDateRange(timestamp: number): PrefilterLocalDateRange {
   const date = new Date(timestamp);
   return {
@@ -262,19 +261,8 @@ function isExistingVisitName(value: string | null): value is string {
   return value !== null;
 }
 
-function oracleSameLocalDate(a: number, b: number, metrics: PrefilterHarnessMetrics): boolean {
-  metrics.localDateComparisons += 1;
-  const first = new Date(a);
-  const second = new Date(b);
-  return (
-    first.getFullYear() === second.getFullYear() &&
-    first.getMonth() === second.getMonth() &&
-    first.getDate() === second.getDate()
-  );
-}
-
 // This literal oracle intentionally does not import production normalization or
-// matching helpers. It is a direct copy of the behavior being replaced.
+// matching helpers, so it independently checks the current matching policy.
 function oracleNormalizeName(value: string, metrics?: PrefilterHarnessMetrics): string {
   if (metrics) {
     metrics.nameNormalizations += 1;
@@ -336,7 +324,10 @@ function oracleNamesSimilar(a: string, b: string, metrics: PrefilterHarnessMetri
 function oracleFingerprint(candidate: ReservationReviewPrefilterCandidate): string | null {
   const source = candidate.sourceName.trim().toLowerCase();
   const name = oracleNormalizeName(candidate.restaurantName);
-  return !source || name.length < 3 ? null : `${source}:${oracleLocalDateKey(candidate.startTime)}:${name}`;
+  const identity = candidate.restaurantId?.trim() || name;
+  return !source || !identity || !Number.isFinite(candidate.startTime)
+    ? null
+    : JSON.stringify([source, identity, candidate.startTime]);
 }
 
 function oracleRestaurantMatch(
@@ -459,27 +450,31 @@ export function runLiteralLegacyPrefilter(
   if (sameDateCandidates.length > 0) {
     const ranges = sameDateCandidates.map(({ startTime }) => oracleLocalDateRange(startTime));
     const minimum = Math.min(...ranges.map(({ startTime }) => startTime));
-    const maximum = Math.max(...ranges.map(({ endTime }) => endTime));
+    const maximum = Math.max(
+      ...ranges.map(({ endTime }) => endTime),
+      ...sameDateCandidates.map((candidate) => candidate.endTime ?? candidate.startTime),
+    );
     const visits = query(
       database,
       metrics,
-      `SELECT visit.restaurantId, visit.suggestedRestaurantId, visit.startTime,
+      `SELECT visit.restaurantId, visit.suggestedRestaurantId, visit.startTime, visit.endTime,
               restaurant.name AS restaurantName,
               suggested.name AS suggestedRestaurantName,
               visit.calendarEventTitle
        FROM visits AS visit
        LEFT JOIN restaurants AS restaurant ON restaurant.id = visit.restaurantId
        LEFT JOIN michelin_restaurants AS suggested ON suggested.id = visit.suggestedRestaurantId
-       WHERE visit.status = 'confirmed' AND visit.startTime >= ? AND visit.startTime < ?
+       WHERE visit.status = 'confirmed' AND visit.endTime > ? AND visit.startTime < ?
        ORDER BY visit.startTime ASC`,
-      [minimum, maximum],
+      [minimum - 30 * 60 * 1000, maximum + 30 * 60 * 1000],
       parseExistingVisitRow,
     );
     for (const candidate of sameDateCandidates) {
       if (
         visits.find(
           (visit) =>
-            oracleSameLocalDate(visit.startTime, candidate.startTime, metrics) &&
+            visit.startTime < (candidate.endTime ?? candidate.startTime) + 30 * 60 * 1000 &&
+            visit.endTime > candidate.startTime - 30 * 60 * 1000 &&
             oracleRestaurantMatch(candidate, visit, metrics),
         )
       ) {

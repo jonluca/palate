@@ -150,6 +150,17 @@ function decodeFactRows(rows: readonly Record<string, SQLiteValue>[]): Reservati
   });
 }
 
+function isNumberValue(value: SQLiteValue | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function requiredNumber(value: SQLiteValue | undefined, label: string): number {
+  if (!isNumberValue(value)) {
+    throw new TypeError(`${label} must be a finite number`);
+  }
+  return value;
+}
+
 function decodeConfirmedVisitRows(
   rows: readonly Record<string, SQLiteValue>[],
 ): ReservationReviewPrefilterConfirmedVisitRow[] {
@@ -157,6 +168,8 @@ function decodeConfirmedVisitRows(
     const label = `confirmed visit row ${index + 1}`;
     return {
       dayKey: requiredString(row.dayKey, `${label}.dayKey`),
+      startTime: requiredNumber(row.startTime, `${label}.startTime`),
+      endTime: requiredNumber(row.endTime, `${label}.endTime`),
       restaurantId: nullableString(row.restaurantId, `${label}.restaurantId`),
       suggestedRestaurantId: nullableString(row.suggestedRestaurantId, `${label}.suggestedRestaurantId`),
       restaurantName: nullableString(row.restaurantName, `${label}.restaurantName`),

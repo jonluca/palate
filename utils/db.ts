@@ -170,7 +170,6 @@ export {
   getExcludedReservationImportReviewSourceEventIds,
   getLinkedCalendarEventIds,
   getProviderReservationReviewPrefilterSnapshot,
-  getReservationImportCandidatesMappedToConfirmedRestaurantDateSourceIds,
   getReservationOnlyVisitsMappedToConfirmedVisitSourceIds,
   getVisitsWithExportedCalendarEvents,
   getVisitsWithoutCalendarData,

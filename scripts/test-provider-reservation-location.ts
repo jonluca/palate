@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import {
   DEFAULT_PROVIDER_RESERVATION_LOCATION_CONCURRENCY,
   MAX_PROVIDER_RESERVATION_LOCATION_CONCURRENCY,
@@ -97,37 +98,21 @@ function makeLookup(): InstrumentedLookup {
     ["error", { latitude: 31, longitude: 41, address: "Michelin after error" }],
     ["error-copy", { latitude: 31, longitude: 41, address: "Michelin after error" }],
     ["empty", { latitude: 32, longitude: 42, address: "Michelin empty-query fallback" }],
-    ["transient-reject-a", { latitude: 33, longitude: 43, address: "Fallback after transient rejection" }],
-    ["transient-empty-a", { latitude: 34, longitude: 44, address: "Fallback after transient empty result" }],
   ]);
   const searchCalls: string[] = [];
   const fallbackCalls: string[] = [];
-  const attemptsByQuery = new Map<string, number>();
   let inFlight = 0;
   let maxInFlight = 0;
 
   return {
     search: async (query) => {
       searchCalls.push(query);
-      const attempt = (attemptsByQuery.get(query) ?? 0) + 1;
-      attemptsByQuery.set(query, attempt);
       inFlight += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
       try {
         await new Promise<void>((resolve) => queueMicrotask(resolve));
         if (query === "Error Place") {
           throw new Error("injected Places failure");
-        }
-        if (query === "Transient Reject Recovery") {
-          if (attempt === 1) {
-            throw new Error("injected transient Places failure");
-          }
-          return [{ latitude: 50 + attempt, longitude: 60 + attempt, address: `Recovered reject ${attempt}` }];
-        }
-        if (query === "Transient Empty Recovery") {
-          return attempt === 1
-            ? []
-            : [{ latitude: 70 + attempt, longitude: 80 + attempt, address: `Recovered empty ${attempt}` }];
         }
         return placeResults.get(query) ?? [];
       } finally {
@@ -207,12 +192,6 @@ function createSemanticFixture(): readonly TestReservation[] {
     reservation("empty", "", null),
     reservation("collision-a", "Alpha Beta", "Gamma"),
     reservation("collision-b", "Alpha", "Beta Gamma"),
-    reservation("transient-reject-a", "Transient Reject", "Recovery"),
-    reservation("transient-reject-b", "Transient Reject", "Recovery"),
-    reservation("transient-reject-c", "Transient Reject", "Recovery"),
-    reservation("transient-empty-a", "Transient Empty", "Recovery"),
-    reservation("transient-empty-b", "Transient Empty", "Recovery"),
-    reservation("transient-empty-c", "Transient Empty", "Recovery"),
   ]);
 }
 
@@ -248,28 +227,6 @@ async function testSequentialParityAndExactCoalescing(): Promise<void> {
     ],
     "different inputs with the exact same query share Google coordinates but retain provider addresses",
   );
-  assert.deepEqual(
-    planned
-      .filter((entry, index) => inputs[index]!.id.startsWith("transient-reject"))
-      .map((entry) => [entry?.id, entry?.latitude, entry?.longitude]),
-    [
-      ["transient-reject-a", 33, 43],
-      ["transient-reject-b", 52, 62],
-      ["transient-reject-c", 53, 63],
-    ],
-    "a rejected shared attempt must not prevent independent duplicate recovery attempts",
-  );
-  assert.deepEqual(
-    planned
-      .filter((entry, index) => inputs[index]!.id.startsWith("transient-empty"))
-      .map((entry) => [entry?.id, entry?.latitude, entry?.longitude]),
-    [
-      ["transient-empty-a", 34, 44],
-      ["transient-empty-b", 72, 82],
-      ["transient-empty-c", 73, 83],
-    ],
-    "an empty shared attempt must not prevent independent duplicate recovery attempts",
-  );
   assert.equal(
     planned.find((entry, index) => inputs[index]?.id === "missing"),
     null,
@@ -280,7 +237,7 @@ async function testSequentialParityAndExactCoalescing(): Promise<void> {
     "output order must match input order",
   );
 
-  assert.equal(oracleLookup.searchCalls.length, 17, "the literal sequential path searches per missing input");
+  assert.equal(oracleLookup.searchCalls.length, 11, "the literal sequential path searches per missing input");
   assert.deepEqual(plannedLookup.searchCalls, [
     "Shared 1 Main",
     "Shared 2 Main",
@@ -289,14 +246,6 @@ async function testSequentialParityAndExactCoalescing(): Promise<void> {
     "Error Place",
     "Missing",
     "Alpha Beta Gamma",
-    "Transient Reject Recovery",
-    "Transient Empty Recovery",
-    "Fallback Place",
-    "Error Place",
-    "Transient Reject Recovery",
-    "Transient Reject Recovery",
-    "Transient Empty Recovery",
-    "Transient Empty Recovery",
   ]);
   assert.equal(
     plannedLookup.searchCalls.filter((query) => query === "Shared 1 Main").length,
@@ -319,12 +268,83 @@ async function testSequentialParityAndExactCoalescing(): Promise<void> {
     "error-copy",
     "missing",
     "empty",
-    "transient-reject-a",
-    "transient-empty-a",
   ]);
   assert.equal(plannedLookup.getMaxInFlight(), DEFAULT_PROVIDER_RESERVATION_LOCATION_CONCURRENCY);
   assert.equal(getProviderReservationPlaceQuery(inputs[1]!), "Shared 1 Main");
   assert.equal(getProviderReservationPlaceQuery(inputs.find((entry) => entry.id === "empty")!), "");
+}
+
+async function testRepeatedEmptyAndFailedQueriesStayBounded(): Promise<void> {
+  const inputs = Array.from({ length: 1_000 }, (_, index) => reservation(`repeat-${index}`, "Shared", "1 Main"));
+  const recoveredPlace = { latitude: 40, longitude: -74, address: "Recovered place" };
+
+  for (const outcome of ["empty", "failure"] as const) {
+    let searchCalls = 0;
+    let fallbackCalls = 0;
+    let recovered = false;
+    const dependencies = {
+      searchPlaces: async () => {
+        searchCalls += 1;
+        if (recovered) {
+          return [recoveredPlace];
+        }
+        if (outcome === "failure") {
+          throw new Error("temporary network failure");
+        }
+        return [];
+      },
+      findLocalFallback: (input: TestReservation) => {
+        fallbackCalls += 1;
+        return input.id === "repeat-0" ? { latitude: 30, longitude: -70 } : null;
+      },
+    };
+    const firstRun = await resolveProviderReservationLocations(inputs, dependencies);
+    assert.equal(searchCalls, 1, `${outcome}: repeated reservations must share one request`);
+    assert.equal(fallbackCalls, inputs.length, "each reservation must retain its own guide fallback");
+    assert.equal(firstRun[0]?.latitude, 30);
+    assert.ok(firstRun.slice(1).every((entry) => entry === null));
+
+    recovered = true;
+    const retried = await resolveProviderReservationLocations(inputs, dependencies);
+    assert.equal(searchCalls, 2, `${outcome}: a later run must retry instead of retaining the earlier outcome`);
+    assert.equal(fallbackCalls, inputs.length, "a recovered search bypasses guide fallback");
+    assert.deepEqual(
+      retried.map((entry) => entry?.id),
+      inputs.map((input) => input.id),
+    );
+    assert.ok(retried.every((entry) => entry?.latitude === 40 && entry.longitude === -74));
+  }
+}
+
+async function testPlacesTextSearchPreservesFailures(): Promise<void> {
+  const source = readFileSync(new URL("../services/places.ts", import.meta.url), "utf8");
+  const script = ts.transpileModule(source.replace(/^import .*from "@\/store";\n/m, "").replace(/^export /gm, ""), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  let response = new Response(JSON.stringify({ status: "ZERO_RESULTS", results: [] }));
+  // SAFETY: this is the return value of the actual typed service function below,
+  // evaluated with injected I/O so the test performs no live Places requests.
+  const search = runInNewContext(`${script}\nsearchPlaceByText;`, {
+    getGoogleMapsApiKey: () => "test-api-key",
+    fetch: async () => response,
+    URL,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+  }) as (query: string) => Promise<readonly { name: string }[]>;
+
+  assert.equal((await search("missing restaurant")).length, 0);
+  response = new Response(JSON.stringify({ status: "OVER_QUERY_LIMIT" }));
+  await assert.rejects(search("quota-limited restaurant"), { status: "OVER_QUERY_LIMIT" });
+  response = new Response("unavailable", { status: 503 });
+  await assert.rejects(search("temporarily unavailable restaurant"), { status: "HTTP_503" });
+  response = new Response(
+    JSON.stringify({
+      status: "OK",
+      results: [{ place_id: "recovered", name: "Recovered", geometry: { location: { lat: 40, lng: -74 } } }],
+    }),
+  );
+  assert.equal((await search("temporarily unavailable restaurant"))[0]?.name, "Recovered");
 }
 
 async function testBoundedConcurrencyAndReviewReuse(): Promise<void> {
@@ -620,6 +640,8 @@ function testProductionWiring(): void {
 }
 
 await testSequentialParityAndExactCoalescing();
+await testRepeatedEmptyAndFailedQueriesStayBounded();
+await testPlacesTextSearchPreservesFailures();
 await testBoundedConcurrencyAndReviewReuse();
 testReplayGenerationGate();
 await testTockSuccessfulPayloadCache();

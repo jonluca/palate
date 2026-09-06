@@ -24,12 +24,19 @@ interface PhotoGalleryModalProps {
   onClose: () => void;
 }
 
-function VideoItem({ item, setImageDimensions }: RenderItemInfo<MediaWithLabels>) {
+function VideoItem({ item, setImageDimensions, isActive }: RenderItemInfo<MediaWithLabels> & { isActive: boolean }) {
   const { width, height } = useWindowDimensions();
   const player = useVideoPlayer(item.uri, (p) => {
     p.loop = true;
-    p.play();
   });
+
+  React.useEffect(() => {
+    if (isActive) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [isActive, player]);
 
   // Set dimensions based on screen size for videos
   React.useEffect(() => {
@@ -67,12 +74,15 @@ export function PhotoGalleryModal({ visible, photos, currentIndex, onIndexChange
   const foodLabels = currentPhoto?.foodLabels ?? undefined;
   const isVideo = currentPhoto?.mediaType === "video";
 
-  const renderItem = useCallback((info: RenderItemInfo<MediaWithLabels>) => {
-    if (info.item.mediaType === "video") {
-      return <VideoItem {...info} />;
-    }
-    return <ImageItem {...info} />;
-  }, []);
+  const renderItem = useCallback(
+    (info: RenderItemInfo<MediaWithLabels>) => {
+      if (info.item.mediaType === "video") {
+        return <VideoItem {...info} isActive={visible && info.index === currentIndex} />;
+      }
+      return <ImageItem {...info} />;
+    },
+    [visible, currentIndex],
+  );
 
   // Only show food labels for photos, not videos
   const showFoodLabels = !isVideo && foodLabels && foodLabels.length > 0;

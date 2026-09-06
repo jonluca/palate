@@ -81,10 +81,6 @@ export function getReservationImportSummary(result: ReservationImportResult): st
     result.matchedMichelinCount > 0
       ? `${result.matchedMichelinCount.toLocaleString()} Michelin match${result.matchedMichelinCount === 1 ? "" : "es"}`
       : null;
-  const mergedPart =
-    result.mergedDuplicateCount > 0
-      ? `merged ${result.mergedDuplicateCount.toLocaleString()} duplicate visit${result.mergedDuplicateCount === 1 ? "" : "s"}`
-      : null;
   const duplicatePart =
     result.skippedDuplicateCount > 0
       ? `skipped ${result.skippedDuplicateCount.toLocaleString()} duplicate reservation${result.skippedDuplicateCount === 1 ? "" : "s"}`
@@ -99,9 +95,8 @@ export function getReservationImportSummary(result: ReservationImportResult): st
       : null;
 
   return (
-    [importedPart, updatedPart, michelinPart, mergedPart, duplicatePart, unreadablePart, conflictPart]
-      .filter(Boolean)
-      .join(", ") + "."
+    [importedPart, updatedPart, michelinPart, duplicatePart, unreadablePart, conflictPart].filter(Boolean).join(", ") +
+    "."
   );
 }
 

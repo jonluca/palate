@@ -1124,18 +1124,7 @@ export function useBatchConfirmVisits() {
       }));
       await batchConfirmVisits(confirmationsWithAwards);
 
-      let mergeCount = 0;
-      try {
-        const mergeableGroups = await getMergeableSameRestaurantVisitGroups();
-        if (mergeableGroups.length > 0) {
-          mergeCount = await batchMergeSameRestaurantVisits(mergeableGroups);
-        }
-      } catch (error) {
-        // Batch confirmation already succeeded. Treat duplicate merging as best-effort.
-        console.error("Error auto-merging duplicate visits after batch confirm:", error);
-      }
-
-      return { count: confirmations.length, mergeCount };
+      return { count: confirmations.length };
     },
     onMutate: async (confirmations) => {
       const refreshNeedsReconciliation = pendingReviewRefreshNeedsReconciliation(queryClient);
@@ -1176,7 +1165,7 @@ export function useBatchConfirmVisits() {
       markPendingReviewMutationIdsSuccessful(queryClient, visitIds);
       optimisticallyRemoveVisitsFromPending(queryClient, visitIds);
       await settleOptimisticPendingReviewMutation(queryClient, refreshNeedsReconciliation);
-      // Merging duplicates may affect confirmed visits, stats, and cleanup queries.
+      // Confirmation changes stats and which visits are eligible for manual merging.
       invalidateVisitStatusQueries(queryClient);
       queryClient.invalidateQueries({ queryKey: queryKeys.mergeableSameRestaurantVisits });
     },

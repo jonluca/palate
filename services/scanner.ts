@@ -511,6 +511,8 @@ export async function getUnscannedPhotoCount(): Promise<number> {
 
   const existingAssetIds = new Set(await getExistingPhotoAssetIdsForIncrementalScan());
   let unscannedCount = 0;
+  let processedAssets = 0;
+  let totalAssets = 0;
   let after: string | undefined;
   let hasNextPage = true;
   while (hasNextPage) {
@@ -519,12 +521,20 @@ export async function getUnscannedPhotoCount(): Promise<number> {
       after,
       mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
     });
+    const pageState = getValidatedMediaLibraryPageState(after, processedAssets, totalAssets, {
+      assetCount: response.assets.length,
+      endCursor: response.endCursor,
+      totalCount: response.totalCount,
+      hasNextPage: response.hasNextPage,
+    });
     for (const asset of response.assets) {
       if (!existingAssetIds.has(asset.id)) {
         unscannedCount++;
       }
     }
-    after = response.endCursor;
+    processedAssets = pageState.processedAssets;
+    totalAssets = pageState.totalAssets;
+    after = pageState.nextCursor;
     hasNextPage = response.hasNextPage;
   }
   return unscannedCount;

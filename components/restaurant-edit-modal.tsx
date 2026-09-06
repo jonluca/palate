@@ -153,6 +153,7 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
   // Google search state
   const [showGoogleSearch, setShowGoogleSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [submittedSearchQuery, setSubmittedSearchQuery] = useState("");
   const [loadingPlaceId, setLoadingPlaceId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -166,13 +167,14 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
   // Use the query hook for place text search
   const {
     data: searchResults = [],
-    isLoading: isSearching,
+    isFetching: isSearching,
+    isError: hasSearchError,
     refetch: refetchSearch,
   } = usePlaceTextSearch(
-    searchQuery,
+    submittedSearchQuery,
     restaurant.latitude,
     restaurant.longitude,
-    showGoogleSearch && searchQuery.trim().length > 0,
+    visible && hasGoogleMapsKey && showGoogleSearch && submittedSearchQuery.length > 0,
   );
 
   // Reset form when restaurant changes
@@ -186,6 +188,7 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
     setNotes(restaurant.notes ?? "");
     setShowGoogleSearch(false);
     setSearchQuery("");
+    setSubmittedSearchQuery("");
     hasAutoSearched.current = false;
   }, [restaurant]);
 
@@ -195,6 +198,7 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
       hasAutoSearched.current = true;
       setShowGoogleSearch(true);
       setSearchQuery(restaurant.name);
+      setSubmittedSearchQuery(restaurant.name.trim());
     }
   }, [visible, hasGoogleMapsKey, restaurant.name]);
 
@@ -206,10 +210,15 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
   }, [visible]);
 
   const handleSearch = () => {
-    if (!searchQuery.trim()) {
+    const query = searchQuery.trim();
+    if (!query) {
       return;
     }
-    refetchSearch();
+    if (query === submittedSearchQuery) {
+      void refetchSearch();
+    } else {
+      setSubmittedSearchQuery(query);
+    }
   };
 
   const handleSelectPlace = async (place: PlaceResult) => {
@@ -235,6 +244,7 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
         // Exit search mode
         setShowGoogleSearch(false);
         setSearchQuery("");
+        setSubmittedSearchQuery("");
 
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
@@ -324,6 +334,7 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
                 onPress={() => {
                   setShowGoogleSearch(true);
                   setSearchQuery(restaurant.name);
+                  setSubmittedSearchQuery(restaurant.name.trim());
                 }}
               >
                 <Card animated={false}>
@@ -452,6 +463,7 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
                   onPress={() => {
                     setShowGoogleSearch(false);
                     setSearchQuery("");
+                    setSubmittedSearchQuery("");
                   }}
                 >
                   <IconSymbol name={"chevron.left"} size={20} color={"#6b7280"} />
@@ -494,7 +506,13 @@ export function RestaurantEditModal({ visible, onClose, onSave, restaurant }: Re
                 </View>
               )}
 
-              {!isSearching && searchResults.length === 0 && searchQuery && (
+              {hasSearchError && (
+                <ThemedText variant={"body"} color={"secondary"}>
+                  Couldn’t search Google Maps. Tap Search to try again.
+                </ThemedText>
+              )}
+
+              {!isSearching && !hasSearchError && searchResults.length === 0 && searchQuery && (
                 <View className={"py-8 items-center"}>
                   <ThemedText variant={"body"} color={"tertiary"}>
                     Search for a restaurant to import details

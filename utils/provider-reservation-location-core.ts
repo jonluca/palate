@@ -66,8 +66,8 @@ async function searchWithEmptyResultOnFailure(
   try {
     return await searchPlaces(query);
   } catch {
-    // The production Places adapter exposes failures as an empty result. Preserve
-    // that contract for injected adapters so local fallback behavior stays exact.
+    // Try the local guide after a failed request. Outcomes live only for this
+    // invocation, so a later import attempt can retry the same query.
     return [];
   }
 }
@@ -95,10 +95,8 @@ async function runBoundedLocationJobs<Job, Result>(
 }
 
 /**
- * Locate provider reservations with successful exact-query request coalescing and
- * bounded concurrency. If a shared attempt is empty or rejected, later duplicate
- * occurrences receive independent bounded attempts so transient failures cannot
- * poison the group. The result has one stable-order entry per input;
+ * Locate provider reservations with one bounded request per exact query,
+ * including queries that return no matches or fail. The result has one entry per input;
  * direct-coordinate inputs retain identity and unresolved inputs become null.
  */
 export async function resolveProviderReservationLocations<T extends ProviderReservationLocationInput>(
@@ -109,45 +107,12 @@ export async function resolveProviderReservationLocations<T extends ProviderRese
   const queryByInputIndex = reservations.map((reservation) =>
     hasDirectCoordinates(reservation) ? null : getProviderReservationPlaceQuery(reservation),
   );
-  const inputIndicesByQuery = new Map<string, number[]>();
-  for (let inputIndex = 0; inputIndex < queryByInputIndex.length; inputIndex++) {
-    const query = queryByInputIndex[inputIndex];
-    if (!query) {
-      continue;
-    }
-    const inputIndices = inputIndicesByQuery.get(query);
-    if (inputIndices) {
-      inputIndices.push(inputIndex);
-    } else {
-      inputIndicesByQuery.set(query, [inputIndex]);
-    }
-  }
-
   const concurrency = normalizeConcurrency(options.concurrency);
-  const uniqueQueries = [...inputIndicesByQuery.keys()];
-  const initialResults = await runBoundedLocationJobs(uniqueQueries, concurrency, (query) =>
+  const uniqueQueries = [...new Set(queryByInputIndex.filter((query): query is string => Boolean(query)))];
+  const results = await runBoundedLocationJobs(uniqueQueries, concurrency, (query) =>
     searchWithEmptyResultOnFailure(query, dependencies.searchPlaces),
   );
-  const initialPlacesByQuery = new Map(
-    uniqueQueries.map((query, index) => [query, initialResults[index] ?? []] as const),
-  );
-
-  const retryJobs: Array<{ readonly inputIndex: number; readonly query: string }> = [];
-  for (const [query, inputIndices] of inputIndicesByQuery) {
-    if (initialPlacesByQuery.get(query)?.[0]) {
-      continue;
-    }
-    for (let occurrenceIndex = 1; occurrenceIndex < inputIndices.length; occurrenceIndex++) {
-      retryJobs.push({ inputIndex: inputIndices[occurrenceIndex]!, query });
-    }
-  }
-  retryJobs.sort((a, b) => a.inputIndex - b.inputIndex);
-  const retryResults = await runBoundedLocationJobs(retryJobs, concurrency, (job) =>
-    searchWithEmptyResultOnFailure(job.query, dependencies.searchPlaces),
-  );
-  const retryPlacesByInputIndex = new Map(
-    retryJobs.map((job, index) => [job.inputIndex, retryResults[index] ?? []] as const),
-  );
+  const placesByQuery = new Map(uniqueQueries.map((query, index) => [query, results[index] ?? []] as const));
 
   return reservations.map((reservation, index) => {
     if (hasDirectCoordinates(reservation)) {
@@ -155,10 +120,7 @@ export async function resolveProviderReservationLocations<T extends ProviderRese
     }
 
     const query = queryByInputIndex[index]!;
-    const inputIndices = query ? inputIndicesByQuery.get(query) : undefined;
-    const isFirstQueryOccurrence = inputIndices?.[0] === index;
-    const initialPlace = query ? initialPlacesByQuery.get(query)?.[0] : undefined;
-    const place = initialPlace ?? (isFirstQueryOccurrence ? undefined : retryPlacesByInputIndex.get(index)?.[0]);
+    const place = query ? placesByQuery.get(query)?.[0] : undefined;
     if (place) {
       return applyLocation(reservation, place);
     }

@@ -6,7 +6,6 @@ import {
   getPath,
   getString,
   hashString,
-  parseTimestamp,
   sanitizeIdPart,
   ReservationApiError,
   type ImportableReservation,
@@ -15,6 +14,8 @@ import {
   type NormalizedReservationHistory,
   type ReservationImportProgress,
 } from "@/services/reservation-import";
+import tzLookup from "tz-lookup";
+import { getResyLocalDate, parseResyTime } from "./resy-time";
 
 const RESY_API_KEY = "VbWk7s3L4KiK5fzlO7JD3Q5EYolJI7n5";
 const RESY_RESERVATIONS_URL = "https://api.resy.com/3/user/reservations";
@@ -61,26 +62,29 @@ function getVenueForReservation(reservation: JsonRecord, venues: JsonRecord): Js
   return reservationVenue;
 }
 
-function parseReservationStartTime(reservation: JsonRecord): number | null {
-  const parsedTimestamp = parseTimestamp(reservation.time_slot, reservation.time, reservation.reservation_time);
-  if (parsedTimestamp !== null) {
-    return parsedTimestamp;
-  }
-
+function parseReservationStartTime(reservation: JsonRecord, timeZone: string): number | null {
   const day = getString(reservation.day, reservation.date, reservation.reservation_date);
-  if (!day) {
-    return null;
+  const values = [reservation.time_slot, reservation.time, reservation.reservation_time];
+  for (const value of values) {
+    const text = getString(value);
+    const timestamp = text ? parseResyTime(text, day, timeZone) : null;
+    if (timestamp !== null) {
+      return timestamp;
+    }
   }
-
-  const time = getString(reservation.time_slot, reservation.time, reservation.reservation_time) ?? "19:00:00";
-  const timestamp = Date.parse(`${day}T${time}`);
-  return Number.isFinite(timestamp) ? timestamp : null;
+  return getString(...values) === null ? parseResyTime("19:00:00", day, timeZone) : null;
 }
 
-function parseReservationEndTime(reservation: JsonRecord, startTime: number): number {
-  return (
-    parseTimestamp(reservation.end_time, reservation.end, reservation.endTime) ?? defaultReservationEndTime(startTime)
-  );
+function parseReservationEndTime(reservation: JsonRecord, startTime: number, timeZone: string): number {
+  const day = getResyLocalDate(startTime, timeZone);
+  for (const value of [reservation.end_time, reservation.end, reservation.endTime]) {
+    const text = getString(value);
+    const timestamp = text ? parseResyTime(text, day, timeZone, startTime) : null;
+    if (timestamp !== null) {
+      return timestamp;
+    }
+  }
+  return defaultReservationEndTime(startTime);
 }
 
 function normalizeReservation(reservation: JsonValue, venues: JsonRecord): ImportableReservation | null {
@@ -95,7 +99,6 @@ function normalizeReservation(reservation: JsonValue, venues: JsonRecord): Impor
   }
 
   const restaurantName = getString(venue.name, record.venue_name, getPath(record, ["venue", "name"]));
-  const startTime = parseReservationStartTime(record);
   const latitude = getNumber(
     getPath(venue, ["location", "latitude"]),
     getPath(venue, ["location", "coords", "lat"]),
@@ -108,7 +111,18 @@ function normalizeReservation(reservation: JsonValue, venues: JsonRecord): Impor
     venue.longitude,
   );
 
-  if (!restaurantName || startTime === null || latitude === null || longitude === null) {
+  if (
+    !restaurantName ||
+    latitude === null ||
+    longitude === null ||
+    Math.abs(latitude) > 90 ||
+    Math.abs(longitude) > 180
+  ) {
+    return null;
+  }
+  const timeZone = tzLookup(latitude, longitude);
+  const startTime = parseReservationStartTime(record, timeZone);
+  if (startTime === null) {
     return null;
   }
 
@@ -137,7 +151,7 @@ function normalizeReservation(reservation: JsonValue, venues: JsonRecord): Impor
     restaurantId,
     address,
     startTime,
-    endTime: parseReservationEndTime(record, startTime),
+    endTime: parseReservationEndTime(record, startTime, timeZone),
     partySize: getNumber(record.num_seats, record.party_size, record.seats),
     latitude,
     longitude,

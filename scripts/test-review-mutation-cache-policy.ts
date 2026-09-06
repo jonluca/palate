@@ -2,6 +2,9 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import {
   MutationObserver,
   QueryClient,
@@ -690,6 +693,68 @@ async function testSameIdSuccessPreventsLaterFailureRollback(): Promise<void> {
   }
 }
 
+async function testBatchConfirmationDoesNotMergeUnrelatedVisits(): Promise<void> {
+  interface Confirmation {
+    visitId: string;
+    restaurantId: string;
+    restaurantName: string;
+    latitude: number;
+    longitude: number;
+    startTime: number;
+  }
+  interface ConfirmMutation {
+    mutationFn(confirmations: Confirmation[]): Promise<{ count: number }>;
+  }
+  interface LoadedHook {
+    useBatchConfirmVisits?: () => ConfirmMutation;
+  }
+  const source = readFileSync(new URL("../hooks/queries.ts", import.meta.url), "utf8");
+  const start = source.indexOf("export function useBatchConfirmVisits()");
+  const end = source.indexOf("\n/**", start);
+  assert.ok(start >= 0 && end > start);
+  const compiled = ts.transpileModule(source.slice(start, end), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const loaded: LoadedHook = {};
+  const written: Array<Confirmation & { awardAtVisit: string | null }> = [];
+  let globalMergeReads = 0;
+  let globalMergeWrites = 0;
+  runInNewContext(compiled, {
+    exports: loaded,
+    console,
+    REVIEW_STATUS_MUTATION_SCOPE,
+    useQueryClient: () => ({}),
+    useMutation: (options: ConfirmMutation) => options,
+    getAwardForDate: async () => ({ "michelin-1": "One Star" }),
+    batchConfirmVisits: async (confirmations: typeof written) => written.push(...confirmations),
+    getMergeableSameRestaurantVisitGroups: async () => {
+      globalMergeReads++;
+      return [{ visits: [{ id: "unrelated-lunch" }, { id: "unrelated-dinner" }] }];
+    },
+    batchMergeSameRestaurantVisits: async () => {
+      globalMergeWrites++;
+      return 1;
+    },
+  });
+  assert.ok(loaded.useBatchConfirmVisits);
+  const confirmation: Confirmation = {
+    visitId: "selected-visit",
+    restaurantId: "michelin-1",
+    restaurantName: "Selected Restaurant",
+    latitude: 34,
+    longitude: -118,
+    startTime: new Date(2026, 8, 5, 19).getTime(),
+  };
+  const result = await loaded.useBatchConfirmVisits().mutationFn([confirmation]);
+  assert.equal(result.count, 1);
+  assert.equal(written.length, 1);
+  assert.equal(written[0]?.visitId, confirmation.visitId);
+  assert.equal(written[0]?.awardAtVisit, "One Star", "confirmation still stores the historical award");
+  assert.equal(globalMergeReads, 0, "confirming selected visits must not scan all visit history for merging");
+  assert.equal(globalMergeWrites, 0, "confirming selected visits must not merge unrelated visits");
+}
+
+await testBatchConfirmationDoesNotMergeUnrelatedVisits();
 await testSuccessfulStatusMutationKeepsOptimisticReviewData();
 testGranularRollbackPreservesIndependentSuccessAndStableOrder();
 await testStaleMarkPreservesOptimisticDataWithoutRefetch();
