@@ -33,8 +33,6 @@ import {
 
 type PhotoInsertRecord = Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">;
 
-type ProcessedAssetBatch = ProcessedPhotoScanAssets;
-
 export interface ScanProgress {
   totalAssets: number;
   processedAssets: number;
@@ -129,9 +127,6 @@ export function formatEta(ms: number | null): string {
   return `${hours.toLocaleString()}h ${remainingMinutes.toLocaleString()}m`;
 }
 
-/** Check if native batch processing is available (iOS only) */
-const isNativeBatchAvailable = () => isBatchAssetInfoAvailable();
-
 function isValidLocation(location: { latitude: number; longitude: number } | null | undefined): boolean {
   return (
     location !== null &&
@@ -153,7 +148,7 @@ function isValidLocation(location: { latitude: number; longitude: number } | nul
  * Note: This function should only be called after checking isBatchAssetInfoAvailable().
  * On Android, this will throw an error.
  */
-async function processWithNativeBatch(assetIds: string[]): Promise<ProcessedAssetBatch> {
+async function processWithNativeBatch(assetIds: string[]): Promise<ProcessedPhotoScanAssets> {
   const batchInfo = await getAssetInfoBatch(assetIds);
 
   const photos: PhotoInsertRecord[] = [];
@@ -189,46 +184,37 @@ async function processWithNativeBatch(assetIds: string[]): Promise<ProcessedAsse
 /**
  * Process assets using JS-based pMap (fallback for Android)
  */
-async function processWithPMap(assets: MediaLibrary.Asset[], concurrency: number): Promise<ProcessedAssetBatch> {
-  const assetsWithInfo = await pMap(
+async function processWithPMap(assets: MediaLibrary.Asset[], concurrency: number): Promise<ProcessedPhotoScanAssets> {
+  let photosWithLocation = 0;
+  const results = await pMap(
     assets,
-    async (asset) => {
+    async (asset): Promise<PhotoInsertRecord | null> => {
+      let info: MediaLibrary.AssetInfo;
       try {
-        const info = await MediaLibrary.getAssetInfoAsync(asset);
-        return { ...info, originalAsset: asset };
+        info = await MediaLibrary.getAssetInfoAsync(asset);
       } catch (error) {
         console.warn(`Failed to get info for asset ${asset.id}:`, error);
         return null;
       }
+      const hasLocation = isValidLocation(info.location);
+      const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
+      if (hasLocation) {
+        photosWithLocation++;
+      }
+      return {
+        id: info.id,
+        uri: info.uri,
+        creationTime: info.creationTime,
+        latitude: hasLocation ? info.location!.latitude : null,
+        longitude: hasLocation ? info.location!.longitude : null,
+        mediaType: isVideo ? "video" : "photo",
+        duration: isVideo ? asset.duration : null,
+      };
     },
     { concurrency },
   );
 
-  const photos: PhotoInsertRecord[] = [];
-  let photosWithLocation = 0;
-
-  for (const asset of assetsWithInfo) {
-    if (!asset) {
-      continue;
-    }
-
-    const hasLocation = isValidLocation(asset.location);
-
-    if (hasLocation) {
-      photosWithLocation++;
-    }
-
-    const isVideo = asset.originalAsset.mediaType === MediaLibrary.MediaType.video;
-    photos.push({
-      id: asset.id,
-      uri: asset.uri,
-      creationTime: asset.creationTime,
-      latitude: hasLocation ? asset.location!.latitude : null,
-      longitude: hasLocation ? asset.location!.longitude : null,
-      mediaType: isVideo ? "video" : "photo",
-      duration: isVideo ? asset.originalAsset.duration : null,
-    });
-  }
+  const photos = results.filter((photo) => photo !== null);
 
   return {
     photos,
@@ -245,7 +231,7 @@ async function processWithPMap(assets: MediaLibrary.Asset[], concurrency: number
  * Automatically adjusts batch sizes based on device capabilities.
  */
 export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanProgress> {
-  const useNativeBatch = isNativeBatchAvailable();
+  const useNativeBatch = isBatchAssetInfoAvailable();
   const useNativeScanSession = isAssetScanAvailable();
   const deviceTier = getDeviceTier();
 
@@ -355,7 +341,7 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     }
   };
 
-  const persistBatch = async (batch: ProcessedAssetBatch) => {
+  const persistBatch = async (batch: ProcessedPhotoScanAssets) => {
     progress.photosWithLocation += batch.photosWithLocation;
     progress.skippedAssets += batch.skippedAssets;
     if (batch.photos.length > 0) {

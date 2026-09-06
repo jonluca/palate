@@ -171,17 +171,6 @@ export default function VisitDetailScreen() {
 
   // Aggregate food labels
   const photos = data?.photos ?? EMPTY_PHOTOS;
-  const photoData = useMemo(
-    () =>
-      photos.map((p) => ({
-        id: p.id,
-        uri: p.uri,
-        foodLabels: p.foodLabels ?? null,
-        mediaType: p.mediaType,
-        duration: p.duration,
-      })),
-    [photos],
-  );
   const unscannedPhotosCount = useMemo(
     () => photos.reduce((count, p) => count + (p.foodDetected === null ? 1 : 0), 0),
     [photos],
@@ -192,15 +181,11 @@ export default function VisitDetailScreen() {
   const handleStatusChange = useCallback(
     async (newStatus: VisitStatus) => {
       // Set loading action based on what's being done
-      const action: LoadingAction = newStatus === "rejected" ? "skip" : newStatus === "confirmed" ? "confirm" : "skip";
+      const action: LoadingAction = newStatus === "confirmed" ? "confirm" : "skip";
       setLoadingAction(action);
 
       Haptics.notificationAsync(
-        newStatus === "confirmed"
-          ? Haptics.NotificationFeedbackType.Success
-          : newStatus === "rejected"
-            ? Haptics.NotificationFeedbackType.Warning
-            : Haptics.NotificationFeedbackType.Success,
+        newStatus === "rejected" ? Haptics.NotificationFeedbackType.Warning : Haptics.NotificationFeedbackType.Success,
       );
 
       try {
@@ -632,7 +617,7 @@ export default function VisitDetailScreen() {
           onIgnoreLocation={handleIgnoreLocation}
         />
         <PhotosSection
-          photos={photoData}
+          photos={photos}
           onPhotoPress={(index) => setGalleryIndex(index)}
           onAddPhotos={handleAddPhotos}
           isAddingPhotos={addPhotosToVisit.isPending}
@@ -739,7 +724,7 @@ export default function VisitDetailScreen() {
       {galleryIndex !== null && (
         <PhotoGalleryModal
           visible={true}
-          photos={photoData}
+          photos={photos}
           currentIndex={galleryIndex}
           onIndexChange={setGalleryIndex}
           onClose={() => setGalleryIndex(null)}

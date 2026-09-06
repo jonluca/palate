@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { AppState, Platform } from "react-native";
+import * as MediaLibrary from "expo-media-library/legacy";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { getUnscannedPhotoCount, hasMediaLibraryPermission } from "@/services/scanner";
 import { logScanCompleted, logScanStarted } from "@/services/analytics";
@@ -14,10 +15,9 @@ import {
   pruneAutomaticPhotoDeepScanQueue,
   syncAllVisitsFoodProbable,
 } from "@/utils/db";
-import { isVisionVisitFoodValidationModeEnabled } from "@/modules/batch-asset-info";
+import { isBatchAssetInfoAvailable, isVisionVisitFoodValidationModeEnabled } from "@/modules/batch-asset-info";
 import {
   AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE,
-  AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS,
   createAutomaticPhotoRescanController,
   getAutomaticDeepScanOverallProgress,
   getAutomaticQuickScanOverallProgress,
@@ -35,36 +35,10 @@ import {
   type ScanProgress,
 } from "./queries";
 
-const PREFLIGHT_FEEDBACK_DELAY_MS = 400;
-const MINIMUM_PREFLIGHT_FEEDBACK_MS = 500;
-
 function subscribeToAutomaticPhotoRescanAppState(controller: AutomaticPhotoRescanController): () => void {
-  let activationTimer: ReturnType<typeof setTimeout> | null = null;
-  const handleAppStateChange = (nextState: string) => {
-    if (activationTimer !== null) {
-      clearTimeout(activationTimer);
-      activationTimer = null;
-    }
-    if (nextState !== "active") {
-      controller.handleAppStateChange(nextState);
-      return;
-    }
-    activationTimer = setTimeout(() => {
-      activationTimer = null;
-      controller.handleAppStateChange(nextState);
-    }, AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS);
-  };
-
-  handleAppStateChange(AppState.currentState);
-  const subscription = AppState.addEventListener("change", handleAppStateChange);
-
-  return () => {
-    if (activationTimer !== null) {
-      clearTimeout(activationTimer);
-      activationTimer = null;
-    }
-    subscription.remove();
-  };
+  const subscription = AppState.addEventListener("change", controller.handleAppStateChange);
+  controller.handleAppStateChange(AppState.currentState);
+  return () => subscription.remove();
 }
 
 async function finishPendingAutomaticPhotoFoodSync(queryClient: QueryClient): Promise<void> {
@@ -76,34 +50,37 @@ async function finishPendingAutomaticPhotoFoodSync(queryClient: QueryClient): Pr
   }
 }
 
-/** Run a silent incremental rescan once per eligible app-open cycle. */
+/** Start incremental import and queued deep analysis on foreground or library changes. */
 export function useAutomaticPhotoRescan(enabled: boolean): void {
   const queryClient = useQueryClient();
   const validationModeEnabled = isVisionVisitFoodValidationModeEnabled();
+  const automaticDeepScanEnabled = !validationModeEnabled && isBatchAssetInfoAvailable();
   const quickScanRanRef = useRef(false);
+  const deepScanTotalsRef = useRef({ completed: 0, total: 0 });
 
   const handleQuickScanProgress = (progress: ScanProgress) => {
     useAppStore.getState().updateBackgroundPhotoScanProgress({
       stage: progress.phase,
       detail: progress.detail,
-      progress: getAutomaticQuickScanOverallProgress(progress.phase, progress.progress, !validationModeEnabled),
+      progress: getAutomaticQuickScanOverallProgress(progress.phase, progress.progress, automaticDeepScanEnabled),
     });
   };
 
   const handleDeepScanProgress = (progress: DeepScanProgress) => {
     const retryDetail =
       progress.retryableFailures > 0 ? ` · ${progress.retryableFailures.toLocaleString()} queued to retry` : "";
+    const processedPhotos = deepScanTotalsRef.current.completed + progress.processedPhotos;
+    const totalPhotos = Math.max(
+      deepScanTotalsRef.current.total,
+      deepScanTotalsRef.current.completed + progress.totalPhotos,
+    );
     useAppStore.getState().updateBackgroundPhotoScanProgress({
       stage: "deep-scanning",
       detail:
-        progress.totalPhotos > 0
-          ? `Analyzed ${progress.processedPhotos.toLocaleString()} of ${progress.totalPhotos.toLocaleString()} photos${retryDetail}`
+        totalPhotos > 0
+          ? `Analyzed ${processedPhotos.toLocaleString()} of ${totalPhotos.toLocaleString()} photos${retryDetail}`
           : "Preparing photo analysis…",
-      progress: getAutomaticDeepScanOverallProgress(
-        progress.processedPhotos,
-        progress.totalPhotos,
-        quickScanRanRef.current,
-      ),
+      progress: getAutomaticDeepScanOverallProgress(processedPhotos, totalPhotos, quickScanRanRef.current),
     });
   };
 
@@ -111,7 +88,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
     handleQuickScanProgress,
     {
       requestCalendarPermissionIfNeeded: false,
-      enqueueInsertedPhotosForAutomaticDeepScan: !validationModeEnabled,
+      enqueueInsertedPhotosForAutomaticDeepScan: automaticDeepScanEnabled,
       runVisitFoodDetection: validationModeEnabled,
     },
     {
@@ -120,6 +97,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
   );
   const { mutateAsync: deepScanPhotos } = useDeepScan(handleDeepScanProgress, {
     invalidateQueriesOnSettled: false,
+    synchronizeVisitFood: false,
   });
 
   useEffect(() => {
@@ -145,23 +123,8 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
           return;
         }
         quickScanRanRef.current = false;
-        let preflightFeedbackShownAt: number | null = null;
-        let preflightFeedbackTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
-          preflightFeedbackTimer = null;
-          preflightFeedbackShownAt = Date.now();
-          useAppStore.getState().updateBackgroundPhotoScanProgress({
-            stage: "checking",
-            detail: "Checking for photo updates…",
-            progress: null,
-          });
-        }, PREFLIGHT_FEEDBACK_DELAY_MS);
-
-        const stopPreflightFeedbackDelay = () => {
-          if (preflightFeedbackTimer !== null) {
-            clearTimeout(preflightFeedbackTimer);
-            preflightFeedbackTimer = null;
-          }
-        };
+        deepScanTotalsRef.current = { completed: 0, total: 0 };
+        let deepScanRan = false;
 
         const runPhotoScan = async () => {
           await queryClient.invalidateQueries({
@@ -170,7 +133,6 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
             refetchType: "none",
           });
           if (await isAutomaticPhotoFoodSyncRequired()) {
-            stopPreflightFeedbackDelay();
             useAppStore.getState().updateBackgroundPhotoScanProgress({
               stage: "reconciling",
               detail: "Finishing a previous photo update…",
@@ -178,7 +140,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
             });
             await finishPendingAutomaticPhotoFoodSync(queryClient);
           }
-          if (!validationModeEnabled) {
+          if (automaticDeepScanEnabled) {
             await pruneAutomaticPhotoDeepScanQueue();
           }
           const [pendingPhotoCount, queuedDeepScanCount, quickPipelineIncomplete] = await Promise.all([
@@ -187,12 +149,11 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
               queryFn: getUnscannedPhotoCount,
               staleTime: 0,
             }),
-            validationModeEnabled ? Promise.resolve(0) : getAutomaticPhotoDeepScanQueueCount(),
+            automaticDeepScanEnabled ? getAutomaticPhotoDeepScanQueueCount() : Promise.resolve(0),
             isAutomaticPhotoQuickPipelineIncomplete(),
           ]);
-          stopPreflightFeedbackDelay();
           const shouldRunQuickScan = shouldRunAutomaticPhotoQuickScan(pendingPhotoCount, quickPipelineIncomplete);
-          if (!shouldRunQuickScan && queuedDeepScanCount === 0) {
+          if (!controller.isActive() || (!shouldRunQuickScan && queuedDeepScanCount === 0)) {
             return;
           }
           quickScanRanRef.current = shouldRunQuickScan;
@@ -206,59 +167,79 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
           const result = await runAutomaticPhotoScanSequence({
             shouldRunQuickScan,
             scanPhotos,
-            getDeepScanCandidates: validationModeEnabled
+            shouldContinue: controller.isActive,
+            getDeepScanCandidates: !automaticDeepScanEnabled
               ? async () => []
-              : () => claimAutomaticPhotoDeepScanCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE),
+              : async (attemptedAssetIds) => {
+                  if (attemptedAssetIds.length === 0) {
+                    deepScanTotalsRef.current.total = await getAutomaticPhotoDeepScanQueueCount();
+                  }
+                  return claimAutomaticPhotoDeepScanCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, attemptedAssetIds);
+                },
             deepScanPhotos: async (photos) => {
-              await markAutomaticPhotoFoodSyncRequired();
+              if (!deepScanRan) {
+                await markAutomaticPhotoFoodSyncRequired();
+                deepScanRan = true;
+              }
               const deepScanResult = await deepScanPhotos(photos);
-              await clearAutomaticPhotoFoodSyncRequired();
+              deepScanTotalsRef.current.completed += photos.length;
               return deepScanResult;
             },
-            finalizeDeepScanQueue: validationModeEnabled ? async () => undefined : pruneAutomaticPhotoDeepScanQueue,
-          }).finally(async () => {
-            // Keep the progress visible until active Restaurants and Review data
-            // have reconciled, then let the shared bar disappear once.
-            useAppStore.getState().updateBackgroundPhotoScanProgress({
-              stage: "reconciling",
-              detail: "Refreshing restaurants and reviews…",
-              progress: null,
-            });
+            finalizeDeepScanQueue: () =>
+              (automaticDeepScanEnabled ? pruneAutomaticPhotoDeepScanQueue() : Promise.resolve()).finally(async () => {
+                // Keep the progress visible until active Restaurants and Review data
+                // have reconciled, then let the shared bar disappear once.
+                useAppStore.getState().updateBackgroundPhotoScanProgress({
+                  stage: "reconciling",
+                  detail: "Refreshing restaurants and reviews…",
+                  progress: null,
+                });
 
-            const visibleReconciliations = [invalidateFoodDetectionQueries(queryClient)];
-            if (shouldRunQuickScan) {
-              visibleReconciliations.push(
-                queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits }),
-                queryClient.invalidateQueries({ queryKey: queryKeys.photoCount }),
-              );
-            }
-            await Promise.allSettled(visibleReconciliations);
+                const visibleReconciliations = [
+                  deepScanRan
+                    ? finishPendingAutomaticPhotoFoodSync(queryClient)
+                    : invalidateFoodDetectionQueries(queryClient),
+                ];
+                if (shouldRunQuickScan) {
+                  visibleReconciliations.push(
+                    queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits }),
+                    queryClient.invalidateQueries({ queryKey: queryKeys.photoCount }),
+                  );
+                }
+                const [foodSyncResult] = await Promise.allSettled(visibleReconciliations);
+                if (deepScanRan && foodSyncResult.status === "rejected") {
+                  throw foodSyncResult.reason;
+                }
+              }),
           });
           logScanCompleted(result?.photosProcessed ?? 0, result?.visitsCreated ?? 0);
         };
 
-        await runPhotoScan().finally(async () => {
-          stopPreflightFeedbackDelay();
-          if (preflightFeedbackShownAt !== null) {
-            const feedbackElapsedMs = Date.now() - preflightFeedbackShownAt;
-            const remainingFeedbackMs = MINIMUM_PREFLIGHT_FEEDBACK_MS - feedbackElapsedMs;
-            if (remainingFeedbackMs > 0) {
-              await new Promise((resolve) => setTimeout(resolve, remainingFeedbackMs));
-            }
-          }
+        await runPhotoScan().finally(() => {
           useAppStore.getState().finishBackgroundPhotoScan();
         });
       },
       onError: (error) => {
-        console.warn("Automatic photo rescan failed; it will retry on a future app open:", error);
+        console.warn("Automatic photo refresh failed; it will retry on the next library change or app open:", error);
       },
     });
 
+    const unsubscribeFromStore = useAppStore.subscribe(controller.handleAvailabilityChange);
+    const unsubscribeFromMutations = queryClient.getMutationCache().subscribe(controller.handleAvailabilityChange);
+    const librarySubscription = MediaLibrary.addListener((event) => {
+      if (event.hasIncrementalChanges && !event.insertedAssets?.length && !event.deletedAssets?.length) {
+        return;
+      }
+      controller.handlePhotoLibraryChange();
+    });
     const unsubscribeFromAppState = subscribeToAutomaticPhotoRescanAppState(controller);
 
     return () => {
-      unsubscribeFromAppState();
       controller.dispose();
+      unsubscribeFromAppState();
+      librarySubscription.remove();
+      unsubscribeFromStore();
+      unsubscribeFromMutations();
     };
-  }, [deepScanPhotos, enabled, queryClient, scanPhotos, validationModeEnabled]);
+  }, [automaticDeepScanEnabled, deepScanPhotos, enabled, queryClient, scanPhotos]);
 }

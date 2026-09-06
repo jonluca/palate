@@ -18,7 +18,6 @@ import type { VisitListFilter } from "../utils/visit-status.ts";
 interface VisitReadApi {
   getVisits(filter?: VisitListFilter): Promise<VisitRecord[]>;
   getVisitById(id: string): Promise<VisitRecord | null>;
-  getVisitsByRestaurantId(id: string): Promise<VisitRecord[]>;
   getVisitsWithDetails(filter?: VisitListFilter): Promise<VisitRecord[]>;
   getRestaurantVisitsWithPreviews(id: string): Promise<VisitRecord[]>;
   getMergeableVisits(id: string, startTime: number): Promise<VisitRecord[]>;
@@ -111,22 +110,8 @@ for (const filename of ["visits.ts", "merge.ts"]) {
   });
 }
 
-const {
-  getVisits,
-  getVisitById,
-  getVisitsByRestaurantId,
-  getVisitsWithDetails,
-  getRestaurantVisitsWithPreviews,
-  getMergeableVisits,
-} = exports;
-assert.ok(
-  getVisits &&
-    getVisitById &&
-    getVisitsByRestaurantId &&
-    getVisitsWithDetails &&
-    getRestaurantVisitsWithPreviews &&
-    getMergeableVisits,
-);
+const { getVisits, getVisitById, getVisitsWithDetails, getRestaurantVisitsWithPreviews, getMergeableVisits } = exports;
+assert.ok(getVisits && getVisitById && getVisitsWithDetails && getRestaurantVisitsWithPreviews && getMergeableVisits);
 
 function assertDomainVisit(visit: VisitRecord): void {
   const expected = visit.id === "visit-0" ? [false, null] : visit.id === "visit-1" ? [true, false] : [true, true];
@@ -141,7 +126,6 @@ for (const rows of await Promise.all([
   getVisits("confirmed"),
   getVisits("food"),
   getVisitsWithDetails(),
-  getVisitsByRestaurantId("restaurant"),
   getRestaurantVisitsWithPreviews("restaurant"),
   getMergeableVisits("missing", fixture.startTime),
 ])) {

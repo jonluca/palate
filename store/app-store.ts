@@ -165,7 +165,11 @@ export const useAppStore = create<AppState>()(
         }
         set({
           isBackgroundPhotoScanRunning: true,
-          backgroundPhotoScanProgress: null,
+          backgroundPhotoScanProgress: {
+            stage: "checking",
+            detail: "Checking for photo updates…",
+            progress: null,
+          },
         });
         return true;
       },

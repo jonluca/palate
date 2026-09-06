@@ -15,6 +15,7 @@ import {
   type VisitListPageRow,
 } from "./visit-list-paging-core";
 import { buildVisitStatusBatchStatement } from "./visit-status-batch-core";
+import { isSQLiteBusyError } from "./transaction-retry-core";
 import type { VisitListFilter, VisitStatus } from "../visit-status.ts";
 import type { RestaurantVisitWithPreview, VisitPreviewPhoto, VisitRecord, VisitWithDetails } from "./types";
 import { isJsonNumber, isJsonObject, isJsonString, parseJsonValue, type JsonValue } from "../runtime-json.ts";
@@ -178,15 +179,6 @@ export async function getFoodDetectionVisitSamplePlan(
   return parseFoodDetectionVisitSampleRows(rows);
 }
 
-export async function getVisitsByRestaurantId(restaurantId: string): Promise<VisitRecord[]> {
-  const database = await getDatabase();
-  const rows = await database.getAllAsync<VisitQueryRow>(
-    `SELECT * FROM visits WHERE restaurantId = ? AND status = 'confirmed' ORDER BY startTime DESC`,
-    [restaurantId],
-  );
-  return rows.map(parseVisitQueryRow);
-}
-
 export async function getRestaurantVisitsWithPreviews(restaurantId: string): Promise<RestaurantVisitWithPreview[]> {
   const database = await getDatabase();
   const rows = await database.getAllAsync<VisitQueryRow & { previewPhotosJson: string | null }>(
@@ -267,14 +259,6 @@ export interface BatchVisitConfirmation {
 
 const BUSY_RETRY_ATTEMPTS = 5;
 const BUSY_RETRY_BASE_DELAY_MS = 50;
-
-function isDatabaseBusyError(cause: unknown): boolean {
-  if (!(cause instanceof Error)) {
-    return false;
-  }
-  const message = cause.message.toLowerCase();
-  return message.includes("database is locked") || message.includes("sqlite_busy");
-}
 
 function parseVisitPreviewPhoto(value: JsonValue): VisitPreviewPhoto | null {
   if (!isJsonObject(value) || !isJsonString(value.id) || !isJsonString(value.uri)) {
@@ -360,7 +344,7 @@ export async function batchConfirmVisits(confirmations: BatchVisitConfirmation[]
       });
       return;
     } catch (error) {
-      const isBusyError = isDatabaseBusyError(error);
+      const isBusyError = isSQLiteBusyError(error);
       const isLastAttempt = attempt === BUSY_RETRY_ATTEMPTS - 1;
       if (!isBusyError || isLastAttempt) {
         throw error;

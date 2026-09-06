@@ -24,13 +24,17 @@ export async function getAutomaticPhotoDeepScanQueueCount(): Promise<number> {
   return row?.pendingCount ?? 0;
 }
 
-export async function claimAutomaticPhotoDeepScanCandidates(limit: number): Promise<Array<{ id: string }>> {
+export async function claimAutomaticPhotoDeepScanCandidates(
+  limit: number,
+  excludedAssetIds: readonly string[] = [],
+): Promise<Array<{ id: string }>> {
   const database = await getDatabase();
   let candidates: Array<{ id: string }> = [];
   await database.withExclusiveTransactionAsync(async (transaction) => {
     candidates = await transaction.getAllAsync<{ id: string }>(
       GET_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL,
       validateAutomaticPhotoDeepScanBatchLimit(limit),
+      JSON.stringify(excludedAssetIds),
     );
     if (candidates.length > 0) {
       await transaction.runAsync(

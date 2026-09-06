@@ -5,8 +5,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE,
-  AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT,
-  AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS,
   createAutomaticPhotoRescanController,
   getAutomaticDeepScanOverallProgress,
   getAutomaticQuickScanOverallProgress,
@@ -20,9 +18,11 @@ const boundaryExpectations = new Map<number, boolean>([
   [0, false],
   [1, true],
   [999, true],
-  [1_000, false],
-  [1_001, false],
+  [1_000, true],
+  [1_001, true],
   [Number.NaN, false],
+  [Number.POSITIVE_INFINITY, false],
+  [1.5, false],
 ]);
 
 for (const [pendingPhotoCount, expected] of boundaryExpectations) {
@@ -32,15 +32,13 @@ for (const [pendingPhotoCount, expected] of boundaryExpectations) {
     `unexpected automatic-rescan decision for ${String(pendingPhotoCount)} pending photos`,
   );
 }
-assert.equal(AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT, 1_000);
-assert.equal(AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS, 5_000);
 assert.equal(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, 24);
 assert.equal(shouldRunAutomaticPhotoQuickScan(0, true), true, "an interrupted quick pipeline should resume");
 assert.equal(shouldRunAutomaticPhotoQuickScan(999, true), true);
 assert.equal(
   shouldRunAutomaticPhotoQuickScan(1_000, true),
-  false,
-  "recovery must not bypass the 1,000-new-photo safety threshold",
+  true,
+  "large updates must begin automatically instead of waiting for a manual scan",
 );
 assert.equal(shouldRunAutomaticPhotoQuickScan(0, false), false);
 
@@ -120,6 +118,7 @@ assert.equal(shouldRunAutomaticPhotoQuickScan(0, false), false);
     "deep:candidates",
     "deep:start:2",
     "deep:end",
+    "deep:candidates",
     "deep:finalize",
   ]);
 }
@@ -383,13 +382,18 @@ assert.match(appLayout, /useAutomaticPhotoRescan\(hasHydrated && hasCompletedIni
 assert.match(rescanScreen, /if \(!useAppStore\.getState\(\)\.isScanning\)/);
 assert.match(automaticHook, /handleAppStateChange\(AppState\.currentState\)/);
 assert.match(automaticHook, /AppState\.addEventListener\("change"/);
-assert.match(automaticHook, /setTimeout\([\s\S]*AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS\)/);
-assert.match(automaticHook, /clearTimeout\(activationTimer\)/);
+assert.doesNotMatch(automaticHook, /AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS|PREFLIGHT_FEEDBACK|setTimeout/);
+assert.match(automaticHook, /MediaLibrary\.addListener/);
+assert.match(automaticHook, /useAppStore\.subscribe\(controller\.handleAvailabilityChange\)/);
+assert.match(automaticHook, /getMutationCache\(\)\.subscribe\(controller\.handleAvailabilityChange\)/);
 assert.match(automaticHook, /subscription\.remove\(\)/);
 assert.match(automaticHook, /getUnscannedPhotoCount/);
 assert.match(automaticHook, /getAutomaticPhotoDeepScanQueueCount/);
 assert.match(automaticHook, /claimAutomaticPhotoDeepScanCandidates/);
-assert.match(automaticHook, /claimAutomaticPhotoDeepScanCandidates\(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE\)/);
+assert.match(
+  automaticHook,
+  /claimAutomaticPhotoDeepScanCandidates\(\s*AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE,\s*attemptedAssetIds/,
+);
 assert.equal(
   automaticHook.match(/invalidateQueriesOnSettled: false/g)?.length,
   2,
@@ -412,13 +416,12 @@ assert.match(automaticHook, /getAutomaticQuickScanOverallProgress/);
 assert.match(automaticHook, /getAutomaticDeepScanOverallProgress/);
 assert.match(automaticHook, /updateBackgroundPhotoScanProgress/);
 assert.match(automaticHook, /startBackgroundPhotoScan/);
-assert.match(automaticHook, /detail: "Checking for photo updates…"/);
-assert.match(automaticHook, /MINIMUM_PREFLIGHT_FEEDBACK_MS/);
+assert.match(appStore, /detail: "Checking for photo updates…"/);
 assert.doesNotMatch(automaticHook, /expo-router|router\.(?:push|replace)|Redirect|Alert\.alert|showToast|Haptics/);
 assert.doesNotMatch(automaticHook, /requestMediaLibraryPermission|useRequestPermission/);
 assert.doesNotMatch(automaticHook, /\.startScan\(\)|\.resetScan\(\)/);
 assert.match(automaticHook, /requestCalendarPermissionIfNeeded: false/);
-assert.match(automaticHook, /enqueueInsertedPhotosForAutomaticDeepScan: !validationModeEnabled/);
+assert.match(automaticHook, /enqueueInsertedPhotosForAutomaticDeepScan: automaticDeepScanEnabled/);
 assert.match(automaticHook, /runVisitFoodDetection: validationModeEnabled/);
 assert.match(visitService, /if \(options\.runVisitFoodDetection !== false\)/);
 assert.doesNotMatch(automaticHook, /pendingAssetIds|getPhotosByAssetIds/);
@@ -434,7 +437,7 @@ assert.match(backgroundPhotoUpdateBar, /reduceMotion[\s\S]{0,100}transitionPrope
 assert.match(backgroundPhotoUpdateBar, /useReducedMotion\(\)/);
 assert.doesNotMatch(backgroundPhotoUpdateBar, /accessibilityLiveRegion/);
 assert.doesNotMatch(backgroundPhotoUpdateBar, /Pressable|router|unscannedPhotoCount/);
-assert.match(appStore, /startBackgroundPhotoScan:[\s\S]{0,500}backgroundPhotoScanProgress: null/);
+assert.match(appStore, /startBackgroundPhotoScan:[\s\S]{0,500}stage: "checking"/);
 assert.match(
   appStore,
   /updateBackgroundPhotoScanProgress:[\s\S]{0,700}state\.isBackgroundPhotoScanRunning[\s\S]{0,700}: state/,

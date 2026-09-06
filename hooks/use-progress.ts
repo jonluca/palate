@@ -46,24 +46,21 @@ function useProgressUpdater(sharedValues: ProgressSharedValues) {
   const updateProgressWorklet = useCallback(
     (data: Partial<ProgressData>) => {
       "worklet";
-      // Shared values are designed to be mutated - disable react-compiler for this block
-      /* oxlint-disable react-compiler/react-compiler */
       if (data.status !== undefined) {
-        statusRef.value = data.status;
+        statusRef.set(data.status);
       }
       if (data.speed !== undefined) {
-        speedRef.value = data.speed;
+        speedRef.set(data.speed);
       }
       if (data.eta !== undefined) {
-        etaRef.value = data.eta;
+        etaRef.set(data.eta);
       }
       if (data.progress !== undefined) {
-        progressRef.value = withTiming(data.progress, { duration: 200 });
+        progressRef.set(withTiming(data.progress, { duration: 200 }));
       }
       if (data.isActive !== undefined) {
-        isActiveRef.value = data.isActive;
+        isActiveRef.set(data.isActive);
       }
-      /* oxlint-enable react-compiler/react-compiler */
     },
     [statusRef, speedRef, etaRef, progressRef, isActiveRef],
   );
@@ -75,20 +72,7 @@ function useProgressUpdater(sharedValues: ProgressSharedValues) {
     [updateProgressWorklet],
   );
 
-  const resetWorklet = useCallback(() => {
-    "worklet";
-    statusRef.value = "";
-    speedRef.value = 0;
-    etaRef.value = "";
-    progressRef.value = 0;
-    isActiveRef.value = false;
-  }, [statusRef, speedRef, etaRef, progressRef, isActiveRef]);
-
-  const reset = useCallback(() => {
-    scheduleOnUI(resetWorklet);
-  }, [resetWorklet]);
-
-  return { updateProgress, reset };
+  return updateProgress;
 }
 
 /**
@@ -96,7 +80,7 @@ function useProgressUpdater(sharedValues: ProgressSharedValues) {
  */
 export function useScanProgress() {
   const sharedValues = useProgressSharedValues();
-  const { updateProgress, reset } = useProgressUpdater(sharedValues);
+  const updateProgress = useProgressUpdater(sharedValues);
 
   const onProgress = useCallback(
     (progress: { phase: string; detail: string; photosPerSecond?: number; eta?: string; progress?: number }) => {
@@ -149,6 +133,5 @@ export function useScanProgress() {
     start,
     complete,
     error,
-    reset,
   };
 }

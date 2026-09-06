@@ -221,7 +221,7 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
     -- Composite index for status-filtered time-ordered queries (getVisits, getVisitsWithDetails)
     CREATE INDEX IF NOT EXISTS idx_visits_status_time ON visits(status, startTime DESC);
 
-    -- Composite index for restaurant-specific queries (getVisitsByRestaurantId, getConfirmedRestaurantsWithVisits)
+    -- Composite index for restaurant visit previews and confirmed restaurant queries
     CREATE INDEX IF NOT EXISTS idx_visits_restaurant_status_time ON visits(restaurantId, status, startTime DESC);
 
     -- Composite index for food-filtered time-ordered queries

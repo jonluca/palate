@@ -62,12 +62,12 @@ try {
   )`);
   database.exec(CREATE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL);
 
-  const claimCandidates = (limit: number): string[] => {
+  const claimCandidates = (limit: number, excludedAssetIds: readonly string[] = []): string[] => {
     database.exec("BEGIN IMMEDIATE");
     try {
       const ids = database
         .prepare(GET_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL)
-        .all(limit)
+        .all(limit, JSON.stringify(excludedAssetIds))
         .map((row) => readStringColumn(row, "id", "deep-scan candidate query"));
       if (ids.length > 0) {
         database.prepare(MARK_AUTOMATIC_PHOTO_DEEP_SCAN_ATTEMPTS_SQL).run(JSON.stringify(ids));
@@ -103,7 +103,7 @@ try {
   assert.deepEqual(
     database
       .prepare(GET_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL)
-      .all(999)
+      .all(999, "[]")
       .map((row) => readStringColumn(row, "id", "deep-scan candidate query")),
     ["needs-'深度'-🍜"],
   );
@@ -190,6 +190,68 @@ try {
   assert.ok(
     boundedIds.some((id) => !boundedClaim.includes(id)),
     "one queued row must remain outside the bounded claim",
+  );
+  const remainingBoundedClaim = claimCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, boundedClaim);
+  assert.deepEqual(remainingBoundedClaim, [boundedIds[boundedIds.length - 1]]);
+  assert.deepEqual(
+    claimCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, [...boundedClaim, ...remainingBoundedClaim]),
+    [],
+    "all rows attempted in this run must be excluded even when their Vision results remain NULL",
+  );
+
+  database.exec("DELETE FROM automatic_photo_deep_scan_queue; DELETE FROM photos;");
+  const retryId = `failed-'深度'-🍜-"quoted"-\\path\nline`;
+  const drainIds = [
+    retryId,
+    ...Array.from(
+      { length: AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE * 2 + 3 },
+      (_, index) => `drain-${index.toString().padStart(3, "0")}`,
+    ),
+  ];
+  for (const [index, id] of drainIds.entries()) {
+    insertPhoto.run(id, `ph://${id}`, index, null);
+  }
+  database.prepare(ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL).run(JSON.stringify(drainIds));
+  database
+    .prepare("UPDATE automatic_photo_deep_scan_queue SET attemptCount = 10 WHERE assetId = ?")
+    .run(drainIds[drainIds.length - 1]!);
+
+  const attemptedIds: string[] = [];
+  const markSuccessful = database.prepare("UPDATE photos SET foodDetected = 0 WHERE id = ?");
+  for (let batch = 0; batch <= drainIds.length; batch++) {
+    const claimed = claimCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, attemptedIds);
+    if (claimed.length === 0) {
+      break;
+    }
+    assert.ok(claimed.length <= AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE);
+    for (const id of claimed) {
+      assert.ok(!attemptedIds.includes(id), "a retryable failure must not be attempted twice in one run");
+      attemptedIds.push(id);
+      if (id !== retryId) {
+        markSuccessful.run(id);
+      }
+    }
+  }
+  assert.deepEqual(
+    new Set(attemptedIds),
+    new Set(drainIds),
+    "bounded batches must cover every remaining row, including rows with higher prior attempt counts",
+  );
+  assert.equal(
+    readIntegerColumn(
+      database.prepare("SELECT attemptCount FROM automatic_photo_deep_scan_queue WHERE assetId = ?").get(retryId),
+      "attemptCount",
+      "retry attempt count query",
+    ),
+    1,
+    "an unavailable photo must be attempted only once while later batches continue",
+  );
+  database.prepare(PRUNE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL).run();
+  assert.deepEqual(claimCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, attemptedIds), []);
+  assert.deepEqual(
+    claimCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE),
+    [retryId],
+    "clearing the run-local exclusion list must make a failed quoted Unicode ID eligible on the next run",
   );
 
   database.exec("DELETE FROM automatic_photo_deep_scan_queue; DELETE FROM photos;");

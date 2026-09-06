@@ -19,48 +19,36 @@ public enum PhotoAssetClassificationBatchSlot: Sendable {
     requestedAssetIds: [String],
     outcomes: [PhotoAssetClassificationOutcome]
   ) -> [PhotoAssetClassificationBatchSlot] {
-    var requestedAssetIdBytes: [Data] = []
-    requestedAssetIdBytes.reserveCapacity(requestedAssetIds.count)
+    var slots: [PhotoAssetClassificationBatchSlot] = []
+    slots.reserveCapacity(requestedAssetIds.count)
+    // Keep canonically equivalent but byte-distinct identifiers separate.
     var firstRequestedIndexByAssetIdBytes: [Data: Int] = [:]
     firstRequestedIndexByAssetIdBytes.reserveCapacity(requestedAssetIds.count)
     for (index, assetId) in requestedAssetIds.enumerated() {
       let bytes = Data(assetId.utf8)
-      requestedAssetIdBytes.append(bytes)
       if firstRequestedIndexByAssetIdBytes[bytes] == nil {
         firstRequestedIndexByAssetIdBytes[bytes] = index
+        slots.append(.missing(assetId: assetId))
+      } else {
+        slots.append(.duplicate(assetId: assetId))
       }
     }
 
-    var outcomeByFirstRequestedIndex = [PhotoAssetClassificationOutcome?](
-      repeating: nil,
-      count: requestedAssetIds.count
-    )
     for outcome in outcomes {
       let bytes = Data(outcome.assetId.utf8)
       guard
         let firstRequestedIndex = firstRequestedIndexByAssetIdBytes[bytes],
-        outcomeByFirstRequestedIndex[firstRequestedIndex] == nil
+        case .missing(let assetId) = slots[firstRequestedIndex]
       else {
         continue
       }
-      outcomeByFirstRequestedIndex[firstRequestedIndex] = outcome
-    }
-
-    return requestedAssetIds.indices.map { index in
-      let assetId = requestedAssetIds[index]
-      let assetIdBytes = requestedAssetIdBytes[index]
-      guard firstRequestedIndexByAssetIdBytes[assetIdBytes] == index else {
-        return .duplicate(assetId: assetId)
-      }
-      guard let outcome = outcomeByFirstRequestedIndex[index] else {
-        return .missing(assetId: assetId)
-      }
       switch outcome {
       case .success(let classification):
-        return .success(classification)
+        slots[firstRequestedIndex] = .success(classification)
       case .failure(_, let message):
-        return .failure(assetId: assetId, message: message)
+        slots[firstRequestedIndex] = .failure(assetId: assetId, message: message)
       }
     }
+    return slots
   }
 }

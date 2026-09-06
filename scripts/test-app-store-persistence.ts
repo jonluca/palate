@@ -3,10 +3,14 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+import { create } from "zustand";
 import { createStore } from "zustand/vanilla";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import { createDeduplicatingStorage } from "../store/deduplicating-storage.ts";
 import { createDefaultAppPreferences, selectAppPreferences, type AppPreferences } from "../store/app-preferences.ts";
+import type * as appStoreModule from "../store/app-store.ts";
 
 // The existing persisted format is the compatibility oracle, including property order.
 const LEGACY_DEFAULT_PREFERENCES = {
@@ -252,11 +256,83 @@ await Promise.all([
 assert.equal(multiKeyMemory.writes.length, 2, "development and production keys must remain independent");
 
 const appStoreSource = readFileSync(new URL("../store/app-store.ts", import.meta.url), "utf8");
+
+// Run the production actions with real Zustand subscriptions and in-memory persistence.
+// The progress card's selector must change on the first update, without a tab remount.
+const appStoreExports: Partial<typeof appStoreModule> = {};
+const appStoreMemory = createMemoryStorage();
+const appStoreDependencies = new Map<string, object>([
+  ["zustand", { create }],
+  ["zustand/middleware", { createJSONStorage, persist }],
+  ["expo-sqlite/kv-store", { __esModule: true, default: appStoreMemory.storage }],
+  ["./app-preferences", { createDefaultAppPreferences, selectAppPreferences }],
+  ["./deduplicating-storage", { createDeduplicatingStorage }],
+]);
+runInNewContext(
+  ts.transpileModule(appStoreSource, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText,
+  {
+    exports: appStoreExports,
+    __DEV__: false,
+    require: (name: string) => {
+      const dependency = appStoreDependencies.get(name);
+      assert.ok(dependency, `Unexpected app store dependency: ${name}`);
+      return dependency;
+    },
+  },
+);
+const appStore = appStoreExports.useAppStore;
+assert.ok(appStore);
+await appStore.persist.rehydrate();
+assert.equal(appStore.getState().hasHydrated, true);
+type AppStoreState = ReturnType<typeof appStore.getState>;
+const selectBackgroundProgress = (state: AppStoreState) =>
+  state.isBackgroundPhotoScanRunning ? state.backgroundPhotoScanProgress : null;
+const backgroundUpdates: AppStoreState[] = [];
+const selectedProgressUpdates: AppStoreState["backgroundPhotoScanProgress"][] = [];
+let selectedProgress = selectBackgroundProgress(appStore.getState());
+const unsubscribe = appStore.subscribe((state) => {
+  backgroundUpdates.push(state);
+  const nextProgress = selectBackgroundProgress(state);
+  if (!Object.is(nextProgress, selectedProgress)) {
+    selectedProgressUpdates.push(nextProgress);
+    selectedProgress = nextProgress;
+  }
+});
+
+assert.equal(appStore.getState().startBackgroundPhotoScan(), true);
+assert.equal(backgroundUpdates.length, 1, "starting a scan must publish one atomic update");
+assert.equal(backgroundUpdates[0].isBackgroundPhotoScanRunning, true);
+assert.equal(selectedProgressUpdates.length, 1, "an already-mounted progress subscriber must update immediately");
+assert.equal(selectedProgress?.stage, "checking");
+assert.equal(selectedProgress.detail, "Checking for photo updates…");
+assert.equal(selectedProgress.progress, null);
+assert.equal(appStore.getState().startBackgroundPhotoScan(), false);
+assert.equal(appStore.getState().startScan(), false);
+assert.equal(backgroundUpdates.length, 1, "failed scan claims must not replace the visible progress");
+
+appStore.getState().updateBackgroundPhotoScanProgress({
+  stage: "deep-scanning",
+  detail: "Analyzed 2 of 4 photos",
+  progress: 0.5,
+});
+assert.equal(selectedProgressUpdates.length, 2);
+assert.equal(selectedProgress?.stage, "deep-scanning");
+assert.equal(selectedProgress.progress, 0.5);
+appStore.getState().finishBackgroundPhotoScan();
+assert.equal(backgroundUpdates.length, 3);
+assert.equal(backgroundUpdates[2].isBackgroundPhotoScanRunning, false);
+assert.equal(backgroundUpdates[2].backgroundPhotoScanProgress, null);
+assert.equal(selectedProgressUpdates.length, 3);
+assert.equal(selectedProgressUpdates[2], null, "the same subscriber must hide the card when the scan finishes");
+unsubscribe();
+
 assert.match(appStoreSource, /storage: createJSONStorage\(\(\) => createDeduplicatingStorage\(AsyncStorage\)\)/);
 assert.match(appStoreSource, /interface AppState extends AppPreferences/);
 assert.equal(appStoreSource.match(/\.\.\.createDefaultAppPreferences\(\)/g)?.length, 2);
 assert.match(appStoreSource, /resetAllState: \(\) =>\s*set\(\{\s*\.\.\.createDefaultAppPreferences\(\)/);
 assert.match(appStoreSource, /partialize: selectAppPreferences/);
 console.log(
-  "App store persistence passed: preference contract/defaults, legacy snapshots, 10,000 transient updates, ordering, reset, rehydration, failures, and independent keys.",
+  "App store persistence passed: preferences, legacy snapshots, 10,000 transient updates, ordering, reset, rehydration, failures, independent keys, and immediately observable background scan progress.",
 );

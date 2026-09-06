@@ -1,6 +1,3 @@
-export const AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT = 1_000;
-/** Leave the first foreground interaction window entirely to visible UI work. */
-export const AUTOMATIC_PHOTO_RESCAN_START_DELAY_MS = 5_000;
 /** Keep each automatic queued Vision batch short enough not to monopolize PhotoKit while the app is in use. */
 export const AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE = 24;
 
@@ -65,42 +62,27 @@ export function getAutomaticDeepScanOverallProgress(
   return scaleProgress(phaseProgress, followsQuickScan ? [0.72, 0.96] : [0.08, 0.96]);
 }
 
-export function shouldAutomaticallyRescanPhotos(
-  pendingPhotoCount: number,
-  exclusiveLimit: number = AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT,
-): boolean {
-  return (
-    Number.isSafeInteger(pendingPhotoCount) &&
-    Number.isSafeInteger(exclusiveLimit) &&
-    pendingPhotoCount > 0 &&
-    pendingPhotoCount < exclusiveLimit
-  );
+export function shouldAutomaticallyRescanPhotos(pendingPhotoCount: number): boolean {
+  return Number.isSafeInteger(pendingPhotoCount) && pendingPhotoCount > 0;
 }
 
-export function shouldRunAutomaticPhotoQuickScan(
-  pendingPhotoCount: number,
-  quickPipelineIncomplete: boolean,
-  exclusiveLimit: number = AUTOMATIC_PHOTO_RESCAN_PENDING_LIMIT,
-): boolean {
+export function shouldRunAutomaticPhotoQuickScan(pendingPhotoCount: number, quickPipelineIncomplete: boolean): boolean {
   return (
-    shouldAutomaticallyRescanPhotos(pendingPhotoCount, exclusiveLimit) ||
-    (quickPipelineIncomplete &&
-      Number.isSafeInteger(pendingPhotoCount) &&
-      Number.isSafeInteger(exclusiveLimit) &&
-      pendingPhotoCount >= 0 &&
-      pendingPhotoCount < exclusiveLimit)
+    shouldAutomaticallyRescanPhotos(pendingPhotoCount) ||
+    (quickPipelineIncomplete && Number.isSafeInteger(pendingPhotoCount) && pendingPhotoCount === 0)
   );
 }
 
 interface AutomaticPhotoScanSequenceDependencies<Result, DeepScanResult> {
   shouldRunQuickScan: boolean;
   scanPhotos: () => Promise<Result>;
-  getDeepScanCandidates: () => Promise<Array<{ id: string }>>;
+  getDeepScanCandidates: (attemptedAssetIds: readonly string[]) => Promise<Array<{ id: string }>>;
+  shouldContinue?: () => boolean;
   deepScanPhotos: (photos: Array<{ id: string }>) => Promise<DeepScanResult>;
   finalizeDeepScanQueue: () => Promise<void>;
 }
 
-/** Run an optional quick import, then drain one durable deep-scan batch. */
+/** Import new photos, then analyze each queued asset once in bounded batches. */
 export async function runAutomaticPhotoScanSequence<Result, DeepScanResult>(
   dependencies: AutomaticPhotoScanSequenceDependencies<Result, DeepScanResult>,
 ): Promise<Result | null> {
@@ -109,12 +91,26 @@ export async function runAutomaticPhotoScanSequence<Result, DeepScanResult>(
   let operationError: unknown;
 
   try {
-    if (dependencies.shouldRunQuickScan) {
+    if (dependencies.shouldRunQuickScan && dependencies.shouldContinue?.() !== false) {
       result = await dependencies.scanPhotos();
     }
-    const deepScanCandidates = await dependencies.getDeepScanCandidates();
-    if (deepScanCandidates.length > 0) {
-      await dependencies.deepScanPhotos(deepScanCandidates);
+    const attemptedAssetIds = new Set<string>();
+    while (dependencies.shouldContinue?.() !== false) {
+      const candidates = await dependencies.getDeepScanCandidates([...attemptedAssetIds]);
+      if (dependencies.shouldContinue?.() === false) {
+        break;
+      }
+      const batch: Array<{ id: string }> = [];
+      for (const candidate of candidates) {
+        if (!attemptedAssetIds.has(candidate.id)) {
+          attemptedAssetIds.add(candidate.id);
+          batch.push(candidate);
+        }
+      }
+      if (batch.length === 0) {
+        break;
+      }
+      await dependencies.deepScanPhotos(batch);
     }
   } catch (error) {
     operationFailed = true;
@@ -144,12 +140,15 @@ interface AutomaticPhotoRescanDependencies {
 
 export interface AutomaticPhotoRescanController {
   handleAppStateChange: (nextState: string) => void;
+  handlePhotoLibraryChange: () => void;
+  handleAvailabilityChange: () => void;
+  isActive: () => boolean;
   dispose: () => void;
   waitForIdle: () => Promise<void>;
 }
 
 /**
- * Coordinates one automatic rescan attempt per active app cycle.
+ * Coalesces foreground and library changes, retrying deferred checks when scans become idle.
  *
  * The lifecycle and async policy live here so a cold launch, repeated active
  * events, and a quick background/foreground round trip cannot overlap scans.
@@ -176,26 +175,31 @@ export function createAutomaticPhotoRescanController(
       return;
     }
 
+    if (!dependencies.canRun()) {
+      return;
+    }
     const cycle = activeCycle;
-    attemptedCycle = cycle;
 
     const run = (async () => {
+      const hasPermission = await dependencies.hasPhotoLibraryPermission();
+      if (disposed || currentAppState !== "active" || cycle !== activeCycle) {
+        return;
+      }
+      if (!hasPermission) {
+        attemptedCycle = cycle;
+        return;
+      }
       if (!dependencies.canRun()) {
         return;
       }
 
-      const hasPermission = await dependencies.hasPhotoLibraryPermission();
-      if (disposed || currentAppState !== "active" || cycle !== activeCycle || !hasPermission) {
-        return;
-      }
-
-      if (disposed || currentAppState !== "active" || cycle !== activeCycle || !dependencies.canRun()) {
-        return;
-      }
-
+      attemptedCycle = cycle;
       await dependencies.runAttempt();
     })()
-      .catch(reportError)
+      .catch((error) => {
+        attemptedCycle = Math.max(attemptedCycle, cycle);
+        reportError(error);
+      })
       .finally(() => {
         if (activeRun === run) {
           activeRun = null;
@@ -220,6 +224,12 @@ export function createAutomaticPhotoRescanController(
 
   return {
     handleAppStateChange,
+    handlePhotoLibraryChange: () => {
+      activeCycle++;
+      startNextEligibleAttempt();
+    },
+    handleAvailabilityChange: startNextEligibleAttempt,
+    isActive: () => !disposed && currentAppState === "active",
     dispose: () => {
       disposed = true;
     },

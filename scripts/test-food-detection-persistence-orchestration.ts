@@ -2,8 +2,14 @@
 /// <reference types="node" />
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import { runBufferedResultPersistence } from "../utils/food-detection-persistence-core.ts";
 import { runOrderedPagePipeline } from "../utils/ordered-page-pipeline-core.ts";
+import { createVisionResultPagePlan } from "../utils/vision-result-page-plan.ts";
+import { DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE } from "../utils/food-detection-buffer-core.ts";
+import type * as visitService from "../services/visit.ts";
 
 interface TestResult {
   readonly id: string;
@@ -420,6 +426,86 @@ function assertAggregateErrors(error: Error, expectedErrors: readonly Error[]): 
   assert.equal(error, persistenceError);
   assert.equal(persistenceAttempts, 1);
   assert.equal(completionCalls, 0);
+}
+
+// The production deep-scan entrypoint preserves the manual synchronization
+// default, while automatic batches can persist results and defer one final sync.
+const compiledVisitService = ts.transpileModule(
+  readFileSync(new URL("../services/visit.ts", import.meta.url), "utf8"),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText;
+
+for (const synchronizeVisitFood of [undefined, true, false]) {
+  for (const failSecondPage of [false, true]) {
+    const events: string[] = [];
+    const persistedIds: string[] = [];
+    const visionError = new Error("injected second-page Vision failure");
+    const exports: Partial<Pick<typeof visitService, "deepScanAllPhotosForFood">> = {};
+    const dependencies = new Map<string, object>([
+      [
+        "@/utils/db",
+        {
+          getEnabledFoodKeywords: async () => ["food"],
+          batchUpdatePhotosFoodDetected: async (results: ReadonlyArray<{ photoId: string }>) => {
+            persistedIds.push(...results.map((result) => result.photoId));
+            events.push("persist");
+          },
+          syncAllVisitsFoodProbable: async () => {
+            events.push("synchronize");
+          },
+        },
+      ],
+      [
+        "@/modules/batch-asset-info",
+        {
+          getVisionResultPageSize: () => 2,
+          getResolvedVisionPageOrchestrationStrategy: () => "serial",
+          isBatchAssetInfoAvailable: () => true,
+          isVisionVisitFoodValidationModeEnabled: () => false,
+          detectFoodInImageBatch: async (ids: string[]) => {
+            if (failSecondPage && ids.includes("third")) {
+              throw visionError;
+            }
+            return ids.map((id) => ({ assetId: id, containsFood: true, foodLabels: [], labels: [] }));
+          },
+        },
+      ],
+      ["@/utils/food-detection-persistence-core", { runBufferedResultPersistence }],
+      ["@/utils/food-detection-buffer-core", { DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE }],
+      ["@/utils/vision-result-page-plan", { createVisionResultPagePlan }],
+      ["@/utils/ordered-page-pipeline-core", { runOrderedPagePipeline }],
+    ]);
+    runInNewContext(compiledVisitService, {
+      exports,
+      require: (name: string) => dependencies.get(name) ?? {},
+    });
+    const { deepScanAllPhotosForFood } = exports;
+    assert.ok(deepScanAllPhotosForFood);
+    const operation = deepScanAllPhotosForFood({
+      photos: [{ id: "first" }, { id: "second" }, { id: "third" }],
+      synchronizeVisitFood,
+      onProgress: (progress) => {
+        if (progress.isComplete) {
+          events.push("complete");
+        }
+      },
+    });
+
+    if (failSecondPage) {
+      assert.equal(await captureRejection(operation), visionError);
+      assert.deepEqual(persistedIds, ["first", "second"], "a failed run must retain its successful prefix");
+    } else {
+      const result = await operation;
+      assert.equal(result.processedPhotos, 3);
+      assert.equal(result.isComplete, true);
+      assert.deepEqual(persistedIds, ["first", "second", "third"]);
+    }
+    assert.deepEqual(events, [
+      "persist",
+      ...(synchronizeVisitFood === false ? [] : ["synchronize"]),
+      ...(failSecondPage ? [] : ["complete"]),
+    ]);
+  }
 }
 
 console.log("Food detection buffered persistence orchestration tests passed.");

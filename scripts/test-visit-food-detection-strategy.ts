@@ -111,9 +111,13 @@ const automaticScanSource = readFileSync(join(repositoryRoot, "hooks/use-automat
 const automaticScanCoreSource = readFileSync(join(repositoryRoot, "utils/automatic-photo-rescan-core.ts"), "utf8");
 assert.match(automaticScanSource, /getUnscannedPhotoCount/);
 assert.match(automaticScanSource, /claimAutomaticPhotoDeepScanCandidates/);
-assert.match(automaticScanSource, /enqueueInsertedPhotosForAutomaticDeepScan: !validationModeEnabled/);
+assert.match(
+  automaticScanSource,
+  /const automaticDeepScanEnabled = !validationModeEnabled && isBatchAssetInfoAvailable\(\)/,
+);
+assert.match(automaticScanSource, /enqueueInsertedPhotosForAutomaticDeepScan: automaticDeepScanEnabled/);
 assert.match(automaticScanSource, /isVisionVisitFoodValidationModeEnabled\(\)/);
-assert.match(automaticScanCoreSource, /deepScanPhotos\(deepScanCandidates\)/);
+assert.match(automaticScanCoreSource, /deepScanPhotos\(batch\)/);
 assert.doesNotMatch(
   automaticScanSource,
   /deepScanPhotos\((?:undefined)?\)/,

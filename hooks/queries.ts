@@ -1814,7 +1814,7 @@ export type { DeepScanProgress, VisitFoodScanProgress };
  */
 export function useDeepScan(
   onProgress?: (progress: DeepScanProgress) => void,
-  mutationOptions: PhotoAnalysisMutationOptions = {},
+  mutationOptions: PhotoAnalysisMutationOptions & { synchronizeVisitFood?: boolean } = {},
 ) {
   const queryClient = useQueryClient();
   // Use ref to always call the latest callback
@@ -1827,7 +1827,11 @@ export function useDeepScan(
     mutationKey: mutationKeys.photoAnalysis,
     scope: PHOTO_ANALYSIS_MUTATION_SCOPE,
     mutationFn: (photos?: Array<{ id: string }>) =>
-      deepScanAllPhotosForFood({ photos, onProgress: (p) => onProgressRef.current?.(p) }),
+      deepScanAllPhotosForFood({
+        photos,
+        onProgress: (p) => onProgressRef.current?.(p),
+        synchronizeVisitFood: mutationOptions.synchronizeVisitFood,
+      }),
     onSettled: () => {
       if (mutationOptions.invalidateQueriesOnSettled === false) {
         return;

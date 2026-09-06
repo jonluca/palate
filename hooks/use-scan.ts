@@ -30,8 +30,6 @@ export interface UseScanReturn {
   isScanning: boolean;
   isBackgroundScanRunning: boolean;
   isComplete: boolean;
-  isError: boolean;
-  isFirstScan: boolean;
 
   // Deep scan state
   isDeepScanning: boolean;
@@ -143,116 +141,78 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
     return libraryPhotoCount !== null && libraryPhotoCount < autoDeepScanPhotoThreshold;
   }, [autoDeepScanPhotoThreshold, autoDeepScanRemainingPhotoThreshold, cameraRollCount, hasCompletedInitialScan]);
 
-  const scan = useCallback(async () => {
-    if (
-      activeScanRef.current ||
-      isStoreScanning ||
-      isBackgroundPhotoScanRunning ||
-      scanMutation.isPending ||
-      deepScanMutation.isPending
-    ) {
-      return;
-    }
-
-    if (!hasPermission) {
-      requestPermission();
-      return;
-    }
-
-    if (!startScan()) {
-      return;
-    }
-    activeScanRef.current = "scan";
-
-    try {
-      start();
-      logScanStarted();
-
-      const result = await scanMutation.mutateAsync();
-      if (await shouldAutoDeepScan()) {
-        await deepScanMutation.mutateAsync(undefined);
+  const runScan = useCallback(
+    async (mode: "scan" | "deep-scan") => {
+      if (
+        activeScanRef.current ||
+        isStoreScanning ||
+        isBackgroundPhotoScanRunning ||
+        scanMutation.isPending ||
+        deepScanMutation.isPending
+      ) {
+        return;
       }
-      const message = `Done!`;
-      complete(message);
-      completeScan(message);
-      logScanCompleted(result?.photosProcessed ?? 0, result?.visitsCreated ?? 0);
-    } catch (err) {
-      console.error("Scan error:", err);
-      const errorMessage = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
-      error(errorMessage);
-      failScan(errorMessage);
-    } finally {
-      activeScanRef.current = null;
-    }
-  }, [
-    hasPermission,
-    isStoreScanning,
-    isBackgroundPhotoScanRunning,
-    requestPermission,
-    start,
-    startScan,
-    scanMutation,
-    shouldAutoDeepScan,
-    deepScanMutation,
-    complete,
-    completeScan,
-    error,
-    failScan,
-  ]);
 
-  const deepScan = useCallback(async () => {
-    if (
-      activeScanRef.current ||
-      isStoreScanning ||
-      isBackgroundPhotoScanRunning ||
-      scanMutation.isPending ||
-      deepScanMutation.isPending
-    ) {
-      return;
-    }
+      if (!hasPermission) {
+        requestPermission();
+        return;
+      }
 
-    if (!hasPermission) {
-      requestPermission();
-      return;
-    }
+      if (!startScan()) {
+        return;
+      }
+      activeScanRef.current = mode;
 
-    if (!startScan()) {
-      return;
-    }
-    activeScanRef.current = "deep-scan";
+      try {
+        start();
+        logScanStarted();
 
-    try {
-      start();
-      logScanStarted();
+        let photosProcessed: number;
+        let resultsCreated: number;
+        if (mode === "scan") {
+          const result = await scanMutation.mutateAsync();
+          if (await shouldAutoDeepScan()) {
+            await deepScanMutation.mutateAsync(undefined);
+          }
+          photosProcessed = result?.photosProcessed ?? 0;
+          resultsCreated = result?.visitsCreated ?? 0;
+        } else {
+          const result = await deepScanMutation.mutateAsync(undefined);
+          photosProcessed = result?.processedPhotos ?? 0;
+          // Deep scan reports food detections rather than newly created visits.
+          resultsCreated = result?.foodPhotosFound ?? 0;
+        }
+        complete("Done!");
+        completeScan("Done!");
+        logScanCompleted(photosProcessed, resultsCreated);
+      } catch (err) {
+        console.error(mode === "scan" ? "Scan error:" : "Deep scan error:", err);
+        const errorMessage = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
+        error(errorMessage);
+        failScan(errorMessage);
+      } finally {
+        activeScanRef.current = null;
+      }
+    },
+    [
+      hasPermission,
+      isStoreScanning,
+      isBackgroundPhotoScanRunning,
+      requestPermission,
+      start,
+      startScan,
+      scanMutation,
+      shouldAutoDeepScan,
+      deepScanMutation,
+      complete,
+      completeScan,
+      error,
+      failScan,
+    ],
+  );
 
-      const result = await deepScanMutation.mutateAsync(undefined);
-      const message = `Done!`;
-      complete(message);
-      completeScan(message);
-      // Deep scan returns DeepScanProgress which tracks food detection, not visit creation
-      logScanCompleted(result?.processedPhotos ?? 0, result?.foodPhotosFound ?? 0);
-    } catch (err) {
-      console.error("Deep scan error:", err);
-      const errorMessage = `Error: ${err instanceof Error ? err.message : "Unknown error"}`;
-      error(errorMessage);
-      failScan(errorMessage);
-    } finally {
-      activeScanRef.current = null;
-    }
-  }, [
-    hasPermission,
-    isStoreScanning,
-    isBackgroundPhotoScanRunning,
-    requestPermission,
-    start,
-    startScan,
-    scanMutation,
-    deepScanMutation,
-    complete,
-    completeScan,
-    error,
-    failScan,
-  ]);
+  const scan = useCallback(() => runScan("scan"), [runScan]);
+  const deepScan = useCallback(() => runScan("deep-scan"), [runScan]);
 
   return {
     // Permission state
@@ -265,8 +225,6 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
     isScanning: scanMutation.isPending || (isStoreScanning && activeScanRef.current !== "deep-scan"),
     isBackgroundScanRunning: isBackgroundPhotoScanRunning,
     isComplete: scanProgress.phase === "complete",
-    isError: scanProgress.phase === "error",
-    isFirstScan: !hasCompletedInitialScan,
 
     // Deep scan state
     isDeepScanning: deepScanMutation.isPending || activeScanRef.current === "deep-scan",

@@ -6,7 +6,6 @@ import {
   useSearchAppleRestaurants,
   useSearchNearbyRestaurants,
   useConfirmedRestaurantSearch,
-  type NearbyRestaurant,
   type ConfirmedRestaurantSearchRow,
 } from "@/hooks";
 import { isMapKitSearchAvailable, type MapKitSearchResult } from "@/modules/mapkit-search";
@@ -200,7 +199,6 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
   const [activeResultSource, setActiveResultSource] = useState<"nearby" | "apple" | "google">("nearby");
   const [searchQuery, setSearchQuery] = useState("");
   const scrollViewRef = useRef<ScrollView>(null);
-  const searchInputRef = useRef<TextInput>(null);
   const googleMapsApiKey = useGoogleMapsApiKey();
   const appleMapsAvailable = isMapKitSearchAvailable();
   const { centerLat, centerLon } = visit;
@@ -325,37 +323,20 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
     return sortBySimilarity(options, sortTerm);
   }, [confirmedRestaurants, searchQuery, sortTerm]);
 
-  // Convert unified results to RestaurantOption, filter by search, and sort by similarity
+  // Filter nearby results and exclude restaurants already shown in visitedOptions.
   const nearbyOptions: RestaurantOption[] = useMemo(() => {
-    const options: RestaurantOption[] = unifiedRestaurants.map((r: NearbyRestaurant) => ({
-      id: r.id,
-      name: r.name,
-      latitude: r.latitude,
-      longitude: r.longitude,
-      distance: r.distance,
-      award: r.award,
-      cuisine: r.cuisine,
-      address: r.address,
-      source: r.source,
-    }));
-
-    // Filter by search query if provided
-    const filtered = searchQuery.trim()
-      ? options.filter((r) => {
-          const query = searchQuery.toLowerCase();
-          return (
-            r.name.toLowerCase().includes(query) ||
-            r.cuisine?.toLowerCase().includes(query) ||
-            r.address?.toLowerCase().includes(query)
-          );
-        })
-      : options;
-
-    // Exclude restaurants that are already in visitedOptions to avoid duplicates
+    const query = searchQuery.trim() ? searchQuery.toLowerCase() : "";
     const visitedIds = new Set(visitedOptions.map((v) => v.id));
-    const deduplicated = filtered.filter((r) => !visitedIds.has(r.id));
+    const filtered = unifiedRestaurants.filter(
+      (r) =>
+        !visitedIds.has(r.id) &&
+        (!query ||
+          r.name.toLowerCase().includes(query) ||
+          r.cuisine?.toLowerCase().includes(query) ||
+          r.address?.toLowerCase().includes(query)),
+    );
 
-    return sortBySimilarity(deduplicated, sortTerm);
+    return sortBySimilarity(filtered, sortTerm);
   }, [unifiedRestaurants, sortTerm, searchQuery, visitedOptions]);
 
   const michelinOptionsByName = useMemo(() => {
@@ -425,6 +406,8 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
     return sortBySimilarity(replaceSameNameWithMichelin(filtered, michelinOptionsByName), sortTerm);
   }, [googleResults, michelinOptionsByName, sortTerm, searchQuery]);
 
+  const searchOptions: typeof googleOptions = activeResultSource === "apple" ? appleOptions : googleOptions;
+
   const handleClose = () => {
     setActiveResultSource("nearby");
     setAppleResults([]);
@@ -457,7 +440,6 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
           <View className={"flex-row items-center bg-white/5 rounded-lg px-3 py-2"}>
             <IconSymbol name={"magnifyingglass"} size={18} color={"#6b7280"} />
             <TextInput
-              ref={searchInputRef}
               value={searchQuery}
               onChangeText={handleSearchQueryChange}
               placeholder={"Search restaurants..."}
@@ -621,15 +603,14 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
             </Animated.View>
           )}
 
-          {/* Apple Maps Results */}
-          {activeResultSource === "apple" && (
-            <Animated.View entering={FadeIn} className={"gap-4"}>
+          {activeResultSource !== "nearby" && (
+            <Animated.View key={activeResultSource} entering={FadeIn} className={"gap-4"}>
               <View className={"flex-row items-center gap-2"}>
                 <Pressable onPress={() => setActiveResultSource("nearby")}>
                   <IconSymbol name={"chevron.left"} size={20} color={"#6b7280"} />
                 </Pressable>
                 <ThemedText variant={"subhead"} color={"secondary"} className={"font-medium"}>
-                  Apple Maps Results
+                  {activeResultSource === "apple" ? "Apple Maps Results" : "Google Maps Results"}
                   {sortTerm && (
                     <ThemedText variant={"caption2"} color={"tertiary"}>
                       {" "}
@@ -639,13 +620,13 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
                 </ThemedText>
               </View>
 
-              {searchingApple ? (
+              {activeResultSource === "apple" && searchingApple ? (
                 <View className={"py-8 items-center gap-2"}>
                   <ThemedText variant={"body"} color={"tertiary"} className={"text-center"}>
                     Searching Apple Maps...
                   </ThemedText>
                 </View>
-              ) : appleOptions.length === 0 ? (
+              ) : searchOptions.length === 0 ? (
                 <View className={"py-8 items-center gap-2"}>
                   <ThemedText variant={"body"} color={"tertiary"} className={"text-center"}>
                     No restaurants found nearby
@@ -653,92 +634,7 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
                 </View>
               ) : (
                 <View className={"gap-3"}>
-                  {appleOptions.map((restaurant) => {
-                    const similarity = sortTerm ? calculateSimilarity(restaurant.name, sortTerm) : 0;
-                    const isLikelyMatch = similarity > 0.5;
-                    const badge = restaurant.award ? getMichelinBadge(restaurant.award) : null;
-                    return (
-                      <Pressable
-                        key={restaurant.id}
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                          onSelect(restaurant);
-                          handleClose();
-                        }}
-                      >
-                        <Card animated={false}>
-                          <View className={"p-3 gap-1"}>
-                            <View className={"flex-row items-start justify-between"}>
-                              <View className={"flex-1"}>
-                                <View className={"flex-row items-center gap-2"}>
-                                  <ThemedText variant={"subhead"} className={"font-medium"}>
-                                    {restaurant.name}
-                                  </ThemedText>
-                                  {isLikelyMatch && (
-                                    <View className={"bg-emerald-500/20 px-1.5 py-0.5 rounded"}>
-                                      <ThemedText variant={"caption2"} className={"text-emerald-400"}>
-                                        Match
-                                      </ThemedText>
-                                    </View>
-                                  )}
-                                </View>
-                                {restaurant.address && (
-                                  <ThemedText variant={"footnote"} color={"tertiary"} numberOfLines={1}>
-                                    {restaurant.address}
-                                  </ThemedText>
-                                )}
-                                {badge && (
-                                  <View className={"flex-row items-center gap-1 mt-1"}>
-                                    <ThemedText variant={"caption1"}>{badge.emoji}</ThemedText>
-                                    <ThemedText variant={"caption2"} color={"secondary"}>
-                                      {badge.label}
-                                    </ThemedText>
-                                  </View>
-                                )}
-                              </View>
-                              {restaurant.distance !== undefined && (
-                                <ThemedText variant={"footnote"} color={"tertiary"}>
-                                  {formatDistance(restaurant.distance)}
-                                </ThemedText>
-                              )}
-                            </View>
-                          </View>
-                        </Card>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-            </Animated.View>
-          )}
-
-          {/* Google Results */}
-          {activeResultSource === "google" && (
-            <Animated.View entering={FadeIn} className={"gap-4"}>
-              <View className={"flex-row items-center gap-2"}>
-                <Pressable onPress={() => setActiveResultSource("nearby")}>
-                  <IconSymbol name={"chevron.left"} size={20} color={"#6b7280"} />
-                </Pressable>
-                <ThemedText variant={"subhead"} color={"secondary"} className={"font-medium"}>
-                  Google Maps Results
-                  {sortTerm && (
-                    <ThemedText variant={"caption2"} color={"tertiary"}>
-                      {" "}
-                      (sorted by match)
-                    </ThemedText>
-                  )}
-                </ThemedText>
-              </View>
-
-              {googleOptions.length === 0 ? (
-                <View className={"py-8 items-center gap-2"}>
-                  <ThemedText variant={"body"} color={"tertiary"} className={"text-center"}>
-                    No restaurants found nearby
-                  </ThemedText>
-                </View>
-              ) : (
-                <View className={"gap-3"}>
-                  {googleOptions.map((restaurant) => {
+                  {searchOptions.map((restaurant) => {
                     const similarity = sortTerm ? calculateSimilarity(restaurant.name, sortTerm) : 0;
                     const isLikelyMatch = similarity > 0.5;
                     const priceString = formatPriceLevel(restaurant.priceLevel);
@@ -782,23 +678,31 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
                                   </View>
                                 )}
                               </View>
-                              <View className={"items-end"}>
-                                {restaurant.rating !== undefined && (
-                                  <View className={"flex-row items-center gap-1"}>
-                                    <ThemedText variant={"footnote"} className={"text-amber-400"}>
-                                      ★
-                                    </ThemedText>
-                                    <ThemedText variant={"footnote"} color={"secondary"}>
-                                      {restaurant.rating.toFixed(1)}
-                                    </ThemedText>
-                                  </View>
-                                )}
-                                {priceString && (
-                                  <ThemedText variant={"caption2"} color={"tertiary"}>
-                                    {priceString}
+                              {activeResultSource === "apple" ? (
+                                restaurant.distance !== undefined && (
+                                  <ThemedText variant={"footnote"} color={"tertiary"}>
+                                    {formatDistance(restaurant.distance)}
                                   </ThemedText>
-                                )}
-                              </View>
+                                )
+                              ) : (
+                                <View className={"items-end"}>
+                                  {restaurant.rating !== undefined && (
+                                    <View className={"flex-row items-center gap-1"}>
+                                      <ThemedText variant={"footnote"} className={"text-amber-400"}>
+                                        ★
+                                      </ThemedText>
+                                      <ThemedText variant={"footnote"} color={"secondary"}>
+                                        {restaurant.rating.toFixed(1)}
+                                      </ThemedText>
+                                    </View>
+                                  )}
+                                  {priceString && (
+                                    <ThemedText variant={"caption2"} color={"tertiary"}>
+                                      {priceString}
+                                    </ThemedText>
+                                  )}
+                                </View>
+                              )}
                             </View>
                           </View>
                         </Card>

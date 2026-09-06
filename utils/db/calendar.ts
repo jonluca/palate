@@ -150,19 +150,6 @@ export async function batchUpdateVisitsCalendarEvents(updates: CalendarEventUpda
 }
 
 /**
- * Get visits that don't have calendar event data yet.
- * Used for enriching visits with calendar metadata.
- */
-export async function getVisitsWithoutCalendarData(): Promise<
-  Array<{ id: string; startTime: number; endTime: number }>
-> {
-  const database = await getDatabase();
-  return database.getAllAsync<{ id: string; startTime: number; endTime: number }>(
-    `SELECT id, startTime, endTime FROM visits WHERE calendarEventId IS NULL ORDER BY startTime DESC`,
-  );
-}
-
-/**
  * Loads every visit and the only suggestion fields used by Calendar matching
  * in one SQLite statement and one consistent read snapshot.
  */

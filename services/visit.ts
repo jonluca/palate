@@ -702,13 +702,13 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
       return { items: pageItems, detectionResults };
     },
     consume: async ({ items: pageItems, detectionResults }, page) => {
-      const itemMap = new Map(pageItems.map((item) => [item.id, item]));
+      const requestedAssetIds = new Set(pageItems.map((item) => item.id));
       const batchResults: FoodBatchResult[] = [];
       const returnedAssetIds = new Set<string>();
       for (const result of detectionResults) {
         // Never turn a PhotoKit/Vision failure into a permanent "not food" result.
         // Failed or missing assets remain unanalyzed and can be retried later.
-        if (!itemMap.has(result.assetId)) {
+        if (!requestedAssetIds.has(result.assetId)) {
           continue;
         }
         returnedAssetIds.add(result.assetId);
@@ -773,6 +773,7 @@ async function processFoodDetectionBatchesWithBufferedPersistence<T extends Food
   onBatchComplete?: (processed: number, foodFound: number, retryableFailures: number) => void,
   foodKeywords?: string[],
   onBatchResults?: (batchResults: FoodBatchResult[]) => void | Promise<void>,
+  synchronizeVisitFood: boolean = true,
 ): Promise<{ foodFoundCount: number; failedCount: number }> {
   let deferredTerminalProgress: [processed: number, foodFound: number, retryableFailures: number] | undefined;
 
@@ -780,7 +781,7 @@ async function processFoodDetectionBatchesWithBufferedPersistence<T extends Food
     maximumPageSize: FOOD_DETECTION_BATCH_SIZE,
     persistenceFlushSize: DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE,
     persist: batchUpdatePhotosFoodDetected,
-    synchronize: syncAllVisitsFoodProbable,
+    synchronize: synchronizeVisitFood === false ? undefined : syncAllVisitsFoodProbable,
     process: async (appendResults) => {
       const { foodFoundCount, failedCount } = await processFoodDetectionBatches(
         items,
@@ -1412,6 +1413,8 @@ export interface DeepScanOptions {
   confidenceThreshold?: number;
   onProgress?: (progress: DeepScanProgress) => void;
   photos?: Array<{ id: string }>;
+  /** A caller that defers synchronization must reconcile visits after persisting its complete run. */
+  synchronizeVisitFood?: boolean;
 }
 
 function adaptVisitFoodProgressToDeepScan(progress: FoodDetectionProgress): DeepScanProgress {
@@ -1433,7 +1436,7 @@ function adaptVisitFoodProgressToDeepScan(progress: FoodDetectionProgress): Deep
  * Photos are processed in deterministic order (by creationTime, then id).
  */
 export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): Promise<DeepScanProgress> {
-  const { confidenceThreshold = 0.3, onProgress, photos } = options;
+  const { confidenceThreshold = 0.3, onProgress, photos, synchronizeVisitFood = true } = options;
 
   if (isVisionVisitFoodValidationModeEnabled()) {
     const visitFoodProgress = await detectFoodInVisits({
@@ -1487,6 +1490,9 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
       // Spread to create new object reference so React detects the change
       onProgress?.({ ...progress });
     },
+    undefined,
+    undefined,
+    synchronizeVisitFood,
   );
 
   progress.foodPhotosFound = foodFoundCount;

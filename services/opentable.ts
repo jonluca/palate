@@ -598,9 +598,8 @@ function summarizeOpenTableReservationForLog(reservation: ImportableReservation)
   };
 }
 
-function normalizeOpenTableCandidate(rawReservation: JsonValue): ImportableReservation | null {
-  const record = asRecord(rawReservation);
-  if (!record || isCanceledReservation(record)) {
+function normalizeOpenTableCandidate(record: JsonRecord): ImportableReservation | null {
+  if (isCanceledReservation(record)) {
     return null;
   }
 
@@ -723,24 +722,9 @@ function normalizeOpenTableCandidate(rawReservation: JsonValue): ImportableReser
   };
 }
 
-function looksLikeReservationCandidate(value: JsonValue): boolean {
-  const record = asRecord(value);
-  if (!record) {
-    return false;
-  }
-
-  const restaurant = getRestaurantRecord(record);
-  const startTime = parseOpenTableStartTime(record);
-  return Boolean(
-    getRestaurantName(record, restaurant) &&
-    startTime !== null &&
-    startTime <= Date.now() &&
-    !isCanceledReservation(record),
-  );
-}
-
-function collectReservationCandidates(payload: JsonValue): JsonValue[] {
-  const candidates: JsonValue[] = [];
+export function normalizeOpenTableVisitHistory(payload: JsonValue): NormalizedReservationHistory {
+  const reservationsBySourceEventId = new Map<string, ImportableReservation>();
+  let fetchedCount = 0;
   const stack: JsonValue[] = [payload];
   const seen = new Set<JsonRecord | JsonValue[]>();
 
@@ -770,8 +754,10 @@ function collectReservationCandidates(payload: JsonValue): JsonValue[] {
     }
     seen.add(record);
 
-    if (looksLikeReservationCandidate(record)) {
-      candidates.push(record);
+    const reservation = normalizeOpenTableCandidate(record);
+    if (reservation) {
+      fetchedCount += 1;
+      reservationsBySourceEventId.set(reservation.sourceEventId, reservation);
       continue;
     }
 
@@ -782,40 +768,23 @@ function collectReservationCandidates(payload: JsonValue): JsonValue[] {
     }
   }
 
-  return candidates;
-}
-
-export function normalizeOpenTableVisitHistory(payload: JsonValue): NormalizedReservationHistory {
-  const rawReservations = collectReservationCandidates(payload);
-  const reservationsBySourceEventId = new Map<string, ImportableReservation>();
-  let invalidCount = 0;
-
-  for (const rawReservation of rawReservations) {
-    const normalized = normalizeOpenTableCandidate(rawReservation);
-    if (normalized) {
-      reservationsBySourceEventId.set(normalized.sourceEventId, normalized);
-    } else {
-      invalidCount += 1;
-    }
-  }
-
   const reservations = Array.from(reservationsBySourceEventId.values()).sort((a, b) => b.startTime - a.startTime);
 
   if (__DEV__) {
     console.info("[OpenTableImport] Normalized history", {
       payload: describeOpenTablePayloadForLog(payload),
       topLevelReservations: summarizeOpenTableTopLevelReservationsForLog(payload),
-      rawCandidateCount: rawReservations.length,
+      rawCandidateCount: fetchedCount,
       normalizedCount: reservations.length,
-      invalidCandidateCount: invalidCount,
-      duplicateCandidateCount: Math.max(0, rawReservations.length - invalidCount - reservations.length),
+      invalidCandidateCount: 0,
+      duplicateCandidateCount: fetchedCount - reservations.length,
       normalizedSample: reservations.slice(0, OPENTABLE_DEBUG_SAMPLE_SIZE).map(summarizeOpenTableReservationForLog),
     });
   }
 
   return {
     reservations,
-    fetchedCount: rawReservations.length,
-    invalidCount,
+    fetchedCount,
+    invalidCount: 0,
   };
 }

@@ -23,13 +23,19 @@ export const COUNT_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL = `
   WHERE photo.foodDetected IS NULL
 `;
 
+/** Bind the batch limit as ?1 and this run's already-attempted ID JSON array as ?2. */
 export const GET_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL = `
   SELECT photo.id
   FROM ${AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE} AS queue
   INNER JOIN photos AS photo ON photo.id = queue.assetId
   WHERE photo.foodDetected IS NULL
+    AND queue.assetId NOT IN (
+      SELECT CAST(value AS TEXT)
+      FROM json_each(?2)
+      WHERE type = 'text'
+    )
   ORDER BY queue.attemptCount ASC, photo.creationTime ASC, photo.id ASC
-  LIMIT ?
+  LIMIT ?1
 `;
 
 export const MARK_AUTOMATIC_PHOTO_DEEP_SCAN_ATTEMPTS_SQL = `
