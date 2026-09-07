@@ -4,7 +4,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 import { hasVisitPhotosForSpatialWork } from "../utils/visit-photo-spatial-work.ts";
+import { calculateVisitPhotoCentroid } from "../utils/visit-photo-centroid-core.ts";
+import * as proximity from "../utils/visit-photo-proximity-core.ts";
 
 interface Counters {
   calls: number;
@@ -113,6 +117,129 @@ assert.ok(databaseIndex > spatialGateIndex, "the empty-photo return must precede
 assert.ok(guideIndexBuildIndex > databaseIndex, "the direct scan guide index must be built only after the photo gate");
 assert.doesNotMatch(visitPhotosSource, /photoCounts,\s*photos,\s*restaurantLocationIndex/);
 
+const compiledService = ts.transpileModule(`${serviceSource}\nexports.visitPhotos = visitPhotos;`, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText;
+
+for (const interruption of ["count-update", "progress"] as const) {
+  const interruptionError = new Error(`injected ${interruption} interruption`);
+  const countRepairError = new Error("injected count repair failure");
+  const assignedPhotoIds = new Set<string>();
+  const persistedVisits = new Map<string, { id: string; photoCount: number }>();
+  const libraryPhotos = [
+    { id: "first", creationTime: 1_700_000_000_000, latitude: 37, longitude: -122 },
+    { id: "second", creationTime: 1_700_000_060_000, latitude: 37, longitude: -122 },
+  ];
+  let failCountUpdate = interruption === "count-update";
+  let failRepair = false;
+  let indexLoads = 0;
+  let completeNotifications = 0;
+  const database = {
+    getMichelinRestaurantCount: async () => 1_000,
+    getImportedMichelinDatasetVersion: async () => "test-guide",
+    recomputeSuggestedRestaurantsIfNeeded: async () => undefined,
+    getVisitablePhotoCounts: async () => ({ total: libraryPhotos.length, visited: assignedPhotoIds.size }),
+    getUnvisitedPhotos: async () => libraryPhotos.filter((photo) => !assignedPhotoIds.has(photo.id)),
+    getDatabase: async () => ({}),
+    insertVisits: async (visits: Array<{ id: string }>) => {
+      for (const visit of visits) {
+        persistedVisits.set(visit.id, { id: visit.id, photoCount: 0 });
+      }
+    },
+    batchUpdatePhotoVisits: async (updates: Array<{ photoIds: string[] }>) => {
+      for (const update of updates) {
+        for (const photoId of update.photoIds) {
+          assignedPhotoIds.add(photoId);
+        }
+      }
+    },
+    batchUpdateVisitPhotoCounts: async () => {
+      if (failRepair) {
+        throw countRepairError;
+      }
+      if (failCountUpdate) {
+        failCountUpdate = false;
+        throw interruptionError;
+      }
+      for (const visit of persistedVisits.values()) {
+        visit.photoCount = assignedPhotoIds.size;
+      }
+    },
+  };
+  const dependencies = new Map<string, object>([
+    ["@/utils/db", database],
+    ["./michelin", { getMichelinDatasetVersion: () => "test-guide" }],
+    ["@/modules/batch-asset-info", { getVisionResultPageSize: () => 24 }],
+    ["@/utils/visit-photo-spatial-work", { hasVisitPhotosForSpatialWork }],
+    ["@/utils/visit-photo-centroid-core", { calculateVisitPhotoCentroid }],
+    ["@/utils/visit-photo-proximity-core", proximity],
+    [
+      "@/utils/db/michelin-index",
+      {
+        MICHELIN_PRIMARY_MATCH_RADIUS_METERS: 100,
+        MICHELIN_SUGGESTION_RADIUS_METERS: 500,
+        ensureRestaurantLocationIndex: async () => {
+          indexLoads++;
+          return { findNearby: () => [] };
+        },
+      },
+    ],
+  ]);
+  interface VisitProgress {
+    phase: string;
+    visitedPhotos: number;
+    visitsCreated: number;
+    isComplete: boolean;
+  }
+  interface VisitServiceExports {
+    visitPhotos?: (options?: { onProgress?: (progress: VisitProgress) => void }) => Promise<VisitProgress>;
+  }
+  const exports: VisitServiceExports = {};
+  runInNewContext(compiledService, {
+    exports,
+    require: (name: string) => dependencies.get(name) ?? {},
+    __DEV__: false,
+    console,
+  });
+  assert.ok(exports.visitPhotos);
+  const visitPhotos = exports.visitPhotos;
+  await assert.rejects(
+    visitPhotos({
+      onProgress: (progress) => {
+        if (interruption === "progress" && progress.phase === "saving-visits" && progress.visitedPhotos > 0) {
+          throw interruptionError;
+        }
+      },
+    }),
+    (error) => error === interruptionError,
+  );
+  assert.equal(assignedPhotoIds.size, 2, "the failed run already committed all photo assignments");
+  assert.deepEqual(
+    [...persistedVisits.values()].map((visit) => visit.photoCount),
+    [0],
+  );
+
+  const onProgress = (progress: VisitProgress) => {
+    if (progress.isComplete) {
+      completeNotifications++;
+    }
+  };
+  failRepair = true;
+  await assert.rejects(visitPhotos({ onProgress }), (error) => error === countRepairError);
+  assert.equal(completeNotifications, 0, "a failed repair must not report a completed grouping phase");
+  failRepair = false;
+  const result = await visitPhotos({ onProgress });
+  assert.equal(result.visitsCreated, 0, "recovery must reuse the committed visit");
+  assert.equal(result.visitedPhotos, 2);
+  assert.equal(result.isComplete, true);
+  assert.equal(completeNotifications, 1);
+  assert.deepEqual(
+    [...persistedVisits.values()].map((visit) => visit.photoCount),
+    [2],
+  );
+  assert.equal(indexLoads, 1, "summary recovery must not load the spatial index without new photos");
+}
+
 console.log(
-  "Visit photo spatial-work tests passed: empty work loads 0 direct scan guide rows, non-empty output parity, failure propagation, validation, and version-preflight ordering.",
+  "Visit photo spatial-work tests passed: empty work loads 0 direct scan guide rows, non-empty output parity, interrupted count-refresh recovery, failure propagation, validation, and version-preflight ordering.",
 );

@@ -599,10 +599,6 @@ function summarizeOpenTableReservationForLog(reservation: ImportableReservation)
 }
 
 function normalizeOpenTableCandidate(record: JsonRecord): ImportableReservation | null {
-  if (isCanceledReservation(record)) {
-    return null;
-  }
-
   const restaurant = getRestaurantRecord(record);
   const restaurantName = getRestaurantName(record, restaurant);
   const startTime = parseOpenTableStartTime(record);
@@ -753,6 +749,12 @@ export function normalizeOpenTableVisitHistory(payload: JsonValue): NormalizedRe
       continue;
     }
     seen.add(record);
+
+    // Cancellation applies to the whole booking. Descending into its children
+    // would lose the parent's status and rediscover it as an active reservation.
+    if (isCanceledReservation(record)) {
+      continue;
+    }
 
     const reservation = normalizeOpenTableCandidate(record);
     if (reservation) {

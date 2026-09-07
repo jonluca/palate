@@ -239,8 +239,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
         AND TRIM(COALESCE(m.location, '')) != '' 
         ${yearFilterForV}
       GROUP BY LOWER(TRIM(m.location))
-      ORDER BY visits DESC
-      LIMIT 10`,
+      ORDER BY visits DESC`,
       yearParameters,
     ),
     // Top restaurant coordinates for map markers
@@ -352,7 +351,9 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
   if (firstVisit && totalConfirmedVisits) {
     const firstDate = new Date(firstVisit.startTime);
     const now = new Date();
-    const monthsDiff = (now.getFullYear() - firstDate.getFullYear()) * 12 + (now.getMonth() - firstDate.getMonth()) + 1;
+    const periodEnd = year && year < now.getFullYear() ? new Date(year, 11, 31) : now;
+    const monthsDiff =
+      (periodEnd.getFullYear() - firstDate.getFullYear()) * 12 + (periodEnd.getMonth() - firstDate.getMonth()) + 1;
     averageVisitsPerMonth = monthsDiff > 0 ? totalConfirmedVisits.count / monthsDiff : totalConfirmedVisits.count;
   }
 
@@ -366,13 +367,15 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     const country = parts.length > 1 ? parts[parts.length - 1] : "";
     return { city, country };
   };
+  const cityLocationKey = (city: string, country: string) =>
+    JSON.stringify([city.toLowerCase().trim(), country.toLowerCase().trim()]);
 
   const cityVisitsMap = new Map<string, { city: string; country: string; visits: number }>();
   for (const loc of topLocationsData) {
     // Location format is typically "City, Region/Country" or "City, Country"
     const { city, country } = parseLocationParts(loc.location);
-    // Normalize city key for deduplication (lowercase, trimmed)
-    const cityKey = city.toLowerCase().trim();
+    // Country keeps same-named cities distinct while location variants merge.
+    const cityKey = cityLocationKey(city, country);
 
     const existing = cityVisitsMap.get(cityKey);
     if (existing) {
@@ -422,7 +425,7 @@ export async function getWrappedStats(year?: number | null): Promise<WrappedStat
     }
     const { city, country } = parseLocationParts(loc.location);
     if (city) {
-      uniqueCitiesSet.add(normalizeLocation(city));
+      uniqueCitiesSet.add(cityLocationKey(city, country));
     }
     if (country) {
       uniqueCountriesSet.add(normalizeLocation(country));

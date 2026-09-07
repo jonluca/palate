@@ -2243,16 +2243,10 @@ export function useAddPhotosToVisit(visitId: string | undefined) {
       // Move the photos to this visit
       return movePhotosToVisit(existingPhotoIds, visitId);
     },
-    onSettled: (_result, _error, _vars) => {
-      void invalidateVisitListPageQueries(queryClient);
-      // Invalidate visit detail query for this visit
-      if (visitId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId) });
-      }
-      // Also invalidate any affected source visits and general queries
+    onSettled: () => {
+      // Moving photos changes both visits, their time ranges, and restaurant previews.
       invalidateVisitQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      return invalidateVisitStatusQueries(queryClient);
     },
   });
 }
@@ -2271,16 +2265,10 @@ export function useRemovePhotosFromVisit(visitId: string | undefined) {
       }
       return removePhotosFromVisit(photoIds, visitId);
     },
-    onSettled: (_result, _error, _vars) => {
-      void invalidateVisitListPageQueries(queryClient);
-      // Invalidate visit detail query for this visit
-      if (visitId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.visitDetail(visitId) });
-      }
-      // Also invalidate general queries
+    onSettled: () => {
+      // Restaurant history and home previews also depend on visit photo ownership.
       invalidateVisitQueries(queryClient);
-      queryClient.invalidateQueries({ queryKey: queryKeys.stats });
-      queryClient.invalidateQueries({ queryKey: ["wrapped"] });
+      return invalidateVisitStatusQueries(queryClient);
     },
   });
 }

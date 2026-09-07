@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { View, TextInput, Pressable, Keyboard } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import { IconSymbol } from "@/components/icon-symbol";
@@ -8,13 +8,16 @@ import * as Haptics from "expo-haptics";
 
 interface NotesCardProps {
   notes: string | null;
-  onSave: (notes: string | null) => void;
+  onSave: (notes: string | null) => Promise<void>;
   isSaving?: boolean;
 }
 
 export function NotesCard({ notes, onSave, isSaving = false }: NotesCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedNotes, setEditedNotes] = useState(notes ?? "");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const saveInFlight = useRef(false);
+  const saving = isSaving || isSubmitting;
 
   const handleEdit = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -28,13 +31,24 @@ export function NotesCard({ notes, onSave, isSaving = false }: NotesCardProps) {
     setEditedNotes(notes ?? "");
   }, [notes]);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
+    if (saveInFlight.current || isSaving) {
+      return;
+    }
+    saveInFlight.current = true;
+    setIsSubmitting(true);
     Keyboard.dismiss();
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const trimmedNotes = editedNotes.trim();
-    onSave(trimmedNotes || null);
-    setIsEditing(false);
-  }, [editedNotes, onSave]);
+    try {
+      await onSave(trimmedNotes || null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setIsEditing(false);
+    } catch {
+      // The caller reports the failure; retain the draft so the user can retry.
+    }
+    saveInFlight.current = false;
+    setIsSubmitting(false);
+  }, [editedNotes, isSaving, onSave]);
 
   const hasNotes = notes && notes.trim().length > 0;
   const hasChanges = editedNotes.trim() !== (notes ?? "").trim();
@@ -58,6 +72,7 @@ export function NotesCard({ notes, onSave, isSaving = false }: NotesCardProps) {
             placeholder={"Add notes about this visit..."}
             placeholderTextColor={"#6b7280"}
             multiline
+            editable={!saving}
             autoFocus
             className={"bg-black/20 rounded-lg p-3 text-white min-h-[100px] text-base"}
             style={{ textAlignVertical: "top" }}
@@ -66,6 +81,7 @@ export function NotesCard({ notes, onSave, isSaving = false }: NotesCardProps) {
           <View className={"flex-row gap-2"}>
             <Pressable
               onPress={handleCancel}
+              disabled={saving}
               className={"flex-1 py-2.5 rounded-lg bg-white/10 items-center justify-center"}
             >
               <ThemedText variant={"subhead"} color={"secondary"}>
@@ -74,7 +90,7 @@ export function NotesCard({ notes, onSave, isSaving = false }: NotesCardProps) {
             </Pressable>
             <Pressable
               onPress={handleSave}
-              disabled={isSaving || !hasChanges}
+              disabled={saving || !hasChanges}
               className={`flex-1 py-2.5 rounded-lg items-center justify-center ${
                 hasChanges ? "bg-amber-500" : "bg-amber-500/50"
               }`}
@@ -83,7 +99,7 @@ export function NotesCard({ notes, onSave, isSaving = false }: NotesCardProps) {
                 variant={"subhead"}
                 className={`font-semibold ${hasChanges ? "text-black" : "text-black/50"}`}
               >
-                {isSaving ? "Saving..." : "Save"}
+                {saving ? "Saving..." : "Save"}
               </ThemedText>
             </Pressable>
           </View>

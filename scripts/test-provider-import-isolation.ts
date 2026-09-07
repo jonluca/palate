@@ -131,6 +131,19 @@ assert.equal(imported.importedCount, 2);
 assert.equal(service.calls.inserted.length, 2);
 assert.equal(service.calls.globalMergeReads, 0, "An import must not scan unrelated confirmed visits for merging");
 assert.equal(service.calls.globalMerges, 0, "An import must not merge unrelated confirmed visits");
+const locationsService = loadService();
+const importedLocations = await locationsService.importHistory([lunch, otherLocation], options);
+assert.equal(importedLocations.importedCount, 2, "Same-name restaurants with different provider IDs both import");
+assert.equal(importedLocations.skippedDuplicateCount, 0);
+assert.deepEqual(
+  locationsService.calls.inserted.map((visit) => visit.restaurant.id).sort(),
+  [lunch.restaurantId, otherLocation.restaurantId].sort(),
+);
+const copiesService = loadService();
+const importedCopies = await copiesService.importHistory([lunch, richerLunch], options);
+assert.equal(importedCopies.importedCount, 1, "Copies of the same restaurant reservation still deduplicate");
+assert.equal(importedCopies.skippedDuplicateCount, 1);
+assert.equal(copiesService.calls.inserted[0]?.sourceEventId, richerLunch.sourceEventId);
 await service.importHistory([], options);
 assert.equal(service.calls.globalMergeReads, 0, "An empty import must leave existing visit history alone");
 

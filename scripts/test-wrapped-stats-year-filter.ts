@@ -22,6 +22,71 @@ const timeZones = [
 const selectedYears = [1969, 1970, 2006, 2024, 2025, 2026];
 
 async function testCurrentTimeZone(): Promise<void> {
+  const averageDatabase = createWrappedStatsYearFilterDatabase();
+  try {
+    averageDatabase.prepare("INSERT INTO restaurants VALUES (?, ?, ?, ?)").run("r", "Restaurant", 0, 0);
+    const selectedYear = new Date().getFullYear() - 2;
+    const insertVisit = averageDatabase.prepare("INSERT INTO visits VALUES (?, ?, ?, ?, ?, ?)");
+    for (let month = 0; month < 12; month++) {
+      for (let visit = 0; visit < 2; visit++) {
+        insertVisit.run(
+          `past-${month}-${visit}`,
+          "r",
+          "confirmed",
+          new Date(selectedYear, month, 15).getTime(),
+          0,
+          null,
+        );
+      }
+    }
+    const harness = createWrappedStatsYearFilterHarness(averageDatabase, "indexed");
+    const stats = await harness.getWrappedStats(selectedYear);
+    assert.equal(stats.averageVisitsPerMonth, 2, "a past year's monthly average ends in that year, not today");
+    const monthsSinceFirstVisit = (new Date().getFullYear() - selectedYear) * 12 + new Date().getMonth() + 1;
+    assert.equal(
+      (await harness.getWrappedStats()).averageVisitsPerMonth,
+      Math.round((24 / monthsSinceFirstVisit) * 10) / 10,
+    );
+  } finally {
+    averageDatabase.close();
+  }
+
+  const locationsDatabase = createWrappedStatsYearFilterDatabase();
+  try {
+    const insertRestaurant = locationsDatabase.prepare("INSERT INTO restaurants VALUES (?, ?, ?, ?)");
+    const insertMichelin = locationsDatabase.prepare("INSERT INTO michelin_restaurants VALUES (?, ?, ?, ?, ?)");
+    const insertVisit = locationsDatabase.prepare("INSERT INTO visits VALUES (?, ?, ?, ?, ?, ?)");
+    const locations = [
+      ...Array.from({ length: 9 }, (_, index) => ({ location: `City ${index}, Country`, count: 5 })),
+      { location: "San Francisco, California, United States", count: 3 },
+      { location: "San Francisco, United States", count: 3 },
+      { location: "London, United Kingdom", count: 1 },
+      { location: "London, Canada", count: 1 },
+    ];
+    for (const [index, { location, count }] of locations.entries()) {
+      const id = `location-${index}`;
+      insertRestaurant.run(id, id, 0, 0);
+      insertMichelin.run(id, id, location, "", "Selected");
+      for (let visit = 0; visit < count; visit++) {
+        insertVisit.run(`${id}-${visit}`, id, "confirmed", new Date(2024, 5, 15).getTime(), 0, null);
+      }
+    }
+    const harness = createWrappedStatsYearFilterHarness(locationsDatabase, "indexed");
+    const stats = await harness.getWrappedStats();
+    assert.equal(stats.topLocations[0]?.city, "San Francisco", "rank cities after combining all location variants");
+    assert.equal(stats.topLocations[0]?.visits, 6);
+    assert.equal(stats.topLocations.length, 10);
+    assert.equal(stats.uniqueCities, 12, "same-named cities in different countries are distinct");
+    locationsDatabase.exec("DELETE FROM visits WHERE restaurantId NOT IN ('location-11', 'location-12')");
+    const londonStats = await harness.getWrappedStats();
+    assert.equal(londonStats.topLocations.length, 2);
+    assert.equal(londonStats.topLocations[0]?.visits, 1);
+    assert.equal(londonStats.topLocations[1]?.visits, 1);
+    assert.equal(new Set(londonStats.topLocations.map((location) => location.country)).size, 2);
+  } finally {
+    locationsDatabase.close();
+  }
+
   const database = createWrappedStatsYearFilterDatabase();
   try {
     const indexed = createWrappedStatsYearFilterHarness(database, "indexed");

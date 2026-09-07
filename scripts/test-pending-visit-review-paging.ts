@@ -5,7 +5,14 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue, type SQLOutputValue } from "node:sqlite";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+import * as reviewCore from "../utils/db/visit-review-core.ts";
+import * as pagingCore from "../utils/db/visit-review-paging-core.ts";
+import * as quickActionsCore from "../utils/db/quick-actions-core.ts";
+import * as restaurantMatching from "../utils/restaurant-name-matching.ts";
+import type { getPendingVisitReviewFirstPage } from "../utils/db/visit-review.ts";
 import { PENDING_VISITS_FOR_REVIEW_SQL, type PendingVisitReviewQueryRow } from "../utils/db/visit-review-core.ts";
 import {
   DEFAULT_PENDING_VISIT_REVIEW_PAGE_SIZE,
@@ -1056,6 +1063,81 @@ try {
   snapshotReader.close();
   snapshotWriter.close();
   rmSync(snapshotDirectory, { recursive: true, force: true });
+}
+
+const compiledReview = ts.transpileModule(
+  readFileSync(new URL("../utils/db/visit-review.ts", import.meta.url), "utf8"),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText;
+
+interface ReviewApi {
+  getPendingVisitReviewFirstPage: typeof getPendingVisitReviewFirstPage;
+}
+
+// A first-page query can reject asynchronously after the manifest succeeds.
+// Exercise the production wrapper so that its legacy fallback remains usable.
+for (const hydrationFailure of [false, true]) {
+  const database = createDatabase();
+  try {
+    const statements = fixtureStatements(database);
+    insertVisit(statements, { id: "first", startTime: 2_000, foodProbable: 0 });
+    insertVisit(statements, { id: "second", startTime: 1_000, foodProbable: 0 });
+    const counts = { pages: 0, fallbackQueries: 0, warnings: 0 };
+    const adapter = {
+      async getFirstAsync(sql: string) {
+        return database.prepare(sql).get() ?? null;
+      },
+      async getAllAsync(sql: string, values: string | readonly SQLInputValue[] = []) {
+        if (sql === PENDING_VISIT_REVIEW_PAGE_SQL) {
+          counts.pages++;
+          if (hydrationFailure) {
+            throw new Error("injected first-page query failure");
+          }
+        }
+        if (sql === PENDING_VISITS_FOR_REVIEW_SQL) {
+          counts.fallbackQueries++;
+        }
+        return database.prepare(sql).all(...(Array.isArray(values) ? values : [values]));
+      },
+    };
+    const modules = new Map<string, object>([
+      ["./core", { DEBUG_TIMING: false, getDatabase: async () => adapter }],
+      ["../restaurant-name-matching", restaurantMatching],
+      ["./quick-actions-core", quickActionsCore],
+      ["./visit-review-core", reviewCore],
+      ["./visit-review-paging-core", pagingCore],
+    ]);
+    const exports: Partial<ReviewApi> = {};
+    runInNewContext(compiledReview, {
+      exports,
+      console: { warn: () => counts.warnings++ },
+      require: (name: string) => {
+        const module = modules.get(name);
+        assert.ok(module, `unexpected production review dependency: ${name}`);
+        return module;
+      },
+    });
+    assert.ok(exports.getPendingVisitReviewFirstPage);
+    const page = await exports.getPendingVisitReviewFirstPage({ food: "off", restaurantMatches: "off" }, 1);
+    assert.equal(counts.pages, 1);
+    if (!hydrationFailure) {
+      assert.equal(page.manifest?.strategy, "progressive");
+      assert.equal(page.visits.length, 1);
+      assert.equal(counts.fallbackQueries, 0);
+      assert.equal(counts.warnings, 0);
+    } else {
+      assert.equal(page.manifest?.strategy, "legacy-fallback");
+      assert.deepEqual(
+        Array.from(page.visits, (visit) => visit.id),
+        ["first", "second"],
+      );
+      assert.equal(page.visits[0]?.foodProbable, false);
+      assert.equal(counts.fallbackQueries, 1);
+      assert.equal(counts.warnings, 1);
+    }
+  } finally {
+    database.close();
+  }
 }
 
 const hooksSource = readFileSync(new URL("../hooks/queries.ts", import.meta.url), "utf8");

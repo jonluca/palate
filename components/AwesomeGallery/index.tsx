@@ -23,6 +23,10 @@ function renderDefaultImage<T>({ item, index, setImageDimensions }: RenderItemIn
   return <DefaultImage item={item} index={index} setImageDimensions={setImageDimensions} />;
 }
 
+function normalizeIndex(index: number, length: number): number {
+  return Number.isFinite(index) ? Math.max(0, Math.min(Math.trunc(index), length - 1)) : 0;
+}
+
 const GalleryComponent = <T = string,>(
   {
     data,
@@ -56,7 +60,8 @@ const GalleryComponent = <T = string,>(
 
   const isLoop = loop && data?.length > 1;
 
-  const [index, setIndex] = useState(initialIndex);
+  const boundedInitialIndex = normalizeIndex(initialIndex, data.length);
+  const [index, setIndex] = useState(boundedInitialIndex);
 
   const refs = useRef<ItemRef[]>([]);
 
@@ -64,9 +69,9 @@ const GalleryComponent = <T = string,>(
     refs.current[itemIndex] = value;
   }, []);
 
-  const translateX = useSharedValue(initialIndex * -(dimensions.width + emptySpaceWidth));
+  const translateX = useSharedValue(boundedInitialIndex * -(dimensions.width + emptySpaceWidth));
 
-  const currentIndex = useSharedValue(initialIndex);
+  const currentIndex = useSharedValue(boundedInitialIndex);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: RTL ? -translateX.value : translateX.value }],
@@ -93,13 +98,14 @@ const GalleryComponent = <T = string,>(
 
   useImperativeHandle(ref, () => ({
     setIndex(newIndex: number, animated?: boolean) {
-      refs.current?.[index].reset(false);
-      setIndex(newIndex);
-      currentIndex.value = newIndex;
+      const boundedIndex = normalizeIndex(newIndex, data.length);
+      refs.current[index]?.reset(false);
+      setIndex(boundedIndex);
+      currentIndex.value = boundedIndex;
       if (animated) {
-        translateX.value = withTiming(newIndex * -(dimensions.width + emptySpaceWidth), TIMING_CONFIG);
+        translateX.value = withTiming(boundedIndex * -(dimensions.width + emptySpaceWidth), TIMING_CONFIG);
       } else {
-        translateX.value = newIndex * -(dimensions.width + emptySpaceWidth);
+        translateX.value = boundedIndex * -(dimensions.width + emptySpaceWidth);
       }
     },
     reset(animated = false) {
@@ -108,8 +114,8 @@ const GalleryComponent = <T = string,>(
   }));
 
   useEffect(() => {
-    if (index >= data.length) {
-      const newIndex = data.length - 1;
+    const newIndex = normalizeIndex(index, data.length);
+    if (index !== newIndex) {
       setIndex(newIndex);
       currentIndex.value = newIndex;
       translateX.value = newIndex * -(dimensions.width + emptySpaceWidth);

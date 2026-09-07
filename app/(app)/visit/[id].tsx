@@ -333,6 +333,7 @@ export default function VisitDetailScreen() {
       } catch (error) {
         console.error("Error saving notes:", error);
         showToast({ type: "error", message: "Failed to save notes" });
+        throw error;
       }
     },
     [updateNotes, showToast],

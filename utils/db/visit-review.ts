@@ -264,7 +264,11 @@ export async function getPendingVisitReviewFirstPage(
       PENDING_VISIT_REVIEW_MATCH_TOOLS,
       row.manifestJson,
     );
-    return hydratePendingVisitReviewPage(manifest.generationId, manifest.selectedKeys.slice(0, pageSize), manifest);
+    return await hydratePendingVisitReviewPage(
+      manifest.generationId,
+      manifest.selectedKeys.slice(0, pageSize),
+      manifest,
+    );
   } catch (error) {
     console.warn("[DB] Progressive pending-review bootstrap failed; using legacy hydration.", error);
     return legacyFallbackFirstPage(filters);

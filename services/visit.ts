@@ -353,6 +353,11 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
   };
 
   if (!hasVisitPhotosForSpatialWork(photos.length)) {
+    // Photo assignments commit before the final count refresh. A resumed scan
+    // must repair that summary even when the previous run assigned every photo.
+    if (previouslyVisitedPhotos > 0) {
+      await batchUpdateVisitPhotoCounts();
+    }
     progress.isComplete = true;
     progress.phase = "complete";
     onProgress?.(progress);

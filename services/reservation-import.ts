@@ -328,7 +328,7 @@ function withMichelinReviewMatch(
 }
 
 function getReservationDedupeKey(visit: ReservationOnlyVisitInput): string {
-  return visit.suggestedRestaurantId ?? normalizeForComparison(stripComparisonAffixes(visit.restaurant.name));
+  return visit.suggestedRestaurantId ?? visit.restaurant.id;
 }
 
 function getRestaurantInputForReservation(
