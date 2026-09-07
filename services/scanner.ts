@@ -489,29 +489,29 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
 /** Prepare once, then hand the retained snapshot directly to the importer. */
 export async function prepareAutomaticPhotoScan(): Promise<PreparedPhotoScan> {
   const startedAt = Date.now();
-  if (isPhotoLibraryChangeScanAvailable()) {
-    const checkpoint = await getPhotoLibraryChangeCheckpoint();
-    const session = await beginPhotoLibraryChangeScan(await getPhotoDatabasePathForIncrementalScan(), checkpoint.token);
-    await getIncrementalPhotoScanInitialProgressWithCleanup(session, endAssetScan);
-    return createPreparedPhotoScan({
-      pendingPhotoCount: session.totalCount,
-      startedAt,
-      scan: { kind: "incremental", session },
-      checkpoint: async () => {
-        await commitPhotoLibraryChangeToken(session.changeToken, checkpoint.revision);
-      },
-      release: () => endAssetScan(session.sessionId),
-    });
-  }
-
   let session: Awaited<ReturnType<typeof beginIncrementalAssetScan>> | null = null;
+  let checkpoint: (() => Promise<void>) | undefined;
   try {
-    session = isDatabaseBackedIncrementalAssetScanAvailable()
-      ? await beginDatabaseBackedIncrementalAssetScan(await getPhotoDatabasePathForIncrementalScan())
-      : isIncrementalAssetScanAvailable()
-        ? await beginIncrementalAssetScan(await getExistingPhotoAssetIdsForIncrementalScan())
-        : null;
+    if (isPhotoLibraryChangeScanAvailable()) {
+      const savedCheckpoint = await getPhotoLibraryChangeCheckpoint();
+      const changeSession = await beginPhotoLibraryChangeScan(
+        await getPhotoDatabasePathForIncrementalScan(),
+        savedCheckpoint.token,
+      );
+      session = changeSession;
+      checkpoint = async () => {
+        await commitPhotoLibraryChangeToken(changeSession.changeToken, savedCheckpoint.revision);
+      };
+    } else {
+      session = isDatabaseBackedIncrementalAssetScanAvailable()
+        ? await beginDatabaseBackedIncrementalAssetScan(await getPhotoDatabasePathForIncrementalScan())
+        : isIncrementalAssetScanAvailable()
+          ? await beginIncrementalAssetScan(await getExistingPhotoAssetIdsForIncrementalScan())
+          : null;
+    }
   } catch (error) {
+    // The native reader owns a separate SQLite connection. If it is locked or
+    // unavailable, the application's connection can still support the fallback.
     console.warn("Could not prepare a native photo comparison; using paged comparison:", error);
   }
   if (session) {
@@ -521,6 +521,7 @@ export async function prepareAutomaticPhotoScan(): Promise<PreparedPhotoScan> {
     pendingPhotoCount: session?.totalCount ?? (await countUnscannedPhotosWithPagedComparison()),
     startedAt,
     scan: session ? { kind: "incremental", session } : null,
+    checkpoint,
     release: () => (session ? endAssetScan(session.sessionId) : Promise.resolve()),
   });
 }

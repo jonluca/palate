@@ -58,18 +58,30 @@ export async function hasCalendarPermission(): Promise<boolean> {
 let lastObservedCalendarPermission: boolean | undefined;
 let calendarPermissionRevision = 0;
 
+/** Retain one selection across awaited SQLite, native, and fallback matching work. */
+export function getCalendarMatchingSelection(): readonly string[] | null {
+  const selectedIds = getSelectedCalendarIds();
+  return selectedIds === null ? null : [...new Set(selectedIds)].sort();
+}
+
 /** Selected calendars and the observed EventKit revision define a matching snapshot. */
-export async function getCalendarEnrichmentContext(): Promise<string | null> {
-  const revision = await getCalendarRevision();
-  if (revision === null || !(await hasCalendarPermission())) {
+export async function getCalendarEnrichmentContext(
+  selectedIds: readonly string[] | null = getCalendarMatchingSelection(),
+): Promise<string | null> {
+  try {
+    const revision = await getCalendarRevision();
+    if (revision === null || !(await hasCalendarPermission())) {
+      return null;
+    }
+    return JSON.stringify([
+      revision,
+      calendarPermissionRevision,
+      selectedIds === null ? null : [...new Set(selectedIds)].sort(),
+    ]);
+  } catch (error) {
+    console.warn("Calendar revision unavailable; matching without cached attempts:", error);
     return null;
   }
-  const selectedIds = getSelectedCalendarIds();
-  return JSON.stringify([
-    revision,
-    calendarPermissionRevision,
-    selectedIds === null ? null : [...new Set(selectedIds)].sort(),
-  ]);
 }
 
 /** Get all syncable calendars for the selection UI (excluding system calendars) */
@@ -98,14 +110,16 @@ export async function getAllSyncableCalendars(): Promise<SyncableCalendar[]> {
 }
 
 /** Get all accessible calendars (excluding system calendars), filtered by user selection */
-async function getCalendars(throwOnError = false): Promise<Calendar.Calendar[]> {
+async function getCalendars(
+  throwOnError = false,
+  selectedIds: readonly string[] | null = getCalendarMatchingSelection(),
+): Promise<Calendar.Calendar[]> {
   try {
     const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
     const systemTypes = new Set(["birthdays", "holidays"]);
     const nonSystemCalendars = calendars.filter((cal) => !systemTypes.has(cal.source?.type ?? ""));
 
     // Filter by selected calendars if the user has made a selection
-    const selectedIds = getSelectedCalendarIds();
     if (selectedIds !== null) {
       const selectedSet = new Set(selectedIds);
       return nonSystemCalendars.filter((cal) => selectedSet.has(cal.id));
@@ -126,6 +140,7 @@ async function getEventsInRange(
   startDate: number,
   endDate: number,
   throwOnError = false,
+  selectedCalendarIds: readonly string[] | null = getCalendarMatchingSelection(),
 ): Promise<CalendarEventInfo[]> {
   if (!(await hasCalendarPermission())) {
     if (throwOnError) {
@@ -136,13 +151,13 @@ async function getEventsInRange(
 
   if (isCalendarMatchingAvailable()) {
     try {
-      return await getNativeCalendarEvents(startDate, endDate, getSelectedCalendarIds());
+      return await getNativeCalendarEvents(startDate, endDate, selectedCalendarIds);
     } catch (error) {
       console.warn("Native calendar event fetch failed; falling back to expo-calendar:", error);
     }
   }
 
-  const calendars = await getCalendars(throwOnError);
+  const calendars = await getCalendars(throwOnError, selectedCalendarIds);
   if (calendars.length === 0) {
     return [];
   }
@@ -190,13 +205,14 @@ async function getEventsInRange(
 export async function matchCalendarEventsForVisitsNatively(
   visits: NativeCalendarVisit[],
   bufferMinutes: number = 30,
+  selectedCalendarIds: readonly string[] | null = getCalendarMatchingSelection(),
 ): Promise<NativeCalendarVisitMatch[] | null> {
   if (!isCalendarMatchingAvailable()) {
     return null;
   }
 
   try {
-    return await matchNativeCalendarVisits(visits, getSelectedCalendarIds(), bufferMinutes);
+    return await matchNativeCalendarVisits(visits, selectedCalendarIds, bufferMinutes);
   } catch (error) {
     console.warn("Native calendar matching failed; falling back to JavaScript:", error);
     return null;
@@ -300,6 +316,7 @@ export async function batchFindCandidateEventsForVisits(
   visits: VisitTimeRange[],
   bufferMinutes: number = 30,
   throwOnError = false,
+  selectedCalendarIds: readonly string[] | null = getCalendarMatchingSelection(),
 ): Promise<Map<string, CalendarEventInfo[]>> {
   if (visits.length === 0) {
     return new Map();
@@ -317,7 +334,7 @@ export async function batchFindCandidateEventsForVisits(
   const searchStart = getStartOfDay(Math.min(...times)) - bufferMs;
   const searchEnd = getEndOfDay(Math.max(...times)) + bufferMs;
 
-  const allEvents = await getEventsInRange(searchStart, searchEnd, throwOnError);
+  const allEvents = await getEventsInRange(searchStart, searchEnd, throwOnError, selectedCalendarIds);
   const timedEvents = allEvents
     .filter((e) => !e.isAllDay)
     .sort((a, b) => (a.startDate - b.startDate !== 0 ? a.startDate - b.startDate : a.endDate - b.endDate));

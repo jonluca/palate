@@ -34,6 +34,7 @@
     "test:calendar-batch-mutation": "zsh scripts/test-calendar-batch-mutation.sh",
     "test:calendar-eventkit-mutation": "zsh scripts/test-calendar-eventkit-mutation-profiler.sh",
     "test:calendar-matching-context": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-calendar-matching-context.ts",
+    "test:calendar-enrichment-recovery": "node --no-warnings --experimental-strip-types scripts/test-calendar-enrichment-recovery.ts",
     "test:calendar-matching-request": "node --no-warnings --experimental-strip-types scripts/test-calendar-matching-request.ts",
     "test:calendar-import-snapshot": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-calendar-import-snapshot.ts",
     "test:reservation-import-persistence": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-reservation-import-persistence.ts && node --no-warnings --experimental-strip-types scripts/test-reservation-distinct-meals.ts",

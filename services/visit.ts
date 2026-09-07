@@ -49,6 +49,7 @@ import {
 import {
   hasCalendarPermission,
   getCalendarEnrichmentContext,
+  getCalendarMatchingSelection,
   requestCalendarPermission,
   batchFindCandidateEventsForVisits,
   isNativeCalendarMatchingAvailable,
@@ -905,6 +906,14 @@ async function processRank3BulkTailVisitFoodDetection(
   return progress;
 }
 
+function assertCalendarMatchingSelectionUnchanged(selectedCalendarIds: readonly string[] | null): void {
+  if (JSON.stringify(selectedCalendarIds) !== JSON.stringify(getCalendarMatchingSelection())) {
+    // Retain retry state when a cached snapshot or completed match belongs to
+    // a selection the user changed while the awaited work was in flight.
+    throw new Error("Calendar selection changed during matching; please retry the photo update.");
+  }
+}
+
 /**
  * Enrich visits with calendar event data.
  * Finds calendar events that overlap with each visit's time range.
@@ -939,12 +948,14 @@ async function enrichVisitsWithCalendarEvents(
     return progress;
   }
 
-  const calendarContext = incremental ? await getCalendarEnrichmentContext() : null;
+  const selectedCalendarIds = getCalendarMatchingSelection();
+  const calendarContext = incremental ? await getCalendarEnrichmentContext(selectedCalendarIds) : null;
   const context = calendarContext === null ? null : JSON.stringify([calendarContext, getMichelinDatasetVersion()]);
   const visitsToProcess = await getCalendarEnrichmentVisitSnapshot(context);
   progress.totalVisits = visitsToProcess.length;
 
   if (visitsToProcess.length === 0) {
+    assertCalendarMatchingSelectionUnchanged(selectedCalendarIds);
     progress.isComplete = true;
     emitProgress();
     return progress;
@@ -986,7 +997,7 @@ async function enrichVisitsWithCalendarEvents(
   let nativeMatches: Awaited<ReturnType<typeof matchCalendarEventsForVisitsNatively>> = null;
 
   if (isNativeCalendarMatchingAvailable()) {
-    nativeMatches = await matchCalendarEventsForVisitsNatively(visitsToProcess);
+    nativeMatches = await matchCalendarEventsForVisitsNatively(visitsToProcess, 30, selectedCalendarIds);
   }
 
   if (nativeMatches !== null) {
@@ -1006,7 +1017,12 @@ async function enrichVisitsWithCalendarEvents(
   } else {
     for (let i = 0; i < visitsToProcess.length; i += BATCH_SIZE) {
       const batch = visitsToProcess.slice(i, i + BATCH_SIZE);
-      const candidateEventMap = await batchFindCandidateEventsForVisits(batch, 30, context !== null);
+      const candidateEventMap = await batchFindCandidateEventsForVisits(
+        batch,
+        30,
+        context !== null,
+        selectedCalendarIds,
+      );
 
       for (const visit of batch) {
         const candidateEvents = candidateEventMap.get(visit.id) ?? [];
@@ -1050,6 +1066,8 @@ async function enrichVisitsWithCalendarEvents(
       updateProgress(i + BATCH_SIZE);
     }
   }
+
+  assertCalendarMatchingSelectionUnchanged(selectedCalendarIds);
 
   if (calendarUpdates.length > 0) {
     await batchUpdateVisitsCalendarEvents(calendarUpdates);

@@ -233,6 +233,7 @@ const serviceDependencies = new Map<string, object>([
     "./calendar",
     {
       hasCalendarPermission: async () => true,
+      getCalendarMatchingSelection: () => null,
       getCalendarEnrichmentContext: async () => activeRevision,
       isNativeCalendarMatchingAvailable: () => true,
       matchCalendarEventsForVisitsNatively: async (visits: CalendarEnrichmentVisitSnapshot[]) => {
@@ -351,10 +352,27 @@ interface MaintenanceExports {
 }
 const maintenanceExports: MaintenanceExports = {};
 const maintenanceStatements: string[] = [];
+const maintenanceWarnings: Error[] = [];
+let maintenanceFailure: "read" | "optimize" | "stamp" | null = null;
 const maintenanceDatabase: DatabaseAdapter = {
   ...adapter,
+  async getFirstAsync<T>(sql: string, ...parameters: Parameters): Promise<T | null> {
+    if (maintenanceFailure === "read") {
+      throw new Error("maintenance checkpoint read failed");
+    }
+    return adapter.getFirstAsync<T>(sql, ...parameters);
+  },
+  async runAsync(sql: string, ...parameters: Parameters) {
+    if (maintenanceFailure === "stamp") {
+      throw new Error("maintenance checkpoint write failed");
+    }
+    return adapter.runAsync(sql, ...parameters);
+  },
   execAsync: async (sql) => {
     maintenanceStatements.push(sql);
+    if (maintenanceFailure === "optimize") {
+      throw new Error("database is locked during maintenance");
+    }
     database.exec(sql);
   },
 };
@@ -365,7 +383,12 @@ runInNewContext(
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     },
   ).outputText,
-  { exports: maintenanceExports, require: () => ({}), __DEV__: false },
+  {
+    exports: maintenanceExports,
+    require: () => ({}),
+    __DEV__: false,
+    console: { warn: (_message: string, error: Error) => maintenanceWarnings.push(error) },
+  },
 );
 assert.ok(maintenanceExports.useTestDatabase);
 assert.ok(maintenanceExports.performIncrementalDatabaseMaintenance);
@@ -382,6 +405,61 @@ await maintenanceExports.performIncrementalDatabaseMaintenance(0, now + 25 * 60 
 assert.equal(maintenanceStatements.length, 1);
 await maintenanceExports.performIncrementalDatabaseMaintenance(1, now + 25 * 60 * 60 * 1000);
 assert.equal(maintenanceStatements.length, 2);
+
+// The final optional optimization cannot reject already persisted photo work.
+// Its failure also must not mark the daily checkpoint, so the next update retries.
+const maintenanceCheckpointSql = "SELECT value FROM app_metadata WHERE key = 'incremental_database_maintenance_at'";
+for (const failure of ["read", "optimize", "stamp"] as const) {
+  database.exec("DELETE FROM app_metadata WHERE key = 'incremental_database_maintenance_at'");
+  maintenanceFailure = failure;
+  await maintenanceExports.performIncrementalDatabaseMaintenance(1, now);
+  assert.equal(database.prepare(maintenanceCheckpointSql).get(), undefined, `${failure}: failure must not checkpoint`);
+  maintenanceFailure = null;
+  await maintenanceExports.performIncrementalDatabaseMaintenance(1, now);
+  assert.equal(database.prepare(maintenanceCheckpointSql).get()?.value, String(now), `${failure}: later work retries`);
+}
+assert.equal(maintenanceWarnings.length, 3);
+
+interface ProcessPhotosExports {
+  processPhotos?: (
+    onProgress: undefined,
+    options: { incrementalVisitWork: boolean; runVisitFoodDetection: boolean },
+  ) => Promise<{ visitsCreated: number; photosProcessed: number }>;
+}
+const processExports: ProcessPhotosExports = {};
+const processStart = serviceSource.indexOf("let processPhotosPromise:");
+assert.ok(processStart >= 0);
+runInNewContext(
+  ts.transpileModule(serviceSource.slice(processStart), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText,
+  {
+    exports: processExports,
+    scanCameraRoll: async () => ({ newPhotosAdded: 2 }),
+    visitPhotos: async () => ({ visitsCreated: 1 }),
+    enrichVisitsWithCalendarEvents: async () => ({ visitsWithEvents: 0 }),
+    yieldToEventLoop: async () => undefined,
+    performIncrementalDatabaseMaintenance: maintenanceExports.performIncrementalDatabaseMaintenance,
+    clearAutomaticPhotoQuickPipelineIncomplete: async () =>
+      database.prepare(automaticQueueCore.CLEAR_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL).run(),
+  },
+);
+assert.ok(processExports.processPhotos);
+database.exec("DELETE FROM app_metadata WHERE key = 'incremental_database_maintenance_at'");
+database.prepare(automaticQueueCore.MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL).run();
+maintenanceFailure = "optimize";
+const completedScan = await processExports.processPhotos(undefined, {
+  incrementalVisitWork: true,
+  runVisitFoodDetection: false,
+});
+assert.equal(completedScan.photosProcessed, 2);
+assert.equal(completedScan.visitsCreated, 1);
+assert.equal(
+  database.prepare(automaticQueueCore.IS_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL).get()?.isPending,
+  0,
+  "completed photo work must clear its recovery marker despite optional maintenance failure",
+);
+assert.equal(database.prepare(maintenanceCheckpointSql).get(), undefined);
 
 database.close();
 console.log(

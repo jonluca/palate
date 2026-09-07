@@ -515,21 +515,27 @@ export async function performIncrementalDatabaseMaintenance(changedPhotos: numbe
     return;
   }
   const database = await getDatabase();
-  const previous = await database.getFirstAsync<{ value: string }>(
-    "SELECT value FROM app_metadata WHERE key = 'incremental_database_maintenance_at'",
-  );
-  const previousTime = Number(previous?.value);
-  if (Number.isFinite(previousTime) && previousTime <= now && now - previousTime < 24 * 60 * 60 * 1000) {
-    return;
+  try {
+    const previous = await database.getFirstAsync<{ value: string }>(
+      "SELECT value FROM app_metadata WHERE key = 'incremental_database_maintenance_at'",
+    );
+    const previousTime = Number(previous?.value);
+    if (Number.isFinite(previousTime) && previousTime <= now && now - previousTime < 24 * 60 * 60 * 1000) {
+      return;
+    }
+    // SQLite's PRAGMA optimize bounds analysis and selects only tables whose
+    // query statistics need refreshing. Full manual scans retain ANALYZE above.
+    await database.execAsync("PRAGMA optimize; PRAGMA wal_checkpoint(PASSIVE);");
+    await database.runAsync(
+      `INSERT INTO app_metadata (key, value) VALUES ('incremental_database_maintenance_at', ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [String(now)],
+    );
+  } catch (error) {
+    // Optional planner work must not turn a durable photo update into a failed
+    // scan. Leave the checkpoint unstamped so a later changed update can retry.
+    console.warn("[DB] Incremental database maintenance failed:", error);
   }
-  // SQLite's PRAGMA optimize bounds analysis and selects only tables whose
-  // query statistics need refreshing. Full manual scans retain ANALYZE above.
-  await database.execAsync("PRAGMA optimize; PRAGMA wal_checkpoint(PASSIVE);");
-  await database.runAsync(
-    `INSERT INTO app_metadata (key, value) VALUES ('incremental_database_maintenance_at', ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [String(now)],
-  );
 }
 
 /**

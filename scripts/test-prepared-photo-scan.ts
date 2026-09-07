@@ -61,7 +61,14 @@ function fixture(options: FixtureOptions = {}) {
   const sessions = new Map<string, incremental.PhotoScanAssetRecord[]>();
   const mode = options.mode ?? "change";
   const counts = { begin: 0, ids: 0, page: 0, insert: 0, end: 0, checkpoint: 0, marker: 0 };
-  const state = { pageFailureAt: 0, insertFailureAt: 0, checkpointFails: false, token: "old-token", revision: "r1" };
+  const state = {
+    pageFailureAt: 0,
+    insertFailureAt: 0,
+    checkpointFails: false,
+    changeBeginFails: false,
+    token: "old-token",
+    revision: "r1",
+  };
   const events: string[] = [];
 
   const begin = async () => {
@@ -160,7 +167,12 @@ function fixture(options: FixtureOptions = {}) {
         isIncrementalAssetScanAvailable: () => mode === "identifiers",
         isBatchAssetInfoAvailable: () => mode !== "legacy",
         isAssetScanAvailable: () => mode !== "legacy",
-        beginPhotoLibraryChangeScan: begin,
+        beginPhotoLibraryChangeScan: async () => {
+          if (state.changeBeginFails) {
+            throw new Error("native comparison database is locked");
+          }
+          return begin();
+        },
         beginDatabaseBackedIncrementalAssetScan: begin,
         beginIncrementalAssetScan: begin,
         beginAssetScan: begin,
@@ -358,6 +370,26 @@ for (const mode of ["database", "identifiers", "full", "legacy"] as const) {
   assert.equal(scan.counts.checkpoint, 0, `${mode}: no unsupported token API calls`);
   assert.equal(scan.counts.begin, mode === "legacy" ? 0 : 1);
   assert.equal(scan.sessions.size, 0);
+}
+
+{
+  const scan = fixture();
+  scan.state.changeBeginFails = true;
+  const prepared = await scan.prepare();
+  assert.equal(prepared.pendingPhotoCount, 3, "native database failure must retain the paged comparison fallback");
+  assert.equal(scan.counts.ids, 1, "fallback reads identifiers through the application's working database connection");
+  const result = await scan.scan({ preparedScan: prepared });
+  await prepared.dispose();
+  assert.equal(result.newPhotosAdded, 3, "a failed history comparison must not prevent an otherwise usable import");
+  assert.equal(scan.counts.checkpoint, 0, "fallback cannot advance the failed history snapshot's checkpoint");
+  assert.equal(scan.state.token, "old-token");
+  assert.equal(scan.sessions.size, 0);
+  scan.state.changeBeginFails = false;
+  const retry = await scan.prepare();
+  assert.equal(retry.pendingPhotoCount, 0);
+  await retry.complete(0);
+  await retry.dispose();
+  assert.equal(scan.state.token, "next-token", "history checkpoints resume after the native connection recovers");
 }
 
 console.log("Prepared scanner snapshot reuse, durable checkpoints, recovery, ownership, and fallback tests passed.");
