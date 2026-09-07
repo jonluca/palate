@@ -51,8 +51,14 @@ export async function resolve(specifier, context, nextResolve) {
     if (specifier === "./reset-core") {
       return { url: resetCoreModuleUrl, shortCircuit: true };
     }
-    if (specifier === "./automatic-photo-deep-scan-queue-core") {
-      return nextResolve("./automatic-photo-deep-scan-queue-core.ts", context);
+    if (
+      [
+        "./automatic-photo-deep-scan-queue-core",
+        "./calendar-enrichment-cache-core",
+        "./visit-photo-count-core",
+      ].includes(specifier)
+    ) {
+      return nextResolve(`${specifier}.ts`, context);
     }
   }
   return nextResolve(specifier, context);

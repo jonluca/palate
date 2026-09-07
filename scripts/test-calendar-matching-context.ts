@@ -304,7 +304,7 @@ const enrichmentStart = visitServiceSource.indexOf("async function enrichVisitsW
 const enrichmentEnd = visitServiceSource.indexOf("// CALENDAR-ONLY VISITS", enrichmentStart);
 assert.ok(enrichmentStart >= 0 && enrichmentEnd > enrichmentStart);
 const enrichmentSource = visitServiceSource.slice(enrichmentStart, enrichmentEnd);
-assert.match(enrichmentSource, /await getCalendarEnrichmentVisitSnapshot\(\)/);
+assert.match(enrichmentSource, /await getCalendarEnrichmentVisitSnapshot\(context\)/);
 assert.doesNotMatch(enrichmentSource, /getVisitsWithoutCalendarData|getSuggestedRestaurantsForVisits/);
 assert.match(enrichmentSource, /matchCalendarEventsForVisitsNatively\(visitsToProcess\)/);
 assert.match(enrichmentSource, /const suggestedRestaurants = visit\.suggestedRestaurants/);

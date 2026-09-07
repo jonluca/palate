@@ -10,7 +10,7 @@ public final class CalendarMatchingModule: Module {
     label: "com.jonluca.palate.calendar-matching",
     qos: .userInitiated
   )
-  private let calendarEventStore = CalendarEventStore()
+  private lazy var calendarEventStore = CalendarEventStore(changeQueue: calendarQueue)
   private let runtimeConfiguration: CalendarMatchingRuntimeConfiguration = {
     let environment = ProcessInfo.processInfo.environment
     let configuration = CalendarMatchingRuntimeConfiguration.resolve(environment: environment)
@@ -34,6 +34,10 @@ public final class CalendarMatchingModule: Module {
     Constant("calendarQueryGapDays") {
       self.runtimeConfiguration.sparseCoalescingGapDays
     }
+
+    AsyncFunction("getRevision") { () -> String in
+      self.calendarEventStore.revision
+    }.runOnQueue(calendarQueue)
 
     AsyncFunction("getEvents") {
       (startMs: Double, endMs: Double, selectedCalendarIds: [String]?) -> [CalendarEventRecord] in

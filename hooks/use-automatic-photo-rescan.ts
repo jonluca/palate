@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { AppState, Platform } from "react-native";
 import * as MediaLibrary from "expo-media-library/legacy";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { getUnscannedPhotoCount, hasMediaLibraryPermission } from "@/services/scanner";
+import { prepareAutomaticPhotoScan, hasMediaLibraryPermission, type PreparedPhotoScan } from "@/services/scanner";
 import { logScanCompleted, logScanStarted } from "@/services/analytics";
 import { useAppStore } from "@/store";
 import {
@@ -88,6 +88,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
     handleQuickScanProgress,
     {
       requestCalendarPermissionIfNeeded: false,
+      incrementalVisitWork: true,
       enqueueInsertedPhotosForAutomaticDeepScan: automaticDeepScanEnabled,
       runVisitFoodDetection: validationModeEnabled,
     },
@@ -125,6 +126,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
         quickScanRanRef.current = false;
         deepScanTotalsRef.current = { completed: 0, total: 0 };
         let deepScanRan = false;
+        let preparedScan: PreparedPhotoScan | undefined;
 
         const runPhotoScan = async () => {
           await queryClient.invalidateQueries({
@@ -143,18 +145,25 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
           if (automaticDeepScanEnabled) {
             await pruneAutomaticPhotoDeepScanQueue();
           }
-          const [pendingPhotoCount, queuedDeepScanCount, quickPipelineIncomplete] = await Promise.all([
-            queryClient.fetchQuery({
-              queryKey: queryKeys.unscannedPhotoCount,
-              queryFn: getUnscannedPhotoCount,
-              staleTime: 0,
-            }),
+          // Keep native ownership outside React Query: cached numbers must never
+          // retain or share a one-shot PhotoKit session between callers.
+          preparedScan = await prepareAutomaticPhotoScan();
+          const pendingPhotoCount = preparedScan.pendingPhotoCount;
+          queryClient.setQueryData(queryKeys.unscannedPhotoCount, pendingPhotoCount);
+          const [queuedDeepScanCount, quickPipelineIncomplete] = await Promise.all([
             automaticDeepScanEnabled ? getAutomaticPhotoDeepScanQueueCount() : Promise.resolve(0),
             isAutomaticPhotoQuickPipelineIncomplete(),
           ]);
           const shouldRunQuickScan = shouldRunAutomaticPhotoQuickScan(pendingPhotoCount, quickPipelineIncomplete);
-          if (!controller.isActive() || (!shouldRunQuickScan && queuedDeepScanCount === 0)) {
+          if (!controller.isActive()) {
             return;
+          }
+          if (!shouldRunQuickScan) {
+            await preparedScan.complete(0);
+            await preparedScan.dispose();
+            if (queuedDeepScanCount === 0) {
+              return;
+            }
           }
           quickScanRanRef.current = shouldRunQuickScan;
           useAppStore.getState().updateBackgroundPhotoScanProgress({
@@ -166,7 +175,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
           logScanStarted();
           const result = await runAutomaticPhotoScanSequence({
             shouldRunQuickScan,
-            scanPhotos,
+            scanPhotos: () => scanPhotos(preparedScan),
             shouldContinue: controller.isActive,
             getDeepScanCandidates: !automaticDeepScanEnabled
               ? async () => []
@@ -215,7 +224,10 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
           logScanCompleted(result?.photosProcessed ?? 0, result?.visitsCreated ?? 0);
         };
 
-        await runPhotoScan().finally(() => {
+        await runPhotoScan().finally(async () => {
+          await preparedScan?.dispose().catch((cleanupError) => {
+            console.warn("Failed to release the prepared automatic photo scan:", cleanupError);
+          });
           useAppStore.getState().finishBackgroundPhotoScan();
         });
       },
@@ -227,7 +239,12 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
     const unsubscribeFromStore = useAppStore.subscribe(controller.handleAvailabilityChange);
     const unsubscribeFromMutations = queryClient.getMutationCache().subscribe(controller.handleAvailabilityChange);
     const librarySubscription = MediaLibrary.addListener((event) => {
-      if (event.hasIncrementalChanges && !event.insertedAssets?.length && !event.deletedAssets?.length) {
+      if (
+        event.hasIncrementalChanges &&
+        !event.insertedAssets?.length &&
+        !event.deletedAssets?.length &&
+        !event.updatedAssets?.length
+      ) {
         return;
       }
       controller.handlePhotoLibraryChange();

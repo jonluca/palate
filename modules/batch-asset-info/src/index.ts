@@ -81,6 +81,14 @@ export interface IncrementalAssetScanSession extends AssetScanSession {
   readonly excludedSkippedAssets: number;
 }
 
+/** Change-history scan that preserves insertion-only behavior and the existing page/end lifecycle. */
+export interface PhotoLibraryChangeScanSession extends IncrementalAssetScanSession {
+  /** Save only after every metadata page is durable and no newly scanned asset was skipped. */
+  readonly changeToken: string | null;
+  /** In delta mode libraryTotalCount counts changed visible candidates, not the complete library. */
+  readonly mode: "full" | "delta";
+}
+
 export type PhotoScanStrategy = "legacy" | "incremental";
 
 /** Options for reading a page from an {@link AssetScanSession}. */
@@ -173,6 +181,10 @@ interface NativeBatchAssetInfoModule {
   beginAssetScan(): Promise<AssetScanSession>;
   beginIncrementalAssetScan?(existingAssetIds: string[]): Promise<IncrementalAssetScanSession>;
   beginDatabaseBackedIncrementalAssetScan?(databasePath: string): Promise<IncrementalAssetScanSession>;
+  beginPhotoLibraryChangeScan?(
+    databasePath: string,
+    serializedToken: string | null,
+  ): Promise<PhotoLibraryChangeScanSession>;
   getAssetScanPage(sessionId: string, offset: number, limit: number): Promise<AssetScanPage>;
   endAssetScan(sessionId: string): Promise<void>;
   clearPhotoAssetThumbnailCache?(): Promise<void>;
@@ -393,6 +405,15 @@ export function isDatabaseBackedIncrementalAssetScanAvailable(): boolean {
   );
 }
 
+/** Whether this binary can resume the Photos change history without re-enumerating known assets. */
+export function isPhotoLibraryChangeScanAvailable(): boolean {
+  return (
+    isAssetScanAvailable() &&
+    getResolvedPhotoScanStrategy() === "incremental" &&
+    hasNativeMethod(BatchAssetInfoModule, "beginPhotoLibraryChangeScan")
+  );
+}
+
 /** Whether this native binary includes the native PhotoKit thumbnail view. */
 export function isPhotoAssetThumbnailAvailable(): boolean {
   return BatchAssetInfoModule?.supportsPhotoAssetThumbnailView === true;
@@ -496,6 +517,21 @@ export async function beginDatabaseBackedIncrementalAssetScan(
     throw new Error("Database-backed incremental asset scanning is unavailable in this native binary");
   }
   return nativeModule.beginDatabaseBackedIncrementalAssetScan(databasePath);
+}
+
+/** Prepare an automatic import from durable history, with a full reconciliation when history is unavailable. */
+export async function beginPhotoLibraryChangeScan(
+  databasePath: string,
+  serializedToken: string | null,
+): Promise<PhotoLibraryChangeScanSession> {
+  if (databasePath.trim().length === 0) {
+    throw new TypeError("Photo library change scan database path must be a non-empty string");
+  }
+  const nativeModule = requireBatchAssetInfoModule();
+  if (!isPhotoLibraryChangeScanAvailable() || !hasNativeMethod(nativeModule, "beginPhotoLibraryChangeScan")) {
+    throw new Error("Photo library change scanning is unavailable in this native binary");
+  }
+  return nativeModule.beginPhotoLibraryChangeScan(databasePath, serializedToken);
 }
 
 /**

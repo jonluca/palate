@@ -10,6 +10,9 @@ import {
   type PhotoRecord,
 } from "@/utils/db";
 import { getPhotoIngestionFlushCount } from "@/utils/db/photo-ingestion-core";
+import { markAutomaticPhotoQuickPipelineIncomplete } from "@/utils/db/automatic-photo-deep-scan-queue";
+import { commitPhotoLibraryChangeToken, getPhotoLibraryChangeCheckpoint } from "@/utils/db/photo-library-checkpoint";
+import { createPreparedPhotoScan, type PreparedPhotoScan } from "@/utils/prepared-photo-scan-core";
 import { getValidatedAssetScanNextOffset, getValidatedMediaLibraryPageState } from "@/utils/photo-scan-core";
 import {
   beginPreferredAssetScan,
@@ -22,6 +25,7 @@ import {
   beginAssetScan,
   beginDatabaseBackedIncrementalAssetScan,
   beginIncrementalAssetScan,
+  beginPhotoLibraryChangeScan,
   endAssetScan,
   getAssetInfoBatch,
   getAssetScanPage,
@@ -29,7 +33,10 @@ import {
   isBatchAssetInfoAvailable,
   isDatabaseBackedIncrementalAssetScanAvailable,
   isIncrementalAssetScanAvailable,
+  isPhotoLibraryChangeScanAvailable,
 } from "@/modules/batch-asset-info";
+
+export type { PreparedPhotoScan } from "@/utils/prepared-photo-scan-core";
 
 type PhotoInsertRecord = Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">;
 
@@ -51,6 +58,8 @@ export interface ScanProgress {
 }
 
 export interface ScanOptions {
+  /** One-shot snapshot retained by the automatic library check. */
+  preparedScan?: PreparedPhotoScan;
   batchSize?: number;
   concurrency?: number;
   onProgress?: (progress: ScanProgress) => void;
@@ -231,6 +240,7 @@ async function processWithPMap(assets: MediaLibrary.Asset[], concurrency: number
  * Automatically adjusts batch sizes based on device capabilities.
  */
 export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanProgress> {
+  const startTime = options.preparedScan?.startedAt ?? Date.now();
   const useNativeBatch = isBatchAssetInfoAvailable();
   const useNativeScanSession = isAssetScanAvailable();
   const deviceTier = getDeviceTier();
@@ -249,29 +259,36 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     throw new RangeError(`Scan concurrency must be a positive safe integer; received ${concurrency}`);
   }
 
-  const nativeScan = useNativeScanSession
-    ? await beginPreferredAssetScan({
-        databaseBackedIncrementalAvailable: isDatabaseBackedIncrementalAssetScanAvailable(),
-        // Signed real-library A/B retained this lower-memory path for profiling,
-        // but did not show a latency win over the identifier-list implementation.
-        preferDatabaseBackedIncremental: false,
-        incrementalAvailable: isIncrementalAssetScanAvailable(),
-        beginDatabaseBackedIncrementalScan: async () =>
-          beginDatabaseBackedIncrementalAssetScan(await getPhotoDatabasePathForIncrementalScan()),
-        loadExistingAssetIds: getExistingPhotoAssetIdsForIncrementalScan,
-        beginFullScan: beginAssetScan,
-        beginIncrementalScan: beginIncrementalAssetScan,
-        onIncrementalBeginFailure: (error) => {
-          console.warn("Native incremental asset scan failed to start; retrying once with a full scan:", error);
-        },
-      })
-    : null;
+  const preparedNativeScan = options.preparedScan?.claim();
+  const nativeScan =
+    preparedNativeScan ??
+    (useNativeScanSession
+      ? await beginPreferredAssetScan({
+          databaseBackedIncrementalAvailable: isDatabaseBackedIncrementalAssetScanAvailable(),
+          // Signed real-library A/B retained this lower-memory path for profiling,
+          // but did not show a latency win over the identifier-list implementation.
+          preferDatabaseBackedIncremental: false,
+          incrementalAvailable: isIncrementalAssetScanAvailable(),
+          beginDatabaseBackedIncrementalScan: async () =>
+            beginDatabaseBackedIncrementalAssetScan(await getPhotoDatabasePathForIncrementalScan()),
+          loadExistingAssetIds: getExistingPhotoAssetIdsForIncrementalScan,
+          beginFullScan: beginAssetScan,
+          beginIncrementalScan: beginIncrementalAssetScan,
+          onIncrementalBeginFailure: (error) => {
+            console.warn("Native incremental asset scan failed to start; retrying once with a full scan:", error);
+          },
+        })
+      : null);
   const nativeSession = nativeScan?.session ?? null;
   const incrementalInitialProgress =
     nativeScan?.kind === "incremental"
-      ? await getIncrementalPhotoScanInitialProgressWithCleanup(nativeScan.session, endAssetScan, (cleanupError) => {
-          console.error("Failed to release malformed native asset scan session:", cleanupError);
-        })
+      ? await getIncrementalPhotoScanInitialProgressWithCleanup(
+          nativeScan.session,
+          preparedNativeScan ? () => options.preparedScan!.dispose() : endAssetScan,
+          (cleanupError) => {
+            console.error("Failed to release malformed native asset scan session:", cleanupError);
+          },
+        )
       : null;
   const totalAssets = incrementalInitialProgress
     ? incrementalInitialProgress.totalAssets
@@ -298,7 +315,6 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     deviceTier: deviceTier.tier,
   };
 
-  const startTime = Date.now();
   let scanError: unknown | null = null;
 
   const updateProgress = () => {
@@ -351,6 +367,10 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
   };
 
   try {
+    if (options.preparedScan && options.preparedScan.pendingPhotoCount > 0) {
+      // Retain downstream recovery even when automatic Vision is disabled.
+      await markAutomaticPhotoQuickPipelineIncomplete();
+    }
     onProgress?.({ ...progress });
 
     if (nativeSession) {
@@ -422,9 +442,21 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     }
   }
 
+  if (scanError === null && options.preparedScan) {
+    try {
+      await options.preparedScan.complete(progress.skippedAssets - (incrementalInitialProgress?.skippedAssets ?? 0));
+    } catch (checkpointError) {
+      scanError = checkpointError;
+    }
+  }
+
   if (nativeSession) {
     try {
-      await endAssetScan(nativeSession.sessionId);
+      if (preparedNativeScan) {
+        await options.preparedScan!.dispose();
+      } else {
+        await endAssetScan(nativeSession.sessionId);
+      }
     } catch (cleanupError) {
       if (scanError === null) {
         scanError = cleanupError;
@@ -452,6 +484,45 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
   onProgress?.({ ...progress });
 
   return progress;
+}
+
+/** Prepare once, then hand the retained snapshot directly to the importer. */
+export async function prepareAutomaticPhotoScan(): Promise<PreparedPhotoScan> {
+  const startedAt = Date.now();
+  if (isPhotoLibraryChangeScanAvailable()) {
+    const checkpoint = await getPhotoLibraryChangeCheckpoint();
+    const session = await beginPhotoLibraryChangeScan(await getPhotoDatabasePathForIncrementalScan(), checkpoint.token);
+    await getIncrementalPhotoScanInitialProgressWithCleanup(session, endAssetScan);
+    return createPreparedPhotoScan({
+      pendingPhotoCount: session.totalCount,
+      startedAt,
+      scan: { kind: "incremental", session },
+      checkpoint: async () => {
+        await commitPhotoLibraryChangeToken(session.changeToken, checkpoint.revision);
+      },
+      release: () => endAssetScan(session.sessionId),
+    });
+  }
+
+  let session: Awaited<ReturnType<typeof beginIncrementalAssetScan>> | null = null;
+  try {
+    session = isDatabaseBackedIncrementalAssetScanAvailable()
+      ? await beginDatabaseBackedIncrementalAssetScan(await getPhotoDatabasePathForIncrementalScan())
+      : isIncrementalAssetScanAvailable()
+        ? await beginIncrementalAssetScan(await getExistingPhotoAssetIdsForIncrementalScan())
+        : null;
+  } catch (error) {
+    console.warn("Could not prepare a native photo comparison; using paged comparison:", error);
+  }
+  if (session) {
+    await getIncrementalPhotoScanInitialProgressWithCleanup(session, endAssetScan);
+  }
+  return createPreparedPhotoScan({
+    pendingPhotoCount: session?.totalCount ?? (await countUnscannedPhotosWithPagedComparison()),
+    startedAt,
+    scan: session ? { kind: "incremental", session } : null,
+    release: () => (session ? endAssetScan(session.sessionId) : Promise.resolve()),
+  });
 }
 
 /**
@@ -495,6 +566,10 @@ export async function getUnscannedPhotoCount(): Promise<number> {
     }
   }
 
+  return countUnscannedPhotosWithPagedComparison();
+}
+
+async function countUnscannedPhotosWithPagedComparison(): Promise<number> {
   const existingAssetIds = new Set(await getExistingPhotoAssetIdsForIncrementalScan());
   let unscannedCount = 0;
   let processedAssets = 0;

@@ -7,6 +7,9 @@ import {
 } from "./photo-association-core";
 import type { MovePhotosResult, RemovePhotosResult } from "./types";
 import { REFRESH_VISIT_PHOTO_SUMMARIES_SQL } from "./visit-photo-summary-core";
+import { REFRESH_AFFECTED_VISIT_PHOTO_COUNTS_SQL } from "./visit-photo-count-core";
+import { INVALIDATE_VISIT_CALENDAR_ATTEMPTS_SQL } from "./calendar-enrichment-cache-core";
+import { MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL } from "./automatic-photo-deep-scan-queue-core";
 
 export async function batchUpdatePhotoVisits(updates: { photoIds: string[]; visitId: string }[]): Promise<void> {
   if (updates.length === 0) {
@@ -19,14 +22,29 @@ export async function batchUpdatePhotoVisits(updates: { photoIds: string[]; visi
   }
 
   const database = await getDatabase();
-  await database.withExclusiveTransactionAsync(async (transaction) => {
-    for (let i = 0; i < associations.length; i += PHOTO_VISIT_ASSOCIATION_BATCH_SIZE) {
-      const statement = buildPhotoVisitAssociationStatement(
-        associations.slice(i, i + PHOTO_VISIT_ASSOCIATION_BATCH_SIZE),
+  await runTransactionWithBusyRetry(() =>
+    database.withExclusiveTransactionAsync(async (transaction) => {
+      const priorVisits = await transaction.getAllAsync<{ visitId: string }>(
+        `SELECT DISTINCT visitId FROM photos
+       WHERE id IN (SELECT value FROM json_each(?)) AND visitId IS NOT NULL`,
+        [JSON.stringify(associations.map(({ photoId }) => photoId))],
       );
-      await transaction.runAsync(statement.sql, statement.parameters);
-    }
-  });
+      const affectedVisitIds = JSON.stringify([
+        ...new Set([...priorVisits.map(({ visitId }) => visitId), ...associations.map(({ visitId }) => visitId)]),
+      ]);
+      for (let i = 0; i < associations.length; i += PHOTO_VISIT_ASSOCIATION_BATCH_SIZE) {
+        const statement = buildPhotoVisitAssociationStatement(
+          associations.slice(i, i + PHOTO_VISIT_ASSOCIATION_BATCH_SIZE),
+        );
+        await transaction.runAsync(statement.sql, statement.parameters);
+      }
+      // Commit assignments and their summary together. A stopped run leaves
+      // unmatched visits eligible for calendar recovery on the next launch.
+      await transaction.runAsync(REFRESH_AFFECTED_VISIT_PHOTO_COUNTS_SQL, [affectedVisitIds]);
+      await transaction.runAsync(INVALIDATE_VISIT_CALENDAR_ATTEMPTS_SQL, [affectedVisitIds]);
+      await transaction.runAsync(MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL);
+    }),
+  );
 }
 
 /**

@@ -6,6 +6,7 @@ import {
   executeCalendarCreateMutations,
   executeCalendarDeleteMutations,
   getEvents as getNativeCalendarEvents,
+  getCalendarRevision,
   isCalendarBatchCreateAvailable,
   isCalendarBatchDeleteAvailable,
   isCalendarMatchingAvailable,
@@ -46,7 +47,29 @@ export async function requestCalendarPermission(): Promise<boolean> {
 /** Check if calendar permission is granted */
 export async function hasCalendarPermission(): Promise<boolean> {
   const { status } = await Calendar.getCalendarPermissionsAsync();
-  return status === "granted";
+  const granted = status === "granted";
+  if (lastObservedCalendarPermission !== undefined && lastObservedCalendarPermission !== granted) {
+    calendarPermissionRevision++;
+  }
+  lastObservedCalendarPermission = granted;
+  return granted;
+}
+
+let lastObservedCalendarPermission: boolean | undefined;
+let calendarPermissionRevision = 0;
+
+/** Selected calendars and the observed EventKit revision define a matching snapshot. */
+export async function getCalendarEnrichmentContext(): Promise<string | null> {
+  const revision = await getCalendarRevision();
+  if (revision === null || !(await hasCalendarPermission())) {
+    return null;
+  }
+  const selectedIds = getSelectedCalendarIds();
+  return JSON.stringify([
+    revision,
+    calendarPermissionRevision,
+    selectedIds === null ? null : [...new Set(selectedIds)].sort(),
+  ]);
 }
 
 /** Get all syncable calendars for the selection UI (excluding system calendars) */
@@ -75,7 +98,7 @@ export async function getAllSyncableCalendars(): Promise<SyncableCalendar[]> {
 }
 
 /** Get all accessible calendars (excluding system calendars), filtered by user selection */
-async function getCalendars(): Promise<Calendar.Calendar[]> {
+async function getCalendars(throwOnError = false): Promise<Calendar.Calendar[]> {
   try {
     const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
     const systemTypes = new Set(["birthdays", "holidays"]);
@@ -91,13 +114,23 @@ async function getCalendars(): Promise<Calendar.Calendar[]> {
     return nonSystemCalendars;
   } catch (error) {
     console.warn("Failed to get calendars:", error);
+    if (throwOnError) {
+      throw error;
+    }
     return [];
   }
 }
 
 /** Fetch calendar events within a time range */
-async function getEventsInRange(startDate: number, endDate: number): Promise<CalendarEventInfo[]> {
+async function getEventsInRange(
+  startDate: number,
+  endDate: number,
+  throwOnError = false,
+): Promise<CalendarEventInfo[]> {
   if (!(await hasCalendarPermission())) {
+    if (throwOnError) {
+      throw new Error("Calendar access changed during matching");
+    }
     return [];
   }
 
@@ -109,7 +142,7 @@ async function getEventsInRange(startDate: number, endDate: number): Promise<Cal
     }
   }
 
-  const calendars = await getCalendars();
+  const calendars = await getCalendars(throwOnError);
   if (calendars.length === 0) {
     return [];
   }
@@ -143,6 +176,9 @@ async function getEventsInRange(startDate: number, endDate: number): Promise<Cal
       }));
   } catch (error) {
     console.warn("Failed to fetch calendar events:", error);
+    if (throwOnError) {
+      throw error;
+    }
     return [];
   }
 }
@@ -263,11 +299,15 @@ interface VisitTimeRange {
 export async function batchFindCandidateEventsForVisits(
   visits: VisitTimeRange[],
   bufferMinutes: number = 30,
+  throwOnError = false,
 ): Promise<Map<string, CalendarEventInfo[]>> {
   if (visits.length === 0) {
     return new Map();
   }
   if (!(await hasCalendarPermission())) {
+    if (throwOnError) {
+      throw new Error("Calendar access changed during matching");
+    }
     return new Map(visits.map((v) => [v.id, []]));
   }
 
@@ -277,7 +317,7 @@ export async function batchFindCandidateEventsForVisits(
   const searchStart = getStartOfDay(Math.min(...times)) - bufferMs;
   const searchEnd = getEndOfDay(Math.max(...times)) + bufferMs;
 
-  const allEvents = await getEventsInRange(searchStart, searchEnd);
+  const allEvents = await getEventsInRange(searchStart, searchEnd, throwOnError);
   const timedEvents = allEvents
     .filter((e) => !e.isAllDay)
     .sort((a, b) => (a.startDate - b.startDate !== 0 ? a.startDate - b.startDate : a.endDate - b.endDate));

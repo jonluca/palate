@@ -2,6 +2,7 @@ export {
   batchCreateExportEvents,
   batchDeleteEvents,
   getEvents,
+  getCalendarRevision,
   isCalendarBatchCreateAvailable,
   isCalendarBatchDeleteAvailable,
   isCalendarMatchingAvailable,

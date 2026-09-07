@@ -11,6 +11,16 @@ struct PalatePhotosProfilerMain {
     }
 
     do {
+      let commandLineArguments = Array(CommandLine.arguments.dropFirst())
+      if commandLineArguments.count == 1,
+        let argument = commandLineArguments.first,
+        argument.hasPrefix("--change-scan-database=")
+      {
+        let databasePath = String(argument.dropFirst("--change-scan-database=".count))
+        let report = try await PhotoLibraryChangeBenchmarkRunner().run(databasePath: databasePath)
+        print(try ProfilerJSONEncoder.string(for: report))
+        return
+      }
       let arguments = try ProfilerArguments(commandLineArguments: Array(CommandLine.arguments.dropFirst()))
       if arguments.showHelp {
         print(ProfilerArguments.usage)

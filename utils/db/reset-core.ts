@@ -1,7 +1,10 @@
 export const APPLICATION_DATABASE_TABLES = [
+  // Clear photo-history checkpoints before a partial reset can remove photo rows.
+  "app_metadata",
   "michelin_restaurant_spatial_index",
   "visit_suggested_restaurants",
   "automatic_photo_deep_scan_queue",
+  "calendar_enrichment_attempts",
   "photos",
   "reservation_import_sources",
   "visits",
@@ -12,7 +15,6 @@ export const APPLICATION_DATABASE_TABLES = [
   "reservation_import_review_exclusions",
   "dismissed_calendar_events",
   "food_keywords",
-  "app_metadata",
 ] as const;
 
 export interface DatabaseResetExecutor {

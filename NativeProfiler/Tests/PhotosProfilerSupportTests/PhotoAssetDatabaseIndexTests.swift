@@ -207,6 +207,34 @@ struct PhotoAssetDatabaseIndexTests {
         == 2)
   }
 
+  @Test("Delta lookup binds identifiers exactly and only reads requested rows across batch boundaries")
+  func targetedLookup() throws {
+    let rows = (0..<1_201).map { Row(id: "asset-\($0)", creationTime: Double($0), latitude: 0, longitude: 0) }
+      + [Row(id: "quoted-'食'-🍜", creationTime: 2_000, latitude: nil, longitude: nil)]
+    let database = try TemporaryDatabase(rows: rows)
+    defer { database.remove() }
+    // Unrelated malformed metadata must not be decoded by a small delta lookup.
+    try database.execute(
+      "INSERT INTO photos (id, creationTime, latitude, longitude) VALUES ('unrelated-invalid', 1, 'north', 0)"
+    )
+    let requested = (0..<1_001).map { "asset-\($0)" } + ["quoted-'食'-🍜", "asset-0", "unknown"]
+    let beforeData = try Data(contentsOf: database.fileURL)
+    let index = try PhotoAssetDatabaseIndex(databasePath: database.fileURL.path, identifiers: requested)
+
+    #expect(index.metricsByIdentifier.count == 1_002)
+    #expect(index.metricsByIdentifier["asset-1000"] != nil)
+    #expect(index.metricsByIdentifier["asset-1001"] == nil)
+    #expect(index.metricsByIdentifier["unknown"] == nil)
+    #expect(index.metricsByIdentifier["quoted-'食'-🍜"]?.hasValidLocation == false)
+    #expect(try Data(contentsOf: database.fileURL) == beforeData)
+  }
+
+  @Test("No changed identifiers bypasses SQLite entirely")
+  func emptyDeltaHasNoDatabaseWork() throws {
+    let index = try PhotoAssetDatabaseIndex(databasePath: "/does/not/exist.sqlite", identifiers: [])
+    #expect(index.metricsByIdentifier.isEmpty)
+  }
+
   @Test("Read-only loading sees committed WAL rows without disturbing the writer")
   func readsLiveWriteAheadLog() throws {
     let database = try TemporaryDatabase()

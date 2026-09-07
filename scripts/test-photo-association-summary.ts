@@ -10,6 +10,9 @@ import ts from "typescript";
 import * as associations from "../utils/db/photo-association-core.ts";
 import * as summaries from "../utils/db/visit-photo-summary-core.ts";
 import * as retry from "../utils/db/transaction-retry-core.ts";
+import * as countCore from "../utils/db/visit-photo-count-core.ts";
+import * as calendarCache from "../utils/db/calendar-enrichment-cache-core.ts";
+import * as automaticQueue from "../utils/db/automatic-photo-deep-scan-queue-core.ts";
 import type { MovePhotosResult, RemovePhotosResult } from "../utils/db/types.ts";
 
 interface PhotoAssociationApi {
@@ -87,6 +90,9 @@ function loadProductionApi(database: DatabaseSync, failureStage = 0, options: Pr
     ],
     ["./photo-association-core", associations],
     ["./visit-photo-summary-core", summaries],
+    ["./visit-photo-count-core", countCore],
+    ["./calendar-enrichment-cache-core", calendarCache],
+    ["./automatic-photo-deep-scan-queue-core", automaticQueue],
     [
       "./transaction-retry-core",
       {

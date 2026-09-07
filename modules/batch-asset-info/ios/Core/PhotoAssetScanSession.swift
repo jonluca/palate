@@ -10,7 +10,7 @@ public final class PhotoAssetScanSession {
     case database(PhotoAssetDatabaseIndex)
   }
 
-  private let fetchResult: PHFetchResult<PHAsset>
+  private let fetchResult: PHFetchResult<PHAsset>?
   private let assetIndexes: [Int]?
 
   public let libraryTotalCount: Int
@@ -35,7 +35,12 @@ public final class PhotoAssetScanSession {
     try self.init(exclusionSource: .database(databaseIndex))
   }
 
-  private init(exclusionSource: ExclusionSource) throws {
+  public convenience init(databasePath: String, assetIdentifiers: [String]) throws {
+    let databaseIndex = try PhotoAssetDatabaseIndex(databasePath: databasePath, identifiers: assetIdentifiers)
+    try self.init(exclusionSource: .database(databaseIndex), assetIdentifiers: assetIdentifiers)
+  }
+
+  private init(exclusionSource: ExclusionSource, assetIdentifiers: [String]? = nil) throws {
     let authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     switch authorizationStatus {
     case .authorized, .limited:
@@ -44,6 +49,16 @@ public final class PhotoAssetScanSession {
       throw PhotoAssetScanError.photoLibraryAccessRequired(status: authorizationStatus.rawValue)
     @unknown default:
       throw PhotoAssetScanError.photoLibraryAccessRequired(status: authorizationStatus.rawValue)
+    }
+
+    if assetIdentifiers?.isEmpty == true {
+      fetchResult = nil
+      assetIndexes = nil
+      libraryTotalCount = 0
+      excludedVisibleCount = 0
+      excludedPhotosWithLocation = 0
+      excludedSkippedAssets = 0
+      return
     }
 
     let options = PHFetchOptions()
@@ -59,7 +74,15 @@ public final class PhotoAssetScanSession {
     options.includeAllBurstAssets = false
     options.includeHiddenAssets = false
 
-    let fetchedAssets = PHAsset.fetchAssets(with: options)
+    if assetIdentifiers != nil, let mediaPredicate = options.predicate {
+      // Identifier fetches include hidden assets by default; enforce the full-library visibility rule explicitly.
+      options.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+        mediaPredicate, NSPredicate(format: "hidden == NO"),
+      ])
+    }
+
+    let fetchedAssets = assetIdentifiers.map { PHAsset.fetchAssets(withLocalIdentifiers: $0, options: options) }
+      ?? PHAsset.fetchAssets(with: options)
     fetchResult = fetchedAssets
     libraryTotalCount = fetchedAssets.count
 
@@ -119,13 +142,15 @@ public final class PhotoAssetScanSession {
     var assets: [PhotoAssetScanRecord] = []
     assets.reserveCapacity(pageCount)
 
-    for index in offset..<endOffset {
-      let record = try autoreleasepool {
-        let assetIndex = assetIndexes?[index] ?? index
-        let metadata = PhotoAssetMetadata(asset: fetchResult.object(at: assetIndex))
-        return try PhotoAssetScanRecord(metadata: metadata)
+    if let fetchResult {
+      for index in offset..<endOffset {
+        let record = try autoreleasepool {
+          let assetIndex = assetIndexes?[index] ?? index
+          let metadata = PhotoAssetMetadata(asset: fetchResult.object(at: assetIndex))
+          return try PhotoAssetScanRecord(metadata: metadata)
+        }
+        assets.append(record)
       }
-      assets.append(record)
     }
 
     let hasNextPage = endOffset < totalCount

@@ -8,6 +8,7 @@ import {
   IS_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL,
   MARK_AUTOMATIC_PHOTO_DEEP_SCAN_ATTEMPTS_SQL,
   MARK_AUTOMATIC_PHOTO_FOOD_SYNC_REQUIRED_SQL,
+  MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL,
   PRUNE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL,
   validateAutomaticPhotoDeepScanBatchLimit,
 } from "./automatic-photo-deep-scan-queue-core";
@@ -53,6 +54,11 @@ export async function pruneAutomaticPhotoDeepScanQueue(): Promise<void> {
 
 export function isAutomaticPhotoQuickPipelineIncomplete(): Promise<boolean> {
   return getAutomaticPhotoStateFlag(IS_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL);
+}
+
+export async function markAutomaticPhotoQuickPipelineIncomplete(): Promise<void> {
+  const database = await getDatabase();
+  await database.runAsync(MARK_AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_SQL);
 }
 
 export async function clearAutomaticPhotoQuickPipelineIncomplete(): Promise<void> {

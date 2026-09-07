@@ -459,6 +459,8 @@ public struct ProfilerArguments: Equatable, Sendable {
   public static let usage = """
     Usage: PalatePhotosProfiler [options]
 
+      --change-scan-database=PATH  Read-only full-versus-history scan preparation benchmark (standalone option)
+
       --mode MODE             photos, vision, initial-images, initial-image-preheat, thumbnail-scroll, or preview-cards (default: photos)
       --batch-sizes N,N,...  Batch/page sizes from 1 through 5000 (default: 2000,500,250)
       --iterations N         Measured iterations per strategy and batch size; Vision requires an even value (default: 5)

@@ -28,7 +28,13 @@ export type {
   WrappedStats,
 } from "./db/types";
 
-export { getDatabase, nukeDatabase, performDatabaseMaintenance, performFullMaintenance } from "./db/core";
+export {
+  getDatabase,
+  nukeDatabase,
+  performDatabaseMaintenance,
+  performFullMaintenance,
+  performIncrementalDatabaseMaintenance,
+} from "./db/core";
 
 export {
   batchUpdatePhotosFoodDetected,
@@ -163,6 +169,7 @@ export {
   getConfirmedVisitsWithMichelinIds,
   getConfirmedVisitsWithoutCalendarEvents,
   getCalendarEnrichmentVisitSnapshot,
+  recordCalendarEnrichmentAttempts,
   getConfirmedLinkedReservationSourceEventIds,
   getDismissedReservationImportSourceEventIds,
   getDismissedCalendarEventIds,

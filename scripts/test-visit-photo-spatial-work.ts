@@ -99,7 +99,7 @@ const initializationIndex = visitPhotosSource.indexOf("await initializeMichelinD
 const suggestionRefreshIndex = visitPhotosSource.indexOf(
   "await recomputeSuggestedRestaurantsIfNeeded(getMichelinDatasetVersion())",
 );
-const photoLoadIndex = visitPhotosSource.indexOf("const [photoCounts, photos] = await Promise.all");
+const photoLoadIndex = visitPhotosSource.indexOf("const [fullPhotoCounts, photos] = await Promise.all");
 const spatialGateIndex = visitPhotosSource.indexOf("if (!hasVisitPhotosForSpatialWork(photos.length))");
 const databaseIndex = visitPhotosSource.indexOf("const database = await getDatabase()");
 const guideIndexBuildIndex = visitPhotosSource.indexOf("ensureRestaurantLocationIndex(database, __DEV__)");
@@ -121,17 +121,15 @@ const compiledService = ts.transpileModule(`${serviceSource}\nexports.visitPhoto
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 
-for (const interruption of ["count-update", "progress"] as const) {
+for (const interruption of ["assignment", "progress"] as const) {
   const interruptionError = new Error(`injected ${interruption} interruption`);
-  const countRepairError = new Error("injected count repair failure");
   const assignedPhotoIds = new Set<string>();
   const persistedVisits = new Map<string, { id: string; photoCount: number }>();
   const libraryPhotos = [
     { id: "first", creationTime: 1_700_000_000_000, latitude: 37, longitude: -122 },
     { id: "second", creationTime: 1_700_000_060_000, latitude: 37, longitude: -122 },
   ];
-  let failCountUpdate = interruption === "count-update";
-  let failRepair = false;
+  let failAssignment = interruption === "assignment";
   let indexLoads = 0;
   let completeNotifications = 0;
   const database = {
@@ -143,23 +141,20 @@ for (const interruption of ["count-update", "progress"] as const) {
     getDatabase: async () => ({}),
     insertVisits: async (visits: Array<{ id: string }>) => {
       for (const visit of visits) {
-        persistedVisits.set(visit.id, { id: visit.id, photoCount: 0 });
+        if (!persistedVisits.has(visit.id)) {
+          persistedVisits.set(visit.id, { id: visit.id, photoCount: 0 });
+        }
       }
     },
     batchUpdatePhotoVisits: async (updates: Array<{ photoIds: string[] }>) => {
+      if (failAssignment) {
+        failAssignment = false;
+        throw interruptionError;
+      }
       for (const update of updates) {
         for (const photoId of update.photoIds) {
           assignedPhotoIds.add(photoId);
         }
-      }
-    },
-    batchUpdateVisitPhotoCounts: async () => {
-      if (failRepair) {
-        throw countRepairError;
-      }
-      if (failCountUpdate) {
-        failCountUpdate = false;
-        throw interruptionError;
       }
       for (const visit of persistedVisits.values()) {
         visit.photoCount = assignedPhotoIds.size;
@@ -213,10 +208,10 @@ for (const interruption of ["count-update", "progress"] as const) {
     }),
     (error) => error === interruptionError,
   );
-  assert.equal(assignedPhotoIds.size, 2, "the failed run already committed all photo assignments");
+  assert.equal(assignedPhotoIds.size, interruption === "assignment" ? 0 : 2);
   assert.deepEqual(
     [...persistedVisits.values()].map((visit) => visit.photoCount),
-    [0],
+    [interruption === "assignment" ? 0 : 2],
   );
 
   const onProgress = (progress: VisitProgress) => {
@@ -224,12 +219,8 @@ for (const interruption of ["count-update", "progress"] as const) {
       completeNotifications++;
     }
   };
-  failRepair = true;
-  await assert.rejects(visitPhotos({ onProgress }), (error) => error === countRepairError);
-  assert.equal(completeNotifications, 0, "a failed repair must not report a completed grouping phase");
-  failRepair = false;
   const result = await visitPhotos({ onProgress });
-  assert.equal(result.visitsCreated, 0, "recovery must reuse the committed visit");
+  assert.equal(result.visitsCreated, interruption === "assignment" ? 1 : 0);
   assert.equal(result.visitedPhotos, 2);
   assert.equal(result.isComplete, true);
   assert.equal(completeNotifications, 1);
@@ -237,9 +228,9 @@ for (const interruption of ["count-update", "progress"] as const) {
     [...persistedVisits.values()].map((visit) => visit.photoCount),
     [2],
   );
-  assert.equal(indexLoads, 1, "summary recovery must not load the spatial index without new photos");
+  assert.equal(indexLoads, interruption === "assignment" ? 2 : 1);
 }
 
 console.log(
-  "Visit photo spatial-work tests passed: empty work loads 0 direct scan guide rows, non-empty output parity, interrupted count-refresh recovery, failure propagation, validation, and version-preflight ordering.",
+  "Visit photo spatial-work tests passed: empty work loads 0 direct scan guide rows, non-empty output parity, atomic assignment recovery, failure propagation, validation, and version-preflight ordering.",
 );

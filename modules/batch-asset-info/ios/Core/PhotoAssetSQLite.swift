@@ -79,6 +79,17 @@ enum PhotoAssetSQLite {
     #endif
   }
 
+  static func bindText(_ statement: OpaquePointer, index: Int32, value: String) -> Int32 {
+    // SQLite copies the bytes before this closure's temporary C string expires.
+    #if SWIFT_PACKAGE
+      let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+      return value.withCString { sqlite3_bind_text(statement, index, $0, -1, transient) }
+    #else
+      let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+      return value.withCString { exsqlite3_bind_text(statement, index, $0, -1, transient) }
+    #endif
+  }
+
   static func step(_ statement: OpaquePointer) -> Int32 {
     #if SWIFT_PACKAGE
       return sqlite3_step(statement)

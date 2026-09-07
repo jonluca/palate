@@ -387,7 +387,7 @@ assert.match(automaticHook, /MediaLibrary\.addListener/);
 assert.match(automaticHook, /useAppStore\.subscribe\(controller\.handleAvailabilityChange\)/);
 assert.match(automaticHook, /getMutationCache\(\)\.subscribe\(controller\.handleAvailabilityChange\)/);
 assert.match(automaticHook, /subscription\.remove\(\)/);
-assert.match(automaticHook, /getUnscannedPhotoCount/);
+assert.match(automaticHook, /prepareAutomaticPhotoScan/);
 assert.match(automaticHook, /getAutomaticPhotoDeepScanQueueCount/);
 assert.match(automaticHook, /claimAutomaticPhotoDeepScanCandidates/);
 assert.match(

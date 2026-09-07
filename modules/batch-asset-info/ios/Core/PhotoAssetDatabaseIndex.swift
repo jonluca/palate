@@ -6,7 +6,11 @@ struct PhotoAssetDatabaseIndex: Equatable, Sendable {
 
   let metricsByIdentifier: [String: PhotoAssetScanStoredMetrics]
 
-  init(databasePath: String) throws {
+  init(databasePath: String, identifiers: [String]? = nil) throws {
+    if identifiers?.isEmpty == true {
+      metricsByIdentifier = [:]
+      return
+    }
     var isDirectory = ObjCBool(false)
     guard
       !databasePath.isEmpty,
@@ -41,10 +45,35 @@ struct PhotoAssetDatabaseIndex: Equatable, Sendable {
 
     try Self.validateSchema(database: database)
 
+    var metrics: [String: PhotoAssetScanStoredMetrics] = [:]
+    if let identifiers {
+      let uniqueIdentifiers = Array(Set(identifiers))
+      for offset in stride(from: 0, to: uniqueIdentifiers.count, by: 500) {
+        let batch = Array(uniqueIdentifiers[offset..<min(offset + 500, uniqueIdentifiers.count)])
+        try Self.readMetrics(database: database, identifiers: batch, into: &metrics)
+      }
+    } else {
+      try Self.readMetrics(database: database, identifiers: nil, into: &metrics)
+    }
+    metricsByIdentifier = metrics
+  }
+
+  private static func readMetrics(
+    database: OpaquePointer,
+    identifiers: [String]?,
+    into metrics: inout [String: PhotoAssetScanStoredMetrics]
+  ) throws {
+    let sql: String
+    if let identifiers {
+      sql = Self.selectSQL + " WHERE id IN (" + identifiers.map { _ in "?" }.joined(separator: ",") + ")"
+    } else {
+      sql = Self.selectSQL
+    }
+
     var statement: OpaquePointer?
     let prepareResult = PhotoAssetSQLite.prepare(
       database: database,
-      sql: Self.selectSQL,
+      sql: sql,
       statement: &statement
     )
     guard prepareResult == PhotoAssetSQLite.ok, let statement else {
@@ -55,7 +84,16 @@ struct PhotoAssetDatabaseIndex: Equatable, Sendable {
     }
     defer { _ = PhotoAssetSQLite.finalize(statement) }
 
-    var metrics: [String: PhotoAssetScanStoredMetrics] = [:]
+    for (index, identifier) in (identifiers ?? []).enumerated() {
+      let bindResult = PhotoAssetSQLite.bindText(statement, index: Int32(index + 1), value: identifier)
+      guard bindResult == PhotoAssetSQLite.ok else {
+        throw PhotoAssetDatabaseIndexError.rowReadFailed(
+          code: bindResult,
+          message: PhotoAssetSQLite.errorMessage(database)
+        )
+      }
+    }
+
     var row = 0
     while true {
       let stepResult = PhotoAssetSQLite.step(statement)
@@ -99,7 +137,6 @@ struct PhotoAssetDatabaseIndex: Equatable, Sendable {
           hasValidLocation: hasValidLocation
         )
       case PhotoAssetSQLite.done:
-        metricsByIdentifier = metrics
         return
       default:
         throw PhotoAssetDatabaseIndexError.rowReadFailed(

@@ -109,7 +109,7 @@ assert.doesNotMatch(
 
 const automaticScanSource = readFileSync(join(repositoryRoot, "hooks/use-automatic-photo-rescan.ts"), "utf8");
 const automaticScanCoreSource = readFileSync(join(repositoryRoot, "utils/automatic-photo-rescan-core.ts"), "utf8");
-assert.match(automaticScanSource, /getUnscannedPhotoCount/);
+assert.match(automaticScanSource, /prepareAutomaticPhotoScan/);
 assert.match(automaticScanSource, /claimAutomaticPhotoDeepScanCandidates/);
 assert.match(
   automaticScanSource,

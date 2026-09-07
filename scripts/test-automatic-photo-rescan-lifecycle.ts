@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import * as core from "../utils/automatic-photo-rescan-core.ts";
+import { createPreparedPhotoScan, type PreparedPhotoScan } from "../utils/prepared-photo-scan-core.ts";
 import type { DeepScanProgress, ScanProgress } from "../hooks/queries.ts";
 
 const compiledHook = ts.transpileModule(
@@ -37,6 +38,8 @@ interface FixtureOptions {
   retainQueue?: boolean;
   nativeAvailable?: boolean;
   syncFailure?: boolean;
+  preparationGate?: Promise<void>;
+  quickPipelineIncomplete?: boolean;
 }
 
 interface StoreSnapshot {
@@ -81,7 +84,18 @@ function fixture(options: FixtureOptions = {}) {
     syncRequired: false,
     syncFailure: options.syncFailure ?? false,
   };
-  const counts = { permission: 0, starts: 0, finishes: 0, quick: 0, errors: 0, maxConcurrent: 0, foodSync: 0 };
+  const counts = {
+    permission: 0,
+    starts: 0,
+    finishes: 0,
+    quick: 0,
+    errors: 0,
+    maxConcurrent: 0,
+    foodSync: 0,
+    prepared: 0,
+    released: 0,
+    checkpoints: 0,
+  };
   const reportedErrors: unknown[] = [];
   const deepBatches: string[][] = [];
   const claimLimits: number[] = [];
@@ -162,6 +176,7 @@ function fixture(options: FixtureOptions = {}) {
     }),
     invalidateQueries: async () => undefined,
     fetchQuery: async ({ queryFn }: { queryFn: () => Promise<number> }) => queryFn(),
+    setQueryData: () => undefined,
   };
   const modules = new Map<string, object>([
     [
@@ -185,7 +200,21 @@ function fixture(options: FixtureOptions = {}) {
     [
       "@/services/scanner",
       {
-        getUnscannedPhotoCount: async () => data.pending,
+        prepareAutomaticPhotoScan: async () => {
+          counts.prepared++;
+          await options.preparationGate;
+          return createPreparedPhotoScan({
+            pendingPhotoCount: data.pending,
+            startedAt: Date.now(),
+            scan: null,
+            checkpoint: async () => {
+              counts.checkpoints++;
+            },
+            release: async () => {
+              counts.released++;
+            },
+          });
+        },
         hasMediaLibraryPermission: async () => {
           counts.permission++;
           return data.permission;
@@ -206,7 +235,7 @@ function fixture(options: FixtureOptions = {}) {
         },
         getAutomaticPhotoDeepScanQueueCount: async () => data.queue.length,
         isAutomaticPhotoFoodSyncRequired: async () => data.syncRequired,
-        isAutomaticPhotoQuickPipelineIncomplete: async () => false,
+        isAutomaticPhotoQuickPipelineIncomplete: async () => options.quickPipelineIncomplete ?? false,
         markAutomaticPhotoFoodSyncRequired: async () => {
           data.syncRequired = true;
         },
@@ -252,8 +281,9 @@ function fixture(options: FixtureOptions = {}) {
           progress: (value: ScanProgress) => void,
           scanOptions: { enqueueInsertedPhotosForAutomaticDeepScan: boolean },
         ) => ({
-          mutateAsync: () =>
+          mutateAsync: (prepared: PreparedPhotoScan) =>
             mutate(async () => {
+              prepared.claim();
               counts.quick++;
               const imported = data.pending;
               await options.quickGate;
@@ -261,6 +291,7 @@ function fixture(options: FixtureOptions = {}) {
                 throw new Error("quick failure");
               }
               data.pending -= imported;
+              await prepared.complete(0);
               if (scanOptions.enqueueInsertedPhotosForAutomaticDeepScan) {
                 data.queue.push(...Array.from({ length: imported }, () => ({ id: `photo-${photoNumber++}` })));
               }
@@ -333,7 +364,7 @@ function fixture(options: FixtureOptions = {}) {
   exports.useAutomaticPhotoRescan(options.enabled ?? true);
   cleanups = effects.map((effect) => effect()).filter((cleanup): cleanup is () => void => cleanup !== undefined);
 
-  const flush = async (turns = 30) => {
+  const flush = async (turns = 60) => {
     for (let turn = 0; turn < turns; turn++) {
       await Promise.resolve();
       for (const [id, timer] of timers) {
@@ -389,6 +420,7 @@ function fixture(options: FixtureOptions = {}) {
       }
       assert.ok(idle, "automatic scan must settle without delayed timers or a retry loop");
       assert.equal(counts.starts, counts.finishes, "every acquired background scan must release its lock");
+      assert.equal(counts.prepared, counts.released, "every prepared native snapshot must be released exactly once");
       assert.ok(counts.maxConcurrent <= 1, "automatic quick and deep scans must not overlap");
     },
   };
@@ -442,10 +474,10 @@ for (const blocker of ["store", "mutation"] as const) {
   assert.equal(scan.counts.quick, 1, "new photos must trigger while the app remains active");
   scan.library({ hasIncrementalChanges: true, updatedAssets: [{ id: "metadata-only" }] });
   await scan.settle();
-  assert.equal(scan.counts.starts, 2, "metadata-only updates should not schedule another import");
+  assert.equal(scan.counts.starts, 3, "updated assets can make previously skipped metadata importable");
   scan.library({});
   await scan.settle();
-  assert.equal(scan.counts.starts, 3, "Android's empty library event must trigger a check");
+  assert.equal(scan.counts.starts, 4, "Android's empty library event must trigger a check");
   scan.cleanup();
 }
 
@@ -612,6 +644,42 @@ for (const options of [{ enabled: false }, { platform: "web" }]) {
   await scan.settle();
   assert.deepEqual(scan.listeners(), [0, 0, 0, 0]);
   assert.equal(scan.counts.starts, 0);
+  scan.cleanup();
+}
+
+for (const stop of ["background", "cleanup"] as const) {
+  const preparation = gate<void>();
+  const scan = fixture({ pending: 2, preparationGate: preparation.promise });
+  await scan.flush();
+  assert.equal(scan.counts.prepared, 1);
+  if (stop === "background") {
+    scan.appState("background");
+  } else {
+    scan.cleanup();
+  }
+  preparation.resolve();
+  await scan.settle();
+  assert.equal(scan.counts.quick, 0, `${stop} during preparation must not start import`);
+  assert.equal(scan.counts.checkpoints, 0, "abandoned checks must not advance history");
+  assert.equal(scan.counts.released, 1);
+  scan.cleanup();
+}
+
+{
+  const scan = fixture();
+  await scan.settle();
+  assert.equal(scan.counts.quick, 0);
+  assert.equal(scan.deepBatches.length, 0);
+  assert.equal(scan.counts.checkpoints, 1, "an explicitly completed empty delta may advance history");
+  assert.equal(scan.counts.foodSync, 0);
+  scan.cleanup();
+}
+
+{
+  const scan = fixture({ quickPipelineIncomplete: true });
+  await scan.settle();
+  assert.equal(scan.counts.quick, 1, "a completed metadata checkpoint must not hide interrupted visit work");
+  assert.equal(scan.counts.checkpoints, 1);
   scan.cleanup();
 }
 

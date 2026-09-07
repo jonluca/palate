@@ -9,6 +9,29 @@ final class CalendarEventStore {
   }
 
   private let eventStore = EKEventStore()
+  private var changeObserver: NSObjectProtocol?
+  private(set) var revision = UUID().uuidString
+
+  // All event-store access and revision updates share the module's serial queue.
+  // A fresh UUID after process restart conservatively invalidates attempts made
+  // before EventKit changes could be observed by this process.
+  init(changeQueue: DispatchQueue) {
+    changeObserver = NotificationCenter.default.addObserver(
+      forName: .EKEventStoreChanged,
+      object: eventStore,
+      queue: nil
+    ) { [weak self] _ in
+      changeQueue.async { [weak self] in
+        self?.revision = UUID().uuidString
+      }
+    }
+  }
+
+  deinit {
+    if let changeObserver {
+      NotificationCenter.default.removeObserver(changeObserver)
+    }
+  }
 
   func events(
     startMs: Double,

@@ -36,6 +36,7 @@ export interface CalendarVisitMatch extends CalendarEvent {
 }
 
 interface NativeCalendarMatchingModule {
+  getRevision?: () => Promise<string>;
   readonly calendarQueryStrategy?: string;
   readonly calendarQueryGapDays?: number;
   getEvents(startMs: number, endMs: number, selectedCalendarIds: readonly string[] | null): Promise<CalendarEvent[]>;
@@ -74,6 +75,14 @@ function requireCalendarMatchingModule(): NativeCalendarMatchingModule {
 /** Whether this binary contains the Apple-native calendar matching module. */
 export function isCalendarMatchingAvailable(): boolean {
   return CalendarMatchingModule !== null;
+}
+
+/** Null disables negative caching on older binaries without change observation. */
+export async function getCalendarRevision(): Promise<string | null> {
+  if (!hasNativeMethod(CalendarMatchingModule, "getRevision")) {
+    return null;
+  }
+  return CalendarMatchingModule.getRevision();
 }
 
 /** Whether this binary contains the native EventKit batch-create method. */

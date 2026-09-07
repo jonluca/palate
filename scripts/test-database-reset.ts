@@ -7,6 +7,7 @@ import { register } from "node:module";
 import { DatabaseSync } from "node:sqlite";
 import { APPLICATION_DATABASE_TABLES, dropApplicationDatabaseTables } from "../utils/db/reset-core.ts";
 import { AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE } from "../utils/db/automatic-photo-deep-scan-queue-core.ts";
+import { CALENDAR_ENRICHMENT_CACHE_TABLE } from "../utils/db/calendar-enrichment-cache-core.ts";
 
 interface Deferred<Value> {
   readonly promise: Promise<Value>;
@@ -173,6 +174,7 @@ const initializedCoreTables = Array.from(
       return table ? [table] : [];
     }),
     AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE,
+    CALENDAR_ENRICHMENT_CACHE_TABLE,
   ]),
 ).sort();
 const resetCoreTables = APPLICATION_DATABASE_TABLES.filter(

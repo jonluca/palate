@@ -5,6 +5,8 @@ import { invalidateRestaurantIndex } from "./michelin-index";
 import { dropApplicationDatabaseTables } from "./reset-core";
 import { syncDefaultFoodKeywords } from "./food-keyword-sync-core";
 import { CREATE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL } from "./automatic-photo-deep-scan-queue-core";
+import { CREATE_CALENDAR_ENRICHMENT_CACHE_SQL } from "./calendar-enrichment-cache-core";
+import { repairLegacyVisitPhotoCounts } from "./visit-photo-count-core";
 import {
   ensureMichelinProviderSpatialIndex,
   invalidateMichelinProviderSpatialIndex,
@@ -174,6 +176,7 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
     );
 
     ${CREATE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL}
+    ${CREATE_CALENDAR_ENRICHMENT_CACHE_SQL}
     
     CREATE INDEX IF NOT EXISTS idx_photos_creation_time ON photos(creationTime);
     CREATE INDEX IF NOT EXISTS idx_photos_visit ON photos(visitId);
@@ -343,6 +346,7 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
   }
 
   await ensureMichelinProviderSpatialIndex(database);
+  await repairLegacyVisitPhotoCounts(database);
 
   // Ensure built-in food keywords include the current defaults
   await syncDefaultFoodKeywords(database);
@@ -503,6 +507,29 @@ export async function performDatabaseMaintenance(): Promise<{
   }
 
   return results;
+}
+
+/** Tiny automatic updates need at most a daily bounded planner refresh. */
+export async function performIncrementalDatabaseMaintenance(changedPhotos: number, now = Date.now()): Promise<void> {
+  if (changedPhotos === 0) {
+    return;
+  }
+  const database = await getDatabase();
+  const previous = await database.getFirstAsync<{ value: string }>(
+    "SELECT value FROM app_metadata WHERE key = 'incremental_database_maintenance_at'",
+  );
+  const previousTime = Number(previous?.value);
+  if (Number.isFinite(previousTime) && previousTime <= now && now - previousTime < 24 * 60 * 60 * 1000) {
+    return;
+  }
+  // SQLite's PRAGMA optimize bounds analysis and selects only tables whose
+  // query statistics need refreshing. Full manual scans retain ANALYZE above.
+  await database.execAsync("PRAGMA optimize; PRAGMA wal_checkpoint(PASSIVE);");
+  await database.runAsync(
+    `INSERT INTO app_metadata (key, value) VALUES ('incremental_database_maintenance_at', ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [String(now)],
+  );
 }
 
 /**

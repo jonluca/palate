@@ -3,11 +3,11 @@ import {
   getVisitablePhotoCounts,
   insertVisits,
   batchUpdatePhotoVisits,
-  batchUpdateVisitPhotoCounts,
   syncAllVisitsFoodProbable,
   batchUpdatePhotosFoodDetected,
   batchUpdateVisitsCalendarEvents,
   getCalendarEnrichmentVisitSnapshot,
+  recordCalendarEnrichmentAttempts,
   getMichelinRestaurantsForCalendarNormalizedNames,
   insertMichelinRestaurants,
   importMichelinRestaurantsFromAttachedSource,
@@ -22,6 +22,7 @@ import {
   getDismissedCalendarEventIds,
   importCalendarSnapshotPlan,
   performDatabaseMaintenance,
+  performIncrementalDatabaseMaintenance,
   getConfirmedVisitsWithMichelinIds,
   getEnabledFoodKeywords,
   getDatabase,
@@ -47,6 +48,7 @@ import {
 } from "@/utils/db/michelin-index";
 import {
   hasCalendarPermission,
+  getCalendarEnrichmentContext,
   requestCalendarPermission,
   batchFindCandidateEventsForVisits,
   isNativeCalendarMatchingAvailable,
@@ -73,7 +75,7 @@ import {
   isVisionVisitFoodValidationModeEnabled,
   type FoodDetectionResult,
 } from "@/modules/batch-asset-info";
-import { scanCameraRoll, formatEta } from "./scanner";
+import { scanCameraRoll, formatEta, type PreparedPhotoScan } from "./scanner";
 import { DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE } from "@/utils/food-detection-buffer-core";
 import { runBufferedResultPersistence } from "@/utils/food-detection-persistence-core";
 import { createVisionResultPagePlan } from "@/utils/vision-result-page-plan";
@@ -172,6 +174,7 @@ interface FoodDetectionProgress {
 }
 
 interface AnalyzingVisitsOptions {
+  incremental?: boolean;
   timeGapThreshold?: number;
   distanceThreshold?: number;
   restaurantMatchThreshold?: number;
@@ -328,13 +331,18 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
     restaurantMatchThreshold = MICHELIN_PRIMARY_MATCH_RADIUS_METERS,
     restaurantSearchRadius = MICHELIN_SUGGESTION_RADIUS_METERS,
     onProgress,
+    incremental = false,
   } = options;
 
   const startTime = Date.now();
 
   await initializeMichelinData();
   await recomputeSuggestedRestaurantsIfNeeded(getMichelinDatasetVersion());
-  const [photoCounts, photos] = await Promise.all([getVisitablePhotoCounts(), getUnvisitedPhotos()]);
+  const [fullPhotoCounts, photos] = await Promise.all([
+    incremental ? Promise.resolve(null) : getVisitablePhotoCounts(),
+    getUnvisitedPhotos(),
+  ]);
+  const photoCounts = fullPhotoCounts ?? { total: photos.length, visited: 0 };
 
   const previouslyVisitedPhotos = photoCounts.visited;
   const isResuming = previouslyVisitedPhotos > 0;
@@ -353,11 +361,7 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
   };
 
   if (!hasVisitPhotosForSpatialWork(photos.length)) {
-    // Photo assignments commit before the final count refresh. A resumed scan
-    // must repair that summary even when the previous run assigned every photo.
-    if (previouslyVisitedPhotos > 0) {
-      await batchUpdateVisitPhotoCounts();
-    }
+    // Counts commit with each assignment batch; startup repairs legacy runs once.
     progress.isComplete = true;
     progress.phase = "complete";
     onProgress?.(progress);
@@ -527,7 +531,6 @@ async function visitPhotos(options: AnalyzingVisitsOptions = {}): Promise<Analyz
     progress.etaMs = progress.visitsPerSecond > 0 && remaining > 0 ? (remaining / progress.visitsPerSecond) * 1000 : 0;
     onProgress?.(progress);
   }
-  await batchUpdateVisitPhotoCounts();
   progress.isComplete = true;
   progress.phase = "complete";
   progress.etaMs = 0;
@@ -647,6 +650,7 @@ interface CalendarEnrichmentProgress {
 interface CalendarEnrichmentOptions {
   onProgress?: (progress: CalendarEnrichmentProgress) => void;
   requestPermissionIfNeeded?: boolean;
+  incremental?: boolean;
 }
 
 // ============================================================================
@@ -908,7 +912,7 @@ async function processRank3BulkTailVisitFoodDetection(
 async function enrichVisitsWithCalendarEvents(
   options: CalendarEnrichmentOptions = {},
 ): Promise<CalendarEnrichmentProgress> {
-  const { onProgress, requestPermissionIfNeeded = true } = options;
+  const { onProgress, requestPermissionIfNeeded = true, incremental = false } = options;
 
   const progress: CalendarEnrichmentProgress = {
     totalVisits: 0,
@@ -935,7 +939,9 @@ async function enrichVisitsWithCalendarEvents(
     return progress;
   }
 
-  const visitsToProcess = await getCalendarEnrichmentVisitSnapshot();
+  const calendarContext = incremental ? await getCalendarEnrichmentContext() : null;
+  const context = calendarContext === null ? null : JSON.stringify([calendarContext, getMichelinDatasetVersion()]);
+  const visitsToProcess = await getCalendarEnrichmentVisitSnapshot(context);
   progress.totalVisits = visitsToProcess.length;
 
   if (visitsToProcess.length === 0) {
@@ -1000,7 +1006,7 @@ async function enrichVisitsWithCalendarEvents(
   } else {
     for (let i = 0; i < visitsToProcess.length; i += BATCH_SIZE) {
       const batch = visitsToProcess.slice(i, i + BATCH_SIZE);
-      const candidateEventMap = await batchFindCandidateEventsForVisits(batch);
+      const candidateEventMap = await batchFindCandidateEventsForVisits(batch, 30, context !== null);
 
       for (const visit of batch) {
         const candidateEvents = candidateEventMap.get(visit.id) ?? [];
@@ -1050,6 +1056,9 @@ async function enrichVisitsWithCalendarEvents(
   }
   if (restaurantSuggestionUpdates.length > 0) {
     await batchUpdateVisitSuggestedRestaurants(restaurantSuggestionUpdates);
+  }
+  if (context !== null && calendarContext === (await getCalendarEnrichmentContext())) {
+    await recordCalendarEnrichmentAttempts(visitsToProcess, context);
   }
 
   progress.isComplete = true;
@@ -1608,6 +1617,10 @@ interface ProcessPhotosResult {
 }
 
 export interface ProcessPhotosOptions {
+  /** Reuse the lifecycle check's scan session instead of enumerating PhotoKit twice. */
+  preparedScan?: PreparedPhotoScan;
+  /** Reuse completed Calendar attempts and update only changed visit summaries. */
+  incrementalVisitWork?: boolean;
   /** Keep lifecycle-triggered scans from presenting a permission prompt. */
   requestCalendarPermissionIfNeeded?: boolean;
   /** Atomically retain this run's inserted IDs for automatic deep-scan recovery. */
@@ -1645,6 +1658,7 @@ async function runProcessPhotos(
   scanProgress?.({ phase: "scanning", detail: "Scanning camera roll..." });
 
   const scanResult = await scanCameraRoll({
+    preparedScan: options.preparedScan,
     enqueueInsertedPhotosForAutomaticDeepScan: options.enqueueInsertedPhotosForAutomaticDeepScan,
     onProgress: (p) => {
       scanProgress?.({
@@ -1664,6 +1678,7 @@ async function runProcessPhotos(
   });
 
   const visitResult = await visitPhotos({
+    incremental: options.incrementalVisitWork,
     onProgress: (p) => {
       scanProgress?.({
         phase: "grouping-visits",
@@ -1682,6 +1697,7 @@ async function runProcessPhotos(
   });
 
   const calendarResult = await enrichVisitsWithCalendarEvents({
+    incremental: options.incrementalVisitWork,
     requestPermissionIfNeeded: options.requestCalendarPermissionIfNeeded,
     onProgress: (p) => {
       if (!p.totalVisits) {
@@ -1733,13 +1749,15 @@ async function runProcessPhotos(
     foodVisitsFound = foodResult.foodVisitsFound;
   }
 
-  // Phase 5: Database maintenance (ANALYZE and WAL checkpoint)
-  scanProgress?.({
-    phase: "optimizing-database",
-    detail: "Optimizing database...",
-  });
-
-  await performDatabaseMaintenance();
+  if (options.incrementalVisitWork) {
+    await performIncrementalDatabaseMaintenance(scanResult.newPhotosAdded + visitResult.visitsCreated);
+  } else {
+    scanProgress?.({
+      phase: "optimizing-database",
+      detail: "Optimizing database...",
+    });
+    await performDatabaseMaintenance();
+  }
   await clearAutomaticPhotoQuickPipelineIncomplete();
 
   return {

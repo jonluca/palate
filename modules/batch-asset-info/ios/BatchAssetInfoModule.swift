@@ -184,6 +184,19 @@ public class BatchAssetInfoModule: Module {
       }
     }.runOnQueue(assetInfoQueue)
 
+    AsyncFunction("beginPhotoLibraryChangeScan") {
+      (databasePath: String, serializedToken: String?) throws -> [String: Any] in
+      do {
+        let scan = try PhotoLibraryChangeScan(databasePath: databasePath, serializedToken: serializedToken)
+        var result = try self.retainAssetScanSession(scan.session, selectedScanImplementation: .databaseBacked)
+        result["changeToken"] = scan.changeToken ?? NSNull()
+        result["mode"] = scan.mode.rawValue
+        return result
+      } catch {
+        throw self.assetScanException(error)
+      }
+    }.runOnQueue(assetInfoQueue)
+
     AsyncFunction("getAssetScanPage") {
       (sessionId: String, offset: Int, limit: Int) throws -> [String: Any?] in
       guard let session = self.assetScanSessions[sessionId] else {

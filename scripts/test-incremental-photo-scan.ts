@@ -628,7 +628,7 @@ function testProductionSourceWiring(): void {
   assert.match(scanSource, /loadExistingAssetIds: getExistingPhotoAssetIdsForIncrementalScan/);
   assert.match(scanSource, /beginIncrementalScan: beginIncrementalAssetScan/);
   assert.match(scanSource, /await getIncrementalPhotoScanInitialProgressWithCleanup\(/);
-  assert.match(scanSource, /nativeScan\.session,\s*endAssetScan,/);
+  assert.match(scanSource, /preparedScan!\.dispose\(\) : endAssetScan/);
   assert.match(scanSource, /processPhotoScanAssets\(page\.assets\)/);
   assert.match(scanSource, /incrementalInitialProgress\?\.processedAssets \?\? 0/);
   assert.doesNotMatch(scanSource, /new Set\s*\(/, "production scanner must not filter PhotoKit IDs in JS");

@@ -14,10 +14,13 @@ import {
 } from "../calendar-batch-mutation-core";
 import {
   buildCalendarEnrichmentVisitSnapshot,
-  CALENDAR_ENRICHMENT_SNAPSHOT_SQL,
   type CalendarEnrichmentSnapshotRow,
   type CalendarEnrichmentVisitSnapshot,
 } from "./calendar-enrichment-snapshot-core";
+import {
+  buildIncrementalCalendarEnrichmentQuery,
+  RECORD_CALENDAR_ENRICHMENT_ATTEMPTS_SQL,
+} from "./calendar-enrichment-cache-core";
 import type { CalendarImportSnapshotPlan } from "../calendar-import-plan-core";
 import {
   executeCalendarImportTransaction,
@@ -153,10 +156,25 @@ export async function batchUpdateVisitsCalendarEvents(updates: CalendarEventUpda
  * Loads every visit and the only suggestion fields used by Calendar matching
  * in one SQLite statement and one consistent read snapshot.
  */
-export async function getCalendarEnrichmentVisitSnapshot(): Promise<CalendarEnrichmentVisitSnapshot[]> {
+export async function getCalendarEnrichmentVisitSnapshot(
+  context: string | null = null,
+): Promise<CalendarEnrichmentVisitSnapshot[]> {
   const database = await getDatabase();
-  const rows = await database.getAllAsync<CalendarEnrichmentSnapshotRow>(CALENDAR_ENRICHMENT_SNAPSHOT_SQL);
+  const query = buildIncrementalCalendarEnrichmentQuery(context, Date.now());
+  const rows = await database.getAllAsync<CalendarEnrichmentSnapshotRow>(query.sql, query.parameters);
   return buildCalendarEnrichmentVisitSnapshot(rows);
+}
+
+/** Called only after the complete matching pass and result persistence succeed. */
+export async function recordCalendarEnrichmentAttempts(
+  visits: readonly CalendarEnrichmentVisitSnapshot[],
+  context: string,
+): Promise<void> {
+  if (visits.length === 0) {
+    return;
+  }
+  const database = await getDatabase();
+  await database.runAsync(RECORD_CALENDAR_ENRICHMENT_ATTEMPTS_SQL, [JSON.stringify(visits), context, Date.now()]);
 }
 
 /**

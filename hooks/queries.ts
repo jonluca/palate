@@ -340,7 +340,12 @@ import {
   type VisitFoodScanProgress,
   type ImportableCalendarEvent,
 } from "@/services/visit";
-import { hasMediaLibraryPermission, requestMediaLibraryPermission, getPhotoCount } from "@/services/scanner";
+import {
+  hasMediaLibraryPermission,
+  requestMediaLibraryPermission,
+  getPhotoCount,
+  type PreparedPhotoScan,
+} from "@/services/scanner";
 import {
   exportAndShareJSON,
   exportToCSV,
@@ -951,7 +956,8 @@ export function useScanPhotos(
   return useMutation({
     mutationKey: mutationKeys.photoAnalysis,
     scope: PHOTO_ANALYSIS_MUTATION_SCOPE,
-    mutationFn: () => processPhotos(onProgress, options),
+    mutationFn: (preparedScan: PreparedPhotoScan | void) =>
+      processPhotos(onProgress, { ...options, preparedScan: preparedScan ?? options.preparedScan }),
     onSettled: () => {
       if (mutationOptions.invalidateQueriesOnSettled === false) {
         return;
