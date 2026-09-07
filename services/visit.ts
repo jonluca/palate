@@ -16,6 +16,7 @@ import {
   getFoodDetectionVisitSamplePlan,
   insertVisitSuggestedRestaurants,
   getUnanalyzedPhotoIds,
+  recordPhotoFoodDetectionFailures,
   batchUpdateVisitSuggestedRestaurants,
   recomputeSuggestedRestaurantsIfNeeded,
   getLinkedCalendarEventIds,
@@ -78,6 +79,7 @@ import {
 } from "@/modules/batch-asset-info";
 import { scanCameraRoll, formatEta, type PreparedPhotoScan } from "./scanner";
 import { DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE } from "@/utils/food-detection-buffer-core";
+import { MAX_PHOTO_FOOD_DETECTION_FAILURES } from "@/utils/db/photo-food-detection-failure-core";
 import { runBufferedResultPersistence } from "@/utils/food-detection-persistence-core";
 import { createVisionResultPagePlan } from "@/utils/vision-result-page-plan";
 import { runOrderedPagePipeline } from "@/utils/ordered-page-pipeline-core";
@@ -699,71 +701,101 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
   // Fetch enabled food keywords from database if not provided
   const keywords = foodKeywords ?? (await getEnabledFoodKeywords());
   const pages = createVisionResultPagePlan(items.length, FOOD_DETECTION_BATCH_SIZE);
+  // A retry must not overlap the next page's speculative native request.
+  let previousDetection: Promise<unknown> = Promise.resolve();
+  const detectPage = (assetIds: string[]) => {
+    const detection = previousDetection.then(() =>
+      detectFoodInImageBatch(assetIds, { confidenceThreshold, foodKeywords: keywords }),
+    );
+    previousDetection = detection.catch(() => undefined);
+    return detection;
+  };
 
   await runOrderedPagePipeline({
     pages,
     strategy: getResolvedVisionPageOrchestrationStrategy(),
     produce: async (page): Promise<ProducedFoodDetectionPage<T>> => {
       const pageItems = items.slice(page.offset, page.endOffset);
-      const detectionResults = await detectFoodInImageBatch(
-        pageItems.map((item) => item.id),
-        { confidenceThreshold, foodKeywords: keywords },
-      );
+      const detectionResults = await detectPage(pageItems.map((item) => item.id));
       return { items: pageItems, detectionResults };
     },
     consume: async ({ items: pageItems, detectionResults }, page) => {
-      const requestedAssetIds = new Set(pageItems.map((item) => item.id));
-      const batchResults: FoodBatchResult[] = [];
-      const returnedAssetIds = new Set<string>();
-      for (const result of detectionResults) {
-        // Never turn a PhotoKit/Vision failure into a permanent "not food" result.
-        // Failed or missing assets remain unanalyzed and can be retried later.
-        if (!requestedAssetIds.has(result.assetId)) {
-          continue;
-        }
-        returnedAssetIds.add(result.assetId);
-        if (result.error !== undefined) {
-          failedCount++;
-          if (collectOutcomes) {
-            outcomes.push({ photoId: result.assetId, status: "failure" });
+      let requestedAssetIds = new Set(pageItems.map((item) => item.id));
+      let attemptResults = detectionResults;
+
+      for (let attempt = 0; attempt < MAX_PHOTO_FOOD_DETECTION_FAILURES; attempt++) {
+        const batchResults: FoodBatchResult[] = [];
+        const returnedAssetIds = new Set<string>();
+        const failedAssetIds = new Set<string>();
+        for (const result of attemptResults) {
+          if (!requestedAssetIds.has(result.assetId) || returnedAssetIds.has(result.assetId)) {
+            continue;
           }
-          continue;
-        }
+          returnedAssetIds.add(result.assetId);
+          if (result.error !== undefined) {
+            failedAssetIds.add(result.assetId);
+            continue;
+          }
 
-        const record: FoodBatchResult = {
-          photoId: result.assetId,
-          foodDetected: result.containsFood,
-          foodLabels: result.foodLabels,
-          foodConfidence: result.foodConfidence,
-          allLabels: result.labels, // Store all labels from classifier
-        };
-
-        if (collectResults) {
-          results.push(record);
-        }
-        batchResults.push(record);
-        if (result.containsFood) {
-          foodFoundCount++;
-        }
-        if (collectOutcomes) {
-          outcomes.push({
+          const record: FoodBatchResult = {
             photoId: result.assetId,
-            status: "success",
-            containsFood: result.containsFood,
-          });
-        }
-      }
+            foodDetected: result.containsFood,
+            foodLabels: result.foodLabels,
+            foodConfidence: result.foodConfidence,
+            allLabels: result.labels,
+          };
 
-      for (const item of pageItems) {
-        if (!returnedAssetIds.has(item.id)) {
-          failedCount++;
+          if (collectResults) {
+            results.push(record);
+          }
+          batchResults.push(record);
+          if (result.containsFood) {
+            foodFoundCount++;
+          }
+          if (collectOutcomes) {
+            outcomes.push({
+              photoId: result.assetId,
+              status: "success",
+              containsFood: result.containsFood,
+            });
+          }
         }
-      }
 
-      if (batchResults.length > 0) {
-        // Persistence errors must abort the scan. Continuing would report completion
-        // while silently leaving a processed batch unsaved.
-        await onBatchResults?.(batchResults);
+        for (const assetId of requestedAssetIds) {
+          if (!returnedAssetIds.has(assetId)) {
+            failedAssetIds.add(assetId);
+          }
+        }
+
+        if (batchResults.length > 0) {
+          // Retain successes before retry work can fail; never request them again.
+          await onBatchResults?.(batchResults);
+        }
+
+        if (failedAssetIds.size === 0) {
+          break;
+        }
+
+        // Persist each failed attempt and spend only that photo's remaining budget.
+        // Exhausted photos stay unknown, but leave the pending queries immediately.
+        const retryableIds = await recordPhotoFoodDetectionFailures([...failedAssetIds]);
+        const retryIds = attempt + 1 < MAX_PHOTO_FOOD_DETECTION_FAILURES ? retryableIds : [];
+        const retryAssetIds = new Set(retryIds);
+        for (const assetId of failedAssetIds) {
+          if (!retryAssetIds.has(assetId)) {
+            failedCount++;
+            if (collectOutcomes && returnedAssetIds.has(assetId)) {
+              outcomes.push({ photoId: assetId, status: "failure" });
+            }
+          }
+        }
+        if (retryIds.length === 0) {
+          break;
+        }
+
+        await new Promise<void>((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        requestedAssetIds = retryAssetIds;
+        attemptResults = await detectPage(retryIds);
       }
 
       onBatchComplete?.(page.endOffset, foodFoundCount, failedCount);
@@ -1464,7 +1496,7 @@ function adaptVisitFoodProgressToDeepScan(progress: FoodDetectionProgress): Deep
 
 /**
  * Deep scan photos for food detection.
- * Scans the provided photos, or every unanalyzed photo when none are specified.
+ * Scans the provided photos, or every retry-eligible unanalyzed photo when none are specified.
  * Photos are processed in deterministic order (by creationTime, then id).
  */
 export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): Promise<DeepScanProgress> {
@@ -1490,9 +1522,7 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
   };
 
   if (!isBatchAssetInfoAvailable()) {
-    progress.isComplete = true;
-    onProgress?.({ ...progress });
-    return progress;
+    throw new Error("Food detection is unavailable in this app build.");
   }
 
   const photosToScan = photos ?? (await getUnanalyzedPhotoIds());

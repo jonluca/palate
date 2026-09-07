@@ -3,12 +3,16 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
 import { runBufferedResultPersistence } from "../utils/food-detection-persistence-core.ts";
 import { runOrderedPagePipeline } from "../utils/ordered-page-pipeline-core.ts";
 import { createVisionResultPagePlan } from "../utils/vision-result-page-plan.ts";
 import { DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE } from "../utils/food-detection-buffer-core.ts";
+import * as photoFoodPersistence from "../utils/db/photo-food-detection-core.ts";
+import * as photoFoodFailures from "../utils/db/photo-food-detection-failure-core.ts";
+import type * as photosDatabase from "../utils/db/photos.ts";
 import type * as visitService from "../services/visit.ts";
 
 interface TestResult {
@@ -472,6 +476,7 @@ for (const synchronizeVisitFood of [undefined, true, false]) {
       ],
       ["@/utils/food-detection-persistence-core", { runBufferedResultPersistence }],
       ["@/utils/food-detection-buffer-core", { DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE }],
+      ["@/utils/db/photo-food-detection-failure-core", photoFoodFailures],
       ["@/utils/vision-result-page-plan", { createVisionResultPagePlan }],
       ["@/utils/ordered-page-pipeline-core", { runOrderedPagePipeline }],
     ]);
@@ -505,6 +510,520 @@ for (const synchronizeVisitFood of [undefined, true, false]) {
       ...(synchronizeVisitFood === false ? [] : ["synchronize"]),
       ...(failSecondPage ? [] : ["complete"]),
     ]);
+  }
+}
+
+// Exercise the production service, selection queries, and food-result writer
+// together: permanently failing assets leave pending work after a bounded number
+// of failures without reprocessing or changing successfully classified photos.
+const compiledPhotosDatabase = ts.transpileModule(
+  readFileSync(new URL("../utils/db/photos.ts", import.meta.url), "utf8"),
+  { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+).outputText;
+
+interface DeepScanFailureFixtureOptions {
+  nativeAvailable?: boolean;
+  failurePersistenceError?: Error;
+  pipelineStrategy?: "serial" | "lookahead";
+  nativeAttempt?: (
+    ids: readonly string[],
+    attempts: ReadonlyMap<string, number>,
+    recoveredIds: Set<string>,
+  ) => void | Promise<void>;
+}
+
+function createDeepScanFailureFixture(options: DeepScanFailureFixtureOptions = {}) {
+  const database = new DatabaseSync(":memory:");
+  database.exec(`CREATE TABLE photos (
+    id TEXT PRIMARY KEY,
+    creationTime REAL NOT NULL,
+    foodDetected INTEGER,
+    foodLabels TEXT,
+    foodConfidence REAL,
+    allLabels TEXT,
+    foodDetectionFailureCount INTEGER NOT NULL DEFAULT 0
+  )`);
+  const insert = database.prepare(
+    "INSERT INTO photos (id, creationTime, foodDetected, foodLabels, foodConfidence, allLabels) VALUES (?, ?, ?, ?, ?, ?)",
+  );
+  insert.run("prior-classified-failed", 30, 1, "preserved-food", 0.91, "preserved-labels");
+  insert.run("prior-true", 10, 1, "old-food", 0.8, "old-labels");
+  insert.run("pending-missing", 20, null, null, null, null);
+  insert.run("pending-error", 21, null, null, null, null);
+  insert.run("pending-food", 22, null, null, null, null);
+  insert.run("prior-false", 10, 0, "[]", 0, "old-labels");
+
+  const events: string[] = [];
+  const pendingReads: string[] = [];
+  const recoveredIds = new Set<string>();
+  const attemptedIds: string[] = [];
+  const requests: string[][] = [];
+  const attempts = new Map<string, number>();
+  const retryDelays: number[] = [];
+  const transaction = {
+    runAsync: async (sql: string, parameters: SQLInputValue[]) => database.prepare(sql).run(...parameters),
+    prepareAsync: async (sql: string) => {
+      const statement = database.prepare(sql);
+      return {
+        executeAsync: async (parameters: SQLInputValue[]) => statement.run(...parameters),
+        finalizeAsync: async () => {},
+      };
+    },
+  };
+  const databaseAdapter = {
+    runAsync: async (sql: string, parameters: SQLInputValue[]) => {
+      if (options.failurePersistenceError) {
+        throw options.failurePersistenceError;
+      }
+      return transaction.runAsync(sql, parameters);
+    },
+    getAllAsync: async (sql: string, parameters: SQLInputValue[] = []) => {
+      if (options.failurePersistenceError && sql === photoFoodFailures.RECORD_PHOTO_FOOD_DETECTION_FAILURES_SQL) {
+        throw options.failurePersistenceError;
+      }
+      return database.prepare(sql).all(...parameters);
+    },
+    getFirstAsync: async (sql: string, parameters: SQLInputValue[] = []) => database.prepare(sql).get(...parameters),
+    withExclusiveTransactionAsync: async (operation: (value: typeof transaction) => Promise<void>) => {
+      database.exec("BEGIN");
+      try {
+        await operation(transaction);
+        database.exec("COMMIT");
+        events.push("persist");
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
+  const photoExports: Partial<
+    Pick<
+      typeof photosDatabase,
+      | "getUnanalyzedPhotoIds"
+      | "getUnanalyzedPhotoCount"
+      | "batchUpdatePhotosFoodDetected"
+      | "recordPhotoFoodDetectionFailures"
+    >
+  > = {};
+  const photoDependencies = new Map<string, object>([
+    ["./core", { getDatabase: async () => databaseAdapter }],
+    ["./photo-food-detection-core", photoFoodPersistence],
+    ["./photo-food-detection-failure-core", photoFoodFailures],
+  ]);
+  runInNewContext(compiledPhotosDatabase, {
+    exports: photoExports,
+    require: (name: string) => photoDependencies.get(name) ?? {},
+  });
+  const {
+    getUnanalyzedPhotoIds,
+    getUnanalyzedPhotoCount,
+    batchUpdatePhotosFoodDetected,
+    recordPhotoFoodDetectionFailures,
+  } = photoExports;
+  assert.ok(
+    getUnanalyzedPhotoIds &&
+      getUnanalyzedPhotoCount &&
+      batchUpdatePhotosFoodDetected &&
+      recordPhotoFoodDetectionFailures,
+  );
+
+  const exports: Partial<Pick<typeof visitService, "deepScanAllPhotosForFood">> = {};
+  const dependencies = new Map<string, object>([
+    [
+      "@/utils/db",
+      {
+        getUnanalyzedPhotoIds: async () => {
+          pendingReads.push("pending");
+          return getUnanalyzedPhotoIds();
+        },
+        getEnabledFoodKeywords: async () => ["food"],
+        batchUpdatePhotosFoodDetected,
+        recordPhotoFoodDetectionFailures,
+        syncAllVisitsFoodProbable: async () => {
+          events.push("synchronize");
+        },
+      },
+    ],
+    [
+      "@/modules/batch-asset-info",
+      {
+        getVisionResultPageSize: () => 2,
+        getResolvedVisionPageOrchestrationStrategy: () => options.pipelineStrategy ?? "serial",
+        isBatchAssetInfoAvailable: () => options.nativeAvailable !== false,
+        isVisionVisitFoodValidationModeEnabled: () => false,
+        detectFoodInImageBatch: async (ids: string[]) => {
+          attemptedIds.push(...ids);
+          requests.push([...ids]);
+          for (const id of ids) {
+            attempts.set(id, (attempts.get(id) ?? 0) + 1);
+          }
+          await options.nativeAttempt?.(ids, attempts, recoveredIds);
+          return ids
+            .filter((id) => id !== "pending-missing" || recoveredIds.has(id))
+            .map((id) => ({
+              assetId: id,
+              containsFood: id === "pending-food" || recoveredIds.has(id),
+              foodConfidence: id === "pending-food" || recoveredIds.has(id) ? 0.9 : 0,
+              foodLabels: id === "pending-food" || recoveredIds.has(id) ? [{ label: "food", confidence: 0.9 }] : [],
+              labels: [{ label: id === "pending-food" || recoveredIds.has(id) ? "food" : "tree", confidence: 0.9 }],
+              error:
+                (id === "pending-error" || id === "prior-classified-failed") && !recoveredIds.has(id)
+                  ? "PhotoKit could not load the photo"
+                  : undefined,
+            }));
+        },
+      },
+    ],
+    ["@/utils/food-detection-persistence-core", { runBufferedResultPersistence }],
+    ["@/utils/food-detection-buffer-core", { DEFAULT_VISION_PERSISTENCE_FLUSH_SIZE }],
+    ["@/utils/db/photo-food-detection-failure-core", photoFoodFailures],
+    ["@/utils/vision-result-page-plan", { createVisionResultPagePlan }],
+    ["@/utils/ordered-page-pipeline-core", { runOrderedPagePipeline }],
+  ]);
+  runInNewContext(compiledVisitService, {
+    exports,
+    require: (name: string) => dependencies.get(name) ?? {},
+    setTimeout: (callback: () => void, delay: number) => {
+      retryDelays.push(delay);
+      callback();
+      return 0;
+    },
+  });
+  const { deepScanAllPhotosForFood } = exports;
+  assert.ok(deepScanAllPhotosForFood);
+  return {
+    database,
+    deepScanAllPhotosForFood,
+    getUnanalyzedPhotoCount,
+    attemptedIds,
+    requests,
+    attempts,
+    retryDelays,
+    pendingReads,
+    recoveredIds,
+    events,
+  };
+}
+
+{
+  const fixture = createDeepScanFailureFixture();
+  try {
+    const classifiedBefore = fixture.database
+      .prepare("SELECT * FROM photos WHERE foodDetected IS NOT NULL ORDER BY id")
+      .all();
+    const readPhoto = (id: string) => fixture.database.prepare("SELECT * FROM photos WHERE id = ?").get(id);
+    const progress: visitService.DeepScanProgress[] = [];
+    const result = await fixture.deepScanAllPhotosForFood({ onProgress: (value) => progress.push(value) });
+    assert.deepEqual(fixture.requests, [
+      ["pending-missing", "pending-error"],
+      ["pending-error", "pending-missing"],
+      ["pending-error", "pending-missing"],
+      ["pending-food"],
+    ]);
+    assert.deepEqual(fixture.retryDelays, [250, 500]);
+    assert.equal(result.retryableFailures, 2);
+    assert.equal(result.foodPhotosFound, 1);
+    assert.equal(result.totalPhotos, 3);
+    assert.equal(result.processedPhotos, 3, "Retry attempts must not inflate the unique photo count");
+    assert.equal(result.isComplete, true);
+    for (const value of progress) {
+      assert.equal(value.totalPhotos, 3);
+      assert.ok(value.processedPhotos <= 3);
+      assert.ok(value.retryableFailures <= 2);
+    }
+    for (const id of ["pending-missing", "pending-error"]) {
+      assert.equal(readPhoto(id)?.foodDetectionFailureCount, 3);
+      assert.equal(readPhoto(id)?.foodDetected, null, "Failures must not become a false food classification");
+    }
+    assert.deepEqual(
+      fixture.database.prepare("SELECT * FROM photos WHERE id LIKE 'prior-%' ORDER BY id").all(),
+      classifiedBefore,
+      "Pending-only scans must never reprocess classified photos",
+    );
+    assert.equal(await fixture.getUnanalyzedPhotoCount(), 0, "Settings must hide deep scan after the single run");
+    fixture.attemptedIds.length = 0;
+    const afterExhaustion = await fixture.deepScanAllPhotosForFood();
+    assert.deepEqual(fixture.attemptedIds, [], "Permanent failures must stop resurfacing in subsequent deep scans");
+    assert.equal(afterExhaustion.totalPhotos, 0);
+    assert.equal(afterExhaustion.processedPhotos, 0);
+    assert.equal(afterExhaustion.retryableFailures, 0);
+    assert.equal(afterExhaustion.isComplete, true);
+
+    // An intentional per-photo retry can recover after Photos makes the image available.
+    fixture.recoveredIds.add("pending-missing");
+    const recovery = await fixture.deepScanAllPhotosForFood({ photos: [{ id: "pending-missing" }] });
+    assert.equal(recovery.foodPhotosFound, 1);
+    assert.equal(readPhoto("pending-missing")?.foodDetected, 1);
+    assert.equal(readPhoto("pending-missing")?.foodDetectionFailureCount, 0);
+    assert.equal(readPhoto("pending-error")?.foodDetectionFailureCount, 3);
+  } finally {
+    fixture.database.close();
+  }
+}
+
+// The user's exact one-photo failure must exhaust its budget inside one invocation.
+{
+  const fixture = createDeepScanFailureFixture();
+  try {
+    fixture.database.exec("DELETE FROM photos WHERE id IN ('pending-error', 'pending-food')");
+    const result = await fixture.deepScanAllPhotosForFood();
+    assert.deepEqual(fixture.requests, [["pending-missing"], ["pending-missing"], ["pending-missing"]]);
+    assert.equal(result.processedPhotos, 1);
+    assert.equal(result.retryableFailures, 1);
+    assert.equal(await fixture.getUnanalyzedPhotoCount(), 0);
+    assert.equal((await fixture.deepScanAllPhotosForFood()).totalPhotos, 0);
+  } finally {
+    fixture.database.close();
+  }
+}
+
+// A failed retry-counter write must not discard successfully classified photos
+// already buffered from the same page or falsely report a completed scan.
+{
+  const failurePersistenceError = new Error("Injected failure-counter persistence error");
+  const fixture = createDeepScanFailureFixture({ failurePersistenceError });
+  try {
+    fixture.database.exec("UPDATE photos SET creationTime = 0 WHERE id = 'pending-food'");
+    const progress: visitService.DeepScanProgress[] = [];
+    await assert.rejects(
+      fixture.deepScanAllPhotosForFood({ onProgress: (value) => progress.push(value) }),
+      (error) => error === failurePersistenceError,
+    );
+    assert.equal(
+      fixture.database.prepare("SELECT foodDetected FROM photos WHERE id = 'pending-food'").get()?.foodDetected,
+      1,
+    );
+    assert.equal(
+      fixture.database.prepare("SELECT SUM(foodDetectionFailureCount) AS failures FROM photos").get()?.failures,
+      0,
+    );
+    assert.equal(
+      progress.some((value) => value.isComplete),
+      false,
+    );
+    assert.deepEqual(fixture.requests, [["pending-food", "pending-missing"]]);
+    assert.deepEqual(fixture.retryDelays, [], "A failed durable counter update must abort before retrying");
+  } finally {
+    fixture.database.close();
+  }
+}
+
+// A budget persisted by an interrupted scan limits retries in the current invocation.
+{
+  const fixture = createDeepScanFailureFixture();
+  try {
+    fixture.database.exec(`
+      DELETE FROM photos WHERE id IN ('pending-error', 'pending-food');
+      UPDATE photos SET foodDetectionFailureCount = 2 WHERE id = 'pending-missing';
+    `);
+    const result = await fixture.deepScanAllPhotosForFood();
+    assert.deepEqual(fixture.requests, [["pending-missing"]]);
+    assert.deepEqual(fixture.retryDelays, []);
+    assert.equal(result.processedPhotos, 1);
+    assert.equal(result.retryableFailures, 1);
+    assert.equal(await fixture.getUnanalyzedPhotoCount(), 0);
+    assert.equal(
+      fixture.database.prepare("SELECT foodDetectionFailureCount FROM photos WHERE id = 'pending-missing'").get()
+        ?.foodDetectionFailureCount,
+      3,
+    );
+  } finally {
+    fixture.database.close();
+  }
+}
+
+// Retry only failed IDs within this invocation, including recovery on different attempts.
+{
+  const fixture = createDeepScanFailureFixture({
+    nativeAttempt: (ids, attempts, recoveredIds) => {
+      for (const id of ids) {
+        if (
+          (id === "pending-error" && attempts.get(id) === 2) ||
+          (id === "pending-missing" && attempts.get(id) === 3)
+        ) {
+          recoveredIds.add(id);
+        }
+      }
+    },
+  });
+  try {
+    fixture.database.exec("UPDATE photos SET creationTime = 0 WHERE id = 'pending-food'");
+    const result = await fixture.deepScanAllPhotosForFood();
+    assert.deepEqual(fixture.requests, [
+      ["pending-food", "pending-missing"],
+      ["pending-missing"],
+      ["pending-missing"],
+      ["pending-error"],
+      ["pending-error"],
+    ]);
+    assert.equal(fixture.attempts.get("pending-food"), 1, "Successful photos must never enter a retry request");
+    assert.deepEqual(fixture.retryDelays, [250, 500, 250]);
+    assert.equal(result.processedPhotos, 3);
+    assert.equal(result.foodPhotosFound, 3);
+    assert.equal(result.retryableFailures, 0);
+    assert.equal(
+      fixture.database.prepare("SELECT SUM(foodDetectionFailureCount) AS failures FROM photos").get()?.failures,
+      0,
+    );
+    assert.equal((await fixture.deepScanAllPhotosForFood()).totalPhotos, 0);
+  } finally {
+    fixture.database.close();
+  }
+}
+
+// Speculative next-page production and retry requests must share the native request slot.
+{
+  let activeRequests = 0;
+  let maximumActiveRequests = 0;
+  const fixture = createDeepScanFailureFixture({
+    pipelineStrategy: "lookahead",
+    nativeAttempt: async (ids, attempts, recoveredIds) => {
+      activeRequests++;
+      maximumActiveRequests = Math.max(maximumActiveRequests, activeRequests);
+      await new Promise(setImmediate);
+      for (const id of ids) {
+        if ((attempts.get(id) ?? 0) >= 2) {
+          recoveredIds.add(id);
+        }
+      }
+      activeRequests--;
+    },
+  });
+  try {
+    const result = await fixture.deepScanAllPhotosForFood();
+    assert.deepEqual(fixture.requests, [
+      ["pending-missing", "pending-error"],
+      ["pending-food"],
+      ["pending-error", "pending-missing"],
+    ]);
+    assert.equal(maximumActiveRequests, 1, "A retry must not overlap an in-flight lookahead native request");
+    assert.equal(result.processedPhotos, 3);
+    assert.equal(result.foodPhotosFound, 3);
+    assert.equal(result.retryableFailures, 0);
+    assert.equal(await fixture.getUnanalyzedPhotoCount(), 0);
+  } finally {
+    fixture.database.close();
+  }
+}
+
+// A thrown retry request preserves successes and charges only the earlier reported asset failure.
+{
+  const transportError = new Error("Injected native retry transport failure");
+  const fixture = createDeepScanFailureFixture({
+    nativeAttempt: (ids, attempts) => {
+      if (ids.includes("pending-missing") && attempts.get("pending-missing") === 2) {
+        throw transportError;
+      }
+    },
+  });
+  try {
+    fixture.database.exec("UPDATE photos SET creationTime = 0 WHERE id = 'pending-food'");
+    const progress: visitService.DeepScanProgress[] = [];
+    await assert.rejects(
+      fixture.deepScanAllPhotosForFood({ onProgress: (value) => progress.push(value) }),
+      (error) => error === transportError,
+    );
+    assert.deepEqual(fixture.requests, [["pending-food", "pending-missing"], ["pending-missing"]]);
+    assert.equal(
+      fixture.database.prepare("SELECT foodDetected FROM photos WHERE id = 'pending-food'").get()?.foodDetected,
+      1,
+    );
+    assert.equal(
+      fixture.database.prepare("SELECT foodDetectionFailureCount FROM photos WHERE id = 'pending-missing'").get()
+        ?.foodDetectionFailureCount,
+      1,
+      "Thrown batch failures must not consume an individual photo's retry budget",
+    );
+    assert.equal(
+      fixture.database.prepare("SELECT foodDetectionFailureCount FROM photos WHERE id = 'pending-error'").get()
+        ?.foodDetectionFailureCount,
+      0,
+    );
+    assert.equal(
+      progress.some((value) => value.isComplete),
+      false,
+    );
+  } finally {
+    fixture.database.close();
+  }
+}
+
+// A whole-batch transport error is not evidence that any requested asset is unreadable.
+{
+  const transportError = new Error("Injected initial native transport failure");
+  const fixture = createDeepScanFailureFixture({
+    nativeAttempt: () => {
+      throw transportError;
+    },
+  });
+  try {
+    await assert.rejects(fixture.deepScanAllPhotosForFood(), (error) => error === transportError);
+    assert.deepEqual(fixture.requests, [["pending-missing", "pending-error"]]);
+    assert.deepEqual(fixture.retryDelays, []);
+    assert.equal(
+      fixture.database.prepare("SELECT SUM(foodDetectionFailureCount) AS failures FROM photos").get()?.failures,
+      0,
+    );
+    assert.equal(await fixture.getUnanalyzedPhotoCount(), 3);
+  } finally {
+    fixture.database.close();
+  }
+}
+
+// Explicit caller-supplied selections still retain their contract, including an empty selection.
+for (const photos of [[], [{ id: "pending-food" }]]) {
+  const fixture = createDeepScanFailureFixture();
+  try {
+    const result = await fixture.deepScanAllPhotosForFood({ photos });
+    assert.deepEqual(fixture.pendingReads, []);
+    assert.deepEqual(
+      fixture.attemptedIds,
+      photos.map((photo) => photo.id),
+    );
+    assert.equal(result.totalPhotos, photos.length);
+    assert.equal(result.isComplete, true);
+  } finally {
+    fixture.database.close();
+  }
+}
+
+// Even an explicit failed recheck preserves a photo's existing classification payload.
+{
+  const fixture = createDeepScanFailureFixture();
+  try {
+    const selectPayload = fixture.database.prepare(
+      "SELECT foodDetected, foodLabels, foodConfidence, allLabels FROM photos WHERE id = 'prior-classified-failed'",
+    );
+    const before = selectPayload.get();
+    const result = await fixture.deepScanAllPhotosForFood({ photos: [{ id: "prior-classified-failed" }] });
+    assert.deepEqual(fixture.pendingReads, []);
+    assert.deepEqual(fixture.requests, [
+      ["prior-classified-failed"],
+      ["prior-classified-failed"],
+      ["prior-classified-failed"],
+    ]);
+    assert.equal(result.processedPhotos, 1);
+    assert.equal(result.retryableFailures, 1);
+    assert.deepEqual(selectPayload.get(), before);
+  } finally {
+    fixture.database.close();
+  }
+}
+
+{
+  const fixture = createDeepScanFailureFixture({ nativeAvailable: false });
+  try {
+    const progress: visitService.DeepScanProgress[] = [];
+    await assert.rejects(
+      fixture.deepScanAllPhotosForFood({ onProgress: (value) => progress.push(value) }),
+      /Food detection is unavailable/,
+    );
+    assert.deepEqual(fixture.pendingReads, []);
+    assert.deepEqual(fixture.attemptedIds, []);
+    assert.deepEqual(fixture.events, []);
+    assert.deepEqual(progress, [], "Missing native capability must not report a successful empty scan");
+  } finally {
+    fixture.database.close();
   }
 }
 

@@ -131,6 +131,7 @@ function createDatabase(configuration: Configuration): DatabaseSync {
       visitId TEXT,
       creationTime INTEGER NOT NULL,
       foodDetected INTEGER,
+      foodDetectionFailureCount INTEGER NOT NULL DEFAULT 0,
       payload TEXT NOT NULL
     );
     CREATE INDEX idx_photos_visit ON photos(visitId);

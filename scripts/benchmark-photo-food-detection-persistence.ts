@@ -339,6 +339,7 @@ function createSeededDatabase(rows: readonly PhotoRow[]): DatabaseSync {
       id TEXT PRIMARY KEY,
       visitId TEXT,
       foodDetected INTEGER,
+      foodDetectionFailureCount INTEGER NOT NULL DEFAULT 0,
       foodLabels TEXT,
       foodConfidence REAL,
       allLabels TEXT,

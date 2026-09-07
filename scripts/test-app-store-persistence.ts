@@ -328,6 +328,47 @@ assert.equal(selectedProgressUpdates.length, 3);
 assert.equal(selectedProgressUpdates[2], null, "the same subscriber must hide the card when the scan finishes");
 unsubscribe();
 
+assert.equal(appStore.getState().startBackgroundPhotoScan(), true);
+assert.equal(selectBackgroundProgress(appStore.getState())?.progress, null);
+const progressTrace: Array<number | null> = [];
+for (const [reported, expected] of [
+  [0.2, 0.2],
+  [0.1, 0.2],
+  [0.5, 0.5],
+  [null, 0.5],
+  [0.4, 0.5],
+  [0.96, 0.96],
+  [null, 0.96],
+  [Number.NaN, 0.96],
+  [Number.POSITIVE_INFINITY, 0.96],
+  [-1, 0.96],
+  [2, 1],
+] as const) {
+  const detail = `Progress update ${progressTrace.length}`;
+  appStore.getState().updateBackgroundPhotoScanProgress({
+    stage: reported === null ? "reconciling" : "deep-scanning",
+    detail,
+    progress: reported,
+  });
+  const update = selectBackgroundProgress(appStore.getState());
+  assert.equal(update?.progress, expected, "progress must not reverse or disappear during the same run");
+  assert.equal(update.detail, detail, "the current phase details must still update when progress is held");
+  progressTrace.push(update.progress);
+}
+assert.deepEqual(progressTrace, [0.2, 0.2, 0.5, 0.5, 0.5, 0.96, 0.96, 0.96, 0.96, 0.96, 1]);
+appStore.getState().finishBackgroundPhotoScan();
+appStore.getState().updateBackgroundPhotoScanProgress({ stage: "deep-scanning", detail: "Late update", progress: 1 });
+assert.equal(selectBackgroundProgress(appStore.getState()), null, "late updates must not reopen a finished card");
+assert.equal(appStore.getState().startBackgroundPhotoScan(), true);
+assert.equal(selectBackgroundProgress(appStore.getState())?.progress, null, "a new scan starts with unknown progress");
+appStore.getState().updateBackgroundPhotoScanProgress({ stage: "scanning", detail: "New scan", progress: 0.03 });
+assert.equal(
+  selectBackgroundProgress(appStore.getState())?.progress,
+  0.03,
+  "completed progress must not leak into a new scan",
+);
+appStore.getState().finishBackgroundPhotoScan();
+
 assert.match(appStoreSource, /storage: createJSONStorage\(\(\) => createDeduplicatingStorage\(AsyncStorage\)\)/);
 assert.match(appStoreSource, /interface AppState extends AppPreferences/);
 assert.equal(appStoreSource.match(/\.\.\.createDefaultAppPreferences\(\)/g)?.length, 2);

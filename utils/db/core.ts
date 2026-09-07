@@ -7,6 +7,7 @@ import { syncDefaultFoodKeywords } from "./food-keyword-sync-core";
 import { CREATE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL } from "./automatic-photo-deep-scan-queue-core";
 import { CREATE_CALENDAR_ENRICHMENT_CACHE_SQL } from "./calendar-enrichment-cache-core";
 import { repairLegacyVisitPhotoCounts } from "./visit-photo-count-core";
+import { ensurePhotoFoodDetectionFailureCount } from "./photo-food-detection-failure-core";
 import {
   ensureMichelinProviderSpatialIndex,
   invalidateMichelinProviderSpatialIndex,
@@ -172,6 +173,7 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
       foodDetected INTEGER,
       foodLabels TEXT,
       foodConfidence REAL,
+      foodDetectionFailureCount INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (visitId) REFERENCES visits(id)
     );
 
@@ -309,6 +311,9 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
   } catch {
     // Column already exists, ignore
   }
+
+  // Migration: Preserve repeated PhotoKit/Vision failures across scan attempts.
+  await ensurePhotoFoodDetectionFailureCount(database);
 
   // Migration: Add allLabels column to store all classifier labels (not just food-related)
   try {

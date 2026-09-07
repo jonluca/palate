@@ -13,9 +13,11 @@ import { useAppStore, useHasCompletedInitialScan } from "@/store/app-store";
 import { formatEta, getPhotoCount } from "@/services/scanner";
 import { logScanStarted, logScanCompleted } from "@/services/analytics";
 import { getUnanalyzedPhotoCount } from "@/utils/db";
+import { getDeepScanSummary } from "@/utils/deep-scan-summary";
 import {
   allowsAutomaticDeepScanFollowup,
   getResolvedVisitFoodDetectionStrategy,
+  isBatchAssetInfoAvailable,
   isVisionVisitFoodValidationModeEnabled,
 } from "@/modules/batch-asset-info";
 
@@ -88,11 +90,11 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
       const percent = Math.round(progressValue * 100);
       const eta = progress.isComplete ? "Done" : formatEta(progress.etaMs);
       const retryDetail =
-        progress.retryableFailures > 0 ? `; ${progress.retryableFailures.toLocaleString()} queued to retry` : "";
+        progress.retryableFailures > 0 ? `; ${progress.retryableFailures.toLocaleString()} could not be analyzed` : "";
 
       onProgress({
         phase: "deep-scanning",
-        detail: `Scanned ${progress.processedPhotos.toLocaleString()} of ${progress.totalPhotos.toLocaleString()} photos (${percent.toLocaleString()}%)${retryDetail}`,
+        detail: `Checked ${progress.processedPhotos.toLocaleString()} of ${progress.totalPhotos.toLocaleString()} photos (${percent.toLocaleString()}%)${retryDetail}`,
         photosPerSecond: Math.round(progress.photosPerSecond),
         eta,
         progress: progressValue,
@@ -116,6 +118,7 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
 
   const shouldAutoDeepScan = useCallback(async () => {
     if (
+      !isBatchAssetInfoAvailable() ||
       !allowsAutomaticDeepScanFollowup(
         getResolvedVisitFoodDetectionStrategy(),
         isVisionVisitFoodValidationModeEnabled(),
@@ -169,21 +172,30 @@ export function useScan(options: UseScanOptions = {}): UseScanReturn {
 
         let photosProcessed: number;
         let resultsCreated: number;
+        let deepScanResult: DeepScanProgress | undefined;
         if (mode === "scan") {
           const result = await scanMutation.mutateAsync();
           if (await shouldAutoDeepScan()) {
-            await deepScanMutation.mutateAsync(undefined);
+            deepScanResult = await deepScanMutation.mutateAsync(undefined);
           }
           photosProcessed = result?.photosProcessed ?? 0;
           resultsCreated = result?.visitsCreated ?? 0;
         } else {
           const result = await deepScanMutation.mutateAsync(undefined);
+          deepScanResult = result;
           photosProcessed = result?.processedPhotos ?? 0;
           // Deep scan reports food detections rather than newly created visits.
           resultsCreated = result?.foodPhotosFound ?? 0;
         }
-        complete("Done!");
-        completeScan("Done!");
+        const summary = deepScanResult ? getDeepScanSummary(deepScanResult) : null;
+        if (mode === "deep-scan" && summary?.type === "error") {
+          error(summary.message);
+          failScan(summary.message);
+          return;
+        }
+        const completionMessage = summary ? `Done. ${summary.message}` : "Done!";
+        complete(completionMessage);
+        completeScan(completionMessage);
         logScanCompleted(photosProcessed, resultsCreated);
       } catch (err) {
         console.error(mode === "scan" ? "Scan error:" : "Deep scan error:", err);

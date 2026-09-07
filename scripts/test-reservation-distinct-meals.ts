@@ -7,6 +7,7 @@ import * as restaurants from "../data/restaurants.ts";
 import * as persistence from "../utils/db/calendar-persistence-core.ts";
 import * as mutations from "../utils/calendar-batch-mutation-core.ts";
 import * as enrichment from "../utils/db/calendar-enrichment-snapshot-core.ts";
+import * as enrichmentCache from "../utils/db/calendar-enrichment-cache-core.ts";
 import * as calendarImport from "../utils/db/calendar-import-transaction-core.ts";
 import * as reservationImport from "../utils/db/reservation-import-transaction-core.ts";
 import * as prefilter from "../utils/db/reservation-review-prefilter-core.ts";
@@ -43,6 +44,7 @@ function loadProductionCalendar(database: DatabaseSync) {
     ["./calendar-persistence-core", persistence],
     ["../calendar-batch-mutation-core", mutations],
     ["./calendar-enrichment-snapshot-core", enrichment],
+    ["./calendar-enrichment-cache-core", enrichmentCache],
     ["./calendar-import-transaction-core", calendarImport],
     ["./reservation-import-transaction-core", reservationImport],
     ["./reservation-review-prefilter-core", prefilter],

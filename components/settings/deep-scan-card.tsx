@@ -9,6 +9,7 @@ import { useToast } from "@/components/ui/toast";
 import { queryKeys, useDeepScan, useUnanalyzedPhotoCount, type DeepScanProgress } from "@/hooks/queries";
 import { formatEta } from "@/services/scanner";
 import { getUnanalyzedPhotoIds } from "@/utils/db";
+import { getDeepScanSummary } from "@/utils/deep-scan-summary";
 import {
   allowsAutomaticDeepScanFollowup,
   getResolvedVisitFoodDetectionStrategy,
@@ -52,11 +53,15 @@ async function runDeepScan({
     setProgress(createInitialProgress());
     const result = await mutateAsync();
     setProgress(null);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    showToast({
-      type: result.retryableFailures > 0 ? "info" : "success",
-      message: `Found ${result.foodPhotosFound.toLocaleString()} food photo${result.foodPhotosFound === 1 ? "" : "s"} in ${result.processedPhotos.toLocaleString()} photos${result.retryableFailures > 0 ? `; ${result.retryableFailures.toLocaleString()} will retry` : ""}`,
-    });
+    const summary = getDeepScanSummary(result);
+    Haptics.notificationAsync(
+      summary.type === "success"
+        ? Haptics.NotificationFeedbackType.Success
+        : summary.type === "error"
+          ? Haptics.NotificationFeedbackType.Error
+          : Haptics.NotificationFeedbackType.Warning,
+    );
+    showToast(summary);
   } catch (error) {
     console.error("Deep scan error:", error);
     setProgress(null);
@@ -112,7 +117,7 @@ export function DeepScanCard({ autoStart = false }: DeepScanCardProps) {
           const photosToScan = await getUnanalyzedPhotoIds();
 
           if (photosToScan.length === 0) {
-            void queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
+            await queryClient.invalidateQueries({ queryKey: queryKeys.unanalyzedPhotoCount });
             if (source === "manual") {
               showToast({ type: "info", message: "No photos left to deep scan" });
             }

@@ -440,10 +440,6 @@ assert.doesNotMatch(backgroundPhotoUpdateBar, /Pressable|router|unscannedPhotoCo
 assert.match(appStore, /startBackgroundPhotoScan:[\s\S]{0,500}stage: "checking"/);
 assert.match(
   appStore,
-  /updateBackgroundPhotoScanProgress:[\s\S]{0,700}state\.isBackgroundPhotoScanRunning[\s\S]{0,700}: state/,
-);
-assert.match(
-  appStore,
   /finishBackgroundPhotoScan:[\s\S]{0,300}isBackgroundPhotoScanRunning: false,[\s\S]{0,100}backgroundPhotoScanProgress: null/,
 );
 assert.match(automaticHook, /stage: "reconciling"[\s\S]{0,200}progress: null/);

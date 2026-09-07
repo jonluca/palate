@@ -68,7 +68,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
 
   const handleDeepScanProgress = (progress: DeepScanProgress) => {
     const retryDetail =
-      progress.retryableFailures > 0 ? ` · ${progress.retryableFailures.toLocaleString()} queued to retry` : "";
+      progress.retryableFailures > 0 ? ` · ${progress.retryableFailures.toLocaleString()} could not be analyzed` : "";
     const processedPhotos = deepScanTotalsRef.current.completed + progress.processedPhotos;
     const totalPhotos = Math.max(
       deepScanTotalsRef.current.total,
@@ -78,7 +78,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
       stage: "deep-scanning",
       detail:
         totalPhotos > 0
-          ? `Analyzed ${processedPhotos.toLocaleString()} of ${totalPhotos.toLocaleString()} photos${retryDetail}`
+          ? `Checked ${processedPhotos.toLocaleString()} of ${totalPhotos.toLocaleString()} photos${retryDetail}`
           : "Preparing photo analysis…",
       progress: getAutomaticDeepScanOverallProgress(processedPhotos, totalPhotos, quickScanRanRef.current),
     });

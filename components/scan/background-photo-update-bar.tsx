@@ -6,12 +6,6 @@ import { ThemedText } from "@/components/themed-text";
 import { useAppStore } from "@/store";
 import { cn } from "@/utils/cn";
 
-const indeterminatePulse = {
-  "0%": { opacity: 0.35, transform: [{ scaleX: 0.08 }] },
-  "50%": { opacity: 1, transform: [{ scaleX: 1 }] },
-  "100%": { opacity: 0.35, transform: [{ scaleX: 0.08 }] },
-};
-
 interface BackgroundPhotoUpdateBarProps {
   className?: string;
 }
@@ -73,22 +67,7 @@ export function BackgroundPhotoUpdateBar({ className }: BackgroundPhotoUpdateBar
       </View>
 
       <View className={"h-1.5 rounded-full bg-primary/15 overflow-hidden"}>
-        {percentage === null ? (
-          reduceMotion ? (
-            <View className={"h-full w-1/3 rounded-full bg-primary"} />
-          ) : (
-            <Animated.View
-              className={"h-full w-full rounded-full bg-primary"}
-              style={{
-                transformOrigin: "left center",
-                animationName: indeterminatePulse,
-                animationDuration: "1200ms",
-                animationIterationCount: "infinite",
-                animationTimingFunction: "ease-in-out",
-              }}
-            />
-          )
-        ) : (
+        {percentage !== null ? (
           <Animated.View
             className={"h-full w-full rounded-full bg-primary"}
             style={[
@@ -105,7 +84,7 @@ export function BackgroundPhotoUpdateBar({ className }: BackgroundPhotoUpdateBar
                   },
             ]}
           />
-        )}
+        ) : null}
       </View>
     </Animated.View>
   );

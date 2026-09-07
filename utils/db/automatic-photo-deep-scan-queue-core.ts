@@ -1,3 +1,5 @@
+import { MAX_PHOTO_FOOD_DETECTION_FAILURES } from "./photo-food-detection-failure-core.ts";
+
 export const AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE = "automatic_photo_deep_scan_queue";
 export const AUTOMATIC_PHOTO_QUICK_PIPELINE_INCOMPLETE_KEY = "automatic_photo_quick_pipeline_incomplete";
 export const AUTOMATIC_PHOTO_FOOD_SYNC_REQUIRED_KEY = "automatic_photo_food_sync_required";
@@ -21,6 +23,7 @@ export const COUNT_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL = `
   FROM ${AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE} AS queue
   INNER JOIN photos AS photo ON photo.id = queue.assetId
   WHERE photo.foodDetected IS NULL
+    AND photo.foodDetectionFailureCount < ${MAX_PHOTO_FOOD_DETECTION_FAILURES}
 `;
 
 /** Bind the batch limit as ?1 and this run's already-attempted ID JSON array as ?2. */
@@ -29,6 +32,7 @@ export const GET_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL = `
   FROM ${AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE} AS queue
   INNER JOIN photos AS photo ON photo.id = queue.assetId
   WHERE photo.foodDetected IS NULL
+    AND photo.foodDetectionFailureCount < ${MAX_PHOTO_FOOD_DETECTION_FAILURES}
     AND queue.assetId NOT IN (
       SELECT CAST(value AS TEXT)
       FROM json_each(?2)
@@ -56,6 +60,7 @@ export const PRUNE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL = `
     FROM photos AS photo
     WHERE photo.id = ${AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_TABLE}.assetId
       AND photo.foodDetected IS NULL
+      AND photo.foodDetectionFailureCount < ${MAX_PHOTO_FOOD_DETECTION_FAILURES}
   )
 `;
 

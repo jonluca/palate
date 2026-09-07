@@ -1,3 +1,5 @@
+import { MAX_PHOTO_FOOD_DETECTION_FAILURES } from "./photo-food-detection-failure-core.ts";
+
 type SQLiteColumnValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
 
 export interface FoodDetectionVisitSampleRow {
@@ -68,6 +70,7 @@ export function buildVisitPhotoSampleStatement(
         INNER JOIN photo_counts AS counts ON counts.visitId = requested.visitId
         INNER JOIN photos AS photo
           ON photo.visitId = requested.visitId AND photo.foodDetected IS NULL
+          AND photo.foodDetectionFailureCount < ${MAX_PHOTO_FOOD_DETECTION_FAILURES}
       )
       SELECT visitId, photoId, sampleRank
       FROM ranked
@@ -86,7 +89,7 @@ export const FOOD_DETECTION_VISIT_SAMPLES_SQL = `WITH photo_counts AS MATERIALIZ
     SELECT
       visitId,
       COUNT(*) AS totalPhotos,
-      SUM(foodDetected IS NULL) AS unanalyzedPhotos
+      SUM(foodDetected IS NULL AND foodDetectionFailureCount < ${MAX_PHOTO_FOOD_DETECTION_FAILURES}) AS unanalyzedPhotos
     FROM photos
     WHERE visitId IS NOT NULL
     GROUP BY visitId
@@ -111,6 +114,7 @@ export const FOOD_DETECTION_VISIT_SAMPLES_SQL = `WITH photo_counts AS MATERIALIZ
     FROM photos AS photo
     INNER JOIN eligible_visits AS eligible ON eligible.visitId = photo.visitId
     WHERE photo.foodDetected IS NULL
+      AND photo.foodDetectionFailureCount < ${MAX_PHOTO_FOOD_DETECTION_FAILURES}
   )
   SELECT
     eligible.visitId,

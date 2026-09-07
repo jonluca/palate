@@ -20,6 +20,7 @@ import {
 } from "../utils/db/automatic-photo-deep-scan-queue-core.ts";
 import { buildPhotoIngestionStatement } from "../utils/db/photo-ingestion-core.ts";
 import { AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE } from "../utils/automatic-photo-rescan-core.ts";
+import { RECORD_PHOTO_FOOD_DETECTION_FAILURES_SQL } from "../utils/db/photo-food-detection-failure-core.ts";
 
 type SQLiteRow = Record<string, SQLOutputValue>;
 
@@ -57,6 +58,7 @@ try {
     latitude REAL,
     longitude REAL,
     foodDetected INTEGER,
+    foodDetectionFailureCount INTEGER NOT NULL DEFAULT 0,
     mediaType TEXT,
     duration REAL
   )`);
@@ -268,6 +270,32 @@ try {
   assert.ok(
     secondClaim.some((id) => !firstClaimSet.has(id)),
     "failed rows must rotate behind never-attempted queue rows",
+  );
+
+  database.exec("DELETE FROM automatic_photo_deep_scan_queue; DELETE FROM photos;");
+  insertPhoto.run("retry-budget", "ph://retry", 1, null);
+  database.prepare(ENQUEUE_AUTOMATIC_PHOTO_DEEP_SCAN_IDS_SQL).run(JSON.stringify(["retry-budget"]));
+  for (let failureCount = 1; failureCount <= 3; failureCount += 1) {
+    database.prepare(RECORD_PHOTO_FOOD_DETECTION_FAILURES_SQL).run(JSON.stringify(["retry-budget", "retry-budget"]));
+    const eligibleIds = failureCount < 3 ? ["retry-budget"] : [];
+    assert.deepEqual(claimCandidates(10), eligibleIds, "exhausted failures must stop automatic attempts");
+    assert.equal(
+      readIntegerColumn(
+        database.prepare(COUNT_AUTOMATIC_PHOTO_DEEP_SCAN_CANDIDATES_SQL).get(),
+        "pendingCount",
+        "retry budget count",
+      ),
+      eligibleIds.length,
+    );
+  }
+  database.prepare(PRUNE_AUTOMATIC_PHOTO_DEEP_SCAN_QUEUE_SQL).run();
+  assert.equal(
+    readIntegerColumn(
+      database.prepare("SELECT COUNT(*) AS count FROM automatic_photo_deep_scan_queue").get(),
+      "count",
+      "exhausted queue pruning",
+    ),
+    0,
   );
 
   database.exec("DELETE FROM automatic_photo_deep_scan_queue; DELETE FROM photos;");

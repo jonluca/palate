@@ -16,6 +16,10 @@ import {
 } from "./automatic-photo-deep-scan-queue-core";
 import type { FoodLabel, PhotoRecord, UnvisitedPhotoRecord } from "./types";
 import { parseFoodLabelArrayJson } from "./food-label-json.ts";
+import {
+  MAX_PHOTO_FOOD_DETECTION_FAILURES,
+  RECORD_PHOTO_FOOD_DETECTION_FAILURES_SQL,
+} from "./photo-food-detection-failure-core";
 
 type SQLiteColumnValue = string | number | boolean | null | ArrayBuffer | Uint8Array;
 
@@ -304,25 +308,44 @@ export async function getPhotosByVisitIdsPage(
 }
 
 /**
- * Get photo IDs that haven't been analyzed for food yet (foodDetected IS NULL)
+ * Get photo IDs still eligible for food detection, excluding exhausted failures.
  * Ordered deterministically by creationTime and id
  */
 export async function getUnanalyzedPhotoIds(): Promise<{ id: string }[]> {
   const database = await getDatabase();
   return database.getAllAsync<{ id: string }>(
-    `SELECT id FROM photos WHERE foodDetected IS NULL ORDER BY creationTime ASC, id ASC`,
+    `SELECT id FROM photos
+     WHERE foodDetected IS NULL AND foodDetectionFailureCount < ${MAX_PHOTO_FOOD_DETECTION_FAILURES}
+     ORDER BY creationTime ASC, id ASC`,
   );
 }
 
 /**
- * Get count of photos that haven't been analyzed for food yet (foodDetected IS NULL)
+ * Get count of photos still eligible for food detection.
  */
 export async function getUnanalyzedPhotoCount(): Promise<number> {
   const database = await getDatabase();
   const result = await database.getFirstAsync<{ count: number }>(
-    `SELECT COUNT(*) as count FROM photos WHERE foodDetected IS NULL`,
+    `SELECT COUNT(*) as count FROM photos
+     WHERE foodDetected IS NULL AND foodDetectionFailureCount < ${MAX_PHOTO_FOOD_DETECTION_FAILURES}`,
   );
   return result?.count ?? 0;
+}
+
+/** Record each failure once and return the ordered, unique IDs with retry budget remaining. */
+export async function recordPhotoFoodDetectionFailures(ids: readonly string[]): Promise<string[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+  const database = await getDatabase();
+  const updatedRows = await database.getAllAsync<{ id: string; foodDetectionFailureCount: number }>(
+    RECORD_PHOTO_FOOD_DETECTION_FAILURES_SQL,
+    [JSON.stringify(ids)],
+  );
+  const retryableIds = new Set(
+    updatedRows.filter((row) => row.foodDetectionFailureCount < MAX_PHOTO_FOOD_DETECTION_FAILURES).map((row) => row.id),
+  );
+  return ids.filter((id) => retryableIds.delete(id));
 }
 
 export async function getTotalPhotoCount(): Promise<number> {
@@ -396,7 +419,7 @@ export async function batchUpdatePhotosFoodDetected(updates: readonly PhotoFoodD
       }
 
       // Keep this phase after all labeled writes. It intentionally changes only
-      // foodDetected, preserving any payload written by the labeled phase.
+      // foodDetected and the retry counter, preserving the labeled payload.
       for (let offset = 0; offset < simpleUpdates.length; offset += SIMPLE_PHOTO_FOOD_DETECTION_BATCH_SIZE) {
         const batch = simpleUpdates.slice(offset, offset + SIMPLE_PHOTO_FOOD_DETECTION_BATCH_SIZE);
         const statement = buildSimplePhotoFoodDetectionStatement(batch);

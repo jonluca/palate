@@ -1842,7 +1842,7 @@ export function useDeepScan(
       if (mutationOptions.invalidateQueriesOnSettled === false) {
         return;
       }
-      void invalidateFoodDetectionQueries(queryClient);
+      return invalidateFoodDetectionQueries(queryClient);
     },
   });
 }

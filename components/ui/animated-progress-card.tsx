@@ -63,7 +63,15 @@ function PulsingIndicator() {
 }
 
 // Animated text component that reads from shared value
-function AnimatedStatusText({ value, isComplete = false }: { value: SharedValue<string>; isComplete?: boolean }) {
+function AnimatedStatusText({
+  value,
+  isComplete = false,
+  isActive,
+}: {
+  value: SharedValue<string>;
+  isComplete?: boolean;
+  isActive: boolean;
+}) {
   const [text, setText] = React.useState("");
 
   useAnimatedReaction(
@@ -85,7 +93,7 @@ function AnimatedStatusText({ value, isComplete = false }: { value: SharedValue<
       variant={isComplete ? "callout" : "subhead"}
       color={isComplete ? undefined : "secondary"}
       className={cn("flex-1 font-medium", isComplete && "text-green-300 font-semibold")}
-      numberOfLines={1}
+      numberOfLines={isActive ? 1 : undefined}
     >
       {text}
     </ThemedText>
@@ -233,7 +241,7 @@ export function AnimatedProgressCard({ sharedValues }: AnimatedProgressCardProps
           <View className={"flex-row items-center gap-3"}>
             {showStats && !isComplete && <PulsingIndicator />}
             {isComplete && <CompletionBadge />}
-            <AnimatedStatusText value={status} isComplete={isComplete} />
+            <AnimatedStatusText value={status} isComplete={isComplete} isActive={showStats} />
           </View>
 
           {/* Progress Bar */}

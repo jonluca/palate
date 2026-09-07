@@ -96,7 +96,8 @@ export function buildLabeledPhotoFoodDetectionStatement(
       SET foodDetected = food_updates.foodDetected,
           foodLabels = food_updates.foodLabels,
           foodConfidence = food_updates.foodConfidence,
-          allLabels = food_updates.allLabels
+          allLabels = food_updates.allLabels,
+          foodDetectionFailureCount = 0
       FROM food_updates
       WHERE target.id = food_updates.id`,
     parameters: updates.flatMap((update) => [
@@ -122,7 +123,8 @@ export function buildSimplePhotoFoodDetectionStatement(
   return {
     sql: `WITH food_updates(id, foodDetected) AS (VALUES ${values})
       UPDATE photos AS target
-      SET foodDetected = food_updates.foodDetected
+      SET foodDetected = food_updates.foodDetected,
+          foodDetectionFailureCount = 0
       FROM food_updates
       WHERE target.id = food_updates.id`,
     parameters: updates.flatMap((update) => [update.photoId, update.foodDetected ? 1 : 0]),

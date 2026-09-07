@@ -37,7 +37,7 @@ export type BackgroundPhotoScanStage =
 export interface BackgroundPhotoScanProgress {
   stage: BackgroundPhotoScanStage;
   detail: string;
-  /** Overall progress from 0-1, or null while the amount of work is still unknown. */
+  /** Nondecreasing overall progress from 0-1, or null before the first measured update. */
   progress: number | null;
 }
 
@@ -175,16 +175,20 @@ export const useAppStore = create<AppState>()(
       },
 
       updateBackgroundPhotoScanProgress: (progress) =>
-        set((state) =>
-          state.isBackgroundPhotoScanRunning
-            ? {
-                backgroundPhotoScanProgress: {
-                  ...progress,
-                  progress: progress.progress === null ? null : Math.min(1, Math.max(0, progress.progress)),
-                },
-              }
-            : state,
-        ),
+        set((state) => {
+          if (!state.isBackgroundPhotoScanRunning) {
+            return state;
+          }
+          const previous = state.backgroundPhotoScanProgress?.progress ?? null;
+          const next = progress.progress;
+          return {
+            backgroundPhotoScanProgress: {
+              ...progress,
+              // Batch boundaries and final reconciliation must not restart the visible bar.
+              progress: next === null || !Number.isFinite(next) ? previous : Math.max(previous ?? 0, Math.min(1, next)),
+            },
+          };
+        }),
 
       finishBackgroundPhotoScan: () =>
         set({

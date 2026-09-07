@@ -129,7 +129,8 @@ try {
       id TEXT PRIMARY KEY,
       visitId TEXT,
       creationTime INTEGER NOT NULL,
-      foodDetected INTEGER
+      foodDetected INTEGER,
+      foodDetectionFailureCount INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX idx_photos_visit ON photos(visitId);
     CREATE INDEX idx_photos_visit_food_time ON photos(visitId, foodDetected, creationTime);
@@ -215,6 +216,29 @@ try {
     RangeError,
   );
   assert.throws(() => buildVisitPhotoSampleStatement(["v"], Number.NaN), RangeError);
+
+  database.exec(
+    "UPDATE photos SET foodDetectionFailureCount = 3 WHERE id IN ('a-00', 'a-01') OR visitId = 'v-newer-b'",
+  );
+  database.exec("UPDATE photos SET foodDetectionFailureCount = 2 WHERE id = 'a-02'");
+  const afterExhaustion = combinedSamplePlan(database, 0.2);
+  assert.equal(afterExhaustion.totalVisits, 3, "visits with only exhausted photos must leave the automatic plan");
+  assert.deepEqual(
+    afterExhaustion.samples.filter((sample) => sample.visitId === "v-newer-a"),
+    [
+      { visitId: "v-newer-a", photoId: "a-02", sampleRank: 1 },
+      { visitId: "v-newer-a", photoId: "a-03", sampleRank: 2 },
+    ],
+    "exhausted rows must not occupy a sample slot or change the all-photo denominator",
+  );
+  const explicitVisitPlan = buildVisitPhotoSampleStatement(["v-newer-a", "v-newer-b"], 0.2);
+  assert.deepEqual(
+    database
+      .prepare(explicitVisitPlan.sql)
+      .all(...explicitVisitPlan.parameters)
+      .map(({ photoId }) => photoId),
+    ["a-02", "a-03"],
+  );
 
   database.exec("DELETE FROM photos");
   assert.deepEqual(combinedSamplePlan(database, 0.2), { totalVisits: 0, samples: [] });

@@ -34,7 +34,7 @@ database.exec(`
   );
   CREATE TABLE photos (
     id TEXT PRIMARY KEY, visitId TEXT, uri TEXT, creationTime INTEGER,
-    foodDetected INTEGER, mediaType TEXT, duration REAL
+    foodDetected INTEGER, foodDetectionFailureCount INTEGER NOT NULL DEFAULT 0, mediaType TEXT, duration REAL
   );
   CREATE TABLE restaurants (id TEXT PRIMARY KEY, name TEXT);
   CREATE TABLE michelin_restaurants (id TEXT PRIMARY KEY, name TEXT, award TEXT);

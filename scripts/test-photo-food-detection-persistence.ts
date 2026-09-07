@@ -3,7 +3,15 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { DatabaseSync, type SQLOutputValue, type StatementSync } from "node:sqlite";
+import { readFileSync } from "node:fs";
+import { DatabaseSync, type SQLInputValue, type SQLOutputValue, type StatementSync } from "node:sqlite";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
+import {
+  ensurePhotoFoodDetectionFailureCount,
+  MAX_PHOTO_FOOD_DETECTION_FAILURES,
+  RECORD_PHOTO_FOOD_DETECTION_FAILURES_SQL,
+} from "../utils/db/photo-food-detection-failure-core.ts";
 import {
   buildLabeledPhotoFoodDetectionStatement,
   buildSimplePhotoFoodDetectionStatement,
@@ -12,6 +20,7 @@ import {
   SIMPLE_PHOTO_FOOD_DETECTION_BATCH_SIZE,
   type PhotoFoodDetectionUpdate,
 } from "../utils/db/photo-food-detection-core.ts";
+import type * as photosDatabase from "../utils/db/photos.ts";
 
 interface PhotoRow {
   readonly id: string;
@@ -65,6 +74,7 @@ function createDatabase(): DatabaseSync {
   database.exec(`CREATE TABLE photos (
     id TEXT PRIMARY KEY,
     foodDetected INTEGER,
+    foodDetectionFailureCount INTEGER NOT NULL DEFAULT 0,
     foodLabels TEXT,
     foodConfidence REAL,
     allLabels TEXT,
@@ -326,14 +336,37 @@ try {
   seedDatabase(oracleDatabase);
   seedDatabase(candidateDatabase);
   seedDatabase(rollbackDatabase);
+  candidateDatabase.exec("UPDATE photos SET foodDetectionFailureCount = 3");
+  rollbackDatabase.exec("UPDATE photos SET foodDetectionFailureCount = 2");
   const beforeRollbackRows = readRows(rollbackDatabase);
 
   applySequentialOracle(oracleDatabase, updates);
   applyCandidate(candidateDatabase, updates);
   assert.deepEqual(readRows(candidateDatabase), readRows(oracleDatabase));
+  assert.equal(
+    candidateDatabase.prepare("SELECT foodDetectionFailureCount FROM photos WHERE id = 'labeled'").get()
+      ?.foodDetectionFailureCount,
+    0,
+  );
+  assert.equal(
+    candidateDatabase.prepare("SELECT foodDetectionFailureCount FROM photos WHERE id = 'simple-true-only'").get()
+      ?.foodDetectionFailureCount,
+    0,
+  );
+  assert.equal(
+    candidateDatabase.prepare("SELECT foodDetectionFailureCount FROM photos WHERE id = 'untouched'").get()
+      ?.foodDetectionFailureCount,
+    3,
+  );
 
   assert.throws(() => applyCandidate(rollbackDatabase, updates, true), /injected failure/);
   assert.deepEqual(readRows(rollbackDatabase), beforeRollbackRows);
+  assert.equal(
+    rollbackDatabase.prepare("SELECT foodDetectionFailureCount FROM photos WHERE id = 'labeled'").get()
+      ?.foodDetectionFailureCount,
+    2,
+    "classification and retry counter must roll back together",
+  );
 
   const labeledRow = candidateDatabase.prepare("SELECT * FROM photos WHERE id = ?").get("labeled");
   assert.deepEqual(
@@ -389,4 +422,133 @@ try {
   oracleDatabase.close();
   candidateDatabase.close();
   rollbackDatabase.close();
+}
+
+// A legacy database retains every payload through migration and all failed
+// attempts. Duplicate/missing IDs cannot consume additional retry budget.
+{
+  const database = new DatabaseSync(":memory:");
+  try {
+    database.exec(`CREATE TABLE photos (
+      id TEXT PRIMARY KEY,
+      foodDetected INTEGER,
+      foodLabels TEXT,
+      foodConfidence REAL,
+      allLabels TEXT,
+      payload TEXT NOT NULL
+    )`);
+    database
+      .prepare("INSERT INTO photos VALUES (?, ?, ?, ?, ?, ?)")
+      .run("pending", null, null, null, null, "keep-pending");
+    database
+      .prepare("INSERT INTO photos VALUES (?, ?, ?, ?, ?, ?)")
+      .run("prior-food", 1, "food-labels", 0.8, "all-labels", "keep-prior");
+    const before = readRows(database);
+    let migrationWrites = 0;
+    const adapter = {
+      getAllAsync: async (sql: string) =>
+        database
+          .prepare(sql)
+          .all()
+          .map((row) => ({ name: requiredString(row.name, "name") })),
+      execAsync: async (sql: string) => {
+        migrationWrites += 1;
+        database.exec(sql);
+      },
+    };
+    await ensurePhotoFoodDetectionFailureCount(adapter);
+    await ensurePhotoFoodDetectionFailureCount(adapter);
+    assert.equal(migrationWrites, 1, "an existing database must migrate once");
+    assert.deepEqual(readRows(database), before);
+    assert.deepEqual(
+      database
+        .prepare("SELECT foodDetectionFailureCount FROM photos")
+        .all()
+        .map((row) => row.foodDetectionFailureCount),
+      [0, 0],
+    );
+
+    let failureQueries = 0;
+    const failureDatabase = {
+      getAllAsync: async (sql: string, parameters: readonly SQLInputValue[]) => {
+        failureQueries += 1;
+        return database.prepare(sql).all(...parameters);
+      },
+    };
+    const exports: Partial<Pick<typeof photosDatabase, "recordPhotoFoodDetectionFailures">> = {};
+    const dependencies = new Map<string, object>([
+      ["./core", { getDatabase: async () => failureDatabase }],
+      [
+        "./photo-food-detection-failure-core",
+        { MAX_PHOTO_FOOD_DETECTION_FAILURES, RECORD_PHOTO_FOOD_DETECTION_FAILURES_SQL },
+      ],
+    ]);
+    const compiledPhotosDatabase = ts.transpileModule(
+      readFileSync(new URL("../utils/db/photos.ts", import.meta.url), "utf8"),
+      { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } },
+    ).outputText;
+    runInNewContext(compiledPhotosDatabase, {
+      exports,
+      require: (name: string) => dependencies.get(name) ?? {},
+    });
+    const { recordPhotoFoodDetectionFailures } = exports;
+    assert.ok(recordPhotoFoodDetectionFailures);
+    assert.deepEqual(Array.from(await recordPhotoFoodDetectionFailures([])), []);
+    assert.equal(failureQueries, 0, "empty failure batches must not touch the database");
+
+    for (let attempt = 1; attempt <= MAX_PHOTO_FOOD_DETECTION_FAILURES + 1; attempt += 1) {
+      const retryableIds: string[] = await recordPhotoFoodDetectionFailures([
+        "prior-food",
+        "pending",
+        "pending",
+        "missing",
+      ]);
+      assert.deepEqual(
+        Array.from(retryableIds),
+        attempt < MAX_PHOTO_FOOD_DETECTION_FAILURES ? ["prior-food", "pending"] : [],
+        "retry IDs must preserve request order, remove duplicates, and exclude exhausted or absent assets",
+      );
+      const expectedCount = Math.min(attempt, MAX_PHOTO_FOOD_DETECTION_FAILURES);
+      assert.deepEqual(
+        database
+          .prepare("SELECT foodDetectionFailureCount FROM photos")
+          .all()
+          .map((row) => row.foodDetectionFailureCount),
+        [expectedCount, expectedCount],
+      );
+      assert.deepEqual(
+        readRows(database),
+        before,
+        "failure tracking must not alter classifications or unrelated payloads",
+      );
+      const pending = database
+        .prepare(
+          `SELECT id FROM photos WHERE foodDetected IS NULL AND foodDetectionFailureCount < ${MAX_PHOTO_FOOD_DETECTION_FAILURES}`,
+        )
+        .all();
+      assert.equal(pending.length, attempt < MAX_PHOTO_FOOD_DETECTION_FAILURES ? 1 : 0);
+    }
+
+    applyCandidate(database, [
+      { photoId: "pending", foodDetected: true, foodLabels: [{ label: "food", confidence: 0.9 }] },
+      { photoId: "prior-food", foodDetected: false },
+    ]);
+    assert.deepEqual(
+      database
+        .prepare("SELECT foodDetectionFailureCount FROM photos")
+        .all()
+        .map((row) => row.foodDetectionFailureCount),
+      [0, 0],
+      "a successful explicit rescan resets both writer shapes",
+    );
+    database.exec("UPDATE photos SET foodDetectionFailureCount = CASE id WHEN 'pending' THEN 2 ELSE 1 END");
+    assert.deepEqual(
+      Array.from(await recordPhotoFoodDetectionFailures(["pending", "prior-food"])),
+      ["prior-food"],
+      "earlier failures must consume the same persisted retry budget",
+    );
+    assert.deepEqual(Array.from(await recordPhotoFoodDetectionFailures(["prior-food", "pending", "missing"])), []);
+  } finally {
+    database.close();
+  }
 }

@@ -56,9 +56,13 @@ export async function resolve(specifier, context, nextResolve) {
         "./automatic-photo-deep-scan-queue-core",
         "./calendar-enrichment-cache-core",
         "./visit-photo-count-core",
+        "./photo-food-detection-failure-core",
       ].includes(specifier)
     ) {
       return nextResolve(`${specifier}.ts`, context);
+    }
+    if (specifier === "./photo-food-detection-failure-core") {
+      return nextResolve("./photo-food-detection-failure-core.ts", context);
     }
   }
   return nextResolve(specifier, context);

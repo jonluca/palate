@@ -51,6 +51,7 @@ export {
   getVisitablePhotoCounts,
   insertPhotos,
   insertPhotosForAutomaticDeepScan,
+  recordPhotoFoodDetectionFailures,
 } from "./db/photos";
 
 export {
