@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": ">= 23.2.0",
+    "version": ">= 24.7.0",
     "appVersionSource": "remote"
   },
   "build": {
@@ -13,7 +13,7 @@
     },
     "production": {
       "autoIncrement": true,
-      "node": "24.20.0"
+      "node": "24.21.0"
     }
   },
   "submit": {
