@@ -264,7 +264,7 @@
   "private": true,
   "packageManager": "pnpm@12.5.1",
   "engines": {
-    "node": ">=22.13.0 <26"
+    "node": ">=22.13.0 <27"
   },
   "devDependencies": {
     "@oxlint/plugins": "1.83.0",
