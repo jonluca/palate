@@ -4,8 +4,7 @@
     "allowImportingTsExtensions": true,
     "strict": true,
     "paths": {
-      "@/*": ["./*"],
-      "react-native": ["./node_modules/react-native"]
+      "@/*": ["./*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts", "uniwind.d.ts", "assets.d.ts"]

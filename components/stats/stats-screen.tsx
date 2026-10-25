@@ -8,6 +8,8 @@ import {
   Alert,
   ActivityIndicator,
   useWindowDimensions,
+  findNodeHandle,
+  type ViewInstance,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { AppleMaps, GoogleMaps } from "expo-maps";
@@ -1751,7 +1753,7 @@ function StatsStoriesModal({
 }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const storyRefs = useRef<Array<React.RefObject<View | null>>>([]);
+  const storyRefs = useRef<Array<React.RefObject<ViewInstance | null>>>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [sharingStoryId, setSharingStoryId] = useState<string | null>(null);
 
@@ -1885,7 +1887,7 @@ function StatsStoriesModal({
           return;
         }
 
-        const image = await makeImageFromView(targetRef);
+        const image = await makeImageFromView({ current: findNodeHandle(targetRef.current) ?? null });
         if (!image) {
           Alert.alert("Share failed", "Could not generate this story image. Please try again.");
           return;
@@ -1896,7 +1898,7 @@ function StatsStoriesModal({
         const storySegment = sanitizeForFileName(story.title) || story.id;
         const fileName = `palate-stats-${yearSegment}-${storySegment}.png`;
         const outputFile = new File(outputDirectory, fileName);
-        outputFile.write(base64Image, { encoding: "base64" });
+        await outputFile.write(base64Image, { encoding: "base64" });
 
         await Sharing.shareAsync(outputFile.uri, {
           mimeType: "image/png",
@@ -1951,7 +1953,7 @@ function StatsStoriesModal({
         >
           {stories.map((story, index) => {
             if (!storyRefs.current[index]) {
-              storyRefs.current[index] = React.createRef<View>();
+              storyRefs.current[index] = React.createRef<ViewInstance>();
             }
             return (
               <View key={story.id} style={{ width }} className={"px-4 gap-4"}>

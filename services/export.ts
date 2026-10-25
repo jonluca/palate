@@ -270,6 +270,6 @@ export async function shareExport(data: string, format: ExportFormat): Promise<E
   const timestamp = formatTimestampForFilename(new Date());
   const fileName = `palate-export-${timestamp}.${format}`;
   const file = new File(exportDir, fileName);
-  file.write(data, { encoding: "utf8" });
+  await file.write(data, { encoding: "utf8" });
   return shareExportFile(file, fileName, format);
 }

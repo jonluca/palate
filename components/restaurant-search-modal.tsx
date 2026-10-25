@@ -13,7 +13,7 @@ import type { PlaceResult } from "@/services/places";
 import type { VisitRecord } from "@/utils/db";
 import { useGoogleMapsApiKey } from "@/store";
 import React, { useEffect, useState, useRef, useMemo } from "react";
-import { View, Pressable, Modal, ScrollView, TextInput } from "react-native";
+import { View, Pressable, Modal, ScrollView, TextInput, type ScrollViewInstance } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import { cleanCalendarEventTitle } from "@/utils/restaurant-name-matching";
@@ -198,7 +198,7 @@ export function RestaurantSearchModal({ visible, onClose, onSelect, visit }: Res
   const [googleResults, setGoogleResults] = useState<PlaceResult[]>([]);
   const [activeResultSource, setActiveResultSource] = useState<"nearby" | "apple" | "google">("nearby");
   const [searchQuery, setSearchQuery] = useState("");
-  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollViewRef = useRef<ScrollViewInstance>(null);
   const googleMapsApiKey = useGoogleMapsApiKey();
   const appleMapsAvailable = isMapKitSearchAvailable();
   const { centerLat, centerLon } = visit;

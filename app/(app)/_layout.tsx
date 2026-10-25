@@ -5,6 +5,10 @@ import { Platform, View, ActivityIndicator } from "react-native";
 import { useHasCompletedInitialScan, useHasHydrated } from "@/store";
 import { useAutomaticPhotoRescan } from "@/hooks";
 
+export const unstable_settings = {
+  initialRouteName: "(tabs)",
+};
+
 export default function RootLayoutNav() {
   const navigationTheme = {
     ...DarkTheme,
@@ -36,7 +40,6 @@ export default function RootLayoutNav() {
 
   return (
     <Stack
-      initialRouteName={hasCompletedInitialScan ? "(tabs)" : "scan"}
       screenOptions={{
         headerBackButtonDisplayMode: "minimal",
         headerShadowVisible: false,

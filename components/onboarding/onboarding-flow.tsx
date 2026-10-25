@@ -1,5 +1,5 @@
 import React, { useRef, useCallback } from "react";
-import { View, FlatList, Pressable, type ViewToken } from "react-native";
+import { View, FlatList, Pressable, type ListViewToken } from "react-native";
 import { BlurView } from "expo-blur";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -72,8 +72,8 @@ export function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
     onComplete();
   }, [onComplete]);
 
-  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    if (viewableItems.length > 0 && viewableItems[0].index !== null) {
+  const onViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
+    if (viewableItems.length > 0 && viewableItems[0].index != null) {
       setCurrentIndex(viewableItems[0].index);
     }
   }, []);

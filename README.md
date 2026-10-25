@@ -3,8 +3,8 @@
 A mobile app that automatically discovers your restaurant visits by analyzing your camera roll. It groups photos by location and time, detects food using on-device ML, and matches visits to restaurants — including 15,000+ Michelin-rated establishments worldwide.
 
 ![iOS](https://img.shields.io/badge/iOS-17+-000000?style=flat&logo=apple)
-![Expo](https://img.shields.io/badge/Expo-57-4630EB?style=flat&logo=expo)
-![React Native](https://img.shields.io/badge/React%20Native-0.86-61DAFB?style=flat&logo=react)
+![Expo](https://img.shields.io/badge/Expo-58-4630EB?style=flat&logo=expo)
+![React Native](https://img.shields.io/badge/React%20Native-0.88-61DAFB?style=flat&logo=react)
 
 ## Screenshots
 
@@ -27,8 +27,8 @@ A mobile app that automatically discovers your restaurant visits by analyzing yo
 
 ## Prerequisites
 
-- Node.js 24.21.0 (set in `.nvmrc` and the EAS production profile)
-- pnpm 12.5.1 (set via `packageManager` in package.json)
+- Node.js 26.12.1 (set in `.nvmrc` and the EAS production profile)
+- pnpm 12.15.0 (set via `packageManager` in package.json)
 - Xcode 26.6+ (for iOS)
 - Android Studio (for Android)
 - A physical device recommended (iOS Simulator lacks photo library with location data)
@@ -98,7 +98,7 @@ Users review pending visits in the **Review** tab — confirm the suggested rest
 
 | Layer              | Technology                                                                              |
 | ------------------ | --------------------------------------------------------------------------------------- |
-| **Framework**      | [Expo SDK 57](https://expo.dev) + React Native 0.86                                     |
+| **Framework**      | [Expo SDK 58](https://expo.dev) + React Native 0.88                                     |
 | **Navigation**     | [Expo Router](https://docs.expo.dev/router/introduction/) with typed routes             |
 | **Database**       | [Expo SQLite](https://docs.expo.dev/versions/latest/sdk/sqlite/) (WAL mode)             |
 | **State**          | [Zustand](https://zustand-demo.pmnd.rs/) + [TanStack Query](https://tanstack.com/query) |

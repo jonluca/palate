@@ -37,7 +37,9 @@ import {
 
 function subscribeToAutomaticPhotoRescanAppState(controller: AutomaticPhotoRescanController): () => void {
   const subscription = AppState.addEventListener("change", controller.handleAppStateChange);
-  controller.handleAppStateChange(AppState.currentState);
+  if (AppState.currentState != null) {
+    controller.handleAppStateChange(AppState.currentState);
+  }
   return () => subscription.remove();
 }
 
