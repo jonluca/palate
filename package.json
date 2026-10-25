@@ -197,6 +197,7 @@
     "@expo/vector-icons": "15.1.1",
     "@react-native-firebase/analytics": "^27.1.0",
     "@react-native-firebase/app": "^27.1.0",
+    "@sentry/react-native": "8.32.0",
     "@shopify/flash-list": "2.3.3",
     "@shopify/react-native-skia": "2.14.0",
     "@tanstack/query-core": "^5.104.5",

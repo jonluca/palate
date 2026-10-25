@@ -9,6 +9,7 @@ allowedDeprecatedVersions:
 
 allowBuilds:
   "@firebase/util": true
+  '@sentry/cli': true
   "@shopify/react-native-skia": true
   msgpackr-extract: true
   protobufjs: true

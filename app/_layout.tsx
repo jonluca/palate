@@ -1,5 +1,7 @@
+import { captureMobileError, withMobileErrorReporting } from "@/lib/error-reporting";
+export { ErrorBoundary } from "@/lib/error-boundary";
 import "@/globals.css";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { QueryCacheNotifyEvent } from "@tanstack/query-core";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect } from "react";
@@ -25,6 +27,8 @@ function onAppStateChange(status: AppStateStatus) {
 Uniwind.setTheme("dark");
 
 export const queryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: (error) => captureMobileError(error, "query") }),
+  mutationCache: new MutationCache({ onError: (error) => captureMobileError(error, "mutation") }),
   defaultOptions: {
     queries: {
       staleTime: 1000 * 30, // 30 seconds
@@ -41,7 +45,7 @@ export const queryClient = new QueryClient({
   },
 });
 
-export default function RootLayout() {
+function RootLayout() {
   useDrizzleStudioInspector();
   useAnalyticsScreenTracking();
   const fastAnimations = useFastAnimations();
@@ -106,3 +110,5 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+export default withMobileErrorReporting(RootLayout);

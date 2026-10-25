@@ -1,6 +1,12 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
 const VERSION = "1.4.2";
+const errorReportingDsn = process.env.EXPO_PUBLIC_SENTRY_DSN?.trim();
+const nativeErrorReportingEnabled =
+  Boolean(errorReportingDsn) &&
+  (process.env.EAS_BUILD_PROFILE === "production" ||
+    (process.env.EXPO_PUBLIC_ERROR_REPORTING_DEBUG === "true" &&
+      process.env.EXPO_PUBLIC_ERROR_REPORTING_ENVIRONMENT === "verification"));
 
 const getConfig = ({ config }: ConfigContext): ExpoConfig => {
   return {
@@ -88,6 +94,40 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
     plugins: [
       ...(config.plugins ?? []),
       [
+        "@sentry/react-native/expo",
+        {
+          url: process.env.SENTRY_URL || "https://http--watchtrader-errors--7rqh4vysrzq7.y8cdxt7gqw.code.run/",
+          organization: process.env.SENTRY_ORG || "jonluca-apps",
+          project: process.env.SENTRY_PROJECT || "palate",
+          // The native SDK must start before the JS bundle to catch startup crashes.
+          useNativeInit: nativeErrorReportingEnabled,
+          disableAutoUpload: !nativeErrorReportingEnabled || process.env.SENTRY_UPLOAD_DISABLED === "true",
+          options: {
+            dsn: errorReportingDsn || "",
+            enabled: nativeErrorReportingEnabled,
+            environment: process.env.EXPO_PUBLIC_ERROR_REPORTING_ENVIRONMENT || "production",
+            sendDefaultPii: false,
+            maxBreadcrumbs: 0,
+            tracesSampleRate: 0,
+            enableAutoBreadcrumbTracking: false,
+            sendClientReports: false,
+            enableLogs: false,
+            enableAutoSessionTracking: false,
+            enableAutoPerformanceTracing: false,
+            enableAppStartTracking: false,
+            enableNativeFramesTracking: false,
+            enableStallTracking: false,
+            enableUserInteractionTracing: false,
+            enableCaptureFailedRequests: false,
+            attachScreenshot: false,
+            attachViewHierarchy: false,
+            reportAccessibilityIdentifier: false,
+            replaysSessionSampleRate: 0,
+            replaysOnErrorSampleRate: 0,
+          },
+        },
+      ],
+      [
         "expo-build-properties",
         {
           ios: {
@@ -139,6 +179,7 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
       reactCompiler: true,
     },
     extra: {
+      errorReportingEnabled: nativeErrorReportingEnabled,
       router: {},
       eas: {
         projectId: "d383062e-5837-4c46-bd3a-6a8cfc5358fb",
