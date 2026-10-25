@@ -91,12 +91,10 @@ const getConfig = ({ config }: ConfigContext): ExpoConfig => {
         "expo-build-properties",
         {
           ios: {
-            useFrameworks: "static",
-            forceStaticLinking: ["RNFBApp", "RNFBAnalytics"],
+            useFrameworks: "dynamic",
           },
         },
       ],
-      "./plugins/with-rn-firebase-cocoapods.ts",
       "@react-native-firebase/app",
       "expo-router",
       "expo-status-bar",
