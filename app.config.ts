@@ -1,6 +1,6 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
 
-const VERSION = "1.4.2";
+const VERSION = "1.4.3";
 const errorReportingDsn = process.env.EXPO_PUBLIC_SENTRY_DSN?.trim();
 const nativeErrorReportingEnabled =
   Boolean(errorReportingDsn) &&
