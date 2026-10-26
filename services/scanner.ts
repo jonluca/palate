@@ -1,5 +1,6 @@
 import * as MediaLibrary from "expo-media-library/legacy";
 import * as Device from "expo-device";
+import { Platform } from "react-native";
 import pMap from "p-map";
 import { resolveAlbumAssets } from "./album-assets-core";
 import {
@@ -13,12 +14,14 @@ import { getPhotoIngestionFlushCount } from "@/utils/db/photo-ingestion-core";
 import { markAutomaticPhotoQuickPipelineIncomplete } from "@/utils/db/automatic-photo-deep-scan-queue";
 import { commitPhotoLibraryChangeToken, getPhotoLibraryChangeCheckpoint } from "@/utils/db/photo-library-checkpoint";
 import { createPreparedPhotoScan, type PreparedPhotoScan } from "@/utils/prepared-photo-scan-core";
+import { createPhotoLibraryReadGate } from "@/utils/photo-library-read-gate";
 import { getValidatedAssetScanNextOffset, getValidatedMediaLibraryPageState } from "@/utils/photo-scan-core";
 import {
   beginPreferredAssetScan,
   getIncrementalPhotoScanInitialProgress,
   getIncrementalPhotoScanInitialProgressWithCleanup,
   processPhotoScanAssets,
+  type PhotoScanAssetRecord,
   type ProcessedPhotoScanAssets,
 } from "@/utils/incremental-photo-scan-core";
 import {
@@ -39,6 +42,38 @@ import {
 export type { PreparedPhotoScan } from "@/utils/prepared-photo-scan-core";
 
 type PhotoInsertRecord = Omit<PhotoRecord, "visitId" | "foodDetected" | "foodLabels" | "foodConfidence" | "allLabels">;
+
+const PHOTO_LIBRARY_READ_TIMEOUT_MS = 15_000;
+const nativePreparationReads = createPhotoLibraryReadGate({
+  maximumOutstanding: 1,
+  timeoutMs: PHOTO_LIBRARY_READ_TIMEOUT_MS,
+});
+const nativeReleaseReads = createPhotoLibraryReadGate({
+  maximumOutstanding: 1,
+  timeoutMs: PHOTO_LIBRARY_READ_TIMEOUT_MS,
+});
+const mediaLibraryPageReads = createPhotoLibraryReadGate({
+  maximumOutstanding: 1,
+  timeoutMs: PHOTO_LIBRARY_READ_TIMEOUT_MS,
+});
+
+function isNativeMetadataUnavailable(): boolean {
+  return nativePreparationReads.isBusy() || nativeReleaseReads.isBusy();
+}
+
+function releasePreparedNativeSession(sessionId: string): Promise<void> {
+  return nativeReleaseReads.read(() => endAssetScan(sessionId));
+}
+
+function prepareNativeSession<Session extends { sessionId: string }>(
+  operation: () => Promise<Session>,
+): Promise<Session> {
+  return nativePreparationReads.read(operation, {
+    // The preparation slot remains owned until this cleanup actually settles.
+    disposeLateResult: (session) => endAssetScan(session.sessionId),
+    onLateCleanupError: (error) => console.warn("Failed to release a late photo-library snapshot:", error),
+  });
+}
 
 export interface ScanProgress {
   totalAssets: number;
@@ -240,8 +275,12 @@ async function processWithPMap(assets: MediaLibrary.Asset[], concurrency: number
  * Automatically adjusts batch sizes based on device capabilities.
  */
 export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanProgress> {
-  const startTime = options.preparedScan?.startedAt ?? Date.now();
-  const useNativeBatch = isBatchAssetInfoAvailable();
+  const preparedScan =
+    options.preparedScan ??
+    (isNativeMetadataUnavailable() ? await prepareMediaLibraryPhotoScan(Date.now()) : undefined);
+  const startTime = preparedScan?.startedAt ?? Date.now();
+  const retainedMediaLibraryAssets = preparedScan?.mediaLibraryAssets;
+  const useNativeBatch = retainedMediaLibraryAssets === undefined && isBatchAssetInfoAvailable();
   const useNativeScanSession = isAssetScanAvailable();
   const deviceTier = getDeviceTier();
 
@@ -259,10 +298,10 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     throw new RangeError(`Scan concurrency must be a positive safe integer; received ${concurrency}`);
   }
 
-  const preparedNativeScan = options.preparedScan?.claim();
-  const nativeScan =
-    preparedNativeScan ??
-    (useNativeScanSession
+  const preparedNativeScan = preparedScan?.claim();
+  const nativeScan = preparedScan
+    ? preparedNativeScan
+    : useNativeScanSession
       ? await beginPreferredAssetScan({
           databaseBackedIncrementalAvailable: isDatabaseBackedIncrementalAssetScanAvailable(),
           // Signed real-library A/B retained this lower-memory path for profiling,
@@ -278,28 +317,31 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
             console.warn("Native incremental asset scan failed to start; retrying once with a full scan:", error);
           },
         })
-      : null);
+      : null;
   const nativeSession = nativeScan?.session ?? null;
   const incrementalInitialProgress =
     nativeScan?.kind === "incremental"
       ? await getIncrementalPhotoScanInitialProgressWithCleanup(
           nativeScan.session,
-          preparedNativeScan ? () => options.preparedScan!.dispose() : endAssetScan,
+          preparedNativeScan ? () => preparedScan!.dispose() : endAssetScan,
           (cleanupError) => {
             console.error("Failed to release malformed native asset scan session:", cleanupError);
           },
         )
       : null;
-  const totalAssets = incrementalInitialProgress
-    ? incrementalInitialProgress.totalAssets
-    : nativeSession
-      ? nativeSession.totalCount
-      : (
-          await MediaLibrary.getAssetsAsync({
-            first: 1,
-            mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-          })
-        ).totalCount;
+  const totalAssets =
+    retainedMediaLibraryAssets !== undefined
+      ? retainedMediaLibraryAssets.length
+      : incrementalInitialProgress
+        ? incrementalInitialProgress.totalAssets
+        : nativeSession
+          ? nativeSession.totalCount
+          : (
+              await MediaLibrary.getAssetsAsync({
+                first: 1,
+                mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+              })
+            ).totalCount;
 
   const progress: ScanProgress = {
     totalAssets,
@@ -367,7 +409,7 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
   };
 
   try {
-    if (options.preparedScan && options.preparedScan.pendingPhotoCount > 0) {
+    if (preparedScan && preparedScan.pendingPhotoCount > 0) {
       // Retain downstream recovery even when automatic Vision is disabled.
       await markAutomaticPhotoQuickPipelineIncomplete();
     }
@@ -390,6 +432,13 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
         await persistBatch(processPhotoScanAssets(page.assets));
         offset = nextOffset;
         progress.processedAssets = (incrementalInitialProgress?.processedAssets ?? 0) + offset;
+        updateProgress();
+      }
+    } else if (retainedMediaLibraryAssets !== undefined) {
+      for (let offset = 0; offset < retainedMediaLibraryAssets.length; offset += batchSize) {
+        const assets = retainedMediaLibraryAssets.slice(offset, offset + batchSize);
+        await persistBatch(processPhotoScanAssets(assets));
+        progress.processedAssets += assets.length;
         updateProgress();
       }
     } else {
@@ -442,9 +491,9 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
     }
   }
 
-  if (scanError === null && options.preparedScan) {
+  if (scanError === null && preparedScan) {
     try {
-      await options.preparedScan.complete(progress.skippedAssets - (incrementalInitialProgress?.skippedAssets ?? 0));
+      await preparedScan.complete(progress.skippedAssets - (incrementalInitialProgress?.skippedAssets ?? 0));
     } catch (checkpointError) {
       scanError = checkpointError;
     }
@@ -453,7 +502,7 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
   if (nativeSession) {
     try {
       if (preparedNativeScan) {
-        await options.preparedScan!.dispose();
+        await preparedScan!.dispose();
       } else {
         await endAssetScan(nativeSession.sessionId);
       }
@@ -487,42 +536,69 @@ export async function scanCameraRoll(options: ScanOptions = {}): Promise<ScanPro
 }
 
 /** Prepare once, then hand the retained snapshot directly to the importer. */
-export async function prepareAutomaticPhotoScan(): Promise<PreparedPhotoScan> {
+export async function prepareAutomaticPhotoScan(
+  options: { onProgress?: (detail: string) => void } = {},
+): Promise<PreparedPhotoScan> {
   const startedAt = Date.now();
   let session: Awaited<ReturnType<typeof beginIncrementalAssetScan>> | null = null;
   let checkpoint: (() => Promise<void>) | undefined;
+  if (isNativeMetadataUnavailable()) {
+    options.onProgress?.("Reading photos directly…");
+    return prepareMediaLibraryPhotoScan(startedAt, options.onProgress);
+  }
   try {
     if (isPhotoLibraryChangeScanAvailable()) {
+      options.onProgress?.("Loading saved photo history…");
       const savedCheckpoint = await getPhotoLibraryChangeCheckpoint();
-      const changeSession = await beginPhotoLibraryChangeScan(
-        await getPhotoDatabasePathForIncrementalScan(),
-        savedCheckpoint.token,
+      const databasePath = await getPhotoDatabasePathForIncrementalScan();
+      options.onProgress?.("Reading photo change history…");
+      const changeSession = await prepareNativeSession(() =>
+        beginPhotoLibraryChangeScan(databasePath, savedCheckpoint.token),
       );
       session = changeSession;
       checkpoint = async () => {
         await commitPhotoLibraryChangeToken(changeSession.changeToken, savedCheckpoint.revision);
       };
     } else {
-      session = isDatabaseBackedIncrementalAssetScanAvailable()
-        ? await beginDatabaseBackedIncrementalAssetScan(await getPhotoDatabasePathForIncrementalScan())
-        : isIncrementalAssetScanAvailable()
-          ? await beginIncrementalAssetScan(await getExistingPhotoAssetIdsForIncrementalScan())
-          : null;
+      if (isDatabaseBackedIncrementalAssetScanAvailable()) {
+        const databasePath = await getPhotoDatabasePathForIncrementalScan();
+        session = await prepareNativeSession(() => beginDatabaseBackedIncrementalAssetScan(databasePath));
+      } else if (isIncrementalAssetScanAvailable()) {
+        const identifiers = await getExistingPhotoAssetIdsForIncrementalScan();
+        session = await prepareNativeSession(() => beginIncrementalAssetScan(identifiers));
+      }
     }
   } catch (error) {
     // The native reader owns a separate SQLite connection. If it is locked or
     // unavailable, the application's connection can still support the fallback.
     console.warn("Could not prepare a native photo comparison; using paged comparison:", error);
   }
-  if (session) {
-    await getIncrementalPhotoScanInitialProgressWithCleanup(session, endAssetScan);
+  if (!session) {
+    options.onProgress?.("Reading photos directly…");
+    return prepareMediaLibraryPhotoScan(startedAt, options.onProgress);
   }
+  await getIncrementalPhotoScanInitialProgressWithCleanup(session, releasePreparedNativeSession);
   return createPreparedPhotoScan({
-    pendingPhotoCount: session?.totalCount ?? (await countUnscannedPhotosWithPagedComparison()),
+    pendingPhotoCount: session.totalCount,
     startedAt,
-    scan: session ? { kind: "incremental", session } : null,
+    scan: { kind: "incremental", session },
     checkpoint,
-    release: () => (session ? endAssetScan(session.sessionId) : Promise.resolve()),
+    release: () => releasePreparedNativeSession(session.sessionId),
+  });
+}
+
+async function prepareMediaLibraryPhotoScan(
+  startedAt: number,
+  onProgress?: (detail: string) => void,
+): Promise<PreparedPhotoScan> {
+  const mediaLibraryAssets = await collectUnscannedMediaLibraryAssets(onProgress);
+  return createPreparedPhotoScan({
+    pendingPhotoCount: mediaLibraryAssets.length,
+    startedAt,
+    scan: null,
+    // Android still needs its existing per-asset metadata path for video GPS.
+    mediaLibraryAssets: Platform.OS === "ios" ? mediaLibraryAssets : undefined,
+    release: () => Promise.resolve(),
   });
 }
 
@@ -600,6 +676,56 @@ async function countUnscannedPhotosWithPagedComparison(): Promise<number> {
     hasNextPage = response.hasNextPage;
   }
   return unscannedCount;
+}
+
+async function collectUnscannedMediaLibraryAssets(
+  onProgress?: (detail: string) => void,
+): Promise<PhotoScanAssetRecord[]> {
+  const existingAssetIds = new Set(await getExistingPhotoAssetIdsForIncrementalScan());
+  const unscannedAssets = new Map<string, PhotoScanAssetRecord>();
+  let processedAssets = 0;
+  let totalAssets = 0;
+  let after: string | undefined;
+  let hasNextPage = true;
+  while (hasNextPage) {
+    const response = await mediaLibraryPageReads.read(() =>
+      MediaLibrary.getAssetsAsync({
+        first: 1_000,
+        after,
+        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+      }),
+    );
+    const pageState = getValidatedMediaLibraryPageState(after, processedAssets, totalAssets, {
+      assetCount: response.assets.length,
+      endCursor: response.endCursor,
+      totalCount: response.totalCount,
+      hasNextPage: response.hasNextPage,
+    });
+    for (const asset of response.assets) {
+      if (
+        !existingAssetIds.has(asset.id) &&
+        (asset.mediaType === MediaLibrary.MediaType.photo || asset.mediaType === MediaLibrary.MediaType.video)
+      ) {
+        const hasLocation = isValidLocation(asset.location);
+        const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
+        unscannedAssets.set(asset.id, {
+          id: asset.id,
+          uri: asset.uri,
+          creationTime: Number.isFinite(asset.creationTime) ? asset.creationTime : null,
+          latitude: hasLocation ? asset.location!.latitude : null,
+          longitude: hasLocation ? asset.location!.longitude : null,
+          mediaType: isVideo ? "video" : "photo",
+          duration: isVideo && Number.isFinite(asset.duration) ? asset.duration : null,
+        });
+      }
+    }
+    processedAssets = pageState.processedAssets;
+    totalAssets = pageState.totalAssets;
+    after = pageState.nextCursor;
+    hasNextPage = response.hasNextPage;
+    onProgress?.(`Checked ${processedAssets.toLocaleString()} of ${totalAssets.toLocaleString()} photos…`);
+  }
+  return [...unscannedAssets.values()];
 }
 
 export interface CreateAlbumResult {

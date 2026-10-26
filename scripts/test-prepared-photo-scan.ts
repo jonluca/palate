@@ -13,7 +13,9 @@ import * as preparedCore from "../utils/prepared-photo-scan-core.ts";
 import type { ScanOptions, ScanProgress } from "../services/scanner.ts";
 
 interface ScannerApi {
-  prepareAutomaticPhotoScan(): Promise<preparedCore.PreparedPhotoScan>;
+  prepareAutomaticPhotoScan(options?: {
+    onProgress?: (detail: string) => void;
+  }): Promise<preparedCore.PreparedPhotoScan>;
   scanCameraRoll(options?: ScanOptions): Promise<ScanProgress>;
 }
 
@@ -33,6 +35,18 @@ function deferred(): Deferred {
 const compiledScanner = ts.transpileModule(readFileSync(new URL("../services/scanner.ts", import.meta.url), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
+const compiledReadGate = ts.transpileModule(
+  readFileSync(new URL("../utils/photo-library-read-gate.ts", import.meta.url), "utf8"),
+  {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  },
+).outputText;
+
+async function flushAsyncWork(): Promise<void> {
+  for (let index = 0; index < 30; index++) {
+    await Promise.resolve();
+  }
+}
 
 function makePhoto(index: number): incremental.PhotoScanAssetRecord {
   return {
@@ -52,6 +66,19 @@ interface FixtureOptions {
   readonly beforeInsert?: (call: number) => Promise<void>;
   readonly malformedSession?: boolean;
   readonly changeToken?: string | null;
+  readonly platform?: "ios" | "android";
+}
+
+interface FixtureState {
+  pageFailureAt: number;
+  insertFailureAt: number;
+  checkpointFails: boolean;
+  changeBeginFails: boolean;
+  token: string;
+  revision: string;
+  nativeBeginGate?: Promise<void>;
+  nativeReleaseGate?: Promise<void>;
+  mediaPageGate?: Promise<void>;
 }
 
 function fixture(options: FixtureOptions = {}) {
@@ -60,8 +87,19 @@ function fixture(options: FixtureOptions = {}) {
   const queued = new Set<string>();
   const sessions = new Map<string, incremental.PhotoScanAssetRecord[]>();
   const mode = options.mode ?? "change";
-  const counts = { begin: 0, ids: 0, page: 0, insert: 0, end: 0, checkpoint: 0, marker: 0 };
-  const state = {
+  const counts = {
+    begin: 0,
+    ids: 0,
+    page: 0,
+    insert: 0,
+    end: 0,
+    checkpoint: 0,
+    marker: 0,
+    mediaPage: 0,
+    mediaInfo: 0,
+    nativeBatch: 0,
+  };
+  const state: FixtureState = {
     pageFailureAt: 0,
     insertFailureAt: 0,
     checkpointFails: false,
@@ -70,10 +108,22 @@ function fixture(options: FixtureOptions = {}) {
     revision: "r1",
   };
   const events: string[] = [];
+  const timers = new Map<number, { callback: () => void; milliseconds: number }>();
+  let timerId = 0;
+  const gateExports = {};
+  runInNewContext(compiledReadGate, {
+    exports: gateExports,
+    setTimeout: (callback: () => void, milliseconds: number) => {
+      timers.set(++timerId, { callback, milliseconds });
+      return timerId;
+    },
+    clearTimeout: (id: number) => timers.delete(id),
+  });
 
   const begin = async () => {
     counts.begin++;
     events.push("begin");
+    await state.nativeBeginGate;
     const pending = mode === "full" ? library.slice() : library.filter((photo) => !stored.has(photo.id));
     const sessionId = `session-${counts.begin}`;
     sessions.set(sessionId, pending);
@@ -113,12 +163,14 @@ function fixture(options: FixtureOptions = {}) {
 
   const modules = new Map<string, object>([
     ["expo-device", { totalMemory: 8 * 1024 ** 3, deviceYearClass: 2026 }],
+    ["react-native", { Platform: { OS: options.platform ?? "ios" } }],
     ["p-map", pMap],
     ["./album-assets-core", {}],
     ["@/utils/db/photo-ingestion-core", ingestion],
     ["@/utils/incremental-photo-scan-core", incremental],
     ["@/utils/photo-scan-core", paging],
     ["@/utils/prepared-photo-scan-core", preparedCore],
+    ["@/utils/photo-library-read-gate", gateExports],
     [
       "@/utils/db/automatic-photo-deep-scan-queue",
       {
@@ -196,8 +248,13 @@ function fixture(options: FixtureOptions = {}) {
         },
         endAssetScan: async (sessionId: string) => {
           counts.end++;
+          await state.nativeReleaseGate;
           assert.equal(sessions.delete(sessionId), true, "native session must be released exactly once");
           events.push("end");
+        },
+        getAssetInfoBatch: async () => {
+          counts.nativeBatch++;
+          throw new Error("Fallback must not re-enter native batch metadata");
         },
       },
     ],
@@ -207,12 +264,35 @@ function fixture(options: FixtureOptions = {}) {
         MediaType: { photo: "photo", video: "video" },
         SortBy: { creationTime: "creationTime" },
         getAssetsAsync: async (request: { first: number; after?: string }) => {
+          counts.mediaPage++;
+          await state.mediaPageGate;
           const offset = Number(request.after ?? 0);
-          const assets = library.slice(offset, offset + request.first);
+          const assets = library.slice(offset, offset + request.first).map((asset) => ({
+            ...asset,
+            location:
+              asset.latitude === null || asset.longitude === null
+                ? undefined
+                : {
+                    latitude: asset.latitude,
+                    longitude: asset.longitude,
+                  },
+          }));
           const end = offset + assets.length;
           return { assets, totalCount: library.length, endCursor: String(end), hasNextPage: end < library.length };
         },
-        getAssetInfoAsync: async (asset: incremental.PhotoScanAssetRecord) => ({ ...asset, location: null }),
+        getAssetInfoAsync: async (asset: incremental.PhotoScanAssetRecord) => {
+          counts.mediaInfo++;
+          return {
+            ...asset,
+            location:
+              asset.latitude === null || asset.longitude === null
+                ? undefined
+                : {
+                    latitude: asset.latitude,
+                    longitude: asset.longitude,
+                  },
+          };
+        },
       },
     ],
   ]);
@@ -237,6 +317,16 @@ function fixture(options: FixtureOptions = {}) {
     counts,
     state,
     events,
+    expireReads() {
+      const active = [...timers.entries()];
+      assert.ok(active.length > 0, "a pending read must own a deadline");
+      for (const [id, timer] of active) {
+        assert.equal(timer.milliseconds, 15_000);
+        timers.delete(id);
+        timer.callback();
+      }
+    },
+    timers,
   };
 }
 
@@ -368,7 +458,7 @@ for (const mode of ["database", "identifiers", "full", "legacy"] as const) {
   await prepared.dispose();
   assert.equal(result.newPhotosAdded, 3, `${mode}: older binaries must retain imports`);
   assert.equal(scan.counts.checkpoint, 0, `${mode}: no unsupported token API calls`);
-  assert.equal(scan.counts.begin, mode === "legacy" ? 0 : 1);
+  assert.equal(scan.counts.begin, mode === "legacy" || mode === "full" ? 0 : 1);
   assert.equal(scan.sessions.size, 0);
 }
 
@@ -392,4 +482,171 @@ for (const mode of ["database", "identifiers", "full", "legacy"] as const) {
   assert.equal(scan.state.token, "next-token", "history checkpoints resume after the native connection recovers");
 }
 
-console.log("Prepared scanner snapshot reuse, durable checkpoints, recovery, ownership, and fallback tests passed.");
+{
+  const native = deferred();
+  const write = deferred();
+  const scan = fixture({ count: 4, beforeInsert: () => write.promise });
+  scan.state.nativeBeginGate = native.promise;
+  scan.stored.set(scan.library[0].id, { ...scan.library[0], creationTime: 1 });
+  scan.library[1] = {
+    ...scan.library[1],
+    mediaType: "video",
+    duration: 12.5,
+    creationTime: -5,
+    latitude: 90,
+    longitude: -180,
+  };
+  scan.library[2] = { ...scan.library[2], latitude: Number.NaN, longitude: 0 };
+  scan.library[3] = { ...scan.library[3], creationTime: null };
+  const details: string[] = [];
+  const preparing = scan.prepare({ onProgress: (detail) => details.push(detail) });
+  await flushAsyncWork();
+  assert.equal(scan.counts.begin, 1);
+  scan.expireReads();
+  const prepared = await preparing;
+  assert.equal(prepared.pendingPhotoCount, 3, "fallback must retain only photos absent from SQLite");
+  assert.equal(prepared.mediaLibraryAssets?.length, 3);
+  assert.equal(Object.isFrozen(prepared.mediaLibraryAssets), true);
+  assert.ok(details.includes("Reading photos directly…"));
+  let finished = false;
+  const importing = scan
+    .scan({ preparedScan: prepared, enqueueInsertedPhotosForAutomaticDeepScan: true })
+    .then((value) => {
+      finished = true;
+      return value;
+    });
+  await flushAsyncWork();
+  assert.equal(scan.counts.insert, 1);
+  assert.equal(finished, false, "fallback must await durable insertion before settling");
+  write.resolve();
+  const result = await importing;
+  await prepared.dispose();
+  assert.equal(result.newPhotosAdded, 2);
+  assert.equal(result.skippedAssets, 1);
+  assert.equal(result.usingNativeBatch, false);
+  assert.equal(scan.stored.get("photo-1")?.creationTime, -5, "pre-1970 timestamps remain valid");
+  assert.equal(scan.stored.get("photo-1")?.latitude, 90);
+  assert.equal(scan.stored.get("photo-1")?.duration, 12.5);
+  assert.equal(scan.stored.get("photo-2")?.latitude, null);
+  assert.equal(scan.queued.size, 2);
+  assert.equal(scan.counts.checkpoint, 0, "timed-out native history must never be checkpointed");
+  assert.equal(scan.counts.nativeBatch, 0);
+  assert.equal(scan.counts.mediaInfo, 0, "page metadata must not trigger content-editing/image reads");
+  assert.equal(scan.counts.begin, 1, "prepared null-native fallback must not re-enter native preparation");
+
+  const retry = await scan.prepare();
+  assert.equal(retry.pendingPhotoCount, 1, "a skipped photo remains eligible on the next attempt");
+  await retry.dispose();
+  scan.library[3] = { ...scan.library[3], creationTime: 3 };
+  const manual = await scan.scan();
+  assert.equal(manual.newPhotosAdded, 1, "manual import also bypasses an outstanding native preparation");
+  assert.equal(scan.counts.begin, 1, "repeated attempts cannot queue more native reads behind a stuck operation");
+
+  const cleanup = deferred();
+  scan.state.nativeReleaseGate = cleanup.promise;
+  native.resolve();
+  await flushAsyncWork();
+  assert.equal(scan.counts.end, 1, "late native snapshot is disposed exactly once");
+  assert.equal(scan.counts.checkpoint, 0);
+  const whileCleaning = await scan.prepare();
+  assert.equal(scan.counts.begin, 1, "native admission remains occupied until late cleanup really finishes");
+  await whileCleaning.dispose();
+  cleanup.resolve();
+  await flushAsyncWork();
+  assert.equal(scan.sessions.size, 0);
+  const recovered = await scan.prepare();
+  assert.equal(scan.counts.begin, 2, "native reads resume only after the previous result and cleanup settle");
+  await recovered.complete(0);
+  await recovered.dispose();
+  assert.equal(scan.counts.checkpoint, 1);
+  assert.equal(scan.timers.size, 0);
+}
+
+{
+  const scan = fixture();
+  scan.state.nativeBeginGate = new Promise(() => undefined);
+  scan.state.mediaPageGate = new Promise(() => undefined);
+  const preparing = scan.prepare();
+  const rejected = assert.rejects(preparing, /Photo library read did not finish/);
+  await flushAsyncWork();
+  scan.expireReads();
+  await flushAsyncWork();
+  assert.equal(scan.counts.mediaPage, 1);
+  scan.expireReads();
+  await rejected;
+  await assert.rejects(scan.prepare(), /Photo library reads are still pending/);
+  assert.equal(scan.counts.begin, 1);
+  assert.equal(scan.counts.mediaPage, 1, "unavailable PhotoKit cannot accumulate native or Expo page workers");
+  assert.equal(scan.counts.checkpoint, 0);
+  assert.equal(scan.timers.size, 0);
+}
+
+{
+  const release = deferred();
+  const scan = fixture({ count: 0 });
+  const prepared = await scan.prepare();
+  await prepared.complete(0);
+  scan.state.nativeReleaseGate = release.promise;
+  const disposing = prepared.dispose();
+  const rejected = assert.rejects(disposing, /Photo library read did not finish/);
+  await flushAsyncWork();
+  scan.expireReads();
+  await rejected;
+  scan.library.push(makePhoto(1));
+  const fallback = await scan.prepare();
+  await scan.scan({ preparedScan: fallback });
+  await fallback.dispose();
+  assert.equal(scan.counts.begin, 1, "pending snapshot release must keep the native path unavailable");
+  assert.equal(scan.counts.end, 1);
+  assert.equal(scan.stored.size, 1);
+  assert.equal(scan.counts.checkpoint, 1, "only the original completed native snapshot advances history");
+  release.resolve();
+  await flushAsyncWork();
+  assert.equal(scan.sessions.size, 0);
+  assert.equal(scan.timers.size, 0);
+}
+
+{
+  const scan = fixture({ mode: "full" });
+  const result = await scan.scan();
+  assert.equal(result.newPhotosAdded, 3);
+  assert.equal(scan.counts.begin, 1, "a manual scan with available native metadata keeps its existing path");
+  assert.equal(scan.counts.mediaPage, 0);
+}
+
+{
+  const scan = fixture({ mode: "legacy", platform: "android", count: 2 });
+  scan.library[0] = { ...scan.library[0], mediaType: "video", duration: 4.5 };
+  const prepared = await scan.prepare();
+  assert.equal(prepared.mediaLibraryAssets, undefined, "Android retains its existing metadata path");
+  await scan.scan({ preparedScan: prepared });
+  await prepared.dispose();
+  assert.equal(scan.counts.mediaInfo, 2);
+  assert.equal(scan.stored.get("photo-0")?.latitude, 0);
+  assert.equal(scan.stored.get("photo-0")?.duration, 4.5);
+  assert.equal(scan.counts.begin, 0);
+}
+
+{
+  const scan = fixture({ mode: "legacy", count: 1_001 });
+  scan.library[1_000] = { ...scan.library[999] };
+  scan.stored.set(scan.library[0].id, { ...scan.library[0], creationTime: 1 });
+  const details: string[] = [];
+  const prepared = await scan.prepare({ onProgress: (detail) => details.push(detail) });
+  assert.equal(scan.counts.mediaPage, 2);
+  assert.equal(prepared.pendingPhotoCount, 999, "paged metadata excludes known IDs and deduplicates moving pages");
+  assert.deepEqual(details, [
+    "Reading photos directly…",
+    "Checked 1,000 of 1,001 photos…",
+    "Checked 1,001 of 1,001 photos…",
+  ]);
+  const result = await scan.scan({ preparedScan: prepared });
+  await prepared.dispose();
+  assert.equal(result.newPhotosAdded, 999);
+  assert.equal(scan.counts.mediaPage, 2, "import consumes the retained records without fetching the library again");
+  assert.equal(scan.counts.mediaInfo, 0);
+}
+
+console.log(
+  "Prepared scanner snapshot reuse, durable checkpoints, bounded fallback, late cleanup, and recovery tests passed.",
+);

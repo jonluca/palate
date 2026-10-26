@@ -1,9 +1,11 @@
-import type { PreferredAssetScanSession } from "./incremental-photo-scan-core";
+import type { PhotoScanAssetRecord, PreferredAssetScanSession } from "./incremental-photo-scan-core";
 
 /** A native snapshot has one importer; its lifecycle never belongs to a query cache. */
 export interface PreparedPhotoScan {
   readonly pendingPhotoCount: number;
   readonly startedAt: number;
+  /** A paged fallback retains unknown metadata and must bypass the native metadata queue. */
+  readonly mediaLibraryAssets?: readonly PhotoScanAssetRecord[];
   claim(): PreferredAssetScanSession | null;
   complete(newlySkippedAssets: number): Promise<void>;
   dispose(): Promise<void>;
@@ -13,6 +15,7 @@ export function createPreparedPhotoScan(options: {
   pendingPhotoCount: number;
   startedAt: number;
   scan: PreferredAssetScanSession | null;
+  mediaLibraryAssets?: readonly PhotoScanAssetRecord[];
   checkpoint?: () => Promise<void>;
   release: () => Promise<void>;
 }): PreparedPhotoScan {
@@ -22,6 +25,10 @@ export function createPreparedPhotoScan(options: {
   return {
     pendingPhotoCount: options.pendingPhotoCount,
     startedAt: options.startedAt,
+    mediaLibraryAssets:
+      options.mediaLibraryAssets === undefined
+        ? undefined
+        : Object.freeze(options.mediaLibraryAssets.map((asset) => Object.freeze({ ...asset }))),
     claim() {
       if (state !== "prepared") {
         throw new Error(`Cannot claim a ${state} photo scan`);

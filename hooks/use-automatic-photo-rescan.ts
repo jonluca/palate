@@ -5,6 +5,8 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { prepareAutomaticPhotoScan, hasMediaLibraryPermission, type PreparedPhotoScan } from "@/services/scanner";
 import { logScanCompleted, logScanStarted } from "@/services/analytics";
 import { captureMobileError } from "@/lib/error-reporting";
+import { useToast } from "@/components/ui/toast";
+import { isPhotoLibraryReadUnavailableError } from "@/utils/photo-library-read-gate";
 import { monitorPhotoRefreshWait } from "@/utils/photo-refresh-wait-monitor";
 import { useAppStore } from "@/store";
 import {
@@ -82,6 +84,7 @@ async function finishPendingAutomaticPhotoFoodSync(): Promise<void> {
 /** Start incremental import and queued deep analysis on foreground or library changes. */
 export function useAutomaticPhotoRescan(enabled: boolean): void {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const validationModeEnabled = isVisionVisitFoodValidationModeEnabled();
   const automaticDeepScanEnabled = !validationModeEnabled && isBatchAssetInfoAvailable();
   const quickScanRanRef = useRef(false);
@@ -139,6 +142,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
     let currentStep = "starting";
     let failedStep: string | null = null;
     let analysisTimeUsedMs = 0;
+    let readUnavailableReported = false;
     const waitForStep = <T>(step: string, operation: Promise<T>): Promise<T> => {
       currentStep = step;
       return monitorPhotoRefreshWait(operation, {
@@ -211,9 +215,25 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
             detail: "Checking your photo library…",
             progress: null,
           });
-          preparedScan = await waitForStep("library_prepare", prepareAutomaticPhotoScan());
+          preparedScan = await waitForStep(
+            "library_prepare",
+            prepareAutomaticPhotoScan({
+              onProgress: (detail) => {
+                useAppStore.getState().updateBackgroundPhotoScanProgress({
+                  stage: "checking",
+                  detail,
+                  progress: null,
+                });
+              },
+            }),
+          );
           const pendingPhotoCount = preparedScan.pendingPhotoCount;
           queryClient.setQueryData(queryKeys.unscannedPhotoCount, pendingPhotoCount);
+          useAppStore.getState().updateBackgroundPhotoScanProgress({
+            stage: "checking",
+            detail: "Checking saved photo analysis…",
+            progress: null,
+          });
           const [queuedDeepScanCount, quickPipelineIncomplete] = await waitForStep(
             "queue_read",
             Promise.all([
@@ -226,7 +246,17 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
             return;
           }
           if (!shouldRunQuickScan) {
+            useAppStore.getState().updateBackgroundPhotoScanProgress({
+              stage: "checking",
+              detail: "Saving photo update…",
+              progress: null,
+            });
             await waitForStep("checkpoint", preparedScan.complete(0));
+            useAppStore.getState().updateBackgroundPhotoScanProgress({
+              stage: "checking",
+              detail: "Finishing photo library check…",
+              progress: null,
+            });
             await waitForStep("snapshot_release", preparedScan.dispose());
             if (queuedDeepScanCount === 0) {
               return;
@@ -311,6 +341,10 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
       },
       onError: (error) => {
         captureMobileError(error, `photo_refresh.${failedStep ?? currentStep}`);
+        if (isPhotoLibraryReadUnavailableError(error) && controller.isActive() && !readUnavailableReported) {
+          readUnavailableReported = true;
+          showToast({ message: "Photo update paused because Photos isn’t responding.", type: "warning", duration: 5 });
+        }
         console.warn("Automatic photo refresh failed; it will retry on the next library change or app open:", error);
       },
     });
@@ -330,6 +364,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
     });
     const unsubscribeFromAppState = subscribeToAutomaticPhotoRescanAppState(controller, () => {
       analysisTimeUsedMs = 0;
+      readUnavailableReported = false;
     });
 
     return () => {
@@ -339,5 +374,5 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
       unsubscribeFromStore();
       unsubscribeFromMutations();
     };
-  }, [automaticDeepScanEnabled, deepScanPhotos, enabled, queryClient, scanPhotos]);
+  }, [automaticDeepScanEnabled, deepScanPhotos, enabled, queryClient, scanPhotos, showToast]);
 }

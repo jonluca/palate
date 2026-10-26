@@ -91,7 +91,7 @@
     "test:album-assets": "node --no-warnings --experimental-strip-types scripts/test-album-assets.ts",
     "test:photo-ingestion": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-photo-ingestion.ts",
     "test:incremental-photo-scan": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-incremental-photo-scan.ts",
-    "test:prepared-photo-scan": "node --no-warnings --experimental-strip-types scripts/test-prepared-photo-scan.ts",
+    "test:prepared-photo-scan": "node --no-warnings --experimental-strip-types scripts/test-prepared-photo-scan.ts && node --no-warnings --experimental-strip-types scripts/test-photo-library-read-gate.ts",
     "test:photo-library-checkpoint": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-photo-library-checkpoint.ts",
     "test:incremental-visit-work": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-incremental-visit-work.ts",
     "test:visit-food-summary": "node --no-warnings --experimental-sqlite --experimental-strip-types scripts/test-visit-food-summary.ts",

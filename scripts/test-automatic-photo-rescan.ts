@@ -460,7 +460,7 @@ assert.match(automaticHook, /getAutomaticDeepScanOverallProgress/);
 assert.match(automaticHook, /updateBackgroundPhotoScanProgress/);
 assert.match(automaticHook, /startBackgroundPhotoScan/);
 assert.match(appStore, /detail: "Checking for photo updates…"/);
-assert.doesNotMatch(automaticHook, /expo-router|router\.(?:push|replace)|Redirect|Alert\.alert|showToast|Haptics/);
+assert.doesNotMatch(automaticHook, /expo-router|router\.(?:push|replace)|Redirect|Alert\.alert|Haptics/);
 assert.doesNotMatch(automaticHook, /requestMediaLibraryPermission|useRequestPermission/);
 assert.doesNotMatch(automaticHook, /\.startScan\(\)|\.resetScan\(\)/);
 assert.match(automaticHook, /requestCalendarPermissionIfNeeded: false/);

@@ -8,6 +8,7 @@ import ts from "typescript";
 import { QueryClient, QueryObserver } from "@tanstack/query-core";
 import * as core from "../utils/automatic-photo-rescan-core.ts";
 import { createPreparedPhotoScan, type PreparedPhotoScan } from "../utils/prepared-photo-scan-core.ts";
+import { isPhotoLibraryReadUnavailableError, PhotoLibraryReadTimeoutError } from "../utils/photo-library-read-gate.ts";
 import type { DeepScanProgress, ScanProgress } from "../hooks/queries.ts";
 
 const compiledHook = ts.transpileModule(
@@ -42,6 +43,7 @@ interface FixtureOptions {
   nativeAvailable?: boolean;
   syncFailure?: boolean;
   preparationGate?: Promise<void>;
+  preparationFailure?: Error;
   quickPipelineIncomplete?: boolean;
   refreshGate?: Promise<void>;
   refreshFailure?: boolean;
@@ -106,6 +108,7 @@ function fixture(options: FixtureOptions = {}) {
     released: 0,
     checkpoints: 0,
     refreshes: 0,
+    unavailableWarnings: 0,
   };
   const reportedErrors: unknown[] = [];
   const deepBatches: string[][] = [];
@@ -216,6 +219,9 @@ function fixture(options: FixtureOptions = {}) {
       "@/services/scanner",
       {
         prepareAutomaticPhotoScan: async () => {
+          if (options.preparationFailure) {
+            throw options.preparationFailure;
+          }
           counts.prepared++;
           await options.preparationGate;
           return createPreparedPhotoScan({
@@ -238,6 +244,17 @@ function fixture(options: FixtureOptions = {}) {
     ],
     ["@/services/analytics", { logScanStarted: () => undefined, logScanCompleted: () => undefined }],
     ["@/lib/error-reporting", { captureMobileError: () => undefined }],
+    [
+      "@/components/ui/toast",
+      {
+        useToast: () => ({
+          showToast: () => {
+            counts.unavailableWarnings++;
+          },
+        }),
+      },
+    ],
+    ["@/utils/photo-library-read-gate", { isPhotoLibraryReadUnavailableError }],
     ["@/utils/photo-refresh-wait-monitor", { monitorPhotoRefreshWait: <T>(operation: Promise<T>) => operation }],
     ["@/store", { useAppStore: store }],
     [
@@ -487,6 +504,22 @@ for (const initialState of [null, "unknown", "background"]) {
   scan.appState("active");
   await scan.settle();
   assert.equal(scan.counts.quick, 1, "native active notification must start the deferred launch");
+  scan.cleanup();
+}
+
+{
+  const scan = fixture({ preparationFailure: new PhotoLibraryReadTimeoutError(15_000) });
+  await scan.settle();
+  assert.equal(scan.state().isBackgroundPhotoScanRunning, false, "failed read recovery must end the spinner");
+  assert.equal(scan.counts.unavailableWarnings, 1, "an unavailable library must not look like successful refresh");
+  scan.library();
+  await scan.settle();
+  assert.equal(scan.counts.unavailableWarnings, 1, "repeated library events must not spam warnings");
+  scan.appState("background");
+  scan.appState("active");
+  await scan.settle();
+  assert.equal(scan.counts.unavailableWarnings, 2, "a later app session can report its own failure");
+  assert.equal(scan.counts.quick, 0, "failed preparation must not start writes");
   scan.cleanup();
 }
 
