@@ -61,6 +61,8 @@ function render(progress, stage = "deep-scanning") {
   state.backgroundPhotoScanProgress = { stage, detail: "Photo refresh progress", progress };
   const card = exports.BackgroundPhotoUpdateBar({});
   const children = elements(card);
+  assert.equal(card.props.accessibilityLabel, "Updating photos");
+  assert.ok(children.some((element) => element.props.children === "Updating photos"));
   const track = children.find((element) => element.props.className?.includes("h-1.5"));
   assert.ok(track, "The progress track must keep the card's height stable through phase changes");
   for (const element of children) {

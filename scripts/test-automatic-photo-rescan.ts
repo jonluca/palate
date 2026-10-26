@@ -443,11 +443,6 @@ assert.match(
   /finishBackgroundPhotoScan:[\s\S]{0,300}isBackgroundPhotoScanRunning: false,[\s\S]{0,100}backgroundPhotoScanProgress: null/,
 );
 assert.match(automaticHook, /stage: "reconciling"[\s\S]{0,200}progress: null/);
-assert.match(automaticHook, /Promise\.allSettled\(visibleReconciliations\)/);
-const visibleReconciliationSource =
-  automaticHook.match(/const visibleReconciliations[\s\S]*?Promise\.allSettled\(visibleReconciliations\)/)?.[0] ?? "";
-assert.equal(visibleReconciliationSource.match(/invalidateFoodDetectionQueries/g)?.length, 1);
-assert.doesNotMatch(visibleReconciliationSource, /pendingReview|confirmedRestaurants/);
 assert.match(scannerService, /enqueueInsertedPhotosForAutomaticDeepScan/);
 assert.match(scannerService, /insertPhotosForAutomaticDeepScan\(photos\)/);
 assert.match(photoDatabase, /withExclusiveTransactionAsync/);

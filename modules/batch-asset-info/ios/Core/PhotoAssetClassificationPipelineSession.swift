@@ -19,6 +19,7 @@ final class PhotoAssetClassificationPipelineSession: @unchecked Sendable {
 
   private var outcomes: [PhotoAssetClassificationOutcome?]
   private var imageRequestIDs: [Int: PHImageRequestID] = [:]
+  private var imageRequestDeadlines: [Int: PhotoAssetClassificationImageRequestDeadline] = [:]
   private var visionOperations: [Int: PhotoAssetClassificationPipelineVisionOperation] = [:]
   private var scheduler: PhotoAssetClassificationPipelineScheduler
   private var didStart = false
@@ -127,9 +128,35 @@ final class PhotoAssetClassificationPipelineSession: @unchecked Sendable {
       }
     }
     imageRequestIDs[index] = requestID
+    imageRequestDeadlines[index] = PhotoAssetClassificationImageRequestDeadline(
+      schedule: { delay, item in
+        self.stateQueue.asyncAfter(deadline: .now() + delay, execute: item)
+      },
+      onTimeout: { [weak self] in
+        self?.handleImageTimeout(at: index)
+      }
+    )
     if isCancellationRequested {
       cancelOnStateQueue()
     }
+  }
+
+  private func handleImageTimeout(at index: Int) {
+    dispatchPrecondition(condition: .onQueue(stateQueue))
+    imageRequestDeadlines.removeValue(forKey: index)
+    guard let requestID = imageRequestIDs.removeValue(forKey: index) else {
+      return
+    }
+    imageManager.cancelImageRequest(requestID)
+    complete(
+      .failure(
+        assetId: assets[index].localIdentifier,
+        message: PhotoAssetClassificationError.imageRequestTimedOut(
+          assetId: assets[index].localIdentifier
+        ).localizedDescription
+      ),
+      at: index
+    )
   }
 
   private func handleImageResult(
@@ -145,6 +172,10 @@ final class PhotoAssetClassificationPipelineSession: @unchecked Sendable {
       cancelOnStateQueue()
       return
     }
+    guard imageRequestDeadlines[index]?.receive(result) == true else {
+      return
+    }
+    imageRequestDeadlines.removeValue(forKey: index)
     if let errorDescription = result.errorDescription {
       imageRequestIDs.removeValue(forKey: index)
       complete(
@@ -164,9 +195,6 @@ final class PhotoAssetClassificationPipelineSession: @unchecked Sendable {
         ),
         at: index
       )
-      return
-    }
-    if result.isDegraded {
       return
     }
     imageRequestIDs.removeValue(forKey: index)
@@ -249,6 +277,10 @@ final class PhotoAssetClassificationPipelineSession: @unchecked Sendable {
 
     let requests = imageRequestIDs
     imageRequestIDs.removeAll(keepingCapacity: false)
+    for deadline in imageRequestDeadlines.values {
+      deadline.cancel()
+    }
+    imageRequestDeadlines.removeAll(keepingCapacity: false)
     for requestID in requests.values {
       imageManager.cancelImageRequest(requestID)
     }

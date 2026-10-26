@@ -34,7 +34,7 @@ export function BackgroundPhotoUpdateBar({ className }: BackgroundPhotoUpdateBar
       style={{ borderCurve: "continuous" }}
       accessible={true}
       accessibilityRole={"progressbar"}
-      accessibilityLabel={"Updating photos in the background"}
+      accessibilityLabel={"Updating photos"}
       accessibilityValue={accessibilityValue}
     >
       <View className={"flex-row items-center gap-3"}>
@@ -48,7 +48,7 @@ export function BackgroundPhotoUpdateBar({ className }: BackgroundPhotoUpdateBar
 
         <View className={"flex-1 gap-0.5"}>
           <ThemedText variant={"footnote"} className={"font-semibold"}>
-            Updating in background
+            Updating photos
           </ThemedText>
           <ThemedText variant={"caption1"} color={"secondary"} numberOfLines={2}>
             {update.detail}

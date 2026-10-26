@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import ts from "typescript";
+import { QueryClient, QueryObserver } from "@tanstack/query-core";
 import * as core from "../utils/automatic-photo-rescan-core.ts";
 import { createPreparedPhotoScan, type PreparedPhotoScan } from "../utils/prepared-photo-scan-core.ts";
 import type { DeepScanProgress, ScanProgress } from "../hooks/queries.ts";
@@ -40,6 +41,11 @@ interface FixtureOptions {
   syncFailure?: boolean;
   preparationGate?: Promise<void>;
   quickPipelineIncomplete?: boolean;
+  refreshGate?: Promise<void>;
+  refreshFailure?: boolean;
+  foodSyncGate?: Promise<void>;
+  syncRequired?: boolean;
+  refreshQueries?: () => Promise<void>;
 }
 
 interface StoreSnapshot {
@@ -81,7 +87,7 @@ function fixture(options: FixtureOptions = {}) {
     mutations: options.mutations ?? 0,
     quickFailure: options.quickFailure ?? false,
     deepFailure: options.deepFailure ?? false,
-    syncRequired: false,
+    syncRequired: options.syncRequired ?? false,
     syncFailure: options.syncFailure ?? false,
   };
   const counts = {
@@ -95,6 +101,7 @@ function fixture(options: FixtureOptions = {}) {
     prepared: 0,
     released: 0,
     checkpoints: 0,
+    refreshes: 0,
   };
   const reportedErrors: unknown[] = [];
   const deepBatches: string[][] = [];
@@ -174,7 +181,11 @@ function fixture(options: FixtureOptions = {}) {
         return () => mutationListeners.delete(listener);
       },
     }),
-    invalidateQueries: async () => undefined,
+    invalidateQueries: async ({ refetchType }: { refetchType?: string }) => {
+      if (refetchType !== "none") {
+        await options.refreshGate;
+      }
+    },
     fetchQuery: async ({ queryFn }: { queryFn: () => Promise<number> }) => queryFn(),
     setQueryData: () => undefined,
   };
@@ -242,6 +253,7 @@ function fixture(options: FixtureOptions = {}) {
         pruneAutomaticPhotoDeepScanQueue: async () => undefined,
         syncAllVisitsFoodProbable: async () => {
           counts.foodSync++;
+          await options.foodSyncGate;
           if (data.syncFailure) {
             throw new Error("food sync failure");
           }
@@ -276,7 +288,14 @@ function fixture(options: FixtureOptions = {}) {
           unmatchedVisits: ["unmatchedVisits"],
           photoCount: ["photoCount"],
         },
-        invalidateFoodDetectionQueries: async () => undefined,
+        invalidateFoodDetectionQueries: async () => {
+          counts.refreshes++;
+          await options.refreshGate;
+          await options.refreshQueries?.();
+          if (options.refreshFailure) {
+            throw new Error("query refresh failure");
+          }
+        },
         useScanPhotos: (
           progress: (value: ScanProgress) => void,
           scanOptions: { enqueueInsertedPhotosForAutomaticDeepScan: boolean },
@@ -681,6 +700,112 @@ for (const stop of ["background", "cleanup"] as const) {
   assert.equal(scan.counts.quick, 1, "a completed metadata checkpoint must not hide interrupted visit work");
   assert.equal(scan.counts.checkpoints, 1);
   scan.cleanup();
+}
+
+{
+  // A visible query can wait indefinitely for PhotoKit or EventKit even after
+  // every scan write has finished. It must not retain the scan's ownership.
+  const refresh = gate<void>();
+  const scan = fixture({ pending: 1, queued: 25, refreshGate: refresh.promise });
+  await scan.settle();
+  assert.equal(scan.data.pending, 0, "new photos must actually be imported");
+  assert.equal(scan.data.queue.length, 0, "analysis must finish despite an unresolved observer read");
+  assert.equal(scan.data.syncRequired, false, "derived food state must be persisted before unlocking");
+  assert.equal(scan.state().isBackgroundPhotoScanRunning, false);
+  assert.equal(scan.state().backgroundPhotoScanProgress, null, "completed work must stop the spinner");
+  scan.data.pending = 1;
+  scan.library();
+  await scan.settle();
+  assert.equal(scan.counts.starts, 2, "a stalled observer must not block the next library update");
+  assert.equal(scan.data.pending, 0);
+  refresh.resolve();
+  await scan.flush();
+  scan.cleanup();
+}
+
+{
+  const deep = gate<void>();
+  const scan = fixture({ pending: 1, deepGate: deep.promise });
+  await scan.flush();
+  assert.equal(scan.counts.quick, 1);
+  assert.equal(scan.deepBatches.length, 1);
+  assert.ok(scan.counts.refreshes > 0, "imported visits must refresh before queued analysis finishes");
+  assert.equal(scan.state().isBackgroundPhotoScanRunning, true, "unfinished analysis still owns the scan");
+  deep.resolve();
+  await scan.settle();
+  scan.cleanup();
+}
+
+{
+  const refresh = gate<void>();
+  const scan = fixture({ pending: 1, syncRequired: true, refreshGate: refresh.promise });
+  await scan.settle();
+  assert.equal(scan.counts.foodSync, 2, "recover old writes and reconcile new results");
+  assert.equal(scan.data.pending, 0, "recovery cache reads must not block new imports");
+  assert.equal(scan.data.syncRequired, false);
+  refresh.resolve();
+  await scan.flush();
+  scan.cleanup();
+}
+
+{
+  const sync = gate<void>();
+  const scan = fixture({ queued: 1, foodSyncGate: sync.promise });
+  await scan.flush();
+  assert.equal(scan.counts.foodSync, 1);
+  assert.equal(scan.state().isBackgroundPhotoScanRunning, true, "pending writes must retain scan ownership");
+  assert.equal(scan.data.syncRequired, true, "recovery flag must remain set until writes complete");
+  sync.resolve();
+  await scan.settle();
+  assert.equal(scan.data.syncRequired, false);
+  scan.cleanup();
+}
+
+{
+  const scan = fixture({ pending: 1, refreshFailure: true });
+  await scan.settle();
+  await scan.flush();
+  assert.equal(scan.data.pending, 0);
+  assert.equal(scan.data.queue.length, 0);
+  assert.equal(scan.state().isBackgroundPhotoScanRunning, false);
+  assert.ok(scan.counts.errors > 0, "detached observer failures must be handled");
+  assert.equal(scan.counts.starts, 1, "observer failures must not restart the scan");
+  scan.cleanup();
+}
+
+{
+  // Exercise real TanStack observers: Restaurants must receive fresh results
+  // while an unrelated native-backed read never settles.
+  const nativeRead = gate<string[]>();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+  const restaurants = new QueryObserver(client, {
+    queryKey: ["confirmedRestaurants"],
+    queryFn: async () => ["Existing restaurant", "Imported restaurant"],
+    initialData: ["Existing restaurant"],
+    staleTime: Infinity,
+  });
+  const visitDetails = new QueryObserver(client, {
+    queryKey: ["visits", "detail"],
+    queryFn: () => nativeRead.promise,
+    initialData: ["Cached visit"],
+    staleTime: Infinity,
+  });
+  const unsubscribeRestaurants = restaurants.subscribe(() => undefined);
+  const unsubscribeVisit = visitDetails.subscribe(() => undefined);
+  const scan = fixture({ pending: 1, refreshQueries: () => client.invalidateQueries() });
+  try {
+    await scan.settle();
+    assert.deepEqual(restaurants.getCurrentResult().data, ["Existing restaurant", "Imported restaurant"]);
+    assert.equal(visitDetails.getCurrentResult().fetchStatus, "fetching", "native read is still unresolved");
+    assert.equal(scan.state().isBackgroundPhotoScanRunning, false, "completed scans must not wait for that read");
+  } finally {
+    nativeRead.resolve(["Refreshed visit"]);
+    await scan.flush();
+    unsubscribeRestaurants();
+    unsubscribeVisit();
+    client.clear();
+    scan.cleanup();
+  }
 }
 
 console.log("Automatic photo rescan hook lifecycle tests passed.");

@@ -4,6 +4,7 @@ public enum PhotoAssetClassificationError: LocalizedError, Sendable {
   case invalidConfidenceThreshold(Float)
   case invalidMaximumLabelCount(Int)
   case imageRequestCancelled(assetId: String)
+  case imageRequestTimedOut(assetId: String)
   case imageUnavailable(assetId: String)
   case noClassificationResults(assetId: String)
 
@@ -15,6 +16,8 @@ public enum PhotoAssetClassificationError: LocalizedError, Sendable {
       return "Maximum classification label count must be between 0 and 1,000; received \(count)."
     case .imageRequestCancelled(let assetId):
       return "PhotoKit cancelled the image request for asset \(assetId)."
+    case .imageRequestTimedOut(let assetId):
+      return "PhotoKit did not finish loading asset \(assetId) within 30 seconds."
     case .imageUnavailable(let assetId):
       return "PhotoKit did not return a usable image for asset \(assetId)."
     case .noClassificationResults(let assetId):

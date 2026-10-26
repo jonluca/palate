@@ -43,13 +43,25 @@ function subscribeToAutomaticPhotoRescanAppState(controller: AutomaticPhotoResca
   return () => subscription.remove();
 }
 
-async function finishPendingAutomaticPhotoFoodSync(queryClient: QueryClient): Promise<void> {
-  try {
-    await syncAllVisitsFoodProbable();
-    await clearAutomaticPhotoFoodSyncRequired();
-  } finally {
-    await invalidateFoodDetectionQueries(queryClient);
+function refreshAutomaticPhotoQueries(queryClient: QueryClient, photosImported = false): void {
+  // Observer reads can include PhotoKit, EventKit, and inactive navigation tabs.
+  // They must refresh after writes, but cannot own the scan lock: a stalled read
+  // would otherwise keep the progress bar and block every subsequent scan.
+  const refreshes = [invalidateFoodDetectionQueries(queryClient)];
+  if (photosImported) {
+    refreshes.push(
+      queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.photoCount }),
+    );
   }
+  void Promise.all(refreshes).catch((error) => {
+    console.warn("Failed to refresh photo results:", error);
+  });
+}
+
+async function finishPendingAutomaticPhotoFoodSync(): Promise<void> {
+  await syncAllVisitsFoodProbable();
+  await clearAutomaticPhotoFoodSyncRequired();
 }
 
 /** Start incremental import and queued deep analysis on foreground or library changes. */
@@ -142,7 +154,9 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
               detail: "Finishing a previous photo update…",
               progress: null,
             });
-            await finishPendingAutomaticPhotoFoodSync(queryClient);
+            await finishPendingAutomaticPhotoFoodSync().finally(() => {
+              refreshAutomaticPhotoQueries(queryClient);
+            });
           }
           if (automaticDeepScanEnabled) {
             await pruneAutomaticPhotoDeepScanQueue();
@@ -177,7 +191,12 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
           logScanStarted();
           const result = await runAutomaticPhotoScanSequence({
             shouldRunQuickScan,
-            scanPhotos: () => scanPhotos(preparedScan),
+            scanPhotos: async () => {
+              const result = await scanPhotos(preparedScan);
+              // Publish imported visits now, even if queued analysis needs more time.
+              refreshAutomaticPhotoQueries(queryClient, true);
+              return result;
+            },
             shouldContinue: controller.isActive,
             getDeepScanCandidates: !automaticDeepScanEnabled
               ? async () => []
@@ -198,29 +217,17 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
             },
             finalizeDeepScanQueue: () =>
               (automaticDeepScanEnabled ? pruneAutomaticPhotoDeepScanQueue() : Promise.resolve()).finally(async () => {
-                // Keep the progress visible until active Restaurants and Review data
-                // have reconciled, then let the shared bar disappear once.
+                // Persist derived food state before releasing scan ownership. Cache
+                // refreshes continue independently of that write lifecycle.
                 useAppStore.getState().updateBackgroundPhotoScanProgress({
                   stage: "reconciling",
                   detail: "Refreshing restaurants and reviews…",
                   progress: null,
                 });
 
-                const visibleReconciliations = [
-                  deepScanRan
-                    ? finishPendingAutomaticPhotoFoodSync(queryClient)
-                    : invalidateFoodDetectionQueries(queryClient),
-                ];
-                if (shouldRunQuickScan) {
-                  visibleReconciliations.push(
-                    queryClient.invalidateQueries({ queryKey: queryKeys.unmatchedVisits }),
-                    queryClient.invalidateQueries({ queryKey: queryKeys.photoCount }),
-                  );
-                }
-                const [foodSyncResult] = await Promise.allSettled(visibleReconciliations);
-                if (deepScanRan && foodSyncResult.status === "rejected") {
-                  throw foodSyncResult.reason;
-                }
+                await (deepScanRan ? finishPendingAutomaticPhotoFoodSync() : Promise.resolve()).finally(() => {
+                  refreshAutomaticPhotoQueries(queryClient, shouldRunQuickScan);
+                });
               }),
           });
           logScanCompleted(result?.photosProcessed ?? 0, result?.visitsCreated ?? 0);
