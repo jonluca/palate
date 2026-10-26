@@ -34,6 +34,8 @@ interface FixtureOptions {
   permission?: boolean | Promise<boolean>;
   quickGate?: Promise<void>;
   deepGate?: Promise<void>;
+  deepGateForBatch?: (batchNumber: number) => Promise<void> | undefined;
+  deepElapsedMs?: number;
   quickFailure?: boolean;
   deepFailure?: boolean;
   retainQueue?: boolean;
@@ -80,6 +82,7 @@ function fixture(options: FixtureOptions = {}) {
   let cleanups: Array<() => void> = [];
   let photoNumber = 0;
   let activeMutations = 0;
+  let elapsed = 0;
   const data = {
     pending: options.pending ?? 0,
     queue: Array.from({ length: options.queued ?? 0 }, () => ({ id: `photo-${photoNumber++}` })),
@@ -98,6 +101,7 @@ function fixture(options: FixtureOptions = {}) {
     errors: 0,
     maxConcurrent: 0,
     foodSync: 0,
+    batchFoodSync: 0,
     prepared: 0,
     released: 0,
     checkpoints: 0,
@@ -233,6 +237,8 @@ function fixture(options: FixtureOptions = {}) {
       },
     ],
     ["@/services/analytics", { logScanStarted: () => undefined, logScanCompleted: () => undefined }],
+    ["@/lib/error-reporting", { captureMobileError: () => undefined }],
+    ["@/utils/photo-refresh-wait-monitor", { monitorPhotoRefreshWait: <T>(operation: Promise<T>) => operation }],
     ["@/store", { useAppStore: store }],
     [
       "@/utils/db",
@@ -251,6 +257,10 @@ function fixture(options: FixtureOptions = {}) {
           data.syncRequired = true;
         },
         pruneAutomaticPhotoDeepScanQueue: async () => undefined,
+        syncVisitsFoodProbableForPhotos: async (ids: readonly string[]) => {
+          assert.ok(ids.length <= core.AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE);
+          counts.batchFoodSync++;
+        },
         syncAllVisitsFoodProbable: async () => {
           counts.foodSync++;
           await options.foodSyncGate;
@@ -271,6 +281,8 @@ function fixture(options: FixtureOptions = {}) {
       "@/utils/automatic-photo-rescan-core",
       {
         ...core,
+        runAutomaticPhotoScanSequence: (dependencies: Parameters<typeof core.runAutomaticPhotoScanSequence>[0]) =>
+          core.runAutomaticPhotoScanSequence({ ...dependencies, now: () => elapsed }),
         createAutomaticPhotoRescanController: (
           dependencies: Parameters<typeof core.createAutomaticPhotoRescanController>[0],
         ) => {
@@ -320,9 +332,14 @@ function fixture(options: FixtureOptions = {}) {
         }),
         useDeepScan: (
           progress: (value: DeepScanProgress) => void,
-          scanOptions: { synchronizeVisitFood?: boolean; invalidateQueriesOnSettled?: boolean },
+          scanOptions: {
+            synchronizeVisitFood?: boolean;
+            invalidateQueriesOnSettled?: boolean;
+            retryFailedPhotos?: boolean;
+          },
         ) => {
           assert.equal(scanOptions.synchronizeVisitFood, false, "automatic batches must defer full food sync");
+          assert.equal(scanOptions.retryFailedPhotos, false, "automatic analysis must defer retries to another run");
           assert.equal(
             scanOptions.invalidateQueriesOnSettled,
             false,
@@ -334,6 +351,8 @@ function fixture(options: FixtureOptions = {}) {
                 const ids = Array.from(photos, (photo) => photo.id);
                 deepBatches.push(ids);
                 await options.deepGate;
+                await options.deepGateForBatch?.(deepBatches.length);
+                elapsed += options.deepElapsedMs ?? 0;
                 if (data.deepFailure) {
                   throw new Error("deep failure");
                 }
@@ -361,6 +380,7 @@ function fixture(options: FixtureOptions = {}) {
   const exports: HookExports = {};
   runInNewContext(compiledHook, {
     exports,
+    performance: { now: () => elapsed },
     require: (name: string) => {
       assert.ok(modules.has(name), `Unexpected hook dependency: ${name}`);
       return modules.get(name);
@@ -523,13 +543,14 @@ for (const retainQueue of [false, true]) {
   await scan.settle();
   assert.deepEqual(
     scan.deepBatches.map((batch) => batch.length),
-    [24, 24, 11],
+    [...Array<number>(14).fill(4), 3],
   );
   assert.equal(new Set(scan.deepBatches.flat()).size, 59, "retryable rows may be attempted only once per run");
   assert.ok(scan.claimLimits.every((limit) => limit === core.AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE));
   assert.equal(scan.counts.starts, 1);
   assert.equal(scan.counts.quick, 0);
   assert.equal(scan.counts.foodSync, 1, "multiple native batches must reconcile food summaries only once");
+  assert.equal(scan.counts.batchFoodSync, 15, "each completed batch must publish its affected visit summaries");
   assert.equal(scan.data.queue.length, retainQueue ? 59 : 0);
   scan.cleanup();
 }
@@ -539,7 +560,42 @@ for (const retainQueue of [false, true]) {
   await scan.settle();
   assert.equal(scan.counts.quick, 1, "large incremental imports must not silently skip automatic scanning");
   assert.equal(scan.deepBatches.flat().length, 1_001);
-  assert.ok(scan.deepBatches.every((batch) => batch.length <= 24));
+  assert.ok(scan.deepBatches.every((batch) => batch.length <= 4));
+  scan.cleanup();
+}
+
+{
+  const scan = fixture({ queued: 100, retainQueue: true, deepElapsedMs: 30_000 });
+  await scan.settle();
+  assert.equal(scan.deepBatches.length, 1, "slow photos must end the run after one native wave");
+  assert.equal(scan.data.queue.length, 100, "failed and unattempted photos remain durable");
+  assert.equal(scan.state().isBackgroundPhotoScanRunning, false, "a backlog must not retain the spinner indefinitely");
+  assert.equal(scan.counts.batchFoodSync, 1);
+  assert.equal(scan.data.syncRequired, false, "completed writes must settle before ending the run");
+  for (let event = 0; event < 3; event++) {
+    scan.data.pending = 1;
+    scan.library();
+    await scan.settle();
+  }
+  assert.equal(scan.deepBatches.length, 1, "library events must not reset the foreground analysis budget");
+  assert.equal(scan.counts.quick, 3, "new photos must still import after the analysis budget is spent");
+  scan.appState("background");
+  scan.appState("active");
+  await scan.settle();
+  assert.equal(scan.deepBatches.length, 2, "returning to the app must grant a fresh analysis budget");
+  scan.cleanup();
+}
+
+{
+  const secondBatch = gate<void>();
+  const scan = fixture({ queued: 8, deepGateForBatch: (batch) => (batch === 2 ? secondBatch.promise : undefined) });
+  await scan.flush(120);
+  assert.equal(scan.deepBatches.length, 2);
+  assert.equal(scan.counts.batchFoodSync, 1, "first batch summaries must be saved before the next batch waits");
+  assert.ok(scan.counts.refreshes > 0, "first batch results must be visible while later photos are loading");
+  assert.equal(scan.state().isBackgroundPhotoScanRunning, true);
+  secondBatch.resolve();
+  await scan.settle();
   scan.cleanup();
 }
 
@@ -605,7 +661,7 @@ for (const stop of ["background", "cleanup"] as const) {
   deep.resolve();
   await scan.settle();
   assert.equal(scan.deepBatches.length, 1, `${stop} must stop before claiming another native batch`);
-  assert.equal(scan.data.queue.length, 25, "unfinished work must remain queued");
+  assert.equal(scan.data.queue.length, 45, "unfinished work must remain queued");
   assert.equal(scan.counts.foodSync, 1, `${stop} must reconcile completed batches before releasing the scan`);
   scan.cleanup();
   assert.deepEqual(scan.listeners(), [0, 0, 0, 0]);

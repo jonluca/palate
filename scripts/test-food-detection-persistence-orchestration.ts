@@ -705,6 +705,73 @@ function createDeepScanFailureFixture(options: DeepScanFailureFixtureOptions = {
   };
 }
 
+// Automatic analysis must yield after one failed native request, preserving the
+// durable retry budget for a later app open. The production service and SQLite
+// failure-counter implementation run here; only the PhotoKit delay is simulated.
+for (const pipelineStrategy of ["serial", "lookahead"] as const) {
+  let nativeWaitMs = 0;
+  const fixture = createDeepScanFailureFixture({
+    pipelineStrategy,
+    nativeAttempt: async () => {
+      nativeWaitMs += 30_000;
+    },
+  });
+  try {
+    fixture.database.exec("DELETE FROM photos WHERE id = 'pending-food'");
+    const progressTimes: number[] = [];
+    const result = await fixture.deepScanAllPhotosForFood({
+      retryFailedPhotos: false,
+      onProgress: (progress) => {
+        if (progress.processedPhotos > 0) {
+          progressTimes.push(nativeWaitMs);
+        }
+      },
+    });
+    assert.equal(progressTimes[0], 30_000, "automatic progress must not wait through three PhotoKit timeouts");
+    assert.deepEqual(fixture.requests, [["pending-missing", "pending-error"]]);
+    assert.deepEqual(fixture.retryDelays, [], "automatic failures must not immediately retry");
+    assert.equal(result.retryableFailures, 2);
+    assert.equal(result.processedPhotos, 2);
+    assert.equal(result.isComplete, true);
+    assert.equal(await fixture.getUnanalyzedPhotoCount(), 2, "failed photos must remain eligible next time");
+    for (const expectedFailures of [1, 2, 3]) {
+      if (expectedFailures > 1) {
+        await fixture.deepScanAllPhotosForFood({ retryFailedPhotos: false });
+      }
+      const counters = fixture.database
+        .prepare("SELECT foodDetectionFailureCount FROM photos WHERE id LIKE 'pending-%'")
+        .all();
+      assert.ok(counters.every((row) => row.foodDetectionFailureCount === expectedFailures));
+    }
+    assert.equal(fixture.requests.length, 3, "each app-open attempt must spend only one durable failure");
+    assert.equal(await fixture.getUnanalyzedPhotoCount(), 0, "the existing lifetime limit must still apply");
+    assert.equal((await fixture.deepScanAllPhotosForFood({ retryFailedPhotos: false })).totalPhotos, 0);
+    assert.equal(fixture.requests.length, 3);
+  } finally {
+    fixture.database.close();
+  }
+}
+
+{
+  const fixture = createDeepScanFailureFixture();
+  try {
+    fixture.database.exec("DELETE FROM photos WHERE id = 'pending-food'");
+    await fixture.deepScanAllPhotosForFood({ retryFailedPhotos: false });
+    fixture.recoveredIds.add("pending-missing");
+    fixture.recoveredIds.add("pending-error");
+    const recovered = await fixture.deepScanAllPhotosForFood({ retryFailedPhotos: false });
+    assert.equal(recovered.foodPhotosFound, 2, "a later automatic run must recover available photos");
+    assert.equal(recovered.retryableFailures, 0);
+    const recoveredRows = fixture.database
+      .prepare("SELECT foodDetected, foodDetectionFailureCount FROM photos WHERE id LIKE 'pending-%'")
+      .all();
+    assert.ok(recoveredRows.every((row) => row.foodDetected === 1 && row.foodDetectionFailureCount === 0));
+    assert.equal(fixture.requests.length, 2);
+  } finally {
+    fixture.database.close();
+  }
+}
+
 {
   const fixture = createDeepScanFailureFixture();
   try {

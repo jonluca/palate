@@ -336,6 +336,7 @@ import {
   dismissCalendarEvents,
   initializeMichelinData,
   type DeepScanProgress,
+  type DeepScanOptions,
   type ProcessPhotosOptions,
   type VisitFoodScanProgress,
   type ImportableCalendarEvent,
@@ -1820,7 +1821,8 @@ export type { DeepScanProgress, VisitFoodScanProgress };
  */
 export function useDeepScan(
   onProgress?: (progress: DeepScanProgress) => void,
-  mutationOptions: PhotoAnalysisMutationOptions & { synchronizeVisitFood?: boolean } = {},
+  mutationOptions: PhotoAnalysisMutationOptions &
+    Pick<DeepScanOptions, "synchronizeVisitFood" | "retryFailedPhotos"> = {},
 ) {
   const queryClient = useQueryClient();
   // Use ref to always call the latest callback
@@ -1837,6 +1839,7 @@ export function useDeepScan(
         photos,
         onProgress: (p) => onProgressRef.current?.(p),
         synchronizeVisitFood: mutationOptions.synchronizeVisitFood,
+        retryFailedPhotos: mutationOptions.retryFailedPhotos,
       }),
     onSettled: () => {
       if (mutationOptions.invalidateQueriesOnSettled === false) {

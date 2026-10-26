@@ -81,6 +81,7 @@ export {
   getVisitsWithDetails,
   insertVisits,
   syncAllVisitsFoodProbable,
+  syncVisitsFoodProbableForPhotos,
   updateVisitNotes,
   updateVisitStatus,
 } from "./db/visits";

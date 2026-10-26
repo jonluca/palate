@@ -524,13 +524,18 @@ for (const outcome of ["recovered", "exhausted", "service-error"]) {
 }
 
 {
-  const mutation = mutationFixture({ invalidateQueriesOnSettled: false, synchronizeVisitFood: false });
+  const mutation = mutationFixture({
+    invalidateQueriesOnSettled: false,
+    synchronizeVisitFood: false,
+    retryFailedPhotos: false,
+  });
   try {
     const hook = mutation.useDeepScan();
     const operation = hook.mutateAsync([{ id: "automatic-batch" }]);
     mutation.scan.resolve(progress());
     await operation;
     assert.equal(mutation.calls.requests[0].synchronizeVisitFood, false);
+    assert.equal(mutation.calls.requests[0].retryFailedPhotos, false);
     assert.equal(mutation.calls.refreshes, 0, "Automatic batches must preserve caller-owned final reconciliation");
     assert.deepEqual(mutation.calls.invalidations, []);
     assert.equal(mutation.isPending, false);

@@ -4,6 +4,8 @@ import * as MediaLibrary from "expo-media-library/legacy";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { prepareAutomaticPhotoScan, hasMediaLibraryPermission, type PreparedPhotoScan } from "@/services/scanner";
 import { logScanCompleted, logScanStarted } from "@/services/analytics";
+import { captureMobileError } from "@/lib/error-reporting";
+import { monitorPhotoRefreshWait } from "@/utils/photo-refresh-wait-monitor";
 import { useAppStore } from "@/store";
 import {
   claimAutomaticPhotoDeepScanCandidates,
@@ -14,10 +16,12 @@ import {
   markAutomaticPhotoFoodSyncRequired,
   pruneAutomaticPhotoDeepScanQueue,
   syncAllVisitsFoodProbable,
+  syncVisitsFoodProbableForPhotos,
 } from "@/utils/db";
 import { isBatchAssetInfoAvailable, isVisionVisitFoodValidationModeEnabled } from "@/modules/batch-asset-info";
 import {
   AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE,
+  AUTOMATIC_PHOTO_DEEP_SCAN_BUDGET_MS,
   createAutomaticPhotoRescanController,
   getAutomaticDeepScanOverallProgress,
   getAutomaticQuickScanOverallProgress,
@@ -35,10 +39,21 @@ import {
   type ScanProgress,
 } from "./queries";
 
-function subscribeToAutomaticPhotoRescanAppState(controller: AutomaticPhotoRescanController): () => void {
-  const subscription = AppState.addEventListener("change", controller.handleAppStateChange);
+function subscribeToAutomaticPhotoRescanAppState(
+  controller: AutomaticPhotoRescanController,
+  onForeground: () => void,
+): () => void {
+  let wasActive = false;
+  const handleAppStateChange = (nextState: string) => {
+    if (nextState === "active" && !wasActive) {
+      onForeground();
+    }
+    wasActive = nextState === "active";
+    controller.handleAppStateChange(nextState);
+  };
+  const subscription = AppState.addEventListener("change", handleAppStateChange);
   if (AppState.currentState != null) {
-    controller.handleAppStateChange(AppState.currentState);
+    handleAppStateChange(AppState.currentState);
   }
   return () => subscription.remove();
 }
@@ -113,6 +128,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
   const { mutateAsync: deepScanPhotos } = useDeepScan(handleDeepScanProgress, {
     invalidateQueriesOnSettled: false,
     synchronizeVisitFood: false,
+    retryFailedPhotos: false,
   });
 
   useEffect(() => {
@@ -120,6 +136,27 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
       return;
     }
 
+    let currentStep = "starting";
+    let failedStep: string | null = null;
+    let analysisTimeUsedMs = 0;
+    const waitForStep = <T>(step: string, operation: Promise<T>): Promise<T> => {
+      currentStep = step;
+      return monitorPhotoRefreshWait(operation, {
+        shouldReport: () => controller.isActive(),
+        onSlowWait: () => {
+          const error = Object.assign(new Error("Photo refresh operation is still waiting"), {
+            code: "PHOTO_REFRESH_SLOW_WAIT",
+          });
+          const phase = step === "quick_scan" ? useAppStore.getState().backgroundPhotoScanProgress?.stage : null;
+          captureMobileError(error, `photo_refresh.${step}${phase ? `.${phase}` : ""}.slow_wait`);
+        },
+      }).catch((error) => {
+        if (failedStep === null) {
+          failedStep = step;
+        }
+        throw error;
+      });
+    };
     const controller = createAutomaticPhotoRescanController({
       canRun: () => {
         const state = useAppStore.getState();
@@ -138,6 +175,7 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
           return;
         }
         quickScanRanRef.current = false;
+        failedStep = null;
         deepScanTotalsRef.current = { completed: 0, total: 0 };
         let deepScanRan = false;
         let preparedScan: PreparedPhotoScan | undefined;
@@ -148,35 +186,48 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
             exact: true,
             refetchType: "none",
           });
-          if (await isAutomaticPhotoFoodSyncRequired()) {
+          useAppStore.getState().updateBackgroundPhotoScanProgress({
+            stage: "checking",
+            detail: "Opening photo history…",
+            progress: null,
+          });
+          if (await waitForStep("database_open", isAutomaticPhotoFoodSyncRequired())) {
             useAppStore.getState().updateBackgroundPhotoScanProgress({
               stage: "reconciling",
               detail: "Finishing a previous photo update…",
               progress: null,
             });
-            await finishPendingAutomaticPhotoFoodSync().finally(() => {
+            await waitForStep("food_sync_recovery", finishPendingAutomaticPhotoFoodSync()).finally(() => {
               refreshAutomaticPhotoQueries(queryClient);
             });
           }
           if (automaticDeepScanEnabled) {
-            await pruneAutomaticPhotoDeepScanQueue();
+            await waitForStep("queue_prune", pruneAutomaticPhotoDeepScanQueue());
           }
           // Keep native ownership outside React Query: cached numbers must never
           // retain or share a one-shot PhotoKit session between callers.
-          preparedScan = await prepareAutomaticPhotoScan();
+          useAppStore.getState().updateBackgroundPhotoScanProgress({
+            stage: "checking",
+            detail: "Checking your photo library…",
+            progress: null,
+          });
+          preparedScan = await waitForStep("library_prepare", prepareAutomaticPhotoScan());
           const pendingPhotoCount = preparedScan.pendingPhotoCount;
           queryClient.setQueryData(queryKeys.unscannedPhotoCount, pendingPhotoCount);
-          const [queuedDeepScanCount, quickPipelineIncomplete] = await Promise.all([
-            automaticDeepScanEnabled ? getAutomaticPhotoDeepScanQueueCount() : Promise.resolve(0),
-            isAutomaticPhotoQuickPipelineIncomplete(),
-          ]);
+          const [queuedDeepScanCount, quickPipelineIncomplete] = await waitForStep(
+            "queue_read",
+            Promise.all([
+              automaticDeepScanEnabled ? getAutomaticPhotoDeepScanQueueCount() : Promise.resolve(0),
+              isAutomaticPhotoQuickPipelineIncomplete(),
+            ]),
+          );
           const shouldRunQuickScan = shouldRunAutomaticPhotoQuickScan(pendingPhotoCount, quickPipelineIncomplete);
           if (!controller.isActive()) {
             return;
           }
           if (!shouldRunQuickScan) {
-            await preparedScan.complete(0);
-            await preparedScan.dispose();
+            await waitForStep("checkpoint", preparedScan.complete(0));
+            await waitForStep("snapshot_release", preparedScan.dispose());
             if (queuedDeepScanCount === 0) {
               return;
             }
@@ -192,31 +243,46 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
           const result = await runAutomaticPhotoScanSequence({
             shouldRunQuickScan,
             scanPhotos: async () => {
-              const result = await scanPhotos(preparedScan);
+              const result = await waitForStep("quick_scan", scanPhotos(preparedScan));
               // Publish imported visits now, even if queued analysis needs more time.
               refreshAutomaticPhotoQueries(queryClient, true);
               return result;
             },
             shouldContinue: controller.isActive,
+            shouldAnalyzePhotos: () => analysisTimeUsedMs < AUTOMATIC_PHOTO_DEEP_SCAN_BUDGET_MS,
             getDeepScanCandidates: !automaticDeepScanEnabled
               ? async () => []
               : async (attemptedAssetIds) => {
                   if (attemptedAssetIds.length === 0) {
-                    deepScanTotalsRef.current.total = await getAutomaticPhotoDeepScanQueueCount();
+                    deepScanTotalsRef.current.total = await waitForStep(
+                      "queue_count",
+                      getAutomaticPhotoDeepScanQueueCount(),
+                    );
                   }
-                  return claimAutomaticPhotoDeepScanCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, attemptedAssetIds);
+                  return waitForStep(
+                    "queue_claim",
+                    claimAutomaticPhotoDeepScanCandidates(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, attemptedAssetIds),
+                  );
                 },
             deepScanPhotos: async (photos) => {
               if (!deepScanRan) {
-                await markAutomaticPhotoFoodSyncRequired();
+                await waitForStep("food_sync_mark", markAutomaticPhotoFoodSyncRequired());
                 deepScanRan = true;
               }
-              const deepScanResult = await deepScanPhotos(photos);
+              const startedAt = performance.now();
+              const deepScanResult = await waitForStep("photo_analysis", deepScanPhotos(photos)).finally(() => {
+                analysisTimeUsedMs += performance.now() - startedAt;
+              });
+              await waitForStep("batch_food_sync", syncVisitsFoodProbableForPhotos(photos.map((photo) => photo.id)));
+              refreshAutomaticPhotoQueries(queryClient);
               deepScanTotalsRef.current.completed += photos.length;
               return deepScanResult;
             },
             finalizeDeepScanQueue: () =>
-              (automaticDeepScanEnabled ? pruneAutomaticPhotoDeepScanQueue() : Promise.resolve()).finally(async () => {
+              waitForStep(
+                "queue_finalize",
+                automaticDeepScanEnabled ? pruneAutomaticPhotoDeepScanQueue() : Promise.resolve(),
+              ).finally(async () => {
                 // Persist derived food state before releasing scan ownership. Cache
                 // refreshes continue independently of that write lifecycle.
                 useAppStore.getState().updateBackgroundPhotoScanProgress({
@@ -225,7 +291,10 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
                   progress: null,
                 });
 
-                await (deepScanRan ? finishPendingAutomaticPhotoFoodSync() : Promise.resolve()).finally(() => {
+                await waitForStep(
+                  "food_sync_finalize",
+                  deepScanRan ? finishPendingAutomaticPhotoFoodSync() : Promise.resolve(),
+                ).finally(() => {
                   refreshAutomaticPhotoQueries(queryClient, shouldRunQuickScan);
                 });
               }),
@@ -234,13 +303,14 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
         };
 
         await runPhotoScan().finally(async () => {
-          await preparedScan?.dispose().catch((cleanupError) => {
+          await waitForStep("snapshot_release", preparedScan?.dispose() ?? Promise.resolve()).catch((cleanupError) => {
             console.warn("Failed to release the prepared automatic photo scan:", cleanupError);
           });
           useAppStore.getState().finishBackgroundPhotoScan();
         });
       },
       onError: (error) => {
+        captureMobileError(error, `photo_refresh.${failedStep ?? currentStep}`);
         console.warn("Automatic photo refresh failed; it will retry on the next library change or app open:", error);
       },
     });
@@ -258,7 +328,9 @@ export function useAutomaticPhotoRescan(enabled: boolean): void {
       }
       controller.handlePhotoLibraryChange();
     });
-    const unsubscribeFromAppState = subscribeToAutomaticPhotoRescanAppState(controller);
+    const unsubscribeFromAppState = subscribeToAutomaticPhotoRescanAppState(controller, () => {
+      analysisTimeUsedMs = 0;
+    });
 
     return () => {
       controller.dispose();

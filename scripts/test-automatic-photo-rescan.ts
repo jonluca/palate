@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE,
+  AUTOMATIC_PHOTO_DEEP_SCAN_BUDGET_MS,
   createAutomaticPhotoRescanController,
   getAutomaticDeepScanOverallProgress,
   getAutomaticQuickScanOverallProgress,
@@ -32,7 +33,7 @@ for (const [pendingPhotoCount, expected] of boundaryExpectations) {
     `unexpected automatic-rescan decision for ${String(pendingPhotoCount)} pending photos`,
   );
 }
-assert.equal(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, 24);
+assert.equal(AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE, 4);
 assert.equal(shouldRunAutomaticPhotoQuickScan(0, true), true, "an interrupted quick pipeline should resume");
 assert.equal(shouldRunAutomaticPhotoQuickScan(999, true), true);
 assert.equal(
@@ -41,6 +42,48 @@ assert.equal(
   "large updates must begin automatically instead of waiting for a manual scan",
 );
 assert.equal(shouldRunAutomaticPhotoQuickScan(0, false), false);
+
+{
+  let elapsed = 0;
+  let finalized = false;
+  const remaining = Array.from({ length: 100 }, (_, index) => ({ id: String(index) }));
+  const attempted: string[] = [];
+  await runAutomaticPhotoScanSequence({
+    shouldRunQuickScan: true,
+    scanPhotos: async () => {
+      elapsed += 120_000;
+    },
+    getDeepScanCandidates: async () => remaining.slice(0, AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE),
+    deepScanPhotos: async (photos) => {
+      attempted.push(...photos.map((photo) => photo.id));
+      remaining.splice(0, photos.length);
+      elapsed += AUTOMATIC_PHOTO_DEEP_SCAN_BUDGET_MS;
+    },
+    finalizeDeepScanQueue: async () => {
+      finalized = true;
+    },
+    now: () => elapsed,
+  });
+  assert.equal(attempted.length, 4, "one slow native wave must not drain a large backlog on launch");
+  assert.equal(remaining.length, 96, "unattempted photos must remain available for a later run");
+  assert.equal(finalized, true, "the time budget must still await final writes");
+
+  await runAutomaticPhotoScanSequence({
+    shouldRunQuickScan: false,
+    scanPhotos: async () => {
+      throw new Error("must not repeat import");
+    },
+    getDeepScanCandidates: async () => remaining.slice(0, AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE),
+    deepScanPhotos: async (photos) => {
+      attempted.push(...photos.map((photo) => photo.id));
+      remaining.splice(0, photos.length);
+      elapsed += AUTOMATIC_PHOTO_DEEP_SCAN_BUDGET_MS;
+    },
+    finalizeDeepScanQueue: async () => undefined,
+    now: () => elapsed,
+  });
+  assert.deepEqual(attempted, ["0", "1", "2", "3", "4", "5", "6", "7"], "the next run resumes remaining work");
+}
 
 {
   const phases = [

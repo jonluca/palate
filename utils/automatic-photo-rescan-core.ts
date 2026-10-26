@@ -1,5 +1,7 @@
 /** Keep each automatic queued Vision batch short enough not to monopolize PhotoKit while the app is in use. */
-export const AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE = 24;
+export const AUTOMATIC_PHOTO_DEEP_SCAN_BATCH_SIZE = 4;
+/** Stop claiming more analysis after this interval; finish and persist the current batch. */
+export const AUTOMATIC_PHOTO_DEEP_SCAN_BUDGET_MS = 30_000;
 
 export type AutomaticPhotoQuickScanPhase =
   | "scanning"
@@ -78,8 +80,10 @@ interface AutomaticPhotoScanSequenceDependencies<Result, DeepScanResult> {
   scanPhotos: () => Promise<Result>;
   getDeepScanCandidates: (attemptedAssetIds: readonly string[]) => Promise<Array<{ id: string }>>;
   shouldContinue?: () => boolean;
+  shouldAnalyzePhotos?: () => boolean;
   deepScanPhotos: (photos: Array<{ id: string }>) => Promise<DeepScanResult>;
   finalizeDeepScanQueue: () => Promise<void>;
+  now?: () => number;
 }
 
 /** Import new photos, then analyze each queued asset once in bounded batches. */
@@ -95,7 +99,13 @@ export async function runAutomaticPhotoScanSequence<Result, DeepScanResult>(
       result = await dependencies.scanPhotos();
     }
     const attemptedAssetIds = new Set<string>();
-    while (dependencies.shouldContinue?.() !== false) {
+    const now = dependencies.now ?? (() => performance.now());
+    const analysisStartedAt = now();
+    while (
+      dependencies.shouldContinue?.() !== false &&
+      dependencies.shouldAnalyzePhotos?.() !== false &&
+      now() - analysisStartedAt < AUTOMATIC_PHOTO_DEEP_SCAN_BUDGET_MS
+    ) {
       const candidates = await dependencies.getDeepScanCandidates([...attemptedAssetIds]);
       if (dependencies.shouldContinue?.() === false) {
         break;

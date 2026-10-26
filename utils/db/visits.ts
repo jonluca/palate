@@ -85,6 +85,26 @@ export async function syncAllVisitsFoodProbable(
   );
 }
 
+/** Reconcile just the visits affected by a persisted photo-analysis batch. */
+export async function syncVisitsFoodProbableForPhotos(photoIds: readonly string[]): Promise<void> {
+  if (photoIds.length === 0) {
+    return;
+  }
+  const database = await getDatabase();
+  await database.runAsync(
+    `UPDATE visits SET foodProbable = COALESCE(
+      (SELECT MAX(foodDetected) FROM photos WHERE photos.visitId = visits.id),
+      0
+    )
+    WHERE id IN (
+      SELECT visitId FROM photos
+      WHERE id IN (SELECT value FROM json_each(?))
+        AND visitId IS NOT NULL
+    )`,
+    [JSON.stringify(photoIds)],
+  );
+}
+
 export async function getVisits(
   filter?: VisitListFilter,
   databaseOverride?: Awaited<ReturnType<typeof getDatabase>>,

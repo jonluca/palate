@@ -685,14 +685,15 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
   onBatchComplete?: (processed: number, foodFound: number, retryableFailures: number) => void,
   foodKeywords?: string[],
   onBatchResults?: (batchResults: FoodBatchResult[]) => void | Promise<void>,
-  collectResults: boolean = true,
-  collectOutcomes: boolean = false,
+  options: { collectResults?: boolean; collectOutcomes?: boolean; retryFailedPhotos?: boolean } = {},
 ): Promise<{
   results: FoodBatchResult[];
   foodFoundCount: number;
   failedCount: number;
   outcomes: AdaptiveVisitFoodOutcome[];
 }> {
+  const { collectResults = true, collectOutcomes = false, retryFailedPhotos = true } = options;
+  const maximumAttempts = retryFailedPhotos ? MAX_PHOTO_FOOD_DETECTION_FAILURES : 1;
   const results: FoodBatchResult[] = [];
   const outcomes: AdaptiveVisitFoodOutcome[] = [];
   let foodFoundCount = 0;
@@ -723,7 +724,7 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
       let requestedAssetIds = new Set(pageItems.map((item) => item.id));
       let attemptResults = detectionResults;
 
-      for (let attempt = 0; attempt < MAX_PHOTO_FOOD_DETECTION_FAILURES; attempt++) {
+      for (let attempt = 0; attempt < maximumAttempts; attempt++) {
         const batchResults: FoodBatchResult[] = [];
         const returnedAssetIds = new Set<string>();
         const failedAssetIds = new Set<string>();
@@ -779,7 +780,7 @@ async function processFoodDetectionBatches<T extends FoodBatchItem>(
         // Persist each failed attempt and spend only that photo's remaining budget.
         // Exhausted photos stay unknown, but leave the pending queries immediately.
         const retryableIds = await recordPhotoFoodDetectionFailures([...failedAssetIds]);
-        const retryIds = attempt + 1 < MAX_PHOTO_FOOD_DETECTION_FAILURES ? retryableIds : [];
+        const retryIds = attempt + 1 < maximumAttempts ? retryableIds : [];
         const retryAssetIds = new Set(retryIds);
         for (const assetId of failedAssetIds) {
           if (!retryAssetIds.has(assetId)) {
@@ -815,8 +816,9 @@ async function processFoodDetectionBatchesWithBufferedPersistence<T extends Food
   onBatchComplete?: (processed: number, foodFound: number, retryableFailures: number) => void,
   foodKeywords?: string[],
   onBatchResults?: (batchResults: FoodBatchResult[]) => void | Promise<void>,
-  synchronizeVisitFood: boolean = true,
+  options: Pick<DeepScanOptions, "synchronizeVisitFood" | "retryFailedPhotos"> = {},
 ): Promise<{ foodFoundCount: number; failedCount: number }> {
+  const { synchronizeVisitFood = true, retryFailedPhotos = true } = options;
   let deferredTerminalProgress: [processed: number, foodFound: number, retryableFailures: number] | undefined;
 
   return runBufferedResultPersistence<FoodBatchResult, { foodFoundCount: number; failedCount: number }>({
@@ -840,7 +842,7 @@ async function processFoodDetectionBatchesWithBufferedPersistence<T extends Food
           await appendResults(batchResults);
           await onBatchResults?.(batchResults);
         },
-        false,
+        { collectResults: false, retryFailedPhotos },
       );
       return { foodFoundCount, failedCount };
     },
@@ -904,8 +906,7 @@ async function processRank3BulkTailVisitFoodDetection(
             }
           }
         },
-        false,
-        true,
+        { collectResults: false, collectOutcomes: true },
       );
       return { outcomes };
     },
@@ -1479,6 +1480,8 @@ export interface DeepScanOptions {
   photos?: Array<{ id: string }>;
   /** A caller that defers synchronization must reconcile visits after persisting its complete run. */
   synchronizeVisitFood?: boolean;
+  /** Retry failures within this invocation. False attempts each photo once and saves remaining retries for later runs. */
+  retryFailedPhotos?: boolean;
 }
 
 function adaptVisitFoodProgressToDeepScan(progress: FoodDetectionProgress): DeepScanProgress {
@@ -1500,7 +1503,13 @@ function adaptVisitFoodProgressToDeepScan(progress: FoodDetectionProgress): Deep
  * Photos are processed in deterministic order (by creationTime, then id).
  */
 export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): Promise<DeepScanProgress> {
-  const { confidenceThreshold = 0.3, onProgress, photos, synchronizeVisitFood = true } = options;
+  const {
+    confidenceThreshold = 0.3,
+    onProgress,
+    photos,
+    synchronizeVisitFood = true,
+    retryFailedPhotos = true,
+  } = options;
 
   if (isVisionVisitFoodValidationModeEnabled()) {
     const visitFoodProgress = await detectFoodInVisits({
@@ -1554,7 +1563,7 @@ export async function deepScanAllPhotosForFood(options: DeepScanOptions = {}): P
     },
     undefined,
     undefined,
-    synchronizeVisitFood,
+    { synchronizeVisitFood, retryFailedPhotos },
   );
 
   progress.foodPhotosFound = foodFoundCount;
